@@ -10,25 +10,25 @@ All notable changes to this project are documented here. The format follows
 
 - **Passkeys / WebAuthn (M100e).** `AuthPluginOptions.signIn.passkeys` (the published
   `PasskeyOptions` type: `rpId` / `rpName` / `origins` / `store` / `resolvePrincipal` /
-  `userVerification`) registers the four ceremony
-  routes — `POST <basePath>/passkeys/{register,login}/{options,verify}` — and lets a passkey
-  assertion with user verification count as the second factor for `signIn.mfa`'s step-up model.
-  The ceremonies are WebAuthn Level 2 with attestation conveyance `none`, accepting ES256, RS256
-  and EdDSA credentials. The verifier is zero-dependency: a bounded CBOR/COSE decoder over
-  `runtime.subtle` (definite lengths only, depth 4, 4 KiB, every unsupported major type refused).
-  `@simplewebauthn/server` was rejected as a runtime dependency because importing it installs a
-  global `Reflect.getMetadata` polyfill in every application that enables passkeys; it appears only
-  in the package's differential test as a test oracle. Challenges are held in the session with a
-  5-minute expiry AND claimed once in the credential store (`IPasskeyStore.claimChallenge`), so a
-  replayed assertion against an older cookie copy is refused even though a synced passkey's counter
-  is always `0`. `updateCounter` MUST be implemented by custom stores as an atomic
-  compare-and-advance; the shipped `MemoryPasskeyStore` purges expired claims on every claim so its
-  map stays bounded. Stored credentials (`StoredPasskey`) record `attestation: 'unverified'` and
-  a `backedUp` flag that is display only. A UV-unset assertion is refused for a username-less
-  sign-in and accepted only as the second factor after a first one; the recorded method is always
-  `pop` (RFC 8176), never `hwk`/`swk` — with attestation unverified the plugin cannot know how the
-  key is protected. Any attestation `fmt` is accepted with its statement unread. Attestation
-  verification against trust roots remains out of scope.
+  `userVerification`) registers the four ceremony routes —
+  `POST <basePath>/passkeys/{register,login}/{options,verify}` — and lets a passkey assertion with
+  user verification count as the second factor for `signIn.mfa`'s step-up model. The ceremonies are
+  WebAuthn Level 2 with attestation conveyance `none`, accepting ES256, RS256 and EdDSA credentials.
+  The verifier is zero-dependency: a bounded CBOR/COSE decoder over `runtime.subtle` (definite
+  lengths only, depth 4, 4 KiB, every unsupported major type refused). `@simplewebauthn/server` was
+  rejected as a runtime dependency because importing it installs a global `Reflect.getMetadata`
+  polyfill in every application that enables passkeys; it appears only in the package's differential
+  test as a test oracle. Challenges are held in the session with a 5-minute expiry AND claimed once
+  in the credential store (`IPasskeyStore.claimChallenge`), so a replayed assertion against an older
+  cookie copy is refused even though a synced passkey's counter is always `0`. `updateCounter` MUST
+  be implemented by custom stores as an atomic compare-and-advance; the shipped `MemoryPasskeyStore`
+  purges expired claims on every claim so its map stays bounded. Stored credentials
+  (`StoredPasskey`) record `attestation: 'unverified'` and a `backedUp` flag that is display only. A
+  UV-unset assertion is refused for a username-less sign-in and accepted only as the second factor
+  after a first one; the recorded method is always `pop` (RFC 8176), never `hwk`/`swk` — with
+  attestation unverified the plugin cannot know how the key is protected. Any attestation `fmt` is
+  accepted with its statement unread. Attestation verification against trust roots remains out of
+  scope.
 - **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
   second factor to any sign-in flow that records its principal through `IAuthSessionService`.
   `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,
