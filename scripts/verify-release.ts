@@ -40,8 +40,14 @@
  *
  * Exits non-zero and prints every problem found, rather than stopping at the
  * first — a release is easier to fix in one pass.
+ *
+ * It also REPORTS every publication hold in `PUBLICATION_HOLDS` without
+ * failing on it. CI runs this on every pull request, so failing would turn
+ * every unrelated PR red; `scripts/publish-packages.ts` is where a hold
+ * refuses.
  */
-import { PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
+import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
+import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
 import { extractReleaseNotes } from './release-notes.ts';
 
@@ -265,6 +271,13 @@ if (releaseWorkflow === null) {
 }
 
 // ── Report ──────────────────────────────────────────────────────────────────
+
+// Reported, never a problem: `publish-packages.ts` is what refuses a held
+// release. Printed first so it is visible whether verification passes or not.
+for (const hold of activeHolds(PUBLICATION_HOLDS, PUBLISHED_PACKAGES)) {
+  console.warn(`⚠ publication hold — ${hold.packageDir}: ${hold.reason}`);
+  console.warn('  release:publish will refuse until this hold is removed.');
+}
 
 if (problems.length > 0) {
   console.error(`Release verification failed for ${expected}:\n`);

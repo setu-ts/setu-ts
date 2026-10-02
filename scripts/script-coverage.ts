@@ -86,6 +86,10 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // goes red, and the cost surfaces later as an intermittent failure somewhere
   // else entirely.
   'scripts/test-partition-rules.ts',
+  // The publication hold's decision. `publish-packages.ts` runs it at the top
+  // level and is the process seam; this carries the bar. Its failure mode is a
+  // SILENT PUBLISH: a held package reaching JSR, where a version is immutable.
+  'scripts/publication-hold.ts',
 ];
 
 interface FileCoverage {

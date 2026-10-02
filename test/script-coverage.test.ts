@@ -67,8 +67,11 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
 }
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly ten canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(10);
+  it('has exactly eleven canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(11);
+    // The publication hold's decision; `publish-packages.ts` is its process seam.
+    expect(SCRIPT_TARGETS).toContain('scripts/publication-hold.ts');
+    expect(SCRIPT_TARGETS).not.toContain('scripts/publish-packages.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
     // The suite partition's classifier. Its runner is deliberately NOT a target
     // — the decidable logic was extracted out of it, and its failure mode is a
