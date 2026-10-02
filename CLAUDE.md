@@ -5525,7 +5525,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `runtime.subtle`, with `@simplewebauthn/server` only as the differential test's oracle, because
   importing it installs a global `Reflect.getMetadata`; challenges held in the session AND claimed
   once in the store; `updateCounter` an atomic compare-and-advance; `pop` only, and a UV-less
-  assertion refused for username-less sign-in) — complete (PR pending).
+  assertion refused for username-less sign-in) — complete (PR #391).
 - **Next milestone** — **M100f** (`packages/auth-plugin` — SAML 2.0 Service Provider; the
   highest-risk letter, over `@node-saml/node-saml@5` inject-or-lazy).
 
