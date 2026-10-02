@@ -24,8 +24,8 @@ function credential(overrides: Partial<StoredPasskey> = {}): StoredPasskey {
 describe('MemoryPasskeyStore', () => {
   it('saves, reads, and lists by principal', async () => {
     const store = new MemoryPasskeyStore();
-    await store.save(credential());
-    await store.save(credential({ id: 'cred-2' }));
+    await store.save(credential(), { maxPerPrincipal: 100 });
+    await store.save(credential({ id: 'cred-2' }), { maxPerPrincipal: 100 });
     expect(await store.findById('cred-1')).not.toBeNull();
     expect(await store.findById('missing')).toBeNull();
     const list = await store.listByPrincipal('alice');
@@ -35,14 +35,14 @@ describe('MemoryPasskeyStore', () => {
 
   it('deletes a credential', async () => {
     const store = new MemoryPasskeyStore();
-    await store.save(credential());
+    await store.save(credential(), { maxPerPrincipal: 100 });
     await store.delete('cred-1');
     expect(await store.findById('cred-1')).toBeNull();
   });
 
   it('updateCounter advances and reports', async () => {
     const store = new MemoryPasskeyStore();
-    await store.save(credential());
+    await store.save(credential(), { maxPerPrincipal: 100 });
     expect(await store.updateCounter('cred-1', 5)).toBe(true);
     const stored = await store.findById('cred-1');
     expect(stored?.counter).toBe(5);
@@ -50,14 +50,14 @@ describe('MemoryPasskeyStore', () => {
 
   it('updateCounter accepts a both-zero counter without changing anything', async () => {
     const store = new MemoryPasskeyStore();
-    await store.save(credential());
+    await store.save(credential(), { maxPerPrincipal: 100 });
     expect(await store.updateCounter('cred-1', 0)).toBe(true);
     expect((await store.findById('cred-1'))?.counter).toBe(0);
   });
 
   it('updateCounter refuses a counter at or below the stored one', async () => {
     const store = new MemoryPasskeyStore();
-    await store.save(credential({ counter: 7 }));
+    await store.save(credential({ counter: 7 }), { maxPerPrincipal: 100 });
     expect(await store.updateCounter('cred-1', 7)).toBe(false);
     expect(await store.updateCounter('cred-1', 6)).toBe(false);
     expect((await store.findById('cred-1'))?.counter).toBe(7);
@@ -70,7 +70,7 @@ describe('MemoryPasskeyStore', () => {
 
   it('concurrent updateCounter leaves exactly the higher counter stored', async () => {
     const store = new MemoryPasskeyStore();
-    await store.save(credential({ counter: 4 }));
+    await store.save(credential({ counter: 4 }), { maxPerPrincipal: 100 });
     // Two concurrent assertions carrying 5 and 7 against a stored 4.
     const outcomes = await Promise.all([
       store.updateCounter('cred-1', 5),
@@ -85,7 +85,7 @@ describe('MemoryPasskeyStore', () => {
   it('hands back a copy of the saved credential, not the caller object', async () => {
     const store = new MemoryPasskeyStore();
     const record = credential();
-    await store.save(record);
+    await store.save(record, { maxPerPrincipal: 100 });
     record.counter = 99;
     expect((await store.findById('cred-1'))?.counter).toBe(0);
   });
@@ -93,7 +93,7 @@ describe('MemoryPasskeyStore', () => {
   it('hands back a deep copy: the array and JWK members are not shared', async () => {
     const store = new MemoryPasskeyStore();
     const record = credential();
-    await store.save(record);
+    await store.save(record, { maxPerPrincipal: 100 });
     // Mutate the CALLER's nested members: the store's copy must be its own.
     (record.transports as string[]).push('usb');
     (record.publicKey as Record<string, unknown>).kty = 'RSA';
@@ -104,10 +104,12 @@ describe('MemoryPasskeyStore', () => {
 
   it('save refuses an id that is already present, never overwriting', async () => {
     const store = new MemoryPasskeyStore();
-    expect(await store.save(credential())).toBe(true);
+    expect(await store.save(credential(), { maxPerPrincipal: 100 })).toBe('saved');
     // The same credential id from another principal: refused, and the first
     // principal's record survives.
-    expect(await store.save(credential({ principalId: 'bob', createdAt: 2 }))).toBe(false);
+    expect(
+      await store.save(credential({ principalId: 'bob', createdAt: 2 }), { maxPerPrincipal: 100 }),
+    ).toBe('duplicate');
     const stored = await store.findById('cred-1');
     expect(stored?.principalId).toBe('alice');
     expect(stored?.createdAt).toBe(1000);
@@ -116,12 +118,37 @@ describe('MemoryPasskeyStore', () => {
   it('concurrent saves of one id leave exactly the first stored', async () => {
     const store = new MemoryPasskeyStore();
     const outcomes = await Promise.all([
-      store.save(credential({ principalId: 'alice' })),
-      store.save(credential({ principalId: 'bob' })),
+      store.save(credential({ principalId: 'alice' }), { maxPerPrincipal: 100 }),
+      store.save(credential({ principalId: 'bob' }), { maxPerPrincipal: 100 }),
     ]);
     // Exactly one caller stored; the other was refused as a duplicate.
-    expect(outcomes.filter((outcome) => outcome === true).length).toBe(1);
-    expect(outcomes.filter((outcome) => outcome === false).length).toBe(1);
+    expect(outcomes).toEqual(['saved', 'duplicate']);
+  });
+
+  it('enforces maxPerPrincipal in the same step as the insert, even under a burst', async () => {
+    const store = new MemoryPasskeyStore();
+    for (let i = 0; i < 15; i++) {
+      expect(await store.save(credential({ id: `seed-${i}` }), { maxPerPrincipal: 16 })).toBe(
+        'saved',
+      );
+    }
+    // 40 concurrent saves at 15 held: exactly one fits.
+    const outcomes = await Promise.all(
+      Array.from(
+        { length: 40 },
+        (_, i) => store.save(credential({ id: `burst-${i}` }), { maxPerPrincipal: 16 }),
+      ),
+    );
+    expect(outcomes.filter((outcome) => outcome === 'saved').length).toBe(1);
+    expect(outcomes.filter((outcome) => outcome === 'limit').length).toBe(39);
+    expect((await store.listByPrincipal('alice')).length).toBe(16);
+    // The cap is per principal: another principal is unaffected, and a
+    // duplicate id is reported as such even when the principal is full.
+    expect(await store.save(credential({ id: 'b1', principalId: 'bob' }), { maxPerPrincipal: 16 }))
+      .toBe('saved');
+    expect(await store.save(credential({ id: 'seed-0' }), { maxPerPrincipal: 16 })).toBe(
+      'duplicate',
+    );
   });
 
   it('claimChallenge is single-use until its expiry', async () => {
@@ -155,7 +182,7 @@ describe('MemoryPasskeyStore', () => {
       transports: ['internal'],
       attestation: 'unverified',
       createdAt: 0,
-    });
+    }, { maxPerPrincipal: 100 });
     const read = await store.findById('c1');
     if (read === null) throw new Error('expected the stored credential');
     read.counter = 99;

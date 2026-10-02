@@ -50,9 +50,9 @@ const USER_HANDLE_BYTES = 32;
 /**
  * The most credentials one principal may register. Credentials are permanent
  * and every one is echoed back in `excludeCredentials`, so an uncapped list is
- * unbounded memory in the store and an unbounded response. The check runs
- * before the write and is not atomic across sessions, so concurrent
- * registrations can overshoot it by at most the number of parallel ceremonies.
+ * unbounded memory in the store and an unbounded response. It is ENFORCED by
+ * the store's atomic `save` (`IPasskeyStore.save`'s `maxPerPrincipal`); the
+ * earlier count check only answers `credential-limit` before a ceremony runs.
  */
 export const MAX_CREDENTIALS_PER_PRINCIPAL = 16;
 
@@ -306,6 +306,14 @@ export interface PasskeyCeremonyDeps {
   readonly authSession: IAuthSessionService;
   /** Best-effort debug reporting; a throwing implementation is ignored. */
   readonly debug?: (message: string) => void;
+  /**
+   * Whether `signIn.mfa` is configured. When it is and no `mayRegister` policy
+   * is set, EVERY registration — the first included — needs a recorded second
+   * factor: the plugin cannot see a factor the application stores itself (a
+   * TOTP secret), so trusting the first passkey on first use would let one
+   * factor enrol an authenticator that then satisfies `requireMfa()`.
+   */
+  readonly mfaConfigured?: boolean;
 }
 
 /** Whether two byte strings are equal, length-first. */
@@ -361,6 +369,7 @@ export class PasskeyCeremonies {
   readonly #sessionService: ISessionService;
   readonly #authSession: IAuthSessionService;
   readonly #debug: ((message: string) => void) | undefined;
+  readonly #mfaConfigured: boolean;
 
   /**
    * Builds the ceremonies.
@@ -373,6 +382,7 @@ export class PasskeyCeremonies {
     this.#sessionService = deps.sessionService;
     this.#authSession = deps.authSession;
     this.#debug = deps.debug;
+    this.#mfaConfigured = deps.mfaConfigured === true;
   }
 
   /** The compiled configuration, for the routes' path building and tests. */
@@ -574,8 +584,10 @@ export class PasskeyCeremonies {
    * A principal who already holds a passkey must have proved a second factor
    * (`otp` or `pop`) in THIS session: otherwise one factor — a stolen password
    * — could enrol the attacker's own authenticator, whose later assertions are
-   * recorded as `pop` and satisfy `requireMfa()`. The FIRST passkey is trusted
-   * on first use; `mayRegister` can refuse it too. The per-principal cap bounds
+   * recorded as `pop` and satisfy `requireMfa()`. With `signIn.mfa` configured
+   * the same holds for the FIRST passkey unless `mayRegister` is set, since the
+   * principal may hold a TOTP factor the plugin cannot see; without `mfa`, the
+   * first passkey is trusted on first use. `mayRegister` can refuse further. The per-principal cap bounds
    * what the store holds and what `excludeCredentials` echoes.
    *
    * @returns The refusal, or `null` when registration may proceed
@@ -591,8 +603,17 @@ export class PasskeyCeremonies {
     // Without the plugin's own session service the recorded methods cannot be
     // read, so the gate fails closed for a principal that already has one.
     const methods = asPendingPromotion(this.#authSession)?.currentMethods(ctx) ?? [];
-    if (credentialCount > 0 && !methods.some((m) => m === 'otp' || m === 'pop')) {
-      return 'second-factor-required';
+    if (!methods.some((m) => m === 'otp' || m === 'pop')) {
+      // An existing passkey is a second factor this session has not proved.
+      if (credentialCount > 0) {
+        return 'second-factor-required';
+      }
+      // With `signIn.mfa` configured the principal may hold a factor the
+      // plugin cannot see (TOTP), so the first passkey is trusted on first use
+      // only when the application says so through `mayRegister`.
+      if (this.#mfaConfigured && this.#config.mayRegister === null) {
+        return 'second-factor-required';
+      }
     }
     if (this.#config.mayRegister !== null) {
       let allowed = false;
@@ -741,13 +762,15 @@ export class PasskeyCeremonies {
       attestation: 'unverified',
       createdAt: this.#runtime.now(),
     };
-    // `save` is a compare-and-set (plan §3.2's duplicate refusal, made
-    // concurrency-safe): the findById check above runs across an await
-    // boundary, so a concurrent ceremony carrying the same credential id can
-    // pass it too — the atomic store refuses the second write rather than
-    // silently replacing the first principal's record with its own.
-    if (!(await this.#config.store.save(stored))) {
-      return { ok: false, reason: 'credential-duplicate' };
+    // `save` is a compare-and-set (plan §3.2's duplicate refusal and the
+    // per-principal cap, made concurrency-safe): the findById and count checks
+    // above run across await boundaries, so concurrent ceremonies can pass
+    // them together — the atomic store is what actually enforces both.
+    const saved = await this.#config.store.save(stored, {
+      maxPerPrincipal: MAX_CREDENTIALS_PER_PRINCIPAL,
+    });
+    if (saved !== 'saved') {
+      return { ok: false, reason: saved === 'limit' ? 'credential-limit' : 'credential-duplicate' };
     }
     return { ok: true, credentialId };
   }

@@ -263,4 +263,28 @@ describe('passkey routes', () => {
       credentialCount: 0,
     }]);
   });
+
+  it('with signIn.mfa configured, a one-factor session cannot enrol even a FIRST passkey', async () => {
+    // Round-2 audit R2-1: the principal may hold a TOTP factor the plugin cannot
+    // see, so a stolen password must not enrol an authenticator that then
+    // satisfies requireMfa().
+    const { app, store } = await buildPasskeyApp({ mfaRequired: () => false });
+    const attacker = new CookieJar();
+    await attacker.postJson(app, '/password-login', {});
+    const refused = await attacker.postJson(app, REGISTER_OPTIONS, {});
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).detail).toBe('second-factor-required');
+    expect(await store.listByPrincipal('alice')).toEqual([]);
+  });
+
+  it('with signIn.mfa configured, mayRegister decides the first passkey', async () => {
+    const { app } = await buildPasskeyApp({
+      mfaRequired: () => false,
+      // The application knows alice holds no other factor.
+      passkeys: { mayRegister: ({ credentialCount }) => credentialCount === 0 },
+    });
+    const jar = new CookieJar();
+    await jar.postJson(app, '/password-login', {});
+    expect((await jar.postJson(app, REGISTER_OPTIONS, {})).status).toBe(200);
+  });
 });

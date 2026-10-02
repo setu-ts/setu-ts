@@ -8,6 +8,8 @@ import {
 } from '../fixtures/passkey-ceremonies.ts';
 import type { CeremoniesHarness } from '../fixtures/passkey-ceremonies.ts';
 import type { IAuthSessionService, ISessionService } from '@setu-ts/common';
+import { MemoryPasskeyStore } from '../../src/stores/passkey-store.ts';
+import type { IPasskeyStore } from '../../src/stores/passkey-store.ts';
 import {
   coseKeyBytes,
   toBase64Url,
@@ -278,7 +280,7 @@ describe('registration ceremony', () => {
         transports: [],
         attestation: 'unverified',
         createdAt: 0,
-      });
+      }, { maxPerPrincipal: 100 });
     }
     expect(await harness.ceremonies.registrationOptions(harness.ctx)).toBe('credential-limit');
     const authenticator = await VirtualAuthenticator.create('ES256');
@@ -313,5 +315,26 @@ describe('registration ceremony', () => {
       authSession: opaque,
     });
     expect(await ceremonies.registrationOptions(harness.ctx)).toBe('second-factor-required');
+  });
+
+  it("maps the store's atomic 'limit' answer to credential-limit", async () => {
+    // A concurrent ceremony filled the principal between the count check and
+    // the write: the store, not the pre-check, is what refuses.
+    const inner = new MemoryPasskeyStore();
+    const racing: IPasskeyStore = {
+      listByPrincipal: (id) => inner.listByPrincipal(id),
+      findById: (id) => inner.findById(id),
+      save: (credential, options) => {
+        expect(credential.principalId).toBe('alice');
+        expect(options).toEqual({ maxPerPrincipal: MAX_CREDENTIALS_PER_PRINCIPAL });
+        return Promise.resolve('limit');
+      },
+      updateCounter: (id, observed) => inner.updateCounter(id, observed),
+      delete: (id) => inner.delete(id),
+      claimChallenge: (c, now, exp) => inner.claimChallenge(c, now, exp),
+    };
+    const harness = createCeremoniesHarness({ passkeys: { store: racing } });
+    const outcome = await register(harness, await VirtualAuthenticator.create('ES256'));
+    expect(outcome).toEqual({ ok: false, reason: 'credential-limit' });
   });
 });

@@ -98,7 +98,12 @@ export {
 
 // Passkeys (M100e)
 export type { PasskeyOptions, PasskeyRegistrationContext } from './interfaces/index.ts';
-export type { IPasskeyStore, StoredPasskey } from './stores/passkey-store.ts';
+export type {
+  IPasskeyStore,
+  PasskeySaveOptions,
+  PasskeySaveResult,
+  StoredPasskey,
+} from './stores/passkey-store.ts';
 export { MemoryPasskeyStore } from './stores/passkey-store.ts';
 
 // TOTP MFA (M100d)

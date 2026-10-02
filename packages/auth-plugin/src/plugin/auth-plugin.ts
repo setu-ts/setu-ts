@@ -357,6 +357,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
             sessionService,
             authSession: authSessionService,
             debug,
+            mfaConfigured: compiledSignIn.mfa !== null,
           });
           registerPasskeyRoutes({
             router: ctx.router,

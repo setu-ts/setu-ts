@@ -555,12 +555,16 @@ export interface PasskeyOptions {
    */
   readonly userVerification?: 'required' | 'preferred' | 'discouraged';
   /**
-   * An optional extra registration policy, consulted AFTER the built-in rule
-   * that a principal who already holds a passkey must have proved a second
-   * factor (`otp` or `pop`) in this session. It can only refuse further — for
-   * example, to require a second factor for the FIRST passkey too, which the
-   * built-in rule trusts on first use. Answering `false` (or throwing) refuses
-   * the registration with `403 registration-refused`.
+   * An optional extra registration policy, consulted AFTER the built-in
+   * rules: a principal who already holds a passkey must have proved a second
+   * factor (`otp` or `pop`) in this session, and — when `signIn.mfa` is
+   * configured and this option is ABSENT — so must one registering a FIRST
+   * passkey, because the plugin cannot see a factor the application stores
+   * itself (a TOTP secret). Supplying `mayRegister` hands the first-passkey
+   * decision to it: it receives the recorded `methods` and `credentialCount`
+   * and should admit a password-only first enrolment only for a principal
+   * that holds no other factor. Answering `false` (or throwing) refuses the
+   * registration with `403 registration-refused`.
    */
   readonly mayRegister?: (context: PasskeyRegistrationContext) => boolean | Promise<boolean>;
 }

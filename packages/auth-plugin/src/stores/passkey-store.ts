@@ -58,20 +58,26 @@ export interface IPasskeyStore {
   /**
    * Atomically stores a NEWLY registered credential.
    *
-   * This is a compare-and-set, not a blind write: it stores `credential`
-   * only when no credential with the same id is already present, and reports
-   * whether it did. Two ceremonies registering the same credential id
-   * concurrently — a synced or cloned authenticator shared across accounts —
-   * must not both succeed with the later record silently replacing the
-   * earlier one (including its `principalId`, which decides whose principal a
-   * later username-less sign-in resolves). The registration ceremony treats a
-   * `false` answer as `credential-duplicate`.
+   * This is a compare-and-set, not a blind write, and BOTH conditions are
+   * checked in the same atomic step as the insert:
+   *
+   * - no credential with the same id is already present — two ceremonies
+   *   registering one credential id concurrently (a synced or cloned
+   *   authenticator shared across accounts) must not both succeed with the
+   *   later record silently replacing the earlier one, `principalId` included;
+   * - the principal holds fewer than `options.maxPerPrincipal` credentials — a
+   *   count checked before a separate write lets a burst of concurrent
+   *   registrations overshoot the cap.
+   *
+   * A duplicate id answers `'duplicate'` (checked first), a full principal
+   * answers `'limit'`, and neither writes anything. The registration ceremony
+   * maps them to `409 credential-duplicate` and `409 credential-limit`.
    *
    * @param credential - The credential to store
-   * @returns `true` when the credential was stored, `false` when the id was
-   *   already present
+   * @param options - The per-principal credential cap to enforce
+   * @returns `'saved'`, `'duplicate'` or `'limit'`
    */
-  save(credential: StoredPasskey): Promise<boolean>;
+  save(credential: StoredPasskey, options: PasskeySaveOptions): Promise<PasskeySaveResult>;
 
   /**
    * Atomically advances the stored counter to `observed`.
@@ -107,6 +113,15 @@ export interface IPasskeyStore {
    */
   claimChallenge(challenge: string, now: number, expiresAt: number): Promise<boolean>;
 }
+
+/** What {@linkcode IPasskeyStore.save} enforces atomically with the insert. */
+export interface PasskeySaveOptions {
+  /** The most credentials one principal may hold; the insert is refused at this count. */
+  readonly maxPerPrincipal: number;
+}
+
+/** The outcome of {@linkcode IPasskeyStore.save}. */
+export type PasskeySaveResult = 'saved' | 'duplicate' | 'limit';
 
 /**
  * A detached copy of a stored credential — its JWK and transports included —
@@ -175,24 +190,33 @@ export class MemoryPasskeyStore implements IPasskeyStore {
 
   /**
    * Atomically stores a newly registered credential, refusing an id that is
-   * already present and copying the record (its array and JWK members
+   * already present or a principal already at `maxPerPrincipal`, and copying
+   * the record (its array and JWK members
    * included) so a later mutation of the caller's object cannot change what
    * the store hands back.
    */
-  save(credential: StoredPasskey): Promise<boolean> {
+  save(credential: StoredPasskey, options: PasskeySaveOptions): Promise<PasskeySaveResult> {
     // Compare-and-set: an id that is already present is refused, never
-    // overwritten — the registration ceremony's duplicate check runs before
-    // this call, but the two are separate awaits, and a concurrent ceremony
-    // carrying the same credential id must not silently replace this
-    // principal's record with its own.
+    // overwritten, and a principal at the cap is refused — both checked in
+    // the same synchronous step as the insert, so no concurrent ceremony can
+    // interleave between the check and the write.
     if (this.#credentials.has(credential.id)) {
-      return Promise.resolve(false);
+      return Promise.resolve('duplicate');
+    }
+    let held = 0;
+    for (const stored of this.#credentials.values()) {
+      if (stored.principalId === credential.principalId) {
+        held++;
+      }
+    }
+    if (held >= options.maxPerPrincipal) {
+      return Promise.resolve('limit');
     }
     // A deep copy, so a caller mutating its own object after `save` cannot
     // change what the store hands back — the record's array and JWK members
     // are copied too, not shared by reference.
     this.#credentials.set(credential.id, copyPasskey(credential));
-    return Promise.resolve(true);
+    return Promise.resolve('saved');
   }
 
   /** Atomically advances the stored counter to `observed`, reporting whether it did. */

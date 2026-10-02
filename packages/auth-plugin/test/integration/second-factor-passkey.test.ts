@@ -95,7 +95,7 @@ describe('passkey as a second factor', () => {
       transports: ['internal'],
       attestation: 'unverified',
       createdAt: 0,
-    });
+    }, { maxPerPrincipal: 100 });
 
     const mfaApp = await buildPasskeyApp({
       passkeys: { store: first.store },

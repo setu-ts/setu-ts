@@ -627,7 +627,9 @@ app.router.get('/account/bank', {
   password during the pending state can enrol one. If that matters, enrol factors only from a
   signed-in session, or have `mfa.required` answer `true` only for principals that already have one.
   An administrator reset that cannot obtain proof calls `ITotpStore.deleteEnrolment` directly,
-  behind its own authorization.
+  behind its own authorization. A PASSKEY is a second factor too: with `signIn.mfa` configured, a
+  one-factor session cannot register one — not even the first — unless `PasskeyOptions.mayRegister`
+  admits it, so a stolen password cannot add a passkey beside a TOTP factor (see Passkeys).
 - **Pending sign-in.** When `mfa.required` returns `true`, `signIn` does NOT sign the session in. It
   stores a `PendingSignIn` record under a private session key and returns `second-factor-required`.
   The session is anonymous until `completeSignIn` (or `completeSignInWithRecoveryCode`) succeeds, at
@@ -760,9 +762,12 @@ the observed counter only when it is greater than the stored one (or both are ze
 whether it did. A read-then-write lets two concurrent assertions both validate against the same
 stored value and lets the lower one overwrite the higher, which is exactly how a cloned
 authenticator's stale counter slips through. **`save` must be an atomic compare-and-set** — it
-stores a NEW credential only when its id is absent and reports whether it did; a blind write lets
-two concurrent registrations of the same credential id both succeed and lets the later record
-silently replace the earlier one, `principalId` included. `claimChallenge` must be atomic too.
+stores a NEW credential only when its id is absent AND the principal holds fewer than
+`options.maxPerPrincipal` credentials, both checked in the same atomic step as the insert, and
+answers `'saved'`, `'duplicate'` or `'limit'`. A blind write lets two concurrent registrations of
+the same credential id both succeed and lets the later record silently replace the earlier one,
+`principalId` included; a count read before a separate write lets a burst of concurrent
+registrations overshoot the cap. `claimChallenge` must be atomic too.
 
 Under the default `userVerification: 'required'` a UV-unset assertion is refused everywhere — the
 options told the browser user verification is required, so the server enforces it. Under
@@ -779,12 +784,20 @@ possession) — never `hwk`/`swk`, which the plugin cannot know with attestation
 a principal who ALREADY holds a passkey must have proved a second factor (`otp` or `pop`) in the
 current session — otherwise a stolen password alone could enrol the attacker's own authenticator,
 whose later assertions are recorded as `pop` and pass `requireMfa()`. That is refused with
-`403 second-factor-required`, at both `register/options` and `register/verify`. The FIRST passkey is
-trusted on first use; `PasskeyOptions.mayRegister` is an optional extra policy, consulted after the
-built-in rule, that can refuse more (for example the first passkey too) — `false` or a throw answers
-`403 registration-refused`. One principal holds at most 16 credentials (`409 credential-limit`), and
-only the six defined WebAuthn `transports` values are stored, each once. An EC2 key is checked to be
-a point on P-256 at registration, because the runtimes disagree on whether Web Crypto does.
+`403 second-factor-required`, at both `register/options` and `register/verify`.
+
+The FIRST passkey depends on whether `signIn.mfa` is configured. Without it (a passkey-only
+application) the first passkey is trusted on first use. **With it, and no `mayRegister`, the first
+passkey needs a proven second factor too** — the principal may hold a TOTP factor this plugin cannot
+see, and a stolen password must not enrol an authenticator that then satisfies `requireMfa()`. A
+user with no factor yet therefore cannot add a first passkey until the application says so:
+`PasskeyOptions.mayRegister` receives the principal, the session's recorded `methods` and the
+principal's `credentialCount`, is consulted after the built-in rules, and decides the first passkey
+when it is set — admit a password-only first enrolment only for a principal that holds no other
+factor. `false` or a throw answers `403 registration-refused`. One principal holds at most 16
+credentials (`409 credential-limit`, enforced atomically by the store's `save`), and only the six
+defined WebAuthn `transports` values are stored, each once. An EC2 key is checked to be a point on
+P-256 at registration, because the runtimes disagree on whether Web Crypto does.
 
 Attestation statements are NOT verified: `attestation: 'none'` is requested, any `fmt` the client
 sends is accepted with its statement unread, and the stored credential records
@@ -1026,6 +1039,8 @@ MIT
 | `SignInProvider`                    | type      |
 | `PasskeyOptions`                    | interface |
 | `PasskeyRegistrationContext`        | interface |
+| `PasskeySaveOptions`                | interface |
+| `PasskeySaveResult`                 | type      |
 | `StoredPasskey`                     | interface |
 | `TokenEndpointAuth`                 | type      |
 | `TotpCompleteSignInResult`          | type      |

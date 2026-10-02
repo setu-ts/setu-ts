@@ -18,6 +18,8 @@ import type {
   OidcProvider,
   PasskeyOptions,
   PasskeyRegistrationContext,
+  PasskeySaveOptions,
+  PasskeySaveResult,
   ProviderTokens,
   RecoveryVerifyResult,
   RefreshPrincipal,
@@ -194,6 +196,9 @@ describe('barrel exports', () => {
       credentialCount: 0,
     };
     expect(context.credentialCount).toBe(0);
+    const saveOptions: PasskeySaveOptions = { maxPerPrincipal: 16 };
+    const saveResult: PasskeySaveResult = 'limit';
+    expect([saveOptions.maxPerPrincipal, saveResult]).toEqual([16, 'limit']);
   });
 
   it('exports TotpService and the M100d MFA types (declared against the barrel)', () => {

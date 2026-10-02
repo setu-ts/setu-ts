@@ -59,7 +59,7 @@ describe('ceremony edge branches', () => {
       transports: ['internal'],
       attestation: 'unverified',
       createdAt: 0,
-    });
+    }, { maxPerPrincipal: 100 });
     const options = await harness.ceremonies.authenticationOptions(harness.ctx);
     const body = await rogue.assertionResult({
       challenge: options.challenge,
