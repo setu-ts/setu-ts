@@ -189,7 +189,8 @@ option families and served in `/v1/cache` with a valid MAC.
   `packages/cli/test/unit/reallocate.test.ts` (devtool ports land in the devtool range),
   `packages/cli/test/unit/devtool-manifest-merge.test.ts` (first allocation records
   `devtoolBasePort`). **Negative control:** route `resolveDevtoolPort` back through `allocatePort` —
-  the allocation case asserts `5870` for a `5869` app port and fails.
+  with `basePort: 5869`, `devtoolBasePort: 6000` and one member at `port: 5869`, the allocation case
+  asserts `6000`, and the rerouted call returns `5870` and fails.
 
 ### 3.5 The production image carries no connector (V8-21)
 

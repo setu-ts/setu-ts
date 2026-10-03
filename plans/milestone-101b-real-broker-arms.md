@@ -152,16 +152,17 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
   "already exists" whose `info` carries another `setu.queue`, or another `filter_subject`, rejects
   with the same error; one with no metadata, a matching filter and a durable name equal to the raw
   queue attaches; one with no metadata whose durable name is `orders_2eeu`, requested as raw queue
-  `orders.eu`, rejects with `NatsConsumerNameCollisionError` and makes no `add`).
-  `test/integration/nats-real.test.ts` gains two cases: a `respond`/`request` round-trip through a
-  kernel app whose `streamSubjects` cover `<scope>.>` and `rr.inbox.>` (the subject set C3
-  documents), a user subscription with `queue: 'orders.eu'` that delivers, and the collision across
-  two broker instances — `orders.eu` in one, `orders_2eeu` in a second — where the second's
-  `subscribe` rejects with `NatsConsumerNameCollisionError` and the first keeps delivering. **In
-  CI** (`NATS_URL`). Negative control: revert the encoding → the RPC case fails with the run's
-  verbatim `invalid durable name - durable name cannot contain '.'`. Remove the "already exists"
-  `info` check → the cross-instance collision case's second `subscribe` resolves and attaches to the
-  first instance's consumer, so the two independent queues split one consumer's messages.
+  `orders.eu`, makes one `add` that fails with "already exists", reads `info`, rejects with
+  `NatsConsumerNameCollisionError`, and makes no second `add`). `test/integration/nats-real.test.ts`
+  gains two cases: a `respond`/`request` round-trip through a kernel app whose `streamSubjects`
+  cover `<scope>.>` and `rr.inbox.>` (the subject set C3 documents), a user subscription with
+  `queue: 'orders.eu'` that delivers, and the collision across two broker instances — `orders.eu` in
+  one, `orders_2eeu` in a second — where the second's `subscribe` rejects with
+  `NatsConsumerNameCollisionError` and the first keeps delivering. **In CI** (`NATS_URL`). Negative
+  control: revert the encoding → the RPC case fails with the run's verbatim
+  `invalid durable name - durable name cannot contain '.'`. Remove the "already exists" `info` check
+  → the cross-instance collision case's second `subscribe` resolves and attaches to the first
+  instance's consumer, so the two independent queues split one consumer's messages.
 
 ### 3.3 V8-26 — a Kafka topic that cannot be subscribed is named, and the consumer never crashes the process
 
