@@ -156,7 +156,7 @@ describe('SchedulerService acquire bound (M101a V8-24)', () => {
   it('a hung delay-slot claim at registration is bounded and the run is skipped', async () => {
     const runtime = new FakeRuntime();
     const control = controllableLock(runtime, DELAY_KEY);
-    const { service, errors } = observedService(runtime, control.lock);
+    const { service, errors, fire } = observedService(runtime, control.lock);
     await service.connect();
     let fired = 0;
     const registering = service.delay('tick', 10_000, () => {
@@ -169,6 +169,27 @@ describe('SchedulerService acquire bound (M101a V8-24)', () => {
     expect(errors.map((e) => e.msg)).toEqual(["Job 'tick': could not claim fire slot"]);
     await runtime.advance(runtime.getNextTimerDelay()!);
     expect(fired).toBe(0);
+    // A lock that failed is not a lock another replica holds: the skipped fire
+    // is counted lock-failed, never contended.
+    expect(fire()).toMatchObject({ count: 1, lockFailed: 1, contended: 0 });
+    await service.disconnect();
+  });
+
+  it('a delay slot another replica holds settles contended, not lock-failed', async () => {
+    const runtime = new FakeRuntime();
+    const control = controllableLock(runtime, 'unused');
+    await control.memory.acquire(DELAY_KEY, 60_000);
+    const { service, errors, fire } = observedService(runtime, control.lock);
+    await service.connect();
+    let fired = 0;
+    await service.delay('tick', 10_000, () => {
+      fired++;
+    });
+    await runtime.advance(runtime.getNextTimerDelay()!);
+
+    expect(fired).toBe(0);
+    expect(errors).toEqual([]);
+    expect(fire()).toMatchObject({ count: 1, lockFailed: 0, contended: 1 });
     await service.disconnect();
   });
 

@@ -318,7 +318,7 @@ export class SchedulerService implements IScheduler {
       nextRunAtMs,
       timerHandle: null,
       generation: 0,
-      slotClaimed: false,
+      slotClaim: 'failed',
       slotToken: null,
       ...(options?.data !== undefined ? { data: options.data as unknown } : {}),
       ...(options?.retry !== undefined ? { retry: options.retry } : {}),
@@ -490,7 +490,7 @@ export class SchedulerService implements IScheduler {
    *
    * **Known limitation — the job is LOST if this replica leaves before it
    * fires.** Because the claim is decided here rather than at fire time, a
-   * replica that finds the slot held sets `slotClaimed = false` once and never
+   * replica that finds the slot held sets `slotClaim = 'contended'` once and never
    * re-attempts. If the claiming replica then dies — a crash, or a graceful
    * {@linkcode disconnect}, which clears timers WITHOUT releasing the slot —
    * between this registration and the fire, no replica runs the handler and
@@ -505,18 +505,18 @@ export class SchedulerService implements IScheduler {
         // Another replica registered this delay first; its fire runs the
         // handler. This replica keeps its armed timer (it must still leave
         // the registry cleanly) but skips the run.
-        entry.slotClaimed = false;
+        entry.slotClaim = 'contended';
         return;
       }
       entry.slotToken = token;
-      entry.slotClaimed = true;
+      entry.slotClaim = 'claimed';
     } catch (error) {
       // Lock backend unreachable — treat as not-claimed rather than risk a
       // duplicate run; the schedule is kept, the run is skipped.
       this.#logger?.error(`Job '${entry.name}': could not claim fire slot`, {
         error: error instanceof Error ? error.message : String(error),
       });
-      entry.slotClaimed = false;
+      entry.slotClaim = 'failed';
     }
   }
 
@@ -673,13 +673,17 @@ export class SchedulerService implements IScheduler {
     // a fresh slot.
     let slotClaimed: boolean;
     if (entry.kind === 'delay') {
-      slotClaimed = entry.slotClaimed;
-      if (!slotClaimed) {
+      slotClaimed = entry.slotClaim === 'claimed';
+      if (entry.slotClaim === 'contended') {
         // Another replica registered this delay first and will run it.
         this.#logger?.debug(
           `Job '${entry.name}': fire slot claimed by another instance, skipping`,
         );
         this.#collector?.fireSettled(fireObs, 'contended', null, null);
+      } else if (entry.slotClaim === 'failed') {
+        // The claim at registration could not reach the lock backend (logged
+        // there). Count it as the every/cron arm counts the same failure.
+        this.#collector?.fireSettled(fireObs, 'lock-failed', null, null);
       }
     } else {
       const slotKey = `scheduler:job:${entry.name}:${String(entry.nextRunAtMs)}`;

@@ -363,15 +363,18 @@ export interface DelayRegistryEntry<T = unknown> extends RegistryEntryBase<T> {
   /** Original delay in milliseconds. Always present for `delay` entries. */
   delayMs: number;
   /**
-   * Whether this entry holds the fire slot (M70l F2).
+   * Outcome of this entry's fire-slot claim (M70l F2; tri-state since M101a).
    *
    * Claimed at REGISTRATION time, keyed on the job name — never on
    * `nextRunAtMs`, which for a delay is `now + delayMs` and therefore
    * carries per-replica startup skew that a fire-time key would turn into
    * non-colliding slots. Set by `SchedulerService` in `delay()`; read by
-   * `#fire` to decide whether this replica runs the handler.
+   * `#fire` to decide whether this replica runs the handler. `'contended'`
+   * means another replica holds the slot and will run it; `'failed'` means
+   * the lock backend could not answer, which `#fire` counts `lock-failed` —
+   * a failed lock is evidence of nothing about other replicas.
    */
-  slotClaimed: boolean;
+  slotClaim: 'claimed' | 'contended' | 'failed';
   /**
    * The token of the held fire slot, or `null` when this entry does not
    * hold it. Released when the entry leaves the registry (fire, `remove`),

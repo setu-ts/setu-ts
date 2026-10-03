@@ -41,7 +41,9 @@ export interface DeadlineOptions {
   readonly timeoutMs: number;
   /**
    * Builds the error the returned promise rejects with when the deadline
-   * fires. Called at most once, and only on expiry.
+   * fires. Called at most once, and only on expiry. If it throws, the thrown
+   * value is used as the expiry error instead — the signal is still aborted
+   * and the promise still rejects.
    */
   readonly onTimeout: () => Error;
   /**
@@ -135,7 +137,15 @@ export function withDeadline<T>(
   let timer: TimerHandle;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimer(() => {
-      const error = options.onTimeout();
+      // A throwing `onTimeout` must not escape the timer callback, where it
+      // would be an uncaught exception and leave the call unbounded: what it
+      // threw becomes the expiry error instead.
+      let error: unknown;
+      try {
+        error = options.onTimeout();
+      } catch (thrown) {
+        error = thrown;
+      }
       controller.abort(error);
       reject(error);
     }, options.timeoutMs);

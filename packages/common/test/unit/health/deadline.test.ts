@@ -114,6 +114,29 @@ describe('withDeadline', () => {
     expect(built).toBe(0);
   });
 
+  it('rejects with what a throwing onTimeout threw, aborting the signal and never escaping the timer', async () => {
+    const timers = new FakeTimers();
+    const thrown = new Error('onTimeout-canary');
+    let signal: AbortSignal | undefined;
+    const pending = withDeadline((s) => {
+      signal = s;
+      return new Promise<never>(() => {});
+    }, {
+      timeoutMs: 100,
+      onTimeout: () => {
+        throw thrown;
+      },
+      timing: timers,
+    });
+    await Promise.resolve();
+
+    // A throw out of the timer callback would be an uncaught exception.
+    expect(() => timers.fire()).not.toThrow();
+    await expect(pending).rejects.toBe(thrown);
+    expect(signal?.aborted).toBe(true);
+    expect(signal?.reason).toBe(thrown);
+  });
+
   it('falls back to the ambient timers when no timing is supplied', async () => {
     await expect(
       withDeadline(() => Promise.resolve('ambient'), {
