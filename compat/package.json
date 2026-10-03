@@ -20,6 +20,7 @@
     "@jsr/setu-ts__database-plugin": "latest",
     "@jsr/setu-ts__decorator-plugin": "latest",
     "@jsr/setu-ts__di-plugin": "latest",
+    "@jsr/setu-ts__diagnostics-plugin": "latest",
     "@jsr/setu-ts__events-plugin": "latest",
     "@jsr/setu-ts__exceptions": "latest",
     "@jsr/setu-ts__feature-flags-plugin": "latest",
