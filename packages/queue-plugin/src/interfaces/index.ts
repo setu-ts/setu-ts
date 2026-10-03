@@ -55,6 +55,19 @@ export interface IRedisQueueClient {
    * @since 0.3.0
    */
   expire?(key: string, seconds: number): Promise<number>;
+  /**
+   * Runs a Lua script atomically (ioredis `eval(script, numKeys, ...keys,
+   * ...args)`). OPTIONAL so an existing injected fake still type-checks. When
+   * present, every multi-command transition (`enqueue`, `reserve`, `ack`,
+   * `requeue`, dead-lettering) runs as one script, so a command timeout can
+   * leave it applied entirely or not at all. Without it those transitions run
+   * as separate commands, and a command that times out locally but is applied
+   * by the server afterwards can leave a job in neither the ready nor the
+   * processing set. The client the adapter builds itself always has it.
+   *
+   * @since 0.9.0
+   */
+  eval?(script: string, numKeys: number, ...keysAndArgs: (string | number)[]): Promise<unknown>;
   /** Connect to Redis (optional). */
   connect?(): Promise<void>;
   /**
@@ -241,6 +254,14 @@ export interface QueuePluginOptions {
    * failure. Applied as ioredis `commandTimeout` to the client the adapter
    * BUILDS — never to an injected `client`, which keeps its own configuration.
    * A value outside `0`–`2147483647` (including `NaN`) throws `RangeError`.
+   *
+   * A timeout rejects the command LOCALLY; the server may still apply it once
+   * it answers. So a rejected `add()` is not proof the job was not enqueued —
+   * a caller that retries on rejection can run the job twice, and should give
+   * the job an idempotent handler. Each queue transition runs as one Lua script
+   * (see `IRedisQueueClient.eval`), so a timeout leaves it whole or absent; a
+   * `reserve` applied after its timeout leaves the job in the processing set,
+   * not lost from both sets.
    *
    * @since 0.9.0
    */
@@ -443,6 +464,14 @@ export interface RedisQueueOptions {
    * failure. Applied as ioredis `commandTimeout` to the client the adapter
    * BUILDS — never to an injected `client`, which keeps its own configuration.
    * A value outside `0`–`2147483647` (including `NaN`) throws `RangeError`.
+   *
+   * A timeout rejects the command LOCALLY; the server may still apply it once
+   * it answers. So a rejected `add()` is not proof the job was not enqueued —
+   * a caller that retries on rejection can run the job twice, and should give
+   * the job an idempotent handler. Each queue transition runs as one Lua script
+   * (see `IRedisQueueClient.eval`), so a timeout leaves it whole or absent; a
+   * `reserve` applied after its timeout leaves the job in the processing set,
+   * not lost from both sets.
    *
    * @since 0.9.0
    */

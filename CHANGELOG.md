@@ -18,9 +18,11 @@ All notable changes to this project are documented here. The format follows
   take `commandTimeoutMs` (default `15000`, `0` disables), applied as the ioredis `commandTimeout`
   on the client they build. `SchedulerPlugin`'s `DistributedLockOptions` take `acquireTimeoutMs`
   (default `5000`, `0` waits) and `commandTimeoutMs` (default `acquireTimeoutMs`, or `15000` when
-  that is `0`). The `vault` secrets provider takes `requestTimeoutMs` (default `5000`). None is
-  applied to an injected client or lock. An out-of-range value — including `NaN`, which
-  `Number(env.X)` yields for an unset variable — throws `RangeError` at startup.
+  that is `0`). The `vault` secrets provider takes `requestTimeoutMs` (default `5000`). Each
+  `commandTimeoutMs` applies only to a Redis client the plugin builds, never an injected one;
+  `acquireTimeoutMs` bounds every acquire, an injected `lock` included, and `requestTimeoutMs`
+  bounds an injected `http` too. An out-of-range value — including `NaN`, which `Number(env.X)`
+  yields for an unset variable — throws `RangeError` at startup.
 - **`SecretProviderUnavailableError` (M101a).** Exported by `@setu-ts/secrets-plugin` and carrying a
   `503` status hint, so an application running `errorHandler` answers an unreachable provider with a
   retryable `503` instead of a masked `500`. The transport error is kept as `cause` and never
@@ -32,11 +34,18 @@ All notable changes to this project are documented here. The format follows
   failure.** A paused or partitioned Redis keeps its socket open, so a cache, queue or
   scheduler-lock command used to wait forever. It now rejects inside the bound: a cache call is
   counted `failed` and the `cache` indicator reports `down`; `queue.add()` rejects and a poll
-  records the failure; a lock acquire that does not settle is a skipped fire, logged, counted
-  `lockFailed` and re-armed for the next slot, so a paused backend skips fires instead of stopping
-  the schedule. A token an abandoned acquire returns later is released, and `RedisLock` releases the
-  exact token of a timed-out `SET`, which can still apply once Redis answers. Verified against a
-  real paused Redis 7.
+  records the failure — though the server may still apply a timed-out command, so a rejected `add()`
+  can have enqueued the job and a retry can run it twice; a lock acquire that does not settle is a
+  skipped fire, logged, counted `lockFailed` and re-armed for the next slot, so a paused backend
+  skips fires instead of stopping the schedule. A token an abandoned acquire returns later is
+  released, and `RedisLock` releases the exact token of a timed-out `SET`, which can still apply
+  once Redis answers. Verified against a real paused Redis 7.
+- **`RedisQueue` transitions are atomic (M101a).** `enqueue`, `reserve`, `ack`, `requeue` and
+  dead-lettering each run as one Lua script when the client exposes `eval` — always true of the
+  client the adapter builds. They used to run as separate commands, so a command that timed out
+  locally but was applied by the server afterwards could leave a reserved job in neither the ready
+  nor the processing set, lost with its payload still stored. An injected client without `eval`
+  keeps the separate commands. Verified against a live Redis 7.
 - **A Vault request that fails on the network or does not answer in `requestTimeoutMs` now rejects
   with `SecretProviderUnavailableError` (`503`)** instead of a plain error served as a masked `500`.
   A Vault that answers with an HTTP error keeps its handling: `404` reads as `null`, any other error

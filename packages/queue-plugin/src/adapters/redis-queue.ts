@@ -10,6 +10,13 @@
 import { attachConnectionErrorReporter } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
+import {
+  ACK_SCRIPT,
+  DEAD_LETTER_SCRIPT,
+  ENQUEUE_SCRIPT,
+  REQUEUE_SCRIPT,
+  RESERVE_SCRIPT,
+} from './redis-queue-scripts.ts';
 import type {
   IRedisQueueClient,
   RedisQueueOptions,
@@ -269,9 +276,16 @@ export class RedisQueue implements QueueAdapter {
 
     const readyKey = `queue:${job.name}:ready`;
     const jobsKey = `queue:${job.name}:jobs`;
+    const payload = JSON.stringify(job);
+
+    const atomic = this.#atomic([jobsKey, readyKey], [job.id, payload, job.availableAtMs]);
+    if (atomic !== null) {
+      await atomic(ENQUEUE_SCRIPT);
+      return;
+    }
 
     // Store job payload
-    await this.#client.hset(jobsKey, job.id, JSON.stringify(job));
+    await this.#client.hset(jobsKey, job.id, payload);
 
     // Add to ready set with score = availableAtMs
     await this.#client.zadd(readyKey, job.availableAtMs, job.id);
@@ -285,6 +299,12 @@ export class RedisQueue implements QueueAdapter {
     const readyKey = `queue:${name}:ready`;
     const processingKey = `queue:${name}:processing`;
     const jobsKey = `queue:${name}:jobs`;
+
+    const atomic = this.#atomic([readyKey, processingKey, jobsKey], [nowMs, limit]);
+    if (atomic !== null) {
+      const raws = await atomic(RESERVE_SCRIPT) as readonly string[];
+      return raws.map((raw) => JSON.parse(raw) as StoredJob<T>);
+    }
 
     // Get due jobs (score <= nowMs)
     const dueIds = await this.#client.zrangebyscore(readyKey, '-inf', nowMs, 'LIMIT', 0, limit);
@@ -322,6 +342,12 @@ export class RedisQueue implements QueueAdapter {
     const processingKey = `queue:${name}:processing`;
     const jobsKey = `queue:${name}:jobs`;
 
+    const atomic = this.#atomic([processingKey, jobsKey], [id]);
+    if (atomic !== null) {
+      await atomic(ACK_SCRIPT);
+      return;
+    }
+
     // Remove from processing
     await this.#client.zrem(processingKey, id);
 
@@ -354,9 +380,18 @@ export class RedisQueue implements QueueAdapter {
 
     // Update job
     const updated: StoredJob<T> = { ...job, availableAtMs, attempts };
+    const payload = JSON.stringify(updated);
+
+    // The read above changes nothing, so a timeout there is harmless; the three
+    // writes are the transition and run as one script.
+    const atomic = this.#atomic([jobsKey, processingKey, readyKey], [id, payload, availableAtMs]);
+    if (atomic !== null) {
+      await atomic(REQUEUE_SCRIPT);
+      return;
+    }
 
     // Update payload
-    await this.#client.hset(jobsKey, id, JSON.stringify(updated));
+    await this.#client.hset(jobsKey, id, payload);
 
     // Remove from processing
     await this.#client.zrem(processingKey, id);
@@ -372,6 +407,18 @@ export class RedisQueue implements QueueAdapter {
 
     const processingKey = `queue:${name}:processing`;
     const deadKey = `queue:${name}:dead`;
+
+    const atomic = this.#atomic(
+      [processingKey, deadKey, `queue:${name}:jobs`, `queue:${name}:dead:jobs`],
+      [id, nowMs, this.#retention() === null ? '0' : '1'],
+    );
+    if (atomic !== null) {
+      // The move and the dead-set insert land together, so a concurrent sweep
+      // can never see a member whose payload has not been moved yet.
+      await atomic(DEAD_LETTER_SCRIPT);
+      await this.#sweepDeadLetters(name, nowMs);
+      return;
+    }
 
     // Remove from processing
     await this.#client.zrem(processingKey, id);
@@ -392,6 +439,28 @@ export class RedisQueue implements QueueAdapter {
     await this.#client.zadd(deadKey, nowMs, id);
 
     await this.#sweepDeadLetters(name, nowMs);
+  }
+
+  /**
+   * Returns a runner for one atomic Lua transition over `keys` and `args`, or
+   * `null` when the client has no `eval` and the caller must fall back to
+   * separate commands (see `IRedisQueueClient.eval`).
+   *
+   * @param keys - The script's `KEYS`
+   * @param args - The script's `ARGV`
+   * @returns A function running a script with those keys and args, or `null`
+   */
+  #atomic(
+    keys: readonly string[],
+    args: readonly (string | number)[],
+  ): ((script: string) => Promise<unknown>) | null {
+    const client = this.#client;
+    if (client === null || typeof client.eval !== 'function') {
+      return null;
+    }
+    const evaluate = client.eval;
+    // Bound to the client: ioredis reads `this` inside every command method.
+    return (script) => evaluate.call(client, script, keys.length, ...keys, ...args);
   }
 
   /**
