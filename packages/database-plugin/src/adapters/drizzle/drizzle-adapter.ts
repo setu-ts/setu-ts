@@ -33,7 +33,13 @@ import {
   resolveKeysetSort,
   sortFingerprint,
 } from '@setu-ts/common';
-import { DATABASE_POOL_CAPACITY } from '../../health/database-capacity.ts';
+import {
+  DATABASE_POOL_CAPACITY,
+  isSaturated,
+  PoolSaturatedProbeSkipped,
+  readPoolCapacity,
+} from '../../health/database-capacity.ts';
+import { isPoolExhaustion } from '../../errors/classify.ts';
 import type { DatabasePoolCapacity } from '../../interfaces/index.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
@@ -363,12 +369,31 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * `rawQuery`, so the probe cannot diverge from the query path. `false`
    * for an adapter that lost its connection or was refused, so an outage
    * reads as a fact.
+   *
+   * Pool saturation is NOT an outage (M101a V8-3), and the probe REJECTS for
+   * it rather than answering `false`, so the service reports `undefined`:
+   *
+   * - When `poolStats` reports every connection busy with callers waiting
+   *   (`idle === 0 && waiting > 0`), no `SELECT 1` is queued at all — a
+   *   queued probe is one more waiter on the pool it is measuring.
+   * - A rejection that IS pool exhaustion (the node-postgres connection
+   *   timeout) is rethrown, since the database never answered either way.
+   *
+   * The `database` indicator then reads the capacity snapshot to tell a
+   * saturated pool (`up`, `reachable: 'unknown'`) from an unanswered probe.
    */
   async #probeWithRawQuery(): Promise<boolean> {
+    const capacity = readPoolCapacity(this);
+    if (capacity !== undefined && isSaturated(capacity)) {
+      throw new PoolSaturatedProbeSkipped();
+    }
     try {
       await this.rawQuery('SELECT 1');
       return true;
-    } catch {
+    } catch (error) {
+      if (isPoolExhaustion(error)) {
+        throw error;
+      }
       return false;
     }
   }

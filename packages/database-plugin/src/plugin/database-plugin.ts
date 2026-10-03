@@ -34,7 +34,7 @@ import { DynamoAdapter } from '../adapters/dynamo/dynamo-adapter.ts';
 import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
 import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
-import { readPoolCapacity } from '../health/database-capacity.ts';
+import { isSaturated, readPoolCapacity } from '../health/database-capacity.ts';
 import type { DataSource } from '../repositories/base-repository.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -229,6 +229,14 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           return { status: 'down', data: { ...data, reachable: false } };
         }
         if (reachable === undefined) {
+          // M101a V8-3: a probe that did not answer while the pool reports
+          // every connection busy with callers waiting is SATURATION — data,
+          // not an outage. Failing `/ready` there would pull every saturated
+          // replica at once. `'unknown'` rather than `true`, because the
+          // database did not answer; the capacity rides beside it.
+          if (capacity !== undefined && isSaturated(capacity)) {
+            return { status: 'up', data: { ...data, reachable: 'unknown' } };
+          }
           // A probe that EXISTS and did not answer is evidence of trouble:
           // `degraded`, and `/ready` fails with it (`degraded` is not 'up').
           return { status: 'degraded', data: { ...data, reachable: 'unknown' } };

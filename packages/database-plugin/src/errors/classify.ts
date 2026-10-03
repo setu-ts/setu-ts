@@ -134,19 +134,7 @@ export function classifyDriverError(
     return null;
   }
 
-  const visited = new Set<unknown>();
-  const candidates: DriverErrorMembers[] = [];
-  let current: unknown = error;
-  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
-    if (typeof current !== 'object' || current === null) break;
-    if (visited.has(current)) break; // cyclic cause chain
-    visited.add(current);
-    const members = safeMembers(current);
-    if (members !== undefined) {
-      candidates.push(members);
-    }
-    current = causeOf(current);
-  }
+  const candidates = causeChainMembers(error);
 
   // A code or label supplied by a driver is more authoritative than a
   // generic wrapper name or message. Search every cause first: an ORM may
@@ -162,6 +150,46 @@ export function classifyDriverError(
     if (matched !== null) return matched;
   }
   return null;
+}
+
+/**
+ * Whether a thrown value is node-postgres pool exhaustion — the pool timing
+ * out a connection request (M101a V8-3).
+ *
+ * Internal. The Drizzle reachability probe uses it to tell "every connection
+ * is busy" from "the database refused": exhaustion is rethrown, so the
+ * service reports `undefined` rather than `false`. It matches the same
+ * message anchor {@linkcode classifyDriverError} uses, over the same bounded,
+ * cycle-safe cause walk, so the two cannot disagree about what exhaustion is.
+ *
+ * @param error - The thrown value
+ * @returns `true` when any error in the cause chain carries the anchor
+ */
+export function isPoolExhaustion(error: unknown): boolean {
+  return causeChainMembers(error).some(({ message }) =>
+    typeof message === 'string' && message.includes(PG_POOL_TIMEOUT_ANCHOR)
+  );
+}
+
+/**
+ * Reads the classifier members of every error in a cause chain, bounded by
+ * `MAX_CAUSE_DEPTH` and stopping at a cycle.
+ */
+function causeChainMembers(error: unknown): DriverErrorMembers[] {
+  const visited = new Set<unknown>();
+  const candidates: DriverErrorMembers[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
+    if (typeof current !== 'object' || current === null) break;
+    if (visited.has(current)) break; // cyclic cause chain
+    visited.add(current);
+    const members = safeMembers(current);
+    if (members !== undefined) {
+      candidates.push(members);
+    }
+    current = causeOf(current);
+  }
+  return candidates;
 }
 
 /**

@@ -86,3 +86,27 @@ export function readPoolCapacity(adapter: IDatabaseAdapter): DatabasePoolCapacit
     return undefined;
   }
 }
+
+/**
+ * Whether a capacity snapshot shows a saturated pool: every connection busy
+ * and at least one caller waiting (M101a V8-3).
+ *
+ * @param capacity - A validated snapshot from {@linkcode readPoolCapacity}
+ * @returns `true` when `idle === 0 && waiting > 0`
+ */
+export function isSaturated(capacity: DatabasePoolCapacity): boolean {
+  return capacity.idle === 0 && capacity.waiting > 0;
+}
+
+/**
+ * Internal rejection of a reachability probe that was deliberately not run
+ * because the pool is saturated (M101a V8-3). Never exported from the
+ * package barrel; the service maps any probe rejection to `undefined`.
+ */
+export class PoolSaturatedProbeSkipped extends Error {
+  /** Creates the skip error. */
+  constructor() {
+    super('Reachability probe skipped: the connection pool is saturated.');
+    this.name = 'PoolSaturatedProbeSkipped';
+  }
+}

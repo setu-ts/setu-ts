@@ -42,7 +42,10 @@ import {
   createDrizzleDataSource,
   DrizzleAdapter,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { HealthPlugin } from '@setu-ts/health-plugin';
+import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
 import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
 import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
@@ -927,6 +930,55 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
       holder.release();
       await pool.end();
       await adapter?.disconnect();
+    }
+  });
+
+  it('a saturated real pool keeps /ready at 200 through the plugin (M101a V8-3)', {
+    ignore: skipLivePg,
+  }, async () => {
+    // Every connection held and a caller queued behind them: the shape that
+    // used to queue the probe too, time it out at the 2 s bound and fail
+    // `/ready` on a replica that was merely busy.
+    const pool = new Pool({ connectionString: livePgUrl!, max: 3 });
+    const holders = await Promise.all([pool.connect(), pool.connect(), pool.connect()]);
+    const waiter = pool.connect();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DatabasePlugin({
+          type: 'drizzle',
+          options: {
+            drizzleInstance: createDrizzleDatabase(
+              nodePostgresDrizzle(pool),
+              (database, work) => database.transaction(work),
+            ),
+            drizzleTables: { Account: pgAccounts },
+            poolStats: () => ({
+              total: pool.totalCount,
+              idle: pool.idleCount,
+              waiting: pool.waitingCount,
+            }),
+          },
+        }),
+        HealthPlugin(),
+      ],
+    });
+    await app.start();
+    try {
+      expect(pool.waitingCount).toBeGreaterThan(0);
+      const health = (await app.inject({ method: 'GET', url: 'http://localhost/health' }))
+        .json() as {
+          checks?: Record<string, { status: string; data?: { reachable?: unknown } }>;
+        };
+      expect(health.checks?.['database']?.status).toBe('up');
+      expect(health.checks?.['database']?.data?.reachable).toBe('unknown');
+      expect((await app.inject({ method: 'GET', url: 'http://localhost/ready' })).statusCode)
+        .toBe(200);
+    } finally {
+      for (const holder of holders) holder.release();
+      (await waiter).release();
+      await app.stop();
+      await pool.end();
     }
   });
 });
