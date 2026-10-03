@@ -175,6 +175,12 @@ describe('mayBeSkipped', () => {
     expect(mayBeSkipped('0.6.1', ['0.6.0', '0.7.0'])).toBe(false);
   });
 
+  it('compares release parts past 2^53 exactly', () => {
+    expect(mayBeSkipped('9007199254740993.0.0', ['9007199254740992.0.0'])).toBe(true);
+    expect(mayBeSkipped('9007199254740992.0.0', ['9007199254740993.0.0'])).toBe(false);
+    expect(mayBeSkipped('0.10.0', ['0.9.0', '0.09.1'])).toBe(true);
+  });
+
   it('ignores build metadata and unparseable registry entries', () => {
     expect(mayBeSkipped('0.8.0-alpha.2', ['0.8.0-alpha.2+ci.1'])).toBe(false);
     expect(mayBeSkipped('0.8.0', ['latest', '0.7.0'])).toBe(true);

@@ -279,9 +279,12 @@ export function symbolPresent(fetched: string, symbol: string): boolean {
 const RELEASE_TRIPLE = /^(\d+)\.(\d+)\.(\d+)/;
 
 /**
- * The `[major, minor, patch]` of a version string; any prerelease identifier
- * and build metadata are ignored here — {@linkcode compareVersions} orders
- * those once the triples match.
+ * The `[major, minor, patch]` of a version string, as decimal strings; any
+ * prerelease identifier and build metadata are ignored here —
+ * {@linkcode compareVersions} orders those once the triples match.
+ *
+ * The parts stay strings because semver puts no bound on them, and past 2^53
+ * `Number` would collapse neighbouring values into one.
  *
  * A string that carries no triple at all returns `null` rather than a
  * zero-filled tuple. The registry's version list is remote input, so a value
@@ -291,10 +294,26 @@ const RELEASE_TRIPLE = /^(\d+)\.(\d+)\.(\d+)/;
  * @param version - A version string, from a tag or from the registry
  * @returns Its release triple, or `null` when there is none
  */
-function releaseTriple(version: string): readonly [number, number, number] | null {
+function releaseTriple(version: string): readonly [string, string, string] | null {
   const match = RELEASE_TRIPLE.exec(version);
   if (match === null) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
+  return [match[1] as string, match[2] as string, match[3] as string];
+}
+
+/**
+ * Orders two non-negative decimal integers given as digit strings, exactly at
+ * any length. Leading zeros are ignored: semver forbids them, but the registry
+ * list is remote input, so a stray `07` must still equal `7`.
+ *
+ * @param a - A run of ASCII digits
+ * @param b - Another
+ * @returns Negative, zero or positive, as for `Array.prototype.sort`
+ */
+function compareDecimal(a: string, b: string): number {
+  const x = a.replace(/^0+(?=\d)/, '');
+  const y = b.replace(/^0+(?=\d)/, '');
+  if (x.length !== y.length) return x.length - y.length;
+  return x === y ? 0 : x < y ? -1 : 1;
 }
 
 /**
@@ -312,11 +331,11 @@ function releaseTriple(version: string): readonly [number, number, number] | nul
 function compareVersions(
   a: string,
   b: string,
-  tripleA: readonly [number, number, number],
-  tripleB: readonly [number, number, number],
+  tripleA: readonly [string, string, string],
+  tripleB: readonly [string, string, string],
 ): number {
   for (let i = 0; i < 3; i++) {
-    const diff = (tripleA[i] as number) - (tripleB[i] as number);
+    const diff = compareDecimal(tripleA[i] as string, tripleB[i] as string);
     if (diff !== 0) return diff;
   }
   const preA = prereleaseOf(a);
@@ -392,11 +411,8 @@ export function comparePrerelease(a: string, b: string): number {
     const xNum = /^\d+$/.test(x);
     const yNum = /^\d+$/.test(y);
     if (xNum && yNum) {
-      // Compared as digit strings, never via Number: semver puts no bound on
-      // a numeric identifier, and past 2^53 Number collapses neighbours.
-      // Semver forbids leading zeros, so a longer run is a larger number.
-      if (x.length !== y.length) return x.length - y.length;
-      if (x !== y) return x < y ? -1 : 1;
+      const diff = compareDecimal(x, y);
+      if (diff !== 0) return diff;
     } else if (xNum !== yNum) {
       return xNum ? -1 : 1;
     } else if (x !== y) {
