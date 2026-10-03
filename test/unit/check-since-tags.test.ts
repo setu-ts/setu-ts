@@ -146,6 +146,12 @@ describe('comparePrerelease', () => {
     expect(comparePrerelease('alpha.1', 'alpha.1')).toBe(0);
   });
 
+  it('orders numeric identifiers past 2^53 exactly', () => {
+    expect(comparePrerelease('rc.9007199254740992', 'rc.9007199254740993')).toBeLessThan(0);
+    expect(comparePrerelease('rc.9007199254740993', 'rc.9007199254740992')).toBeGreaterThan(0);
+    expect(comparePrerelease('rc.99999999999999999', 'rc.100000000000000000')).toBeLessThan(0);
+  });
+
   it('ignores build metadata, which never affects precedence', () => {
     expect(comparePrerelease('alpha.2+ci.1', 'alpha.10')).toBeLessThan(0);
     expect(comparePrerelease('alpha.10', 'alpha.2+ci.1')).toBeGreaterThan(0);

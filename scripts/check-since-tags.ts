@@ -374,7 +374,7 @@ export function mayBeSkipped(version: string, published: readonly string[]): boo
 /**
  * Orders two prerelease suffixes (`alpha.9`, `alpha.10`) the way semver does:
  * dot-separated identifiers compared left to right, numeric ones numerically
- * and below alphanumeric ones, with a shorter run of equal identifiers first.
+ * (exactly, at any length) and below alphanumeric ones, with a shorter run of equal identifiers first.
  * A plain lexical compare would put `alpha.10` before `alpha.9`. Build
  * metadata (`+…`) is stripped first: it never affects precedence, and left in
  * place it would turn `2+ci` into an alphanumeric identifier.
@@ -392,8 +392,11 @@ export function comparePrerelease(a: string, b: string): number {
     const xNum = /^\d+$/.test(x);
     const yNum = /^\d+$/.test(y);
     if (xNum && yNum) {
-      const diff = Number(x) - Number(y);
-      if (diff !== 0) return diff;
+      // Compared as digit strings, never via Number: semver puts no bound on
+      // a numeric identifier, and past 2^53 Number collapses neighbours.
+      // Semver forbids leading zeros, so a longer run is a larger number.
+      if (x.length !== y.length) return x.length - y.length;
+      if (x !== y) return x < y ? -1 : 1;
     } else if (xNum !== yNum) {
       return xNum ? -1 : 1;
     } else if (x !== y) {
