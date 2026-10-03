@@ -280,8 +280,8 @@ const RELEASE_TRIPLE = /^(\d+)\.(\d+)\.(\d+)/;
 
 /**
  * The `[major, minor, patch]` of a version string; any prerelease identifier
- * and build metadata are ignored, because this only has to order release
- * LINES, never two prereleases of one line.
+ * and build metadata are ignored here — {@linkcode compareVersions} orders
+ * those once the triples match.
  *
  * A string that carries no triple at all returns `null` rather than a
  * zero-filled tuple. The registry's version list is remote input, so a value
@@ -298,9 +298,55 @@ function releaseTriple(version: string): readonly [number, number, number] | nul
 }
 
 /**
+ * Orders two version strings by full semver precedence: release triple first,
+ * then a version WITH a prerelease below the same triple without one, then
+ * the prerelease identifiers via {@linkcode comparePrerelease}. Build metadata
+ * (`+…`) never affects the order.
+ *
+ * @param a - A version string carrying a release triple
+ * @param b - Another
+ * @param tripleA - `a`'s release triple, already parsed
+ * @param tripleB - `b`'s release triple, already parsed
+ * @returns Negative, zero or positive, as for `Array.prototype.sort`
+ */
+function compareVersions(
+  a: string,
+  b: string,
+  tripleA: readonly [number, number, number],
+  tripleB: readonly [number, number, number],
+): number {
+  for (let i = 0; i < 3; i++) {
+    const diff = (tripleA[i] as number) - (tripleB[i] as number);
+    if (diff !== 0) return diff;
+  }
+  const preA = prereleaseOf(a);
+  const preB = prereleaseOf(b);
+  if (preA === null || preB === null) {
+    return preA === preB ? 0 : preA === null ? 1 : -1;
+  }
+  return comparePrerelease(preA, preB);
+}
+
+/**
+ * The prerelease suffix of a version string, without its leading `-` and
+ * without any build metadata, or `null` when the version has none.
+ *
+ * @param version - A version string
+ * @returns Its prerelease identifiers, or `null`
+ */
+function prereleaseOf(version: string): string | null {
+  const core = version.split('+', 1)[0] as string;
+  const dash = core.search(/-/);
+  return dash === -1 ? null : core.slice(dash + 1);
+}
+
+/**
  * Whether a tag naming an unpublished version may be skipped rather than
  * reported: exactly when the version is NEWER than every version the registry
  * holds — the normal state on a release branch, which must never be blocked.
+ * "Newer" is full semver precedence, prereleases included, so
+ * `0.8.0-alpha.2` is ahead of a registry holding `0.8.0-alpha.1`, while
+ * `0.8.0-alpha.1` against a registry holding `0.8.0-alpha.2` is not.
  *
  * Absence from the published list is NOT by itself that question, and
  * conflating them left a permanent blind spot: a version that was never
@@ -316,15 +362,12 @@ function releaseTriple(version: string): readonly [number, number, number] | nul
  * @param published - Every version the registry holds for that package
  * @returns True when the tag must not be reported
  */
-function mayBeSkipped(version: string, published: readonly string[]): boolean {
+export function mayBeSkipped(version: string, published: readonly string[]): boolean {
   const triple = releaseTriple(version);
   if (triple === null) return true;
-  const [major, minor, patch] = triple;
-  const lines = published.map(releaseTriple).filter((t) => t !== null);
-  return lines.every(([m, n, p]) => {
-    if (major !== m) return major > m;
-    if (minor !== n) return minor > n;
-    return patch > p;
+  return published.every((other) => {
+    const otherTriple = releaseTriple(other);
+    return otherTriple === null || compareVersions(version, other, triple, otherTriple) > 0;
   });
 }
 
@@ -332,15 +375,17 @@ function mayBeSkipped(version: string, published: readonly string[]): boolean {
  * Orders two prerelease suffixes (`alpha.9`, `alpha.10`) the way semver does:
  * dot-separated identifiers compared left to right, numeric ones numerically
  * and below alphanumeric ones, with a shorter run of equal identifiers first.
- * A plain lexical compare would put `alpha.10` before `alpha.9`.
+ * A plain lexical compare would put `alpha.10` before `alpha.9`. Build
+ * metadata (`+…`) is stripped first: it never affects precedence, and left in
+ * place it would turn `2+ci` into an alphanumeric identifier.
  *
  * @param a - A prerelease suffix, without its leading `-`
  * @param b - Another
  * @returns Negative, zero or positive, as for `Array.prototype.sort`
  */
 export function comparePrerelease(a: string, b: string): number {
-  const left = a.split('.');
-  const right = b.split('.');
+  const left = (a.split('+', 1)[0] as string).split('.');
+  const right = (b.split('+', 1)[0] as string).split('.');
   for (let i = 0; i < Math.min(left.length, right.length); i++) {
     const x = left[i] as string;
     const y = right[i] as string;

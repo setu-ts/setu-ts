@@ -19,6 +19,7 @@ import {
   defaultListSourceFiles,
   type FetchLike,
   lineStandIn,
+  mayBeSkipped,
   packageNameFor,
   registryFileUrl,
   resolveFollowingSymbol,
@@ -144,6 +145,34 @@ describe('comparePrerelease', () => {
     expect(comparePrerelease('alpha', 'alpha.1')).toBeLessThan(0);
     expect(comparePrerelease('alpha.1', 'alpha.1')).toBe(0);
   });
+
+  it('ignores build metadata, which never affects precedence', () => {
+    expect(comparePrerelease('alpha.2+ci.1', 'alpha.10')).toBeLessThan(0);
+    expect(comparePrerelease('alpha.10', 'alpha.2+ci.1')).toBeGreaterThan(0);
+    expect(comparePrerelease('alpha.2+ci.1', 'alpha.2+ci.9')).toBe(0);
+  });
+});
+
+describe('mayBeSkipped', () => {
+  it('skips a prerelease ahead of an earlier prerelease of the same line', () => {
+    expect(mayBeSkipped('0.8.0-alpha.2', ['0.7.0', '0.8.0-alpha.1'])).toBe(true);
+    expect(mayBeSkipped('0.8.0-alpha.10', ['0.8.0-alpha.9'])).toBe(true);
+  });
+
+  it('reports a prerelease older than one the registry holds', () => {
+    expect(mayBeSkipped('0.8.0-alpha.1', ['0.8.0-alpha.2'])).toBe(false);
+  });
+
+  it('orders a plain release above its own prereleases and below the next line', () => {
+    expect(mayBeSkipped('0.8.0', ['0.8.0-rc.1'])).toBe(true);
+    expect(mayBeSkipped('0.8.0-rc.1', ['0.8.0'])).toBe(false);
+    expect(mayBeSkipped('0.6.1', ['0.6.0', '0.7.0'])).toBe(false);
+  });
+
+  it('ignores build metadata and unparseable registry entries', () => {
+    expect(mayBeSkipped('0.8.0-alpha.2', ['0.8.0-alpha.2+ci.1'])).toBe(false);
+    expect(mayBeSkipped('0.8.0', ['latest', '0.7.0'])).toBe(true);
+  });
 });
 
 describe('lineStandIn', () => {
@@ -154,6 +183,11 @@ describe('lineStandIn', () => {
 
   it('answers null when the line shipped no prerelease', () => {
     expect(lineStandIn('0.5.1', ['0.5.0', '0.6.0'])).toBeNull();
+  });
+
+  it('picks the later prerelease when one carries build metadata', () => {
+    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2+ci.1', '0.1.0-alpha.10']))
+      .toBe('0.1.0-alpha.10');
   });
 
   it('answers null for a tag that is itself a prerelease', () => {
