@@ -39,12 +39,12 @@ await mailer.sendTemplate('welcome', { to: 'ada@example.com', subject: 'Welcome'
 
 ## Options
 
-| Option      | Type                                     | Default | Description                               |
-| ----------- | ---------------------------------------- | ------- | ----------------------------------------- |
-| `provider`  | `'log' \| 'smtp' \| 'ses' \| 'sendgrid'` | `'log'` | Backend.                                  |
-| `options`   | `MailProviderOptions`                    | —       | Provider-specific configuration.          |
-| `defaults`  | `{ from?: string }`                      | —       | Applied when a message omits the field.   |
-| `templates` | `Record<string, MailTemplate>`           | —       | Named bodies available to `sendTemplate`. |
+| Option      | Type                                     | Default | Description                                                                                                                                  |
+| ----------- | ---------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`  | `'log' \| 'smtp' \| 'ses' \| 'sendgrid'` | `'log'` | Backend.                                                                                                                                     |
+| `options`   | `MailProviderOptions`                    | —       | Provider-specific configuration.                                                                                                             |
+| `defaults`  | `{ from?: string }`                      | —       | Applied when a message omits the field.                                                                                                      |
+| `templates` | `Record<string, MailTemplate>`           | —       | Named bodies available to `sendTemplate`: `{{ variable }}` strings, or view components rendered through `CAPABILITIES.VIEW` (see Templates). |
 
 ## Runtime support
 
@@ -53,9 +53,72 @@ and `SendGridProvider` work on every runtime including Cloudflare Workers.
 
 ## Templates
 
-The template engine renders named `{{ variable }}` placeholders. The `html` body is
+A template is one of two arms, and the two never mix in one template (a template carrying both
+`view` and `html` is a compile error).
+
+**String templates** render named `{{ variable }}` placeholders. The `html` body is
 **HTML-escaped**; a missing variable or an unknown template **throws** rather than rendering an
 empty string.
+
+**Component templates** (`{ view, text? }`) render through the view engine registered under
+`CAPABILITIES.VIEW` — a JSX component, an `html` tagged template, or a plain `(props) => string`
+function — with `sendTemplate`'s `data` passed to each component verbatim as its props. `view`
+renders the HTML body; the optional `text` renders the plain-text body and is used verbatim.
+Configuring one requires a `CAPABILITIES.VIEW` provider: `MailPlugin` refuses at `register()`
+otherwise, naming both remedies, so the failure is a startup failure rather than a throw on the
+first send.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { ViewPlugin } from '@setu-ts/view-plugin';
+import { MailPlugin } from '@setu-ts/mail-plugin';
+import { CAPABILITIES, type IMailer } from '@setu-ts/common';
+import { html } from '@hono/hono/html';
+
+interface WelcomeProps {
+  readonly name: string;
+  readonly plan: string;
+}
+
+// The `html` tag escapes `name` and `plan`; a JSX component would too.
+const WelcomeHtml = (p: WelcomeProps) =>
+  html`
+    <h1>Welcome ${p.name}</h1>
+    <p>You are on the ${p.plan} plan.</p>
+  `;
+const WelcomeText = (p: WelcomeProps) => `Welcome ${p.name}. You are on the ${p.plan} plan.`;
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    ViewPlugin({ engine: 'hono-html' }),
+    MailPlugin({
+      defaults: { from: 'no-reply@example.com' },
+      templates: {
+        welcome: { view: WelcomeHtml, text: WelcomeText },
+      },
+    }),
+  ],
+});
+await app.start();
+
+const mailer = app.services.get<IMailer>(CAPABILITIES.MAIL);
+await mailer.sendTemplate('welcome', { to: 'ada@example.com', subject: 'Welcome' }, {
+  name: 'Ada',
+  plan: 'team',
+});
+```
+
+Two things differ from the string arm. Escaping is the rendering runtime's: an `html` template and a
+JSX component escape their interpolations, while a hand-written template literal does not (the same
+caveat `IViewEngine.render` carries for a page). And there is **no missing-key check**: a component
+reads whatever it reads, so a key absent from `data` renders as `undefined` rather than throwing.
+The committed `sendTemplate` signature types `data` as `Record<string, unknown>`; for compile-time
+props, render by hand — `engine.render(WelcomeHtml, props)` on the engine resolved from
+`CAPABILITIES.VIEW`, then `mailer.send({ ..., html })`.
+
+`TemplateEngine.render` is asynchronous for both arms, because a view component's render may be.
 
 ## Health indicator
 
@@ -96,11 +159,12 @@ the provider has no liveness check (e.g. the log provider always reports `true`)
 | `ISesClient`              | interface |
 | `ISmtpTransport`          | interface |
 | `LogProviderOptions`      | interface |
+| `MailComponentTemplate`   | interface |
 | `MailMessage`             | interface |
 | `MailPluginOptions`       | interface |
 | `MailProviderOptions`     | interface |
 | `MailServiceOptions`      | interface |
-| `MailTemplate`            | interface |
+| `MailStringTemplate`      | interface |
 | `NodemailerModule`        | interface |
 | `RenderedTemplate`        | interface |
 | `SendGridProviderOptions` | interface |
@@ -109,6 +173,7 @@ the provider has no liveness check (e.g. the log provider always reports `true`)
 | `SmtpProviderOptions`     | interface |
 | `IMailHttp`               | type      |
 | `MailProviderType`        | type      |
+| `MailTemplate`            | type      |
 | `OutgoingMail`            | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

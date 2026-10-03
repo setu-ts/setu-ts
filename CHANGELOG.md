@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Mail bodies rendered through the view engine (M102).** `MailPluginOptions.templates` gains a
+  component arm beside the released string arm: `{ view, text? }`, where `view` and `text` are
+  `Component`s (a JSX function, an `html` tagged template, or a plain `(props) => string`) rendered
+  through the `IViewEngine` registered under `CAPABILITIES.VIEW`, with `sendTemplate`'s `data`
+  passed verbatim as each component's props. `MailPlugin` declares `CAPABILITIES.VIEW` in
+  `optionalDependencies` and resolves the engine once at `register()`; a component template
+  configured with no provider fails at `register()` naming both remedies, never on the first send.
+  `MailTemplate` is now the union `MailStringTemplate | MailComponentTemplate` (both exported), and
+  the two arms cannot mix in one template (a compile error). Escaping is the rendering runtime's,
+  and the component arm performs no missing-key check — an absent key renders as `undefined`. The
+  committed `IMailer` contract is unchanged, so every holder calling `sendTemplate` gets the arm
+  with no code change.
+
+### Changed
+
+- **BREAKING: `TemplateEngine.render` is asynchronous (M102).** The exported class's
+  `render(name, data)` now returns `Promise<RenderedTemplate>`, because `IViewEngine.render` may
+  answer a promise and both template arms share one lookup; every refusal (unknown template, missing
+  placeholder key) is now a rejection rather than a synchronous throw. `MailService` is unaffected
+  (it awaits). A direct caller of `TemplateEngine` adds an `await`; the constructor also gains an
+  optional second parameter, the view engine, which the plugin supplies. See `docs/upgrading.md`.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added

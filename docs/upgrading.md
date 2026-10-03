@@ -10,6 +10,17 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Await `TemplateEngine.render` if you call the mail template engine directly
+
+`@setu-ts/mail-plugin`'s exported `TemplateEngine.render(name, data)` now returns a
+`Promise<RenderedTemplate>` (M102), so a direct caller adds an `await`; unknown-template and
+missing-placeholder refusals arrive as rejections rather than synchronous throws. Nothing to do if
+you only ever reached templates through `IMailer.sendTemplate`, which already returned a promise.
+The constructor's new second parameter (a view engine) is optional and only needed for the new
+component-template arm, which `MailPlugin` supplies for you.
+
 ## 0.8.0
 
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at

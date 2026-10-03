@@ -4,9 +4,20 @@
  *
  * @module
  */
-import type { HealthCheckResult, IMailer, IPlugin, IPluginContext } from '@setu-ts/common';
+import type {
+  HealthCheckResult,
+  IMailer,
+  IPlugin,
+  IPluginContext,
+  IViewEngine,
+} from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, resolveProbeTiming } from '@setu-ts/common';
-import type { MailProvider, MailProviderOptions, MailProviderType } from '../interfaces/index.ts';
+import type {
+  MailProvider,
+  MailProviderOptions,
+  MailProviderType,
+  MailTemplate,
+} from '../interfaces/index.ts';
 import { MailService } from '../services/mail-service.ts';
 import { TemplateEngine } from '../templates/template-engine.ts';
 import { LogProvider, type LogProviderOptions } from '../providers/log-provider.ts';
@@ -92,7 +103,11 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
-    optionalDependencies: ['logger'],
+    // The VIEW edge is what makes the `register()`-time engine lookup a
+    // contract rather than plugin-order luck: the resolver orders an optional
+    // dependency first (`plugin-resolver.ts`), and `view-plugin` declares no
+    // edge of its own, so this cannot form a cycle (the M90i P1 class).
+    optionalDependencies: [CAPABILITIES.LOGGER, CAPABILITIES.VIEW],
     provides: [CAPABILITIES.MAIL],
     priority: PLUGIN_PRIORITY.NORMAL,
 
@@ -100,7 +115,13 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
       const provider = createProvider(providerType, providerOptions, ctx);
       await provider.connect();
 
-      const templates = new TemplateEngine(options?.templates);
+      // Resolved once, here, so a component template with no provider fails
+      // at startup naming both remedies (inside the TemplateEngine constructor)
+      // rather than on the first `sendTemplate` of a shipped path.
+      const templates = new TemplateEngine(
+        options?.templates,
+        resolveViewEngine(ctx, options?.templates),
+      );
       // The runtime's clock and timers reach the service, which is where the
       // reachability probe is cached and bounded: this indicator and every
       // email channel in `notification-plugin` ask the same question, and the
@@ -144,6 +165,35 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
       });
     },
   };
+}
+
+/**
+ * Resolves the view engine the component-template arm renders through, or
+ * `undefined` when no configured template needs one.
+ *
+ * Only the registry is consulted. A container-supplied engine
+ * (`@Injectable({ token: CAPABILITIES.VIEW })` under `DiPlugin`) is registered
+ * into `ctx.container` during `DecoratorPlugin`'s OWN `register()`, which runs
+ * after this one, so there is nothing to find there at this point; the
+ * refusal names the registry remedy. An application with only string
+ * templates performs no lookup at all, so it needs no view plugin.
+ *
+ * @param ctx - The plugin context
+ * @param templates - The configured template map
+ * @returns The engine, or `undefined` when no component template is configured
+ *   or no provider is registered (the constructor then refuses by name)
+ */
+function resolveViewEngine(
+  ctx: IPluginContext,
+  templates: Readonly<Record<string, MailTemplate>> | undefined,
+): IViewEngine | undefined {
+  const needsEngine = Object.values(templates ?? {}).some((t) =>
+    'view' in t && t.view !== undefined
+  );
+  if (!needsEngine || !ctx.services.has(CAPABILITIES.VIEW)) {
+    return undefined;
+  }
+  return ctx.services.get<IViewEngine>(CAPABILITIES.VIEW);
 }
 
 /** Builds {@linkcode LogProvider} options, threading `ctx.logger` and `sink`. */

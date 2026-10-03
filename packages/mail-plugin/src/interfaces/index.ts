@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ILogger, MailMessage } from '@setu-ts/common';
+import type { Component, ILogger, MailMessage } from '@setu-ts/common';
 
 /**
  * An outgoing email whose sender has already been resolved by
@@ -99,16 +99,63 @@ export interface ISesClient {
 export type IMailHttp = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
- * A named body template. At least one of `html`/`text` must be present.
+ * The string arm of {@linkcode MailTemplate}: named `{{ variable }}` bodies.
+ * At least one of `html`/`text` must be present. `view` is forbidden so a
+ * template cannot mix the two arms — the mix is a compile error, not a
+ * precedence rule.
  *
  * @since 0.1.0
  */
-export interface MailTemplate {
+export interface MailStringTemplate {
   /** HTML body template with `{{ variable }}` placeholders (values escaped). */
   html?: string;
   /** Plain-text body template with `{{ variable }}` placeholders (raw). */
   text?: string;
+  /** Never present on the string arm. */
+  view?: never;
 }
+
+/**
+ * The component arm of {@linkcode MailTemplate} (M102): bodies rendered through
+ * the view engine registered under `CAPABILITIES.VIEW`, with `sendTemplate`'s
+ * `data` passed to each component verbatim as its props.
+ *
+ * Configuring one requires a `CAPABILITIES.VIEW` provider — `MailPlugin`
+ * refuses at `register()` otherwise, naming both remedies. Escaping is the
+ * rendering runtime's (a JSX component and an `html` tagged template escape
+ * their interpolations; a hand-written template literal does not — the caveat
+ * `IViewEngine.render` states applies unchanged to a mail body). Unlike the
+ * string arm, there is NO missing-key check: a component reads whatever it
+ * reads, so a key absent from `data` renders as `undefined` rather than
+ * throwing. The compile-time route is to call `engine.render(Component, props)`
+ * and `mailer.send` by hand.
+ *
+ * `Component<never>` is the one type every component is assignable to; the
+ * props are not checked at this boundary because the committed
+ * `IMailer.sendTemplate` types `data` as `Record<string, unknown>`.
+ *
+ * @since 0.9.0
+ */
+export interface MailComponentTemplate {
+  /** Renders the HTML body. */
+  view: Component<never>;
+  /**
+   * Renders the plain-text body, used verbatim. A plain `(props) => string`
+   * function is a valid component whose output the engine returns unchanged.
+   */
+  text?: Component<never>;
+  /** Never present on the component arm. */
+  html?: never;
+}
+
+/**
+ * A named body template: either `{{ variable }}` strings
+ * ({@linkcode MailStringTemplate}) or view components
+ * ({@linkcode MailComponentTemplate}). The two arms never mix in one template.
+ *
+ * @since 0.1.0
+ */
+export type MailTemplate = MailStringTemplate | MailComponentTemplate;
 
 /**
  * Provider-specific options. Fields are consumed only by the matching provider;
@@ -165,7 +212,11 @@ export interface MailPluginOptions {
   options?: MailProviderOptions;
   /** Message defaults applied when a message omits the field. */
   defaults?: { from?: string };
-  /** Named body templates available to `sendTemplate`. */
+  /**
+   * Named body templates available to `sendTemplate` — `{{ variable }}`
+   * strings, or view components rendered through `CAPABILITIES.VIEW`
+   * (which must then be registered; see {@linkcode MailComponentTemplate}).
+   */
   templates?: Record<string, MailTemplate>;
 }
 
