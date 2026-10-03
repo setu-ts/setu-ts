@@ -130,7 +130,13 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
   recorded raw queue differs, or when the existing `filter_subject` is not this `topic` — the second
   condition also closes today's silent attach of a queue reused across two topics to the first
   topic's consumer. A consumer with no `setu.queue` metadata (created before this letter) is
-  accepted when its filter matches, so no deployed consumer is refused on upgrade.
+  accepted only when its durable name EQUALS the requested raw queue and its filter matches; any
+  other metadata-less match is refused with the same error, because a matching filter does not prove
+  which raw queue created it — a legacy `orders_2eeu` durable belongs to raw queue `orders_2eeu`,
+  and attaching `orders.eu` to it would make the two queues split one consumer's deliveries. No
+  deployed consumer is refused on upgrade by this rule: before this letter the durable name WAS the
+  raw queue (an encoded name never reached the server, because the client refused it), so every
+  legacy consumer's name equals the raw queue that created it.
 - **Why:** the refusal is client-side (`jsmconsumer_api.js:51`), before the wire, on the exact name
   the inbox mints — so NATS `request()` has never worked against a real server, and any dotted user
   queue fails identically. A hash was rejected because it hides the queue name from an operator's
@@ -144,7 +150,9 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
   the dotted topic; `subscribe(t, h, { queue: 'orders.eu' })` then `{ queue: 'orders_2eeu' }` on one
   broker rejects with `NatsConsumerNameCollisionError` naming both and makes no second `add`; an
   "already exists" whose `info` carries another `setu.queue`, or another `filter_subject`, rejects
-  with the same error; one with no metadata and a matching filter attaches).
+  with the same error; one with no metadata, a matching filter and a durable name equal to the raw
+  queue attaches; one with no metadata whose durable name is `orders_2eeu`, requested as raw queue
+  `orders.eu`, rejects with `NatsConsumerNameCollisionError` and makes no `add`).
   `test/integration/nats-real.test.ts` gains two cases: a `respond`/`request` round-trip through a
   kernel app whose `streamSubjects` cover `<scope>.>` and `rr.inbox.>` (the subject set C3
   documents), a user subscription with `queue: 'orders.eu'` that delivers, and the collision across

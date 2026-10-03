@@ -287,8 +287,19 @@ fail fast. The new outage tests therefore pause.
   landing late at all, and it must not outlast the call it bounds: when unset it DEFAULTS to the
   resolved `acquireTimeoutMs` (and to the M98l `15_000` only when `acquireTimeoutMs` is `0`), and a
   configured `commandTimeoutMs` greater than a non-zero `acquireTimeoutMs` is refused with a
-  `RangeError` at construction naming both values. `MemoryLock` is unaffected (synchronous map). The
-  scheduler health indicator is unchanged in this letter (§9).
+  `RangeError` at construction naming both values. A client-side timeout rejects the command
+  PROMISE; it does not recall a `SET NX` already written to the socket, which can still apply on the
+  server after the rejection — and the scheduler's continuation ignores a rejection, because a
+  rejection carries no token. So `RedisLock.acquire` owns that recovery: the token is minted
+  client-side before the `SET`, so when the `SET` rejects, `acquire` issues the existing
+  token-checked release `EVAL` for that exact key and token (best-effort, a failure swallowed), then
+  rethrows the original error. The `EVAL` is written to the same connection after the `SET`, so
+  Redis applies it after the `SET` if the `SET` applied at all: an applied `SET` is deleted, an
+  unapplied one leaves nothing to match, and the token check means a lock another holder took in
+  between is never touched. If the connection is dead for long enough that the `EVAL` also cannot
+  run, the key is held no longer than the TTL it was set with — the bound that exists today.
+  `MemoryLock` is unaffected (synchronous map). The scheduler health indicator is unchanged in this
+  letter (§9).
 - **Why:** the lock is a port a caller may implement, so the bound has to sit on the CALL, not on
   one backend; the Redis-side bound is the §3.1 reasoning about parked commands. Five seconds is
   below every realistic `every` interval and above the ~2 s a healthy Redis round trip never
@@ -300,7 +311,11 @@ fail fast. The new outage tests therefore pause.
   each of the three sites, and the next fire's mutex acquire is not contended; a late `null` and a
   late rejection call no `release`). `test/unit/redis-lock.test.ts` + `distributed-lock.test.ts`
   (the option reaches the constructor; unset, it defaults to `acquireTimeoutMs`; `commandTimeoutMs`
-  above a non-zero `acquireTimeoutMs` throws `RangeError`; injected client untouched). New
+  above a non-zero `acquireTimeoutMs` throws `RangeError`; injected client untouched; a fake client
+  whose `set` records the write as applied and then rejects with ioredis's `Command timed out`:
+  `acquire` rejects with that error, `eval` was called once with the same key and the token passed
+  to `set`, and the fake's key is gone — not held until its TTL; an `eval` that also rejects does
+  not replace the original rejection). New
   `packages/scheduler-plugin/test/integration/outage-real.test.ts` through a kernel app with
   `diagnostics`, an `every` job on a 1 s grid,
   `distributedLock: { enabled: true, storage: 'redis', acquireTimeoutMs: 500 }` (strictly below the
@@ -309,7 +324,8 @@ fail fast. The new outage tests therefore pause.
   incrementing; unpause → `dispatched` resumes. **In CI** (Redis), guarded `ignore:` on `REDIS_URL`.
   Negative control: revert the deadline → `count` freezes and `lockFailed` stays `0` for the whole
   paused window. Remove the late-token release → the unit case's next fire reports `'contended'`
-  against its own abandoned token.
+  against its own abandoned token. Remove the release-on-rejection in `RedisLock.acquire` → the
+  timed-out-but-applied case finds the key still held with the abandoned token.
 
 ### 3.8 One outage test per package, through the endpoints
 
