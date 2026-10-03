@@ -27,8 +27,9 @@ focused on the behaviour, documentation, or proposal at hand.
 2. Open a focused issue with a reproducible problem or agreed acceptance criteria.
 3. Wait for a maintainer to mark the issue as accepted for contribution before opening a code PR.
    Small documentation corrections may skip the discussion when their expected wording is clear.
-4. Fork the repository, create one branch for the agreed change, and open a PR against `main`. Do
-   not push to `main`, and do not request write access solely to contribute.
+4. Fork the repository, create one branch for the agreed change from `develop`, and open a PR
+   against `develop` (the default branch). `main` holds only the last release and accepts release
+   PRs alone. Do not push to either, and do not request write access solely to contribute.
 5. Keep the PR scoped to its linked issue. Include tests and documentation when the change requires
    them, and explain any intentional trade-off in the PR description.
 

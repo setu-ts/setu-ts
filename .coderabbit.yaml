@@ -28,3 +28,8 @@ reviews:
     # from a fork fails with a 403 and nothing is applied.
     labels:
       - maintainer-review
+    # Automatic review covers PRs into the default branch only. `develop` is the default; release,
+    # hotfix and back-merge PRs target `main` (or come from it), so `main` is listed explicitly or
+    # release PRs would go unreviewed while looking exactly like reviews that had not arrived yet.
+    base_branches:
+      - '^main$'

@@ -10,25 +10,29 @@ never appears in any JSR-published package's dependency graph (see AI_GUIDELINES
 
 ## Starting a new milestone — READ THESE FIRST (mandatory)
 
-**Step 0 — be on the milestone's feature branch before you touch anything.** `main` is protected;
-never work on it and never commit to it directly (AI_GUIDELINES §15.3). A milestone gets exactly ONE
-feature branch — `feat/[milestone]-[description]` (e.g. `feat/m4-logger-plugin`) — and ALL work for
-that milestone lives on it: the initial implementation AND every follow-up fix, review change, or
-bug repair, right up until the branch is merged. Your FIRST action is:
+**Step 0 — be on the milestone's feature branch before you touch anything.** `develop` and `main`
+are both protected; never work on either and never commit to either directly (AI_GUIDELINES §15.3).
+`develop` is the default branch and the integration branch every PR targets; `main` holds only the
+last release and changes only through a release PR (see "Branches" under Key conventions). A
+milestone gets exactly ONE feature branch — `feat/[milestone]-[description]` (e.g.
+`feat/m4-logger-plugin`) — and ALL work for that milestone lives on it: the initial implementation
+AND every follow-up fix, review change, or bug repair, right up until the branch is merged. Your
+FIRST action is:
 
 ```bash
 git branch --show-current            # what am I on?
 # If it already prints the milestone's feat/… branch (work in progress) → continue on it.
-# If it prints "main":
+# If it prints "develop" or "main":
 git switch feat/[milestone]-[description]     # resume the existing branch if it exists, else:
-git switch -c feat/[milestone]-[description]  # create it (only when starting the milestone fresh)
+git fetch origin && git switch -c feat/[milestone]-[description] origin/develop   # start it fresh
 ```
 
 Do NOT open a new `fix/…` branch for defects in a milestone that is not yet merged — those fixes
 belong on the milestone's own `feat/…` branch (a `fix/…` branch is only for a defect in
-already-merged code on `main`). If `git branch --show-current` prints `main` at any point during a
-milestone, stop and switch to the feature branch before doing anything else. The branch merges to
-`main` via a single PR once the milestone is complete.
+already-merged code on `develop`). If `git branch --show-current` prints `develop` or `main` at any
+point during a milestone, stop and switch to the feature branch before doing anything else. The
+branch merges to `develop` via a single PR once the milestone is complete; it reaches `main` only
+with the next release.
 
 Do NOT write, edit, or scaffold any code until you have read, in this order:
 
@@ -6035,7 +6039,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   milestone" at the following one). These edits belong on the milestone's own `feat/…` branch and
   ship in the SAME PR as the code — a merged PR that left the tracking table at `⬜` is a defect. If
   you catch a merged milestone whose status was never flipped, correct it on a `fix/…` branch (it is
-  a defect in already-merged `main`), never by editing `main` directly.
+  a defect in already-merged `develop`), never by editing `develop` or `main` directly.
 - **Clean up plan/scratch files before you commit — a milestone commits exactly ONE plan.** The only
   `plans/` file a milestone PR may add or keep is its single canonical plan,
   `plans/milestone-<N>-<desc>.md`. Every transient artifact — continuation prompts, `fix-round-*`
@@ -6068,9 +6072,21 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).
+- **Two long-lived branches, and every PR targets `develop`.** `develop` is the default branch,
+  where milestones, fixes and docs integrate. `main` means "the last release": it moves only when a
+  release PR merges, and each merge to `main` redeploys the public website (Cloudflare Workers
+  Builds watches `main`). Both are protected by rulesets ("protect develop", "protect main"), which
+  name each branch explicitly — never point one at `~DEFAULT_BRANCH`, since that silently moves
+  protection when the default changes. The release flow is `docs/releasing.md`'s: cut
+  `release/vX.Y.Z` from `develop`, PR it into `main` with a MERGE COMMIT (the `main` ruleset refuses
+  squash and rebase, because either rewrites the history `develop` must share), tag that merge
+  commit, then open a back-merge PR `main` → `develop`, also as a merge commit, so the release's
+  version-bump commits reach `develop`. A defect in a PUBLISHED release that cannot wait for the
+  next one goes on `hotfix/[issue]-[description]` cut from `main`, PRs into `main`, ships as a patch
+  release, and back-merges the same way.
 - Branches: one `feat/[milestone]-[description]` per milestone — all of that milestone's work and
   fixes stay on it until it merges; `fix/[issue]-[description]` is only for defects in
-  already-merged `main`; `docs/[description]` is for a documentation-only change that is not a
+  already-merged `develop`; `docs/[description]` is for a documentation-only change that is not a
   milestone's implementation work — opening a new ROADMAP milestone, correcting a committed doc,
   amending these conventions. Use `docs/…` rather than `feat/…` for those: a `feat/[milestone]-…`
   branch asserts that the milestone is being BUILT on it, so `feat/37c-…` carrying only a ROADMAP
@@ -6082,7 +6098,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `feat/…` branch — the status flip, the PUBLIC_API correction, and the plan archival are part of
   the milestone, not separate work. Commits: conventional format (`feat(scope): subject`); **no
   commit message may exceed 100 words** in total (AI_GUIDELINES §15.1) — the plan, the PR body, and
-  the code comments are where the long reasoning goes; no direct commits to `main`.
+  the code comments are where the long reasoning goes; no direct commits to `develop` or `main`.
 - **Pushing and opening the PR are yours to do — but only when asked.** Remote credentials ARE
   available (`gh auth status` reports a logged-in account; SSH for git operations), so `git push`
   and `gh pr create` work. This bullet previously said the opposite — that no credentials existed

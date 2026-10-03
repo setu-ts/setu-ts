@@ -61,7 +61,7 @@
  *   deno task test:coverage:pkg exceptions kernel    # explicit, by short name
  *   deno task test:coverage:pkg packages/sdk         # or by path
  *   deno task test:coverage:pkg resilience           # or by bare plugin concern
- *   deno task test:coverage:pkg --base=origin/main   # change the diff base
+ *   deno task test:coverage:pkg --base=origin/develop   # change the diff base
  */
 
 /** Absolute-percentage bar this repository applies to every `packages/<name>/src` file. */
@@ -268,7 +268,7 @@ export function parseArgs(
   argv: readonly string[],
 ): { readonly selectors: readonly string[]; readonly base: string } {
   const selectors: string[] = [];
-  let base = 'main';
+  let base = 'develop';
   for (const arg of argv) {
     const baseFlag = /^--base=(.+)$/.exec(arg);
     if (baseFlag !== null) {

@@ -17,9 +17,10 @@ probes never exercise.
   `.roo/rules-orchestrator/01-switch-modes.md`). If you find yourself wanting to edit a file, that
   is a finding to report, not a fix to make — and switching yourself to Code mode to make it voids
   this gate exactly as editing would, because nothing then re-checks the fix.
-- **Scope is the whole milestone diff, `git diff main...HEAD`** on the milestone's `feat/…` branch —
-  not just the latest commit. Confirm you are on the `feat/…` branch (`git branch --show-current`),
-  never `main`, and that the tree is committed (`git status --short` empty) before reviewing.
+- **Scope is the whole milestone diff, `git diff develop...HEAD`** on the milestone's `feat/…`
+  branch — not just the latest commit. Confirm you are on the `feat/…` branch
+  (`git branch --show-current`), never `main`, and that the tree is committed (`git status --short`
+  empty) before reviewing.
 - **The diff is the floor of the scope, not the ceiling — read past it at two named seams.** For
   every ADDED class member or field, read the type's whole lifecycle (constructor, `connect`/
   `start`, `disconnect`/`stop`/`close`, `onClose`) even where those methods are unchanged: state
@@ -132,7 +133,7 @@ Sort every finding into one of two buckets:
 ## The bookkeeping no gate can see
 
 The milestone's plan under `plans/` is part of the review scope, not background for it. Check all
-three of these against `git diff main...HEAD`:
+three of these against `git diff develop...HEAD`:
 
 - **Every planned design decision exists in code**, every `src/index.ts` export is documented in
   `PUBLIC_API.md`, and no `common` contract / capability token / PUBLIC_API shape drifted silently.
@@ -141,11 +142,11 @@ three of these against `git diff main...HEAD`:
   gate green: the plan promised a package README's `contains` prose be rewritten, the diff changed
   only that README's export table, and the package went on promising behavior the same milestone had
   just changed. The check is mechanical — for each row in that table,
-  `git diff main...HEAD -- <the file the row names>` and read what actually moved.
+  `git diff develop...HEAD -- <the file the row names>` and read what actually moved.
 - **A change under `packages/*/src` that alters released behavior has a `CHANGELOG.md` entry, and a
   breaking one carries migration text** naming what restores the old behavior.
-  `git diff main...HEAD -- CHANGELOG.md` coming back empty on a milestone that moved a default is a
-  finding in its own right. This has now happened twice — M66 shipped two breaking configuration
+  `git diff develop...HEAD -- CHANGELOG.md` coming back empty on a milestone that moved a default is
+  a finding in its own right. This has now happened twice — M66 shipped two breaking configuration
   changes with the file untouched, M70b shipped three.
 
 **All three block the merge.** The first two are contract lies in the same class as a wrong JSDoc: a
@@ -156,7 +157,7 @@ is a cleanup, and none may be downgraded to one.
 ## On a re-review, the fix diff is the least-reviewed code in the milestone
 
 When you are sent back after a Code-mode pass has fixed your findings, the scope is still
-`git diff main...HEAD` — but the part of it you have never seen is the fix, and that is the part
+`git diff develop...HEAD` — but the part of it you have never seen is the fix, and that is the part
 most likely to be wrong. Those lines exist because something subtle was already wrong there, they
 were written last and under pressure to close the milestone, and the gates re-run after them cannot
 see a concurrency, lifecycle, or contract-honesty defect. **Two consecutive milestones here shipped
@@ -166,8 +167,8 @@ and introduced an interleaving bug that stranded data permanently.
 
 So on any pass after the first, isolate the fix and hunt it as new code by someone else. The
 boundary is the commit hash the PREVIOUS review reported (see "The report you hand back" — recording
-it is what makes this step executable; `main...HEAD` cannot substitute, since it spans the whole
-milestone and, being a symmetric difference, also picks up commits unique to `main`):
+it is what makes this step executable; `develop...HEAD` cannot substitute, since it spans the whole
+milestone and, being a symmetric difference, also picks up commits unique to `develop`):
 
 ```bash
 PREV=<reviewed-commit-hash from the previous report>

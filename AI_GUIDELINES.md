@@ -922,13 +922,16 @@ Closes #123
 ### 15.2 Branch Naming
 
 - Feature branches: `feat/[milestone]-[description]`
-- Bug fix branches: `fix/[issue]-[description]`
-- Release branches: `release/[version]`
+- Bug fix branches: `fix/[issue]-[description]` (a defect in merged `develop`)
+- Hotfix branches: `hotfix/[issue]-[description]` (a defect in a published release; cut from `main`)
+- Release branches: `release/[version]` (cut from `develop`, merged into `main`)
 
-### 15.3 No Direct Commits to Main
+### 15.3 No Direct Commits to Main or Develop
 
-- All changes go through pull requests.
-- No direct commits to `main` or `master`.
+- All changes go through pull requests, and every PR targets `develop`, the default branch.
+- `main` holds only the last release: it changes only through a release or hotfix PR, merged with a
+  merge commit, and every merge into it is followed by a back-merge PR from `main` into `develop`.
+- No direct commits to `develop`, `main` or `master`.
 - All PRs require review and CI to pass.
 
 ### 15.4 Atomic Commits

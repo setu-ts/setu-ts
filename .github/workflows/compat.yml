@@ -27,7 +27,7 @@ on:
       - 'compat/**'
       - '.github/workflows/compat.yml'
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - 'compat/**'
       - '.github/workflows/compat.yml'
