@@ -22,7 +22,7 @@ import type {
   OutboundHttpDiagnosticsRecord,
   OutboundHttpDiagnosticsSnapshot,
   OutboundHttpStatusClass,
-} from 'jsr:@setu-ts/common@^0.7.0';
+} from 'jsr:@setu-ts/common@^0.8.0';
 
 /**
  * The fixed collector bounds. Constants, not options.

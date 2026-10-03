@@ -137,6 +137,12 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   `compat/package.json` dependencies. Do not leave that follow-up unopened: while the entry stands,
   check 1 keeps passing while the package is covered on Deno and nowhere else, which is the exact
   coverage hole that check exists to catch.
+- **`packages/sdk/deno.json` maps the specifier to a PINNED version, and a `^`-only sed misses the
+  value.** Its `imports` entry reads `"jsr:@setu-ts/common@^X": "jsr:@setu-ts/common@X"`; a sweep
+  that rewrites `@^<old>` moves the key and leaves the value on the previous release, so
+  `deno task check` then fails with `has no exported member` against
+  `jsr.io/@setu-ts/common/<old>/…`. Cutting `v0.8.0` hit exactly that. `check:versions` does not see
+  it, because it ignores a pin written without the caret.
 - **Bump the SDK's `SDK_VERSION` literal** in `packages/sdk/src/http/observed-fetch.ts` (M98n). It
   is the version the observed-fetch registration plugin reports, written as a literal because the
   browser-portable SDK does not import its own manifest; `observed-fetch-plugin.test.ts` pins it to

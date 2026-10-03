@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-03
+
 ### Added
 
 - **Diagnostics session renewal (M98o).** `DiagnosticsPluginOptions.maxSessionLifetimeMs` opts a
@@ -1336,17 +1338,15 @@ All notable changes to this project are documented here. The format follows
   shapes a request actually has and refuses every other by name.** `InjectRequest.body` widens from
   an anything-goes `unknown` (documented "will be stringified if not a string", implemented as
   `JSON.stringify` of whatever arrived) to
-  `string | Uint8Array | ArrayBuffer | Blob | URLSearchParams | Record<string, unknown>`: a
-  `Uint8Array` and an `ArrayBuffer` pass through verbatim with NO content-type default (only the
-  caller knows whether those bytes are multipart, JSON, or an image), a `Blob` contributes its own
-  non-empty `type` as the default — as the platform does for `new Request(url, { body: blob })` — a
-  `URLSearchParams` is serialised with its own `toString()` and defaults
-  `application/x-www-form-urlencoded`, and a plain object (JSON) and a bare string keep the
-  `application/json` default. A byte body is COPIED rather than aliased, so a handler that mutates
-  what `ctx.request.bytes()` returned cannot corrupt the `Uint8Array`/`ArrayBuffer` the test passed
-  in, and a fixture reused across two injected requests carries none of the first request's
-  mutation. Previously a `Uint8Array` arrived as `{"0":97,…}`, an
-  `ArrayBuffer`/`Blob`/`URLSearchParams` each arrived as the two bytes `{}`, and the same release
+  `string | Uint8Array | ArrayBuffer | Blob | URLSearchParams | Record<string, unknown>`: the
+  byte-ish shapes pass through verbatim with NO content-type default (only the caller knows whether
+  bytes are multipart, JSON, or an image), a `URLSearchParams` is serialised with its own
+  `toString()` and defaults `application/x-www-form-urlencoded`, and a plain object (JSON) and a
+  bare string keep the `application/json` default. A byte body is COPIED rather than aliased, so a
+  handler that mutates what `ctx.request.bytes()` returned cannot corrupt the
+  `Uint8Array`/`ArrayBuffer` the test passed in, and a fixture reused across two injected requests
+  carries none of the first request's mutation. Previously a `Uint8Array` arrived as `{"0":97,…}`,
+  an `ArrayBuffer`/`Blob`/`URLSearchParams` each arrived as the two bytes `{}`, and the same release
   named `inject()` a producer of `IRequest.formData?()` — so an injected multipart upload parsed as
   an empty form. **Migration:** TypeScript callers are compile-checked. A JavaScript caller passing
   an array, `Date`, class instance or number must convert first: arrays and plain data to a plain
@@ -6880,6 +6880,7 @@ Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milest
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
 [unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.6.0...HEAD
+[0.8.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.8.0
 [0.7.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.7.0
 [0.6.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.6.0
 [0.5.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.5.0
