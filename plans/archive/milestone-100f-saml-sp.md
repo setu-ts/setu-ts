@@ -1,7 +1,7 @@
 # Milestone 100f — SAML 2.0 Service Provider (`@setu-ts/auth-plugin`)
 
-> **Status:** Planning on `docs/m100-auth-federation-mfa`. Implementation and fixes belong on
-> `feat/m100f-saml-sp`; `main` remains protected. Depends on 100a, 100c and 100d.
+> **Status:** Implemented on `feat/m100f-saml-sp`. Depends on 100a, 100c and 100d. See §11 for what
+> implementation corrected.
 
 ## 0. Objective & scope
 
@@ -246,3 +246,45 @@ principal → `signIn` → redirect to a validated `returnTo`.
 The implementation audit posts a captured valid response twice, from a browser without the binding
 cookie, with the assertion wrapped after an unsigned copy, and with `InResponseTo` from another
 browser's login.
+
+## 11. Corrections made during implementation
+
+Each is a claim this plan made that did not survive the source or a test, recorded rather than
+quietly fixed.
+
+| #   | Plan claim                                                                                  | Measured                                                                                                                                                                                                                                            | Resolution                                                                                                                   |
+| --- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| K1  | §3.5: "The library verifies the signature, **issuer**, audience, **`Recipient`** …".        | node-saml 5.1.0 reads `idpIssuer` only in `verifyIssuer`, called for logout messages (`lib/saml.js:705,717`), and never reads `Recipient` or `Destination` at all. The `refuses a wrong issuer` test FAILED (302) against the first implementation. | The ACS checks the verified assertion's `Issuer` against `idp.entityId`, and every `SubjectConfirmationData` `Recipient`.    |
+| K2  | §3.4: `removeAsync` is called on the library's success path.                                | Not on every path: a confirmation without `InResponseTo` falls through `getInResponseTo` with no `removeAsync`.                                                                                                                                     | The ACS completes consumption itself after the library resolves; the consume is idempotent per request (one store call).     |
+| K3  | §3.4: the adapter "captures" the record per ACS request over one long-lived library object. | `cacheProvider` is read from the instance, so swapping it per request on a shared instance races.                                                                                                                                                   | A `SAML` instance is constructed per request with its own adapter; options are compiled once.                                |
+| K4  | §3.1: `register()` "becomes async".                                                         | Making it unconditionally async turned two existing synchronous refusal tests into rejections.                                                                                                                                                      | `register()` returns a promise only when a `saml` provider is configured, awaited as its last step.                          |
+| K5  | §4: three exported types.                                                                   | `toPrincipal(profile)` and `module` need nameable types (slow types otherwise).                                                                                                                                                                     | `SamlProfile`, `SamlModule` and `SamlPendingRequest` are also exported, each read by `SamlProvider` / `ISamlRequestStore`.   |
+| K6  | §3.4 one fixed error code set.                                                              | A replayed response is refused by the library's `getAsync` BEFORE the binding check runs.                                                                                                                                                           | Replay answers `assertion-invalid`, not `state-invalid`; both codes are documented and the tests assert the actual code.     |
+| K8  | §3.5: the library binds the assertion to the request through `InResponseTo`.                | node-saml compares the signed `SubjectConfirmationData` `InResponseTo` with the UNSIGNED response one only when both are present; code review reproduced a signed assertion lacking it, re-wrapped in a fresh response, signing in.                 | Every signed `SubjectConfirmationData` must carry `InResponseTo` equal to the consumed request id; real Keycloak emits it.   |
+| K7  | §6 Keycloak image `quay.io/keycloak/keycloak:26.4`.                                         | quay.io is not reachable from the development container.                                                                                                                                                                                            | Verified locally against the same release from Docker Hub (`keycloak/keycloak:26.4`); CI keeps the quay.io image unchanged.  |
+| K9  | §3.4: the memory store "sweeps expired entries on write".                                   | Security audit round 1 (Medium): the unauthenticated login route grew the map without bound for the pending lifetime, and the full-map sweep on every write made the flood quadratic.                                                               | `maxPendingRequests` cap (default 10,000, oldest evicted first), front-of-map expiry sweep, amortized assertion-claim sweep. |
+| K10 | §3.6: `toPrincipal` receives the library's profile `issuer`/`nameID`.                       | Security audit round 1 (Low): node-saml copies every attribute onto its profile, so an assertion with no `Issuer`/`NameID` element but same-named attributes supplied both.                                                                         | Both are read from the signed assertion's own elements; an assertion missing either is refused.                              |
+
+Negative controls, each observed failing and reverted: removing the issuer check (wrong-issuer test
+fails), the recipient check (both recipient tests fail), the binding check (two binding tests fail),
+the assertion-id claim (the reused-id test fails), and the provider check (the wrong-provider test
+fails — after it was tightened, because it first passed vacuously via the binding check).
+
+Audit-fix negative controls: falling back to the profile's `issuer`/`nameID` fails the "no NameID
+element but a nameID attribute" test; disabling the cap fails the eviction test.
+
+## 12. Committed-tree security audit record
+
+Run in fresh contexts per `.roo/skills/security-audit/SKILL.md`.
+
+- **Round 1** (on `b609e081`): FAILED — Finding 1 (Medium, unbounded and quadratic-cost memory
+  request store) and Finding 2 (Low, `Issuer`/`NameID` sourced from attributes). Both fixed (K9,
+  K10).
+- **Round 2** (on `cc4cdd30`): PASSED — both round-1 fixes verified with negative controls on a
+  scratch copy (attribute-sourced `nameID` signs in as `admin`; attribute-sourced issuer check fails
+  the committed `saml-routes` test; eviction disabled holds 1,000 entries against a cap of 100);
+  signature wrapping, comment truncation, replay and 8-way concurrency, binding, open redirect,
+  error disclosure, session fixation and XML DoS probes all refused. No finding open. Info only: I1
+  a login flood evicts pending logins (documented, fails closed); I2 the binding cookie is checked
+  after XML/signature work; I3 the ACS body is unbounded without `maxBodyBytes` (documented); I4 a
+  cross-site POST to the ACS clears the binding cookie (nuisance, fails closed).

@@ -8,9 +8,10 @@ through Web Crypto via `IRuntimeServices` (`runtime.subtle` / `runtime.randomByt
 package is involved in issuing or verifying a token, or in hashing a password**, and every one of
 those paths is cross-runtime (Deno / Node 20+ / Bun).
 
-The package does declare one optional driver: `RedisRateLimitStore` lazy-loads `ioredis`, which npm
-therefore installs alongside this package. Nothing imports it unless you construct that store — the
-default `MemoryRateLimitStore` needs no driver. See
+The package declares two optional drivers, which npm therefore installs alongside it:
+`RedisRateLimitStore` lazy-loads `ioredis`, and a `saml` sign-in provider lazy-loads
+`@node-saml/node-saml` (which needs the `nodejs_compat` flag on Cloudflare Workers). Nothing imports
+either unless you construct that store or configure that provider — the defaults need no driver. See
 [Optional npm drivers](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-npm-drivers)
 for what that means on npm versus Deno.
 
@@ -351,8 +352,10 @@ Configuring `signIn` does three things:
   authenticates every later request through the global authentication middleware with no
   hand-written middleware; the principal carries `claims.amr` from the recorded methods (RFC 8176),
   overwriting any `amr` the stored principal held;
-- registers, per provider, `GET <basePath>/<name>/login` and `GET <basePath>/<name>/callback`, and
-  one `POST <basePath>/logout` (`basePath` defaults to `/auth`).
+- registers, per `oidc`/`oauth2` provider, `GET <basePath>/<name>/login` and
+  `GET <basePath>/<name>/callback`, and one `POST <basePath>/logout` (`basePath` defaults to
+  `/auth`); a `saml` provider gets its own three routes — see
+  [SAML 2.0 single sign-on](#saml-20-single-sign-on).
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -482,6 +485,141 @@ app.router.get('/account', (ctx) =>
 
 Not provided: the implicit and hybrid flows, the device flow, dynamic client registration, front-
 and back-channel logout, and account linking — `toPrincipal` decides what an identity maps to.
+
+## SAML 2.0 single sign-on
+
+A `saml` provider makes the application a SAML 2.0 **service provider** (SP) for an enterprise
+identity provider (Entra ID, Okta, ADFS, Keycloak, Google Workspace). It joins the same
+`signIn.providers` list and lands in the same signed-in session, with `methods: ['fed']`, so
+`signIn.mfa` and `requireMfa()` apply to it exactly as to an OpenID Connect sign-in.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SessionPlugin } from '@setu-ts/session-plugin';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+const idpSigningCert = '-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    AuthPlugin({
+      signIn: {
+        providers: [{
+          kind: 'saml',
+          name: 'corp',
+          entityId: 'https://app.example.com/saml',
+          idp: {
+            entityId: 'https://sts.example.com/acme',
+            ssoUrl: 'https://sts.example.com/acme/saml2',
+            // Several certificates let a signing-key rotation overlap.
+            certs: [idpSigningCert],
+          },
+          acsUrl: 'https://app.example.com/auth/corp/acs',
+          // A NameID is unique only within its issuer: namespace it.
+          toPrincipal: (profile) => ({
+            id: `corp|${profile.nameID}`,
+            claims: { email: profile.attributes.email },
+          }),
+        }],
+      },
+    }),
+  ],
+});
+```
+
+Three routes per provider:
+
+- `GET <basePath>/<name>/login` — issues an AuthnRequest over the **HTTP-Redirect** binding and
+  redirects to `idp.ssoUrl`. `?returnTo=` follows the same same-origin rule as the other providers
+  and is stored server-side. If the pending request cannot be stored the route answers `503`
+  `provider-unavailable` rather than redirecting.
+- `POST <basePath>/<name>/acs` — the assertion consumer service, over the **HTTP-POST** binding.
+- `GET <basePath>/<name>/metadata` — the SP descriptor (`application/samlmetadata+xml`) to register
+  with the IdP: the entity id, the ACS URL, `AuthnRequestsSigned="false"` and
+  `WantAssertionsSigned="true"`.
+
+**What the ACS checks.** The assertion must be signed by one of `idp.certs` (a signature only on the
+response envelope is not enough, and an unsigned or encrypted assertion is refused); its `Issuer`
+must equal `idp.entityId`; its `Audience` must be `entityId`; every `SubjectConfirmationData` must
+name `acsUrl` as its `Recipient` and carry an `InResponseTo` naming the consumed request (the
+response envelope is unsigned when only the assertion is, so its own `InResponseTo` cannot bind the
+assertion); `NotBefore`/`NotOnOrAfter` must hold with 60 seconds of skew; the response's
+`InResponseTo` must name a pending request this server issued for this provider, and that request is
+consumed — once; the assertion `ID` must not have been used before; and the browser must present the
+binding cookie set at login. Two posts of one captured response cannot both sign in. The `Issuer`
+and `NameID` the plugin checks and hands to `toPrincipal` are read from the signed assertion's own
+`<Issuer>` and `<Subject><NameID>` elements — never from the library's profile object, where a
+same-named IdP attribute could stand in for them — and an assertion missing either is refused.
+**IdP-initiated (unsolicited) login is refused**: it has no request to bind to. XML signature
+verification, including resistance to signature-wrapping, is delegated to
+[`@node-saml/node-saml`](https://github.com/node-saml/node-saml) rather than hand-written.
+
+**Refusals** answer `401` — or redirect to `failureRedirect` with `?error=<code>` — with one of two
+fixed codes, and the library's own message reaches only the `debug` log:
+
+| Code                | Meaning                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `assertion-invalid` | The response did not verify, answered no pending request, or reused an assertion id.                               |
+| `state-invalid`     | The response answers a login this browser did not start: another browser's request, or a missing or wrong binding. |
+
+`toPrincipal` returning `null` (or throwing) answers `403` `principal-refused`. A sign-in held for a
+second factor redirects to `signIn.mfa.challengePath` when set.
+
+**Why a second cookie.** The IdP returns by a cross-site `POST`, which the session cookie's default
+`SameSite=Lax` does not accompany, so the pending request cannot live in the session. It lives in
+the provider's `store`, and the browser that started the login is bound to it by `__Host-setu-saml`
+(`SameSite=None; Secure; HttpOnly; Path=/; Max-Age=600`). Without that binding an attacker could
+start a login, obtain a valid response for their own account, and make a victim's browser post it.
+Do **not** set the session cookie to `SameSite=None` to "make SAML work" — it is unnecessary.
+Because the binding is one cookie per browser, a login started in a second tab replaces the first
+tab's, which then fails closed; retrying succeeds.
+
+**The ACS runs on a new session.** The `Lax` session cookie is not sent with the IdP's `POST`, so
+the session middleware opens an empty session, `signIn` writes the identity into it, and its cookie
+replaces the browser's previous one. Anything the previous session held is gone (on the store
+strategy its entry is orphaned until its own expiry). Do not keep state across a SAML sign-in in the
+session; `returnTo` is the supported way to resume.
+
+**Several replicas need a shared store.** The default `MemorySamlRequestStore` is correct for ONE
+process: a login started on one replica and answered on another is refused. Implement
+`ISamlRequestStore` over a shared backend; `consumeRequest` and `claimAssertionId` MUST be atomic.
+
+**The login route is unauthenticated, so bound what it can cost.** Each `GET …/login` records a
+pending request for its lifetime. `MemorySamlRequestStore` caps how many it holds
+(`maxPendingRequests`, default `DEFAULT_MAX_PENDING_SAML_REQUESTS` = 10,000): past the cap the
+OLDEST pending request is evicted, so its login fails closed and is retried while memory stays
+bounded. A shared store needs its own bound (a TTL and a size limit). Rate-limit the login route as
+well, and set `RuntimePlugin({ maxBodyBytes })` — the ACS reads a form body, and a SAML response is
+a few kilobytes, so a cap of tens of kilobytes is ample.
+
+**CSRF composition.** The IdP's `POST` carries no form token and an `Origin` naming the IdP, so with
+the session plugin's form CSRF the ACS path must be in `csrf.exclude`, and with
+`http-security-plugin`'s Origin check the IdP origin must be in `csrf.trustedOrigins` — otherwise
+the ACS answers `403`. Exempting it is sound because the signed assertion, the single-use request
+and the binding cookie are the ACS's own defences. `trustedOrigins` admits the IdP origin on every
+route, which is acceptable: the IdP is already trusted to assert identity.
+
+```typescript
+import { SessionPlugin } from '@setu-ts/session-plugin';
+import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
+
+SessionPlugin({
+  secret: 'replace-with-at-least-32-characters!!',
+  csrf: { exclude: ['/auth/corp/acs'] },
+});
+HttpSecurityPlugin({ csrf: { trustedOrigins: ['https://sts.example.com'] } });
+```
+
+**The library.** `@node-saml/node-saml@^5` is imported lazily when a `saml` provider is configured,
+awaited in `register()`, so a missing package fails at startup with `SamlRuntimeLoadError` rather
+than at the first login. Pass `module` to inject it instead. On Cloudflare Workers it needs the
+`nodejs_compat` compatibility flag; without it the library cannot bundle, and the error says so.
+
+Not provided: IdP-initiated login, encrypted assertions, single logout, the Artifact binding, signed
+AuthnRequests, and acting as an IdP.
 
 ## Multi-Factor Authentication (TOTP)
 
@@ -986,14 +1124,17 @@ MIT
 | `AuthPluginConfigurationError`      | class     |
 | `MalformedPasswordHashError`        | class     |
 | `MemoryAccessTokenRevocationStore`  | class     |
+| `MemoryPasskeyStore`                | class     |
 | `MemoryRateLimitStore`              | class     |
 | `MemoryRefreshTokenStore`           | class     |
+| `MemorySamlRequestStore`            | class     |
 | `MemoryTotpStore`                   | class     |
-| `MemoryPasskeyStore`                | class     |
 | `PasswordHasher`                    | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
+| `SamlRuntimeLoadError`              | class     |
 | `TotpService`                       | class     |
+| `DEFAULT_MAX_PENDING_SAML_REQUESTS` | const     |
 | `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
 | `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
 | `ApiKeyOptions`                     | interface |
@@ -1007,15 +1148,20 @@ MIT
 | `IAuthService`                      | interface |
 | `IAuthStrategy`                     | interface |
 | `IJwtService`                       | interface |
+| `IPasskeyStore`                     | interface |
 | `IPrincipal`                        | interface |
+| `ISamlRequestStore`                 | interface |
 | `ITotpStore`                        | interface |
 | `JwtOptions`                        | interface |
 | `JwtSignOptions`                    | interface |
 | `LocalOptions`                      | interface |
+| `MemorySamlRequestStoreOptions`     | interface |
 | `MfaOptions`                        | interface |
-| `IPasskeyStore`                     | interface |
 | `OAuth2Provider`                    | interface |
 | `OidcProvider`                      | interface |
+| `PasskeyOptions`                    | interface |
+| `PasskeyRegistrationContext`        | interface |
+| `PasskeySaveOptions`                | interface |
 | `ProviderTokens`                    | interface |
 | `RateLimitOptions`                  | interface |
 | `RateLimitResult`                   | interface |
@@ -1026,9 +1172,14 @@ MIT
 | `RefreshTokenStore`                 | interface |
 | `ReserveAttemptResult`              | interface |
 | `RoleDefinition`                    | interface |
+| `SamlModule`                        | interface |
+| `SamlPendingRequest`                | interface |
+| `SamlProfile`                       | interface |
+| `SamlProvider`                      | interface |
 | `SessionAuthOptions`                | interface |
 | `SignInConfig`                      | interface |
 | `SignInProviderBase`                | interface |
+| `StoredPasskey`                     | interface |
 | `TokenPair`                         | interface |
 | `TotpEnrolment`                     | interface |
 | `TotpServiceOptions`                | interface |
@@ -1038,15 +1189,11 @@ MIT
 | `IRefreshTokenRotation`             | type      |
 | `IssuerAlgorithm`                   | type      |
 | `IssuerKeySource`                   | type      |
+| `PasskeySaveResult`                 | type      |
 | `RecoveryCodesResult`               | type      |
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |
 | `SignInProvider`                    | type      |
-| `PasskeyOptions`                    | interface |
-| `PasskeyRegistrationContext`        | interface |
-| `PasskeySaveOptions`                | interface |
-| `PasskeySaveResult`                 | type      |
-| `StoredPasskey`                     | interface |
 | `TokenEndpointAuth`                 | type      |
 | `TotpCompleteSignInResult`          | type      |
 | `TotpProofResult`                   | type      |

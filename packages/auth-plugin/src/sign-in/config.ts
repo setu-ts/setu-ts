@@ -23,11 +23,12 @@ import type {
   ProviderTokens,
   RefreshPrincipal,
   SignInConfig,
-  SignInProvider,
   TokenEndpointAuth,
 } from '../interfaces/index.ts';
 import type { IPrincipal } from '@setu-ts/common';
 import { safeReturnTo } from './return-to.ts';
+import { compileSamlProvider } from '../saml/config.ts';
+import type { CompiledSamlProvider } from '../saml/config.ts';
 
 /** Default route prefix. */
 export const DEFAULT_SIGN_IN_BASE_PATH = '/auth';
@@ -93,8 +94,10 @@ export interface CompiledProvider {
 export interface CompiledSignIn {
   /** Route prefix, defaults to `/auth`. */
   readonly basePath: string;
-  /** The providers, in configuration order. */
+  /** The `oidc` and `oauth2` providers, in configuration order. */
   readonly providers: readonly CompiledProvider[];
+  /** The `saml` providers (M100f), in configuration order. */
+  readonly samlProviders: readonly CompiledSamlProvider[];
   /** The single logout route. */
   readonly logoutPath: string;
   /** The one provider configured for RP-initiated logout, if any. */
@@ -127,7 +130,7 @@ function isFunction(value: unknown): boolean {
 
 /** Applies the credential rules, which depend on each other. */
 function resolveAuth(
-  provider: SignInProvider,
+  provider: OidcProvider | OAuth2Provider,
   name: string,
 ): { auth: TokenEndpointAuth; secret?: string } {
   const hasSecret = typeof provider.clientSecret === 'string' && provider.clientSecret.length > 0;
@@ -153,7 +156,7 @@ function resolveAuth(
 
 /** Validates the fields the two arms share, including their route paths. */
 function compileBase(
-  provider: SignInProvider,
+  provider: OidcProvider | OAuth2Provider,
   name: string,
   basePath: string,
 ): Omit<CompiledProvider, 'kind'> {
@@ -340,7 +343,9 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   }
 
   const names = new Set<string>();
-  const providers = config.providers.map((provider) => {
+  const providers: CompiledProvider[] = [];
+  const samlProviders: CompiledSamlProvider[] = [];
+  for (const provider of config.providers) {
     const name = provider?.name;
     if (typeof name !== 'string' || !PROVIDER_NAME.test(name)) {
       throw new AuthPluginConfigurationError(
@@ -354,15 +359,17 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
     // A missing `kind` is refused rather than guessed at: the two arms produce
     // different callbacks, and a default would silently choose one.
     if (provider.kind === 'oidc') {
-      return compileOidc(provider, compileBase(provider, name, basePath));
+      providers.push(compileOidc(provider, compileBase(provider, name, basePath)));
     } else if (provider.kind === 'oauth2') {
-      return compileOAuth2(provider, compileBase(provider, name, basePath));
+      providers.push(compileOAuth2(provider, compileBase(provider, name, basePath)));
+    } else if (provider.kind === 'saml') {
+      samlProviders.push(compileSamlProvider(provider, name, basePath));
     } else {
       throw new AuthPluginConfigurationError(
-        `auth-plugin: signIn['${name}'] kind must be 'oidc' or 'oauth2'`,
+        `auth-plugin: signIn['${name}'] kind must be 'oidc', 'oauth2' or 'saml'`,
       );
     }
-  });
+  }
 
   // One logout route serves the whole plugin, so more than one provider claiming
   // RP-initiated logout is ambiguous: the route could not know whose
@@ -389,6 +396,7 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   return {
     basePath,
     providers,
+    samlProviders,
     logoutPath: `${basePath}/logout`,
     rpLogoutProvider: rpLogoutProviders[0] ?? null,
     refreshPrincipal: config.refreshPrincipal ?? null,
