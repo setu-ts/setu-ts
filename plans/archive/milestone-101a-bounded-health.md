@@ -529,3 +529,27 @@ Each is a place the shipped code or tests differ from the text above; the text i
 - **`DOC_LINT_BASELINE` under `RUST_BACKTRACE=1`.** With that variable set, `deno doc --lint` prints
   a stack backtrace that `generate-api-docs.ts` classifies as a fatal child error; the count itself
   is at the 496 baseline. Not changed here.
+
+### Recorded after milestone verification and code review
+
+- **§3.3 a saturated pool is `up` only while queries complete.** `idle === 0 && waiting > 0` is also
+  what a hung database looks like, so the plan's `undefined` + saturated → `up` row would have kept
+  a dead database in rotation. The Drizzle adapter (with `poolStats`) counts queries that complete
+  through it; the indicator samples that count each poll and reads `up` only when it moved within
+  the last 10 seconds, otherwise `degraded`. Maintainer's choice among three options. The mapping
+  rows are in a new `test/unit/database-indicator-mapping.test.ts` rather than `plugin.test.ts`, and
+  the live Postgres file gains a no-progress cell (`/ready` 503).
+- **§3.4 the Vault body read is bounded too**, and `connect()` refuses an address that is not an
+  absolute `http:`/`https:` URL. The plan bounded the request only, so headers followed by silence
+  hung.
+- **§3.5 `RedisQueue` transitions are atomic.** With `commandTimeoutMs`, a rejected command may
+  still apply on the server, so a multi-command transition (reserve, ack, requeue, dead-letter)
+  could stop half-way and lose a job. Each now runs as one Lua script through an optional
+  `IRedisQueueClient.eval?`; a client without it keeps the sequential path.
+- **§3.7 a failed delay-slot claim counts `lock-failed`**, not `contended`: the entry carries a
+  tri-state `slotClaim` instead of a boolean.
+- **§3.1 a throwing `onTimeout`** is caught; its thrown value becomes the expiry error.
+- **§6 test homes.** The `withDeadline` tests live at `test/unit/health/deadline.test.ts`. The cache
+  "options reach the store" row is proven by `test/integration/outage-real.test.ts` (CI), not a unit
+  test: dropping the forwarding line makes it fail. There is no seam to read a built client's
+  `commandTimeout` without one.

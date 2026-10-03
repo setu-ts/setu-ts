@@ -525,6 +525,31 @@ describe('real-backend CI wiring', () => {
     }
   });
 
+  it('keeps the M101a Vault and live-Postgres outage cells deliberately local-only (§3.8)', async () => {
+    // CI runs neither Vault nor PostgreSQL. Asserting that here — rather than
+    // leaving it implicit — keeps a later reader from mistaking the skipped
+    // cells for an oversight, and pins the `ignore:` guards so an unset
+    // variable is reported IGNORED, never passed by an early return.
+    for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
+      const text = await Deno.readTextFile(workflow);
+      expect(text).not.toContain('VAULT_ADDR');
+      expect(text).not.toContain('POSTGRES_URL');
+    }
+    const vault = await Deno.readTextFile(
+      'packages/secrets-plugin/test/integration/vault-outage-real.test.ts',
+    );
+    expect(vault).toContain('local-only');
+    expect(vault).toContain("Deno.env.get('VAULT_ADDR')");
+    expect(vault).toContain('ignore: skip');
+    // The header carries the command that runs it, since no doc does.
+    expect(vault).toContain('docker run');
+    const postgres = await Deno.readTextFile(
+      'packages/database-plugin/test/integration/real-drizzle-adapter.test.ts',
+    );
+    expect(postgres).toContain("Deno.env.get('POSTGRES_URL')");
+    expect(postgres).toContain('ignore: skipLivePg');
+  });
+
   it('starts the NATS and Kafka backends and declares their endpoints and grants (M90d §3.5)', async () => {
     // The M90d real-backend suites (nats-real / kafka-real) guard on NATS_URL
     // / KAFKA_BROKERS via `ignore:` — a skipped suite is visible, but a DROPPED

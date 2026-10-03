@@ -99,6 +99,21 @@ describe('database-plugin barrel exports — M90f driver classifications', () =>
   it('keeps the classifier INTERNAL — classifyDriverError is not public surface', () => {
     expect(Object.hasOwn(database, 'classifyDriverError')).toBe(false);
   });
+
+  it('keeps the M101a saturation and progress internals OUT of the public surface', () => {
+    for (
+      const name of [
+        'isPoolExhaustion',
+        'PoolSaturatedProbeSkipped',
+        'QueryProgressTracker',
+        'readQueryProgress',
+        'DATABASE_QUERY_PROGRESS',
+      ]
+    ) {
+      expect(Object.hasOwn(database, name)).toBe(false);
+      expect(Object.hasOwn(common, name)).toBe(false);
+    }
+  });
 });
 
 describe('database-plugin barrel exports', () => {

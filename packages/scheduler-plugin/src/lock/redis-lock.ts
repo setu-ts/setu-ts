@@ -217,8 +217,6 @@ export class RedisLock implements IDistributedLock {
    * Uses `SET key token NX PX ttl` — returns the token if acquired,
    * `null` if another instance holds the lock.
    *
-   * @param key - The lock key
-   * @param ttlMs - Time-to-live in milliseconds
    * A `SET` whose command promise REJECTS — a client-side `commandTimeout`
    * above all — may still have been written to the socket and applied on the
    * server, holding a lock nobody knows the token of (M101a V8-24). The token
@@ -228,6 +226,8 @@ export class RedisLock implements IDistributedLock {
    * and the token check never touches a lock another holder took in between.
    * That release is best-effort; the original rejection is rethrown.
    *
+   * @param key - The lock key
+   * @param ttlMs - Time-to-live in milliseconds
    * @returns A unique token if acquired, or `null` if held
    * @throws The `SET`'s own rejection, after the best-effort release
    */

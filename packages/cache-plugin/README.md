@@ -54,8 +54,9 @@ injected client gets no listener: it belongs to the caller.
 
 `options.commandTimeoutMs` (Redis only, default `15000`, `0` disables) bounds each command on the
 client the store builds. A paused or partitioned server keeps its socket open, so without the bound
-a cache call waits forever; with it the call rejects, the diagnostics count it `failed`, and the
-`cache` health indicator reports `down`. It is not applied to an injected `client`, and a value
+a cache call waits forever; with it the call rejects and the diagnostics count it `failed`. (The
+`cache` health indicator reports such a server `down` on its own, independent of this option: its
+`ping()` probe has a fixed 2-second bound.) It is not applied to an injected `client`, and a value
 outside `0`–`2147483647` throws `RangeError` when `CachePlugin(...)` is called.
 
 A `name` other than `'default'` derives the capability token as `cache.<name>`, so several caches
