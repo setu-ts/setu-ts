@@ -187,6 +187,40 @@ export function lastReleasedVersion(changelog: string): string | null {
 }
 
 /**
+ * Reads the changelog as it stood BEFORE a release PR renamed `Unreleased`.
+ *
+ * A release PR renames the `Unreleased` heading to the version being cut, so the
+ * newest "released" section is one whose tag does not exist yet and the
+ * `Unreleased` section is empty. The comparison base is then the version before
+ * it, and the section that must announce each new export is the cut version's
+ * own — presented here under the `Unreleased` heading the rest of the gate
+ * reads. Nothing about a normal run changes: this applies only when the newest
+ * version's tag does not resolve while the one beneath it does.
+ *
+ * @param changelog - The whole `CHANGELOG.md`
+ * @param tagExists - Whether `v<version>` resolves
+ * @returns The base version and the changelog to read, or `null` when this is
+ *   not a release in progress
+ */
+export async function undoReleaseRename(
+  changelog: string,
+  tagExists: (version: string) => Promise<boolean>,
+): Promise<{ readonly base: string; readonly changelog: string } | null> {
+  const headings = [
+    ...changelog.matchAll(/^## \[(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\][^\n]*$/gm),
+  ];
+  const cut = headings[0];
+  const previous = headings[1];
+  if (cut?.[1] === undefined || previous?.[1] === undefined) return null;
+  if (await tagExists(cut[1]) || !(await tagExists(previous[1]))) return null;
+  const withoutEmpty = changelog.replace(/^## \[Unreleased\]\s*\n(?=## \[)/m, '');
+  return {
+    base: previous[1],
+    changelog: withoutEmpty.replace(cut[0], '## [Unreleased]'),
+  };
+}
+
+/**
  * Reads one path at a git revision.
  *
  * @param revision - The revision to read at
@@ -247,8 +281,10 @@ export interface MainDeps {
  * @returns `0` when every added export is announced, `1` otherwise
  */
 export async function main(deps: MainDeps): Promise<number> {
-  const changelog = await deps.readChangelog();
-  const version = lastReleasedVersion(changelog);
+  const raw = await deps.readChangelog();
+  const cutting = await undoReleaseRename(raw, (v) => deps.revisionExists(`v${v}`));
+  const changelog = cutting?.changelog ?? raw;
+  const version = cutting?.base ?? lastReleasedVersion(raw);
   if (version === null) {
     deps.error('changelog coverage FAILED: CHANGELOG.md names no released version.');
     return 1;
