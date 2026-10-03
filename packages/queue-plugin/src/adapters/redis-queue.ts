@@ -35,12 +35,68 @@ async function loadIoredis(): Promise<typeof import('npm:ioredis@5.x').Redis> {
   return mod.Redis;
 }
 
-/** Constructs an ioredis client without opening its socket before connect(). */
+/**
+ * Default bound on one Redis command, in milliseconds (M101a V8-5).
+ *
+ * Above the ~10 s `maxRetriesPerRequest` budget that already covers a STOPPED
+ * server, so it bounds only the open-but-silent connection (a paused or
+ * partitioned server) and never rejects a command a reconnect was about to
+ * deliver — the M98l backplane reasoning, unchanged.
+ */
+export const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 15_000;
+
+/** The largest delay a runtime timer accepts (2^31 - 1 ms). */
+const MAX_REDIS_COMMAND_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * Resolve and validate `commandTimeoutMs`.
+ *
+ * `NaN` (what `Number(env.X)` yields for an unset variable) would otherwise
+ * reach ioredis and silently disable the bound, so it is refused with the
+ * other out-of-range values. The message is fixed and never echoes the value.
+ *
+ * @param value - The configured bound, or `undefined` for the default
+ * @returns The bound in milliseconds; `0` disables it
+ * @throws {RangeError} If the value is not a number from `0` to `2147483647`
+ */
+export function resolveCommandTimeoutMs(value: number | undefined): number {
+  const resolved = value ?? DEFAULT_REDIS_COMMAND_TIMEOUT_MS;
+  if (
+    typeof resolved !== 'number' || !Number.isFinite(resolved) || resolved < 0 ||
+    resolved > MAX_REDIS_COMMAND_TIMEOUT_MS
+  ) {
+    throw new RangeError(
+      'queue-plugin: options.commandTimeoutMs must be a number from 0 to ' +
+        `${MAX_REDIS_COMMAND_TIMEOUT_MS} (0 disables the bound)`,
+    );
+  }
+  return resolved;
+}
+
+/** The constructor options a lazily built client receives. */
+export type LazyRedisClientOptions = {
+  readonly lazyConnect: true;
+  readonly commandTimeout?: number;
+};
+
+/**
+ * Constructs an ioredis client without opening its socket before connect().
+ *
+ * @param RedisCtor - The ioredis constructor
+ * @param url - Redis connection URL
+ * @param commandTimeoutMs - Bound on one command; `0` omits `commandTimeout`
+ *   so ioredis applies none
+ * @returns The constructed client
+ */
 export function createLazyRedisClient(
-  RedisCtor: new (url: string, options: { readonly lazyConnect: true }) => unknown,
+  RedisCtor: new (url: string, options: LazyRedisClientOptions) => unknown,
   url: string,
+  commandTimeoutMs: number = DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
 ): IRedisQueueClient {
-  return new RedisCtor(url, { lazyConnect: true }) as IRedisQueueClient;
+  const options: LazyRedisClientOptions = commandTimeoutMs === 0
+    ? { lazyConnect: true }
+    : { lazyConnect: true, commandTimeout: commandTimeoutMs };
+  return new RedisCtor(url, options) as IRedisQueueClient;
 }
 
 /**
@@ -71,6 +127,8 @@ export function validateClient(client: unknown): client is IRedisQueueClient {
  * @param injectedClient - Optionally injected ioredis-compatible client
  * @param reporter - Receives the BUILT client's connection errors; never
  *   attached to an injected client, which belongs to the caller
+ * @param commandTimeoutMs - Bound applied to the BUILT client only; an
+ *   injected client is the caller's and keeps its own configuration
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
@@ -78,6 +136,7 @@ async function resolveClient(
   url: string,
   injectedClient: IRedisQueueClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
+  commandTimeoutMs: number,
 ): Promise<IRedisQueueClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -89,7 +148,7 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  const client = createLazyRedisClient(RedisCtor, url);
+  const client = createLazyRedisClient(RedisCtor, url, commandTimeoutMs);
   if (reporter !== undefined) {
     attachConnectionErrorReporter(client, reporter);
   }
@@ -123,6 +182,7 @@ export class RedisQueue implements QueueAdapter {
   /** Retention for a dead-lettered job's payload; unbounded when undefined. */
   #deadLetterTtlMs: number | undefined;
   #reporter: ConnectionErrorReporter | undefined;
+  #commandTimeoutMs: number;
   #ready = false;
   /**
    * M70c: present only when the client exposes `ping()`; its absence is
@@ -133,7 +193,13 @@ export class RedisQueue implements QueueAdapter {
    */
   isHealthy?: () => Promise<boolean>;
 
+  /**
+   * @param options - Connection, client and retention options
+   * @throws {RangeError} If `commandTimeoutMs` is not a number from `0` to
+   *   `2147483647`
+   */
   constructor(options?: RedisQueueOptions) {
+    this.#commandTimeoutMs = resolveCommandTimeoutMs(options?.commandTimeoutMs);
     this.#url = options?.url ?? 'redis://localhost:6379';
     this.#injectedClient = options?.client;
     this.#deadLetterTtlMs = options?.deadLetterTtlMs;
@@ -144,7 +210,12 @@ export class RedisQueue implements QueueAdapter {
     if (this.#ready) {
       return;
     }
-    this.#client = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
+    this.#client = await resolveClient(
+      this.#url,
+      this.#injectedClient,
+      this.#reporter,
+      this.#commandTimeoutMs,
+    );
     if (typeof this.#client.connect === 'function') {
       await this.#client.connect();
     }

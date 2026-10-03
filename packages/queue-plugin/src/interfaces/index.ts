@@ -233,6 +233,18 @@ export interface QueuePluginOptions {
    * @since 0.3.0
    */
   deadLetterTtlMs?: number;
+  /**
+   * Bound on one Redis command, in milliseconds (adapter `'redis'` only;
+   * ignored by every other adapter). Default `15000`; `0` disables it. A
+   * paused or partitioned server keeps its socket open, so without a bound a
+   * command waits forever; with it `add()` rejects and a poll records the
+   * failure. Applied as ioredis `commandTimeout` to the client the adapter
+   * BUILDS — never to an injected `client`, which keeps its own configuration.
+   * A value outside `0`–`2147483647` (including `NaN`) throws `RangeError`.
+   *
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
   /** SQS-specific options (required when adapter is 'sqs'). */
   sqs?: import('../adapters/sqs-queue.ts').SqsQueueOptions;
   /**
@@ -423,6 +435,18 @@ export interface RedisQueueOptions {
    * @since 0.8.0
    */
   connectionErrorReporter?: ConnectionErrorReporter;
+  /**
+   * Bound on one Redis command, in milliseconds (adapter `'redis'` only;
+   * ignored by every other adapter). Default `15000`; `0` disables it. A
+   * paused or partitioned server keeps its socket open, so without a bound a
+   * command waits forever; with it `add()` rejects and a poll records the
+   * failure. Applied as ioredis `commandTimeout` to the client the adapter
+   * BUILDS — never to an injected `client`, which keeps its own configuration.
+   * A value outside `0`–`2147483647` (including `NaN`) throws `RangeError`.
+   *
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
 }
 
 /**
