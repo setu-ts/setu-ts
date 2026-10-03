@@ -14,7 +14,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 Nothing below fails to compile; each change is a default that now applies to a running application.
 
-### Keep a scheduler lock bound below each job's interval
+### Keep `acquireTimeoutMs` below each scheduled job's interval
 
 Every distributed-lock acquire is now bounded by `distributedLock.acquireTimeoutMs`, default `5000`.
 An acquire still unsettled at the bound skips that fire. If a job runs more often than every five
@@ -22,7 +22,7 @@ seconds, set `acquireTimeoutMs` below its interval. If you set `commandTimeoutMs
 exceed a non-zero `acquireTimeoutMs`, or `SchedulerPlugin(...)` throws `RangeError`. `0` restores
 the old unbounded wait, which leaves the schedule parked while the lock backend is unreachable.
 
-### Check code that branches on a Vault error
+### Catch `SecretProviderUnavailableError` where you handled a Vault error
 
 A Vault request that fails on the network or times out (default `requestTimeoutMs: 5000`) now
 rejects with `SecretProviderUnavailableError`, answered `503` through `errorHandler`, instead of a
@@ -37,7 +37,7 @@ for pool exhaustion should watch `degraded` or `data.capacity` instead. Separate
 row the latest diagnostics cycle could not read is now absent rather than repeating the previous
 count; a dashboard should read `depthCoverage` instead of assuming every name has a row.
 
-### Raise a Redis command bound for a slow network
+### Raise `commandTimeoutMs` for a slow Redis network
 
 Cache and queue Redis commands are now bounded at `15000` ms through `commandTimeoutMs`. An injected
 client is unaffected. Set `commandTimeoutMs` higher, or `0` to disable, if a command legitimately
