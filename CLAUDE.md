@@ -5526,8 +5526,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   importing it installs a global `Reflect.getMetadata`; challenges held in the session AND claimed
   once in the store; `updateCounter` an atomic compare-and-advance; `pop` only, and a UV-less
   assertion refused for username-less sign-in) — complete (PR #391).
-- **Next milestone** — **M100f** (`packages/auth-plugin` — SAML 2.0 Service Provider; the
-  highest-risk letter, over `@node-saml/node-saml@5` inject-or-lazy).
+- **Milestone 100f** (`packages/auth-plugin` — SAML 2.0 service provider): a `saml` arm of
+  `signIn.providers` registers `GET …/login` (HTTP-Redirect AuthnRequest), `POST …/acs` (HTTP-POST)
+  and `GET …/metadata`, over `@node-saml/node-saml@^5` loaded lazily and awaited in `register()` (or
+  injected), failing at startup with `SamlRuntimeLoadError` naming `nodejs_compat`. Assertions must
+  be signed; every library security option is set explicitly. **Two plan claims did not survive the
+  library's source, and a test caught the first**: node-saml 5.1.0 reads `idpIssuer` only for LOGOUT
+  messages and never reads `Recipient` — an assertion with a foreign `Issuer`, signed by a trusted
+  key, signed in until the plugin checked the verified assertion's `Issuer` and every
+  `SubjectConfirmationData` `Recipient` itself. Pending requests live in an `ISamlRequestStore` that
+  is ALSO the library's `cacheProvider` (one record, so replicas sharing a store agree), consumed
+  exactly once, and bound to the starting browser by a `__Host-setu-saml` `SameSite=None` cookie,
+  because the IdP's cross-site POST does not carry the `Lax` session cookie; assertion ids are
+  claimed once, so two concurrent posts of one captured response cannot both sign in. IdP-initiated
+  login is refused. Driven against the real node-saml (tampered, unsigned, wrong-key, wrapped before
+  and after, wrong audience/issuer/recipient, expired, unsolicited, replayed, foreign-browser and
+  concurrent posts) and against a real Keycloak 26.4 SAML client. A negative control found the
+  wrong-provider test passing vacuously through the binding check; it was tightened. Code review
+  then found a signed assertion lacking its own `InResponseTo`, re-wrapped in a fresh response,
+  signing in (node-saml compares the signed and envelope values only when both exist), so every
+  `SubjectConfirmationData` must now name the consumed request. The fresh-context security audit
+  failed round 1 on a Medium — the unauthenticated login route grew `MemorySamlRequestStore` without
+  bound, with a full-map sweep on every write — and a Low: node-saml copies attributes onto its
+  profile, so an assertion with no `Issuer`/`NameID` element but same-named attributes supplied
+  both. The store is now capped (`maxPendingRequests`, oldest evicted, amortized sweeps) and both
+  values are read from the signed elements; round 2 passed on `cc4cdd30` — complete (PR #393).
+- **Next milestone** — **M98o** (`diagnostics-plugin` — diagnostics session renewal).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

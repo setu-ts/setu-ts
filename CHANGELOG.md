@@ -8,6 +8,43 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **SAML 2.0 service provider (M100f).** A `saml` arm of `AuthPluginOptions.signIn.providers` (the
+  published `SamlProvider` type) makes the application a SAML 2.0 SP for an enterprise IdP, landing
+  in the same signed-in session as every other method with `methods: ['fed']`, so `signIn.mfa` and
+  `requireMfa()` apply unchanged. Each provider registers `GET <basePath>/<name>/login` (an
+  AuthnRequest over the HTTP-Redirect binding), `POST <basePath>/<name>/acs` (the assertion consumer
+  service, HTTP-POST binding) and `GET <basePath>/<name>/metadata` (the SP descriptor). XML
+  signature verification is delegated to `@node-saml/node-saml@^5`, imported lazily and awaited in
+  `register()` — or injected through `module` (`SamlModule`) — so a missing package fails at startup
+  with the new `SamlRuntimeLoadError`, which names the specifier and Cloudflare Workers'
+  `nodejs_compat` flag. Assertions must be signed (a response-only signature is not enough;
+  unsigned, encrypted and signature-wrapped assertions are refused); every security option handed to
+  the library is set explicitly, because node-saml 5.1.0 defaults `validateInResponseTo` to
+  `'never'`. Two checks node-saml 5.1.0 does NOT make on an authentication response are made by the
+  plugin from the verified assertion: its `Issuer` must equal `idp.entityId` (the library reads
+  `idpIssuer` only for logout messages), and every `SubjectConfirmationData` must name `acsUrl` as
+  its `Recipient` and the consumed request as its `InResponseTo` — the signed binding, since the
+  response envelope's own `InResponseTo` is unsigned when only the assertion is. The response's
+  `InResponseTo` must name a pending request this server issued; pending requests
+  (`SamlPendingRequest`) live in an `ISamlRequestStore` (`MemorySamlRequestStore` by default, single
+  replica only) that is also the library's `cacheProvider`, are consumed exactly once, and are bound
+  to the browser that started the login by a `__Host-setu-saml` cookie
+  (`SameSite=None; Secure; HttpOnly;
+  Path=/; Max-Age=600`) — because the IdP's cross-site POST
+  does not carry the `Lax` session cookie, and without the binding a posted foreign response would
+  sign the victim in as the attacker. Assertion ids are claimed once (`claimAssertionId`), so two
+  concurrent posts of one captured response cannot both sign in. The checked `Issuer` and the
+  `nameID` handed to `toPrincipal` are read from the assertion's own elements, never from
+  attribute-overlaid profile fields. `MemorySamlRequestStore` caps its pending requests
+  (`MemorySamlRequestStoreOptions.maxPendingRequests`, default `DEFAULT_MAX_PENDING_SAML_REQUESTS` =
+  10,000, oldest evicted first), so an unauthenticated login flood cannot grow memory without bound.
+  IdP-initiated login is refused. Refusals answer `401` (or `failureRedirect?error=`) with one of
+  two fixed codes, `assertion-invalid` and `state-invalid`; the library's message reaches only the
+  `debug` log. `toPrincipal` receives a frozen `SamlProfile`. The ACS signs in on a NEW session,
+  since the previous session's cookie is not sent with the IdP's POST. Encrypted assertions, single
+  logout, the Artifact binding and signed AuthnRequests are not offered. Proven against the real
+  node-saml on every run and against a real Keycloak 26.4 SAML client
+  (`test/e2e/keycloak-saml-real.test.ts`).
 - **Passkeys / WebAuthn (M100e).** `AuthPluginOptions.signIn.passkeys` (the published
   `PasskeyOptions` type: `rpId` / `rpName` / `origins` / `store` / `resolvePrincipal` /
   `userVerification`) registers the four ceremony routes —
@@ -662,6 +699,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`AuthPlugin`'s `register()` returns a promise when a `saml` provider is configured (M100f)**,
+  because the SAML library load is awaited there. Every other configuration still registers
+  synchronously. `SignInProvider` gains the `SamlProvider` arm, so code switching exhaustively over
+  `provider.kind` must handle `'saml'`; an unknown `kind` is now refused naming
+  `'oidc', 'oauth2' or 'saml'`.
 - **`common` — `IAuthSessionService` gains a required `pending()` member and `SignInOutcome` widens
   (M100d, breaking).** `IAuthSessionService` now requires `pending(ctx): PendingSignIn |
   null`,

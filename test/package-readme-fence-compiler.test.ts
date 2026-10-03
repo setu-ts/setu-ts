@@ -81,7 +81,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M100e: +1 for the passkeys configuration example; the browser-ceremony
   // snippet is a ```js fence (plain browser fetch, no Setu-TS import) the
   // engine deliberately skips.
-  'packages/auth-plugin/README.md': 14,
+  'packages/auth-plugin/README.md': 16,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   'packages/session-plugin/README.md': 11,

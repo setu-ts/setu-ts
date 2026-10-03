@@ -10,9 +10,11 @@ import type {
   IAuthorizationDiagnosticsSource,
   IPasskeyStore,
   IRefreshTokenRotation,
+  ISamlRequestStore,
   IssuerAlgorithm,
   IssuerKeySource,
   ITotpStore,
+  MemorySamlRequestStoreOptions,
   MfaOptions,
   OAuth2Provider,
   OidcProvider,
@@ -24,6 +26,10 @@ import type {
   RecoveryVerifyResult,
   RefreshPrincipal,
   ReserveAttemptResult,
+  SamlModule,
+  SamlPendingRequest,
+  SamlProfile,
+  SamlProvider,
   SessionAuthOptions,
   SignInConfig,
   SignInProvider,
@@ -314,6 +320,27 @@ describe('barrel exports', () => {
       ]
     ) {
       expect(barrel[internal]).toBeUndefined();
+    }
+  });
+
+  it('exports the M100f SAML surface (declared against the barrel)', () => {
+    // Compile-time: each M100f type resolves from the barrel.
+    const options: MemorySamlRequestStoreOptions = {
+      maxPendingRequests: auth.DEFAULT_MAX_PENDING_SAML_REQUESTS,
+    };
+    const store: ISamlRequestStore = new auth.MemorySamlRequestStore(options);
+    const pending: SamlPendingRequest | null = null;
+    const profile: SamlProfile | null = null;
+    const module: SamlModule | null = null;
+    const provider: SamlProvider | null = null;
+    expect([pending, profile, module, provider]).toEqual([null, null, null, null]);
+    expect(store).toBeInstanceOf(auth.MemorySamlRequestStore);
+    expect(auth.DEFAULT_MAX_PENDING_SAML_REQUESTS).toBe(10_000);
+    expect(new auth.SamlRuntimeLoadError('npm:x')).toBeInstanceOf(Error);
+    for (
+      const internal of ['registerSamlRoutes', 'loadSaml', 'describeError', 'compileSamlProvider']
+    ) {
+      expect((auth as Record<string, unknown>)[internal]).toBeUndefined();
     }
   });
 
