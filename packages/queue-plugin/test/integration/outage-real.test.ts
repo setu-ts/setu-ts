@@ -10,8 +10,10 @@
  * - M101a V8-5: a PAUSED Redis (socket open, no reply) through a real kernel
  *   app — `queue.add` rejects inside `commandTimeoutMs` instead of waiting
  *   forever, `/health` reports the queue `down`, and after unpause `add`
- *   succeeds. Guarded with `ignore:` on `REDIS_URL`, so an unset variable is
- *   reported as IGNORED rather than passing.
+ *   succeeds. V8-23: while paused the diagnostics source carries no depth
+ *   row — never the last count — and names the timeout. Guarded with
+ *   `ignore:` on `REDIS_URL`, so an unset variable is reported as IGNORED
+ *   rather than passing.
  *
  * `ALLOW_SKIP` does not apply here — that variable is read only by
  * `scripts/check-apps.ts` and governs `apps/`. `test/apps-gate.test.ts` pins the service, port
@@ -22,7 +24,7 @@ import { expect } from '@std/expect';
 import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 import { RabbitMqQueue } from '../../src/adapters/rabbitmq-queue.ts';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IQueue, IRuntimeServices } from '@setu-ts/common';
+import type { IQueue, IQueueDiagnosticsSource, IRuntimeServices } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
@@ -248,6 +250,7 @@ describe('REAL RabbitMqQueue outage (§3.7)', () => {
 
 const redisUrl = Deno.env.get('REDIS_URL');
 const BOUND_MS = 1000;
+const JOB_NAME = 'm101a.bounded';
 
 describe(
   'REAL paused Redis bounds queue.add (M101a V8-5)',
@@ -261,17 +264,34 @@ describe(
       const app = createApplication({
         plugins: [
           RuntimePlugin(),
-          QueuePlugin({ adapter: 'redis', url, commandTimeoutMs: BOUND_MS }),
+          QueuePlugin({
+            adapter: 'redis',
+            url,
+            commandTimeoutMs: BOUND_MS,
+            processors: [{ name: JOB_NAME, processor: () => {} }],
+            diagnostics: {
+              enabled: true,
+              instanceAlias: 'bounded',
+              queues: { [JOB_NAME]: 'jobs' },
+              depths: { intervalMs: 1_000, timeoutMs: 500, concurrency: 1 },
+            },
+          }),
           HealthPlugin(),
         ],
       });
       await app.start();
       const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
-      const jobName = `m101a-${crypto.randomUUID()}`;
+      const jobName = JOB_NAME;
+      const [source] = app.services.getAll<IQueueDiagnosticsSource>(
+        CAPABILITIES.QUEUE_DIAGNOSTICS,
+      );
 
       let paused = false;
       try {
         await queue.add(jobName, { n: 1 });
+        // Baseline: a depth row exists before the outage, so its absence while
+        // paused is a change rather than a row that was never there.
+        await waitTrue(() => source.read(0).depths.length === 1, 'baseline depth row', 10_000);
 
         await docker(['pause', containerId]);
         paused = true;
@@ -300,6 +320,14 @@ describe(
           20_000,
         );
         expect({ healthStatus, queueStatus }).toEqual({ healthStatus: 503, queueStatus: 'down' });
+
+        // M101a V8-23: an unread depth is ABSENT, never a retained count.
+        await waitTrue(
+          () => source.read(0).depths.length === 0,
+          'depth rows dropped while paused',
+          20_000,
+        );
+        expect(source.read(0).failure).toBe('depth-read-timed-out');
 
         await docker(['unpause', containerId]);
         paused = false;
