@@ -28,6 +28,8 @@ interface WelcomeProps {
 const WelcomeHtml = (p: WelcomeProps) => html`<h1>Welcome ${p.name}</h1>`;
 /** A plain-string component: a valid `Component` whose output is used verbatim. */
 const WelcomeText = (p: WelcomeProps) => `Welcome ${p.name}`;
+/** A text body authored with the `html` tag — escaped, which the docs warn about. */
+const TagText = (p: WelcomeProps) => html`Welcome ${p.name}`;
 const Throwing: Component<WelcomeProps> = () => {
   throw new Error('template exploded');
 };
@@ -51,6 +53,7 @@ async function startApp(sent: OutgoingMail[]) {
         templates: {
           plain: { html: '<h1>Hi {{ name }}</h1>', text: 'Hi {{ name }}' },
           welcome: { view: WelcomeHtml, text: WelcomeText },
+          tagText: { view: WelcomeHtml, text: TagText },
           broken: { view: Throwing },
           suspended: { view: Suspended },
         },
@@ -82,6 +85,16 @@ describe('Mail component templates through a real kernel app (M102)', () => {
     expect(sent[0]?.text).toBe('Welcome <script>alert(1)</script>');
     expect(typeof sent[0]?.html).toBe('string');
 
+    await app.stop();
+  });
+
+  it('HTML-escapes a text body authored with the html tag (the documented foot-gun)', async () => {
+    const sent: OutgoingMail[] = [];
+    const app = await startApp(sent);
+    const mailer = app.services.get<IMailer>('mail');
+    await mailer.sendTemplate('tagText', { to: 'u@example.com', subject: 'x' }, { name: 'A & B' });
+    // Pinned so the README/PUBLIC_API/JSDoc warning describes real behaviour.
+    expect(sent[0]?.text).toBe('Welcome A &amp; B');
     await app.stop();
   });
 

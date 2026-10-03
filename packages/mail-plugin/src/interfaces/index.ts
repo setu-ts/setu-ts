@@ -104,7 +104,7 @@ export type IMailHttp = (url: string, init?: RequestInit) => Promise<Response>;
  * template cannot mix the two arms — the mix is a compile error, not a
  * precedence rule.
  *
- * @since 0.1.0
+ * @since 0.9.0
  */
 export interface MailStringTemplate {
   /** HTML body template with `{{ variable }}` placeholders (values escaped). */
@@ -140,8 +140,11 @@ export interface MailComponentTemplate {
   /** Renders the HTML body. */
   view: Component<never>;
   /**
-   * Renders the plain-text body, used verbatim. A plain `(props) => string`
-   * function is a valid component whose output the engine returns unchanged.
+   * Renders the plain-text body, used verbatim — so write it as a plain
+   * `(props) => string` function, whose output the engine returns unchanged.
+   * A text component written with the `html` tag or JSX is HTML-escaped by its
+   * rendering runtime like any other, which puts entities into a plain-text
+   * mail: `Hi ${name}` with `name = 'A & B'` arrives as `Hi A &amp; B`.
    */
   text?: Component<never>;
   /** Never present on the component arm. */

@@ -19,7 +19,7 @@ import type {
   MailTemplate,
 } from '../interfaces/index.ts';
 import { MailService } from '../services/mail-service.ts';
-import { TemplateEngine } from '../templates/template-engine.ts';
+import { isComponentTemplate, TemplateEngine } from '../templates/template-engine.ts';
 import { LogProvider, type LogProviderOptions } from '../providers/log-provider.ts';
 import { SmtpProvider } from '../providers/smtp-provider.ts';
 import { SesProvider } from '../providers/ses-provider.ts';
@@ -112,16 +112,18 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
-      const provider = createProvider(providerType, providerOptions, ctx);
-      await provider.connect();
-
-      // Resolved once, here, so a component template with no provider fails
-      // at startup naming both remedies (inside the TemplateEngine constructor)
-      // rather than on the first `sendTemplate` of a shipped path.
+      // Templates are validated BEFORE the provider connects: a component
+      // template with no view provider is a configuration error, and it must
+      // be the error the developer sees — not masked by, or paid for after,
+      // the provider's lazy SDK import. Resolved once, here, so it fails at
+      // startup naming both remedies rather than on the first `sendTemplate`.
       const templates = new TemplateEngine(
         options?.templates,
         resolveViewEngine(ctx, options?.templates),
       );
+
+      const provider = createProvider(providerType, providerOptions, ctx);
+      await provider.connect();
       // The runtime's clock and timers reach the service, which is where the
       // reachability probe is cached and bounded: this indicator and every
       // email channel in `notification-plugin` ask the same question, and the
@@ -171,12 +173,15 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
  * Resolves the view engine the component-template arm renders through, or
  * `undefined` when no configured template needs one.
  *
- * Only the registry is consulted. A container-supplied engine
- * (`@Injectable({ token: CAPABILITIES.VIEW })` under `DiPlugin`) is registered
- * into `ctx.container` during `DecoratorPlugin`'s OWN `register()`, which runs
- * after this one, so there is nothing to find there at this point; the
- * refusal names the registry remedy. An application with only string
- * templates performs no lookup at all, so it needs no view plugin.
+ * Only the registry is consulted, deliberately. An engine supplied solely as
+ * an `@Injectable({ token: CAPABILITIES.VIEW })` under `DiPlugin` lands in
+ * `ctx.container` during `DecoratorPlugin`'s own `register()`, and nothing
+ * orders that before this plugin: `DecoratorPlugin` is `PLUGIN_PRIORITY.LOW`,
+ * so under the default composition it registers AFTER this one, and no edge
+ * guarantees otherwise. Such an engine is therefore refused rather than found
+ * by luck; register a plugin that provides the token instead. An application
+ * with only string templates performs no lookup at all, so it needs no view
+ * plugin.
  *
  * @param ctx - The plugin context
  * @param templates - The configured template map
@@ -187,9 +192,7 @@ function resolveViewEngine(
   ctx: IPluginContext,
   templates: Readonly<Record<string, MailTemplate>> | undefined,
 ): IViewEngine | undefined {
-  const needsEngine = Object.values(templates ?? {}).some((t) =>
-    'view' in t && t.view !== undefined
-  );
+  const needsEngine = Object.values(templates ?? {}).some(isComponentTemplate);
   if (!needsEngine || !ctx.services.has(CAPABILITIES.VIEW)) {
     return undefined;
   }

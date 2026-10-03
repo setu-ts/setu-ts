@@ -29,6 +29,11 @@ All notable changes to this project are documented here. The format follows
   placeholder key) is now a rejection rather than a synchronous throw. `MailService` is unaffected
   (it awaits). A direct caller of `TemplateEngine` adds an `await`; the constructor also gains an
   optional second parameter, the view engine, which the plugin supplies. See `docs/upgrading.md`.
+- **BREAKING: `MailTemplate` is a union type, no longer an interface (M102).** It is now
+  `MailStringTemplate | MailComponentTemplate`, so `interface X extends MailTemplate` fails with
+  `TS2312` and `class Y implements MailTemplate` with `TS2422`. Extend or implement
+  `MailStringTemplate` instead, which has the released `{ html?, text? }` shape. A value typed
+  `MailTemplate`, and every object literal assigned to one, compiles unchanged.
 
 ## [0.8.0] — 2026-10-03
 

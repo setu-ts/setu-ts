@@ -46,8 +46,16 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/** Discriminates the component arm of {@linkcode MailTemplate}. */
-function isComponentTemplate(template: MailTemplate): template is MailComponentTemplate {
+/**
+ * Discriminates the component arm of {@linkcode MailTemplate}. The one
+ * definition both `MailPlugin` (deciding whether to resolve an engine) and
+ * this class (deciding how to render) read, so the two cannot disagree about
+ * which templates need one. Internal: not exported from the package barrel.
+ *
+ * @param template - The template to classify
+ * @returns `true` for a component template
+ */
+export function isComponentTemplate(template: MailTemplate): template is MailComponentTemplate {
   return 'view' in template && template.view !== undefined;
 }
 
@@ -146,10 +154,10 @@ export class TemplateEngine {
     template: MailComponentTemplate,
     data: Readonly<Record<string, unknown>>,
   ): Promise<RenderedTemplate> {
-    // `#viewEngine` is present whenever a component template exists — the
-    // constructor refused the other combination — so the assertion below can
-    // only fire if a template map is mutated after construction, which the
-    // readonly map prevents.
+    // `#viewEngine` is present whenever a component template exists: the
+    // constructor refused the other combination, and the template map is a
+    // private copy taken at construction, so no later edit to the caller's
+    // object can add a component template the check never saw.
     const engine = this.#viewEngine as IViewEngine;
     // `data` is typed `Record<string, unknown>` by the committed
     // `IMailer.sendTemplate` contract, and `Component<never>` is the one type

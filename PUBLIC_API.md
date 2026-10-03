@@ -6779,19 +6779,21 @@ app.router.post('/users', async (ctx) => {
   placeholder whose key is absent from `data`, or an unknown template name, rejects. **Component
   arm** (`MailComponentTemplate`, M102): `view` and the optional `text` are `Component`s rendered
   through the `IViewEngine` registered under `CAPABILITIES.VIEW`, with `data` passed verbatim as
-  each component's props — `view` into `html`, `text` into `text` (verbatim). Escaping is the
-  rendering runtime's (an `html` tagged template and a JSX component escape; a hand-written template
-  literal does not). There is NO missing-key check on this arm: an absent key renders as `undefined`
-  rather than throwing, because the committed `sendTemplate` types `data` as
-  `Record<string, unknown>`; the compile-time route is `engine.render(Component,
-  props)` by hand,
-  then `mailer.send`. `MailPlugin` declares `CAPABILITIES.VIEW` in `optionalDependencies` and
-  resolves the engine ONCE at `register()`; a component template configured with no provider **fails
-  at `register()`** naming both remedies (register `ViewPlugin` or any other provider of the token,
-  or remove the component templates) — never on the first `sendTemplate`. Only the registry is
-  consulted: a container-supplied engine registered by `DecoratorPlugin` lands after this plugin has
-  run. A rendering failure (`ViewRenderError`, `UnresolvedSuspenseError`) propagates unwrapped and
-  the provider is never reached.
+  each component's props — `view` into `html`, `text` into `text` (verbatim; write it as a plain
+  `(props) => string` function, since one written with the `html` tag or JSX is HTML-escaped by its
+  runtime and puts entities such as `&amp;` into a plain-text body). Escaping is the rendering
+  runtime's (an `html` tagged template and a JSX component escape; a hand-written template literal
+  does not). There is NO missing-key check on this arm: an absent key renders as `undefined` rather
+  than throwing, because the committed `sendTemplate` types `data` as `Record<string, unknown>`; the
+  compile-time route is `engine.render(Component,
+  props)` by hand, then `mailer.send`.
+  `MailPlugin` declares `CAPABILITIES.VIEW` in `optionalDependencies` and resolves the engine ONCE
+  at `register()`; a component template configured with no provider **fails at `register()`** naming
+  both remedies (register `ViewPlugin` or any other provider of the token, or remove the component
+  templates) — never on the first `sendTemplate`. Only the registry is consulted: a
+  container-supplied engine registered by `DecoratorPlugin` lands after this plugin has run. A
+  rendering failure (`ViewRenderError`, `UnresolvedSuspenseError`) propagates unwrapped and the
+  provider is never reached.
 - `TemplateEngine.render(name, data)` returns `Promise<RenderedTemplate>` (asynchronous since M102,
   because `IViewEngine.render` may answer a promise); every refusal is a rejection.
 - `LogProvider` never sends real email — it records each message (`.messages`), forwards to `sink`,

@@ -148,6 +148,25 @@ describe('MailPlugin.register — component templates (M102)', () => {
     expect(fake.registered.has(CAPABILITIES.MAIL)).toBe(false);
   });
 
+  it('refuses a template misconfiguration BEFORE the provider connects', async () => {
+    // The refusal is configuration validation, so it must not depend on the
+    // provider loading its SDK first. An injected transport missing `sendMail`
+    // makes `connect()` throw; the developer must still see the template error.
+    const fake = createFakeContext();
+    const plugin = MailPlugin({
+      provider: 'smtp',
+      options: {
+        transport: {} as unknown as import('../../src/interfaces/index.ts').ISmtpTransport,
+      },
+      templates: { welcome: { view: Body } },
+    });
+    let caught: unknown;
+    await Promise.resolve(plugin.register(fake.ctx)).catch((e: unknown) => {
+      caught = e;
+    });
+    expect((caught as Error).message).toContain('Mail template "welcome" is a view component');
+  });
+
   it('resolves the registered view engine and renders component templates through it', async () => {
     const sunk: OutgoingMail[] = [];
     const fake = createFakeContext();

@@ -21,6 +21,14 @@ you only ever reached templates through `IMailer.sendTemplate`, which already re
 The constructor's new second parameter (a view engine) is optional and only needed for the new
 component-template arm, which `MailPlugin` supplies for you.
 
+### Extend `MailStringTemplate`, not `MailTemplate`
+
+`MailTemplate` is now the union `MailStringTemplate | MailComponentTemplate` (M102). TypeScript
+refuses to extend or implement a union, so `interface X extends MailTemplate` (`TS2312`) and
+`class Y implements MailTemplate` (`TS2422`) stop compiling. Name `MailStringTemplate` instead — it
+carries the released `{ html?, text? }` shape. Anything that only holds or assigns a `MailTemplate`
+value needs no change.
+
 ## 0.8.0
 
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at

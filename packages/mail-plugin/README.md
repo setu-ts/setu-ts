@@ -63,7 +63,9 @@ empty string.
 **Component templates** (`{ view, text? }`) render through the view engine registered under
 `CAPABILITIES.VIEW` — a JSX component, an `html` tagged template, or a plain `(props) => string`
 function — with `sendTemplate`'s `data` passed to each component verbatim as its props. `view`
-renders the HTML body; the optional `text` renders the plain-text body and is used verbatim.
+renders the HTML body; the optional `text` renders the plain-text body and is used verbatim, so
+write it as a plain `(props) => string` function — a text component written with the `html` tag or
+JSX is HTML-escaped like any other, which puts entities (`&amp;`) into a plain-text mail.
 Configuring one requires a `CAPABILITIES.VIEW` provider: `MailPlugin` refuses at `register()`
 otherwise, naming both remedies, so the failure is a startup failure rather than a throw on the
 first send.

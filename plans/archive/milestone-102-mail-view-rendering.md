@@ -1,7 +1,8 @@
 # Milestone 102 — Mail bodies rendered through the view engine (`@setu-ts/mail-plugin`)
 
-> **Status:** Complete (PR pending). Branch: `feat/m102-mail-view-rendering`. `develop` and `main` are protected
-> — all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Branch: `feat/m102-mail-view-rendering`. `develop` and `main`
+> are protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR.
 
 ## 0. Objective & scope
 
