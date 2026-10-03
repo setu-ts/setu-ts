@@ -4620,10 +4620,11 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
   `HashiCorpVaultProvider` — provider classes.
 - `SecretProviderUnavailableError` — **since M101a**, a provider that cannot be reached, answered
   **`503 Service Unavailable`** through a status hint. `HashiCorpVaultProvider` rejects with it when
-  a request fails on the network or does not answer inside `options.requestTimeoutMs`; the transport
-  error is kept as `cause` for the log and never reaches the response body. A Vault that answers
-  with an HTTP error is reachable and keeps its handling: `404` reads as `null`, any other error
-  status rejects with a plain `Error`. `provider` names the unreachable provider.
+  a request fails on the network or does not answer inside `options.requestTimeoutMs` — the body
+  read included, so headers followed by silence count as no answer; the transport error is kept as
+  `cause` for the log and never reaches the response body. A Vault that answers with an HTTP error
+  is reachable and keeps its handling: `404` reads as `null`, any other error status rejects with a
+  plain `Error`. `provider` names the unreachable provider.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write

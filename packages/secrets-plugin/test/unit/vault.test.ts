@@ -302,3 +302,98 @@ describe('HashiCorpVaultProvider request bound (M101a V8-4)', () => {
     });
   }
 });
+
+describe('HashiCorpVaultProvider body bound and address validation (M101a)', () => {
+  const base = { address: 'https://vault.example.com', token: 'tok' };
+
+  /** A 200 response whose body sends headers and then never another byte. */
+  function stalledBody(): Response {
+    return new Response(new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}) }), {
+      status: 200,
+    });
+  }
+
+  it('bounds the body read: headers then silence rejects 503 instead of hanging', async () => {
+    const timers = new ManualTimers();
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      timing: timers,
+      http: () => Promise.resolve(stalledBody()),
+    });
+    await provider.connect();
+
+    const pending = provider.get('database/password');
+    await flush();
+    expect(timers.armed).toHaveLength(1);
+    timers.fire();
+
+    const error = await pending.then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretProviderUnavailableError);
+    expect(httpStatusHintOf(error)?.status).toBe(503);
+  });
+
+  it('keeps a malformed JSON body from a Vault that answered as a plain error', async () => {
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response('{not json', { status: 200 })),
+    });
+    await provider.connect();
+
+    const error = await provider.get('x').then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+  });
+
+  it('bounds the body release in isHealthy and a write', async () => {
+    const timers = new ManualTimers();
+    let cancelled = 0;
+    const body = (): Response =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull: () => new Promise(() => {}),
+          cancel: () => {
+            cancelled++;
+            return new Promise(() => {});
+          },
+        }),
+        { status: 200 },
+      );
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      timing: timers,
+      http: () => Promise.resolve(body()),
+    });
+    await provider.connect();
+
+    const health = provider.isHealthy();
+    await flush();
+    timers.fire();
+    expect(await health).toBe(false);
+
+    const write = provider.set('a', 'b');
+    await flush();
+    timers.fire();
+    const error = await write.then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretProviderUnavailableError);
+    expect(cancelled).toBe(2);
+  });
+
+  const malformed: ReadonlyArray<string> = ['vault.example.com', 'ftp://vault.example.com', '::'];
+  for (const address of malformed) {
+    it(`connect refuses the malformed address ${JSON.stringify(address)} without echoing it`, async () => {
+      const provider = new HashiCorpVaultProvider({ address, token: 'tok' });
+      const error = await provider.connect().then(() => undefined, (e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+      expect((error as Error).message).toContain('options.address');
+      expect((error as Error).message).not.toContain(address);
+      expect(provider.isReady()).toBe(false);
+    });
+  }
+
+  it('connect accepts an http:// address', async () => {
+    const provider = new HashiCorpVaultProvider({ address: 'http://127.0.0.1:8200', token: 'tok' });
+    await provider.connect();
+    expect(provider.isReady()).toBe(true);
+  });
+});

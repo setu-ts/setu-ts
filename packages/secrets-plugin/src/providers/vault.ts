@@ -66,6 +66,33 @@ interface VaultReadBody {
 }
 
 /**
+ * What one bounded request yields: the status, and the body text when it was
+ * asked for. The body is read (or released) INSIDE the bound, so a server that
+ * sends headers and then stalls cannot outlive `requestTimeoutMs`.
+ */
+interface VaultAnswer {
+  readonly status: number;
+  readonly ok: boolean;
+  readonly text: string | null;
+}
+
+/** URL schemes a Vault address may use. */
+const ADDRESS_PROTOCOLS: ReadonlySet<string> = new Set(['http:', 'https:']);
+
+/**
+ * Whether `address` parses as an absolute `http:`/`https:` URL.
+ *
+ * @param address - The configured address, trailing slashes trimmed
+ */
+function isValidAddress(address: string): boolean {
+  try {
+    return ADDRESS_PROTOCOLS.has(new URL(address).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * HashiCorp Vault (KV v2) provider.
  *
  * @since 0.1.0
@@ -100,6 +127,13 @@ export class HashiCorpVaultProvider implements SecretProvider {
     if (this.#address === '') {
       return Promise.reject(new Error('HashiCorpVaultProvider requires options.address'));
     }
+    if (!isValidAddress(this.#address)) {
+      // The value is not echoed: an address can carry credentials in its
+      // userinfo, and the message reaches logs.
+      return Promise.reject(
+        new Error('HashiCorpVaultProvider requires options.address to be an http(s) URL'),
+      );
+    }
     if (this.#token === '') {
       return Promise.reject(new Error('HashiCorpVaultProvider requires options.token'));
     }
@@ -123,20 +157,22 @@ export class HashiCorpVaultProvider implements SecretProvider {
    * @returns The value, or `null` when absent
    * @throws {SecretProviderUnavailableError} When Vault cannot be reached or
    *   does not answer within `requestTimeoutMs`
-   * @throws {Error} On a non-404 HTTP error
+   * @throws {Error} On a non-404 HTTP error or a body that is not JSON
    */
   async get(name: string): Promise<string | null> {
     const res = await this.#request(this.#dataUrl(name), {
       method: 'GET',
       headers: { 'X-Vault-Token': this.#token },
-    });
+    }, true);
     if (res.status === HTTP_NOT_FOUND) {
       return null;
     }
     if (!res.ok) {
       throw new Error(`Vault read failed for ${name}: HTTP ${res.status}`);
     }
-    const body = await res.json() as VaultReadBody;
+    // Parsed outside the bound: a Vault that answered with a malformed body
+    // is a plain error, not an unreachable provider.
+    const body = JSON.parse(res.text ?? '') as VaultReadBody;
     const value = body.data?.data?.[VALUE_FIELD];
     return typeof value === 'string' ? value : null;
   }
@@ -158,7 +194,7 @@ export class HashiCorpVaultProvider implements SecretProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ data: { [VALUE_FIELD]: value } }),
-    });
+    }, false);
     if (!res.ok) {
       throw new Error(`Vault write failed for ${name}: HTTP ${res.status}`);
     }
@@ -180,12 +216,7 @@ export class HashiCorpVaultProvider implements SecretProvider {
       return false;
     }
     try {
-      const res = await this.#request(`${this.#address}/v1/sys/health`, { method: 'GET' });
-      // Release the unread body so the connection is not held open.
-      await res.body?.cancel().catch(() => {
-        // A body the transport already closed cannot be cancelled; the
-        // status answer still proved reachability.
-      });
+      await this.#request(`${this.#address}/v1/sys/health`, { method: 'GET' }, false);
       return true;
     } catch {
       return false;
@@ -197,12 +228,25 @@ export class HashiCorpVaultProvider implements SecretProvider {
    *
    * A transport failure and an expired bound both become
    * {@linkcode SecretProviderUnavailableError}: either way Vault did not
-   * answer, and the caller needs a retryable `503`, not a masked `500`. A
-   * response — any status — is returned unchanged.
+   * answer, and the caller needs a retryable `503`, not a masked `500`. Any
+   * status is returned unchanged. The body is consumed inside the same bound:
+   * read as text when `readBody` is set and the status carries one worth
+   * reading, otherwise cancelled so the connection is not held open — so a
+   * server that sends headers and then stalls is unreachable too.
    */
-  async #request(url: string, init: RequestInit): Promise<Response> {
+  async #request(url: string, init: RequestInit, readBody: boolean): Promise<VaultAnswer> {
     try {
-      return await withDeadline((signal) => this.#http(url, { ...init, signal }), {
+      return await withDeadline(async (signal) => {
+        const res = await this.#http(url, { ...init, signal });
+        if (readBody && res.ok) {
+          return { status: res.status, ok: true, text: await res.text() };
+        }
+        await res.body?.cancel().catch(() => {
+          // A body the transport already closed cannot be cancelled; the
+          // status still answered.
+        });
+        return { status: res.status, ok: res.ok, text: null };
+      }, {
         timeoutMs: this.#timeoutMs,
         onTimeout: () => new Error(`Vault did not answer within ${this.#timeoutMs} ms`),
         ...(this.#timing !== undefined && { timing: this.#timing }),

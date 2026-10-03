@@ -48,8 +48,10 @@ All notable changes to this project are documented here. The format follows
   keeps the separate commands. Verified against a live Redis 7.
 - **A Vault request that fails on the network or does not answer in `requestTimeoutMs` now rejects
   with `SecretProviderUnavailableError` (`503`)** instead of a plain error served as a masked `500`.
-  A Vault that answers with an HTTP error keeps its handling: `404` reads as `null`, any other error
-  status rejects with a plain `Error`.
+  The bound covers reading the response body too. `connect()` now refuses an address that is not an
+  absolute `http:`/`https:` URL, so a malformed address fails at startup rather than as a `503` on
+  every read. A Vault that answers with an HTTP error keeps its handling: `404` reads as `null`, any
+  other error status rejects with a plain `Error`.
 - **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
   registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
   `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
