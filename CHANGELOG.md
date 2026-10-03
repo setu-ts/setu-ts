@@ -10,9 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - **Service-call agreement (M101d).** The SDK adds `createTraceContextInterceptor` and
   `ClientRetryPolicy`; the full-stack starter adds `fullStackConfigOf` and
-  `FullStackConfigUnavailableError` for the exact composition snapshot; and
-  `contextToTraceparent` accepts the new `TraceparentSource` shared by both telemetry context
-  shapes.
+  `FullStackConfigUnavailableError` for the exact composition snapshot; and `contextToTraceparent`
+  accepts the new `TraceparentSource` shared by both telemetry context shapes.
 
 ### Changed
 
