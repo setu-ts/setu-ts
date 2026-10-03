@@ -5612,7 +5612,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   prerelease, which took it from 946 verified tags to 1,728 and surfaced 62 wrong ones — the
   MongoDB, DynamoDB and cursor-paging surfaces of `database-plugin` tagged `0.1.0` while shipping in
   `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
-  registry rather than guessed) — complete (PR pending)
+  registry rather than guessed) — complete (PR #400)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
