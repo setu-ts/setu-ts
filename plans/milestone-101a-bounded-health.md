@@ -283,23 +283,23 @@ fail fast. The new outage tests therefore pause.
   that releases a late non-null token (`release(key, token)`, best-effort, a failure logged once and
   swallowed) and ignores a late `null` or rejection. That continuation is the correctness guarantee
   for EVERY lock implementation. `DistributedLockOptions.commandTimeoutMs` is additionally forwarded
-  to `RedisLock` on the lazy path so the parked `SET NX` is cancelled on the client rather than
-  landing late at all, and it must not outlast the call it bounds: when unset it DEFAULTS to the
-  resolved `acquireTimeoutMs` (and to the M98l `15_000` only when `acquireTimeoutMs` is `0`), and a
-  configured `commandTimeoutMs` greater than a non-zero `acquireTimeoutMs` is refused with a
-  `RangeError` at construction naming both values. A client-side timeout rejects the command
-  PROMISE; it does not recall a `SET NX` already written to the socket, which can still apply on the
-  server after the rejection — and the scheduler's continuation ignores a rejection, because a
-  rejection carries no token. So `RedisLock.acquire` owns that recovery: the token is minted
-  client-side before the `SET`, so when the `SET` rejects, `acquire` issues the existing
-  token-checked release `EVAL` for that exact key and token (best-effort, a failure swallowed), then
-  rethrows the original error. The `EVAL` is written to the same connection after the `SET`, so
-  Redis applies it after the `SET` if the `SET` applied at all: an applied `SET` is deleted, an
-  unapplied one leaves nothing to match, and the token check means a lock another holder took in
-  between is never touched. If the connection is dead for long enough that the `EVAL` also cannot
-  run, the key is held no longer than the TTL it was set with — the bound that exists today.
-  `MemoryLock` is unaffected (synchronous map). The scheduler health indicator is unchanged in this
-  letter (§9).
+  to `RedisLock` on the lazy path so the `SET NX` command promise is bounded on the client — a
+  `SET NX` already sent to Redis can still apply, which the recovery below handles — and it must not
+  outlast the call it bounds: when unset it DEFAULTS to the resolved `acquireTimeoutMs` (and to the
+  M98l `15_000` only when `acquireTimeoutMs` is `0`), and a configured `commandTimeoutMs` greater
+  than a non-zero `acquireTimeoutMs` is refused with a `RangeError` at construction naming both
+  values. A client-side timeout rejects the command PROMISE; it does not recall a `SET NX` already
+  written to the socket, which can still apply on the server after the rejection — and the
+  scheduler's continuation ignores a rejection, because a rejection carries no token. So
+  `RedisLock.acquire` owns that recovery: the token is minted client-side before the `SET`, so when
+  the `SET` rejects, `acquire` issues the existing token-checked release `EVAL` for that exact key
+  and token (best-effort, a failure swallowed), then rethrows the original error. The `EVAL` is
+  written to the same connection after the `SET`, so Redis applies it after the `SET` if the `SET`
+  applied at all: an applied `SET` is deleted, an unapplied one leaves nothing to match, and the
+  token check means a lock another holder took in between is never touched. If the connection is
+  dead for long enough that the `EVAL` also cannot run, the key is held no longer than the TTL it
+  was set with — the bound that exists today. `MemoryLock` is unaffected (synchronous map). The
+  scheduler health indicator is unchanged in this letter (§9).
 - **Why:** the lock is a port a caller may implement, so the bound has to sit on the CALL, not on
   one backend; the Redis-side bound is the §3.1 reasoning about parked commands. Five seconds is
   below every realistic `every` interval and above the ~2 s a healthy Redis round trip never
