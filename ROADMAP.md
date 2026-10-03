@@ -12244,9 +12244,11 @@ write-safety rules. M101c, M101d, M101g and M101h are independent of each other 
 
 ### Milestone 101a: Health That Reports Healthy, and Calls That Hang, When a Dependency Fails
 
-**Package(s):** `packages/messaging-plugin`, `packages/database-plugin`, `packages/health-plugin`,
+**Package(s):** `packages/common`, `packages/messaging-plugin`, `packages/database-plugin`,
 `packages/secrets-plugin`, `packages/cache-plugin`, `packages/queue-plugin`,
-`packages/scheduler-plugin`
+`packages/scheduler-plugin` (`health-plugin` needs no `src` change — `/ready` failing on `degraded`
+is by design, and the V8-3 decision lives in the database indicator; `common` gains the bounded-call
+helper the plan names)
 
 **Objective:** the two questions an operator asks during an outage — "is it down?" and "do my calls
 fail fast?" — answered wrongly in both directions: a dead broker reported `up`, a healthy database
@@ -12327,8 +12329,10 @@ fails the same way. Encode the durable name, and add a real-NATS RPC case — `n
 drives no `request()`.
 
 **V8-26 — a Kafka subscription to a not-yet-existing topic kills boot** with a raw
-`KafkaJSProtocolError` naming no topic. Retry metadata on `UNKNOWN_TOPIC_OR_PARTITION`, or throw a
-named error naming the topic (the `JetStreamStreamError` precedent), and document pre-creation.
+`KafkaJSProtocolError` naming no topic. kafkajs already retries `UNKNOWN_TOPIC_OR_PARTITION` (five
+retries, about nine seconds, the error is marked retriable) — what escaped was budget exhaustion on
+a broker with auto-create off, so no second retry loop: throw a named error naming the topic (the
+`JetStreamStreamError` precedent), forward the existing `retry` option, and document pre-creation.
 
 **Why they are one letter.** Each is a broker-specific naming or startup rule — a subscription's
 topic binding, a durable-name grammar, topic leadership at subscribe — that a permissive fake
@@ -12347,15 +12351,20 @@ composition their own documentation describes.
 
 **V8-7 — `tenantBinding` is silently inert when the tenant comes from the signed-in principal.** The
 session middleware compares and seals at priority 260 (`session-plugin/src/errors.ts:45-58` names
-that priority), before `AuthPlugin`'s passive authentication at 300 sets the principal, so a
-`JwtResolver`-style tenant is always absent at compare time. Either defer the compare to commit, or
-refuse the composition at `register()`; the session README must say which.
+that priority), before `AuthPlugin`'s passive authentication at 300 sets the principal. The shipped
+`JwtResolver` reads the raw header at priority 40 and so IS present at compare time; the inert case
+is any tenant stamped after 260 — a custom resolver reading the principal, or a handler-written one.
+Deferring to commit is too late (the handler has run) and refusing at `register()` is
+unimplementable (the session plugin cannot see the tenancy priority), so the compare runs on
+whichever side sees the tenant second; the session README must say so.
 
 **V8-8 — tenant data isolation has no bridge to `database-plugin`.** `getRepository` writes to
 `ITenantDataStore` (memory only by default); `DatabasePlugin` repositories are tenant-blind, and an
-adapter cannot resolve `CAPABILITIES.DATABASE` at construction. Ship the bridge — an
-`ITenantDataStore` over `IDatabaseService` resolved at `onInit` — or state in both READMEs that the
-two do not compose.
+adapter cannot resolve `CAPABILITIES.DATABASE` at construction. `IDatabaseService` lives in
+`database-plugin`, not `common`, so multi-tenancy cannot type a store over it (§2.2): the port
+(`ITenantDataStore`) is promoted to `common` and `database-plugin` ships the implementation as a
+`RegistryFactory` resolved at `onInit` (the M70d arm) — or state in both READMEs that the two do not
+compose.
 
 **V8-9 — the README's SAML CSRF recipe 403s against Keycloak.** Keycloak sends
 `Referrer-Policy: no-referrer`, so Chrome posts the ACS with `Origin: null`; http-security CSRF has
@@ -12444,7 +12453,8 @@ write-safety rule in the command layer covers them all.
 
 ### Milestone 101f: The Devtool Lifecycle
 
-**Package(s):** `packages/cli`, `packages/common`, every diagnostics source
+**Package(s):** `packages/cli`, `packages/common`, `packages/kernel`, `packages/diagnostics-plugin`,
+`packages/sdk`, every diagnostics source
 
 **Objective:** the M98c devtool works on a fresh scaffold and fails across its lifecycle — enabling
 on an older project, reallocating ports, building a production image, and trusting aliases.
@@ -12465,7 +12475,10 @@ devtool port is also allocated in the app-port sequence. Bump the set together o
 container. Exclude both from the production image.
 
 **V8-22 — diagnostics aliases accept bidi/format (Cf) characters** and deliver them verbatim in a
-signed body; only C0/C1 are rejected. Reject Cf in the shared alias validator in `common`.
+signed body; only C0/C1 are rejected. No shared alias validator exists — there are thirteen private
+copies (`common`, the kernel projection, the diagnostics protocol, nine plugins, `sdk`), which is
+why the package list above is wider than `cli` + `common`: one predicate in `common` rejecting Cc
+and Cf replaces twelve of them (`sdk` keeps its documented local copy).
 
 **V8-34 — `devtool enable` on Node/Bun/Workers does not name the runtime** ("not a Setu-TS
 project"). Refuse by name.
@@ -12477,7 +12490,8 @@ share the devtool's manifest, entry and port records.
 
 ### Milestone 101g: Scaffolds That Are Not Wired
 
-**Package(s):** `packages/cli`, `packages/testing`, the full-stack template
+**Package(s):** `packages/cli`, the full-stack template (`packages/testing` needs no `src` change —
+the narrow `createApp` annotation is the CLI's)
 
 **Objective:** what `setu new`, `setu add` and `setu generate` write compiles and does not do what
 it is for until the developer wires it by hand.
@@ -12491,11 +12505,13 @@ bundles it, and the README path crashes with `Duplicate plugin name`. **V8-15** 
 full-stack `.gitignore` omit `node_modules/` while `nodeModulesDir: "auto"` creates it (73,632 files
 staged). **V8-31** — `generate ws-route` emits a dependency `setu add websocket` does not register;
 the member crashes at boot and the root `dev` runner stops every member. **V8-32** — `setu add`
-emits no wiring, `g guard` ignores an installed `auth-plugin`, and the standalone devtool port is
-fixed at 4919. **V8-33** — class-based `generate job` without a queue plugin emits an unwired
-functional job instead of refusing. **V8-39** — `deno task test` fails ("No test modules found") on
-every fresh Deno scaffold. **V8-40** — `setu add` re-sorts the whole import map and adds an unused
-`npm:@jsr/…` copy on an npm-build member.
+emits no wiring, `g guard` ignores an installed `auth-plugin`, and the standalone devtool port
+DEFAULTS to 4919 with no probe (`--devtool-port` exists on `new`, `generate app` and
+`devtool enable`; only the default is fixed — owned by M101f). **V8-33** — class-based
+`generate job` without a queue plugin emits an unwired functional job instead of refusing. **V8-39**
+— `deno task test` fails ("No test modules found") on every fresh Deno scaffold. **V8-40** —
+`setu add` re-sorts the whole import map and adds an unused `npm:@jsr/…` copy on an npm-build
+member.
 
 **No-row deliverable — no CLI path writes any plugin's `diagnostics` option.** In X60 all eleven
 diagnostics sources and `createObservedFetch` were hand-written (`X60-X65-FINDINGS.md`, generator
@@ -12508,16 +12524,18 @@ or its harness — the M60 "generated code that is wired" bar, applied to what h
 
 ### Milestone 101h: Documentation, Plus Redaction Setup That Takes Extra Work
 
-**Package(s):** `packages/common`, `packages/storage-plugin`, `packages/auth-plugin`,
-`packages/events-plugin`, docs
+**Package(s):** `packages/common` (the only `src` change), plus the READMEs of `storage-plugin`,
+`auth-plugin`, `events-plugin` and the five further diagnostics-carrying plugins, `PUBLIC_API.md`
+and docs
 
 **Objective:** the code is correct and a reader following the documentation still cannot set it up.
 
 **V8-30 — redactors are keyed by classification,** so two treatments within one classification need
 invented classification strings. Allow a per-path redactor override in the policy. **V8-42** — the
 storage README never names `LocalStorageProviderOptions.rootDir`. **V8-43** — seven wiring gaps:
-multi-tenancy and telemetry option tables incomplete, the logger `'private'` example,
-`RedactionPolicy`/`DATA_CLASSIFICATIONS`/`IPrincipal` undocumented, and a rate-limit key
+multi-tenancy and telemetry option tables incomplete, the logger `'private'` example, the
+`RedactionPolicy` shape and the `DATA_CLASSIFICATIONS` table absent (both NAMES do appear in
+`PUBLIC_API.md` and the common README), `IPrincipal` undocumented, and a rate-limit key
 contradiction. **V8-44** — `authorizationDiagnostics` and `EventsDiagnosticsOptions` appear only as
 export-table rows.
 
