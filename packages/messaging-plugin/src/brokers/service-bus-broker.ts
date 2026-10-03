@@ -808,7 +808,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
 
   /**
    * Tri-state backend reachability (M70c, bounded in M90b; evidence-first
-   * in M95b).
+   * in M95b; a negative outcome answers at once in M101a).
    *
    * The evidence is consulted FIRST: a data-plane outcome —
    * the success or network-layer failure of a real publish, recorded in
@@ -816,14 +816,23 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * trips — answers directly, because the thing reported on should be the
    * plane the application actually uses. Positive evidence expires after
    * {@linkcode ServiceBusOptions.dataPlaneEvidenceMs}; negative evidence is
-   * retained until contradicted. With no authoritative evidence the
-   * management probe answers exactly as it did before M95b: the probe
-   * delegates to the transport's `isHealthy?()` — the real adapter reads
-   * the namespace through the administration client — through the broker's
-   * own cached probe (5 s TTL, 2 s bound), so repeated health polls cost
-   * at most one round trip per TTL and a hung transport cannot hold a
-   * caller past the bound. `true`/`false` from the evidence or the probe,
-   * `undefined` when neither has an answer (a minimal fake, an idle
+   * retained until contradicted.
+   *
+   * A retained negative outcome returns `false` WITHOUT waiting for the
+   * management probe (V8-1): the probe is started in the background, and only
+   * when it settles `true` does it clear the outcome — so the NEXT read, not
+   * this one, answers through the probe again. Awaiting it here was a race the
+   * caller lost: the `messaging` indicator bounds this call with the same 2 s
+   * the probe is bounded with, so a probe that could not reach the namespace
+   * timed the indicator out first and the indicator reported `up`.
+   *
+   * With no authoritative evidence the management probe answers exactly as it
+   * did before M95b: the probe delegates to the transport's `isHealthy?()` —
+   * the real adapter reads the namespace through the administration client —
+   * through the broker's own cached probe (5 s TTL, 2 s bound), so repeated
+   * health polls cost at most one round trip per TTL and a hung transport
+   * cannot hold a caller past the bound. `true`/`false` from the evidence or
+   * the probe, `undefined` when neither has an answer (a minimal fake, an idle
    * broker) — the indicator then reports `reachable: 'unknown'`.
    *
    * @returns `true`/`false`/`undefined` as described
@@ -834,18 +843,33 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     if (evidence === true) {
       return evidence;
     }
-    if (this.#probe === null) {
+    const probe = this.#probe;
+    if (probe === null) {
       return evidence;
     }
-    const managementReachability = await this.#probe();
     if (evidence === false) {
-      if (managementReachability === true) {
-        this.#evidence = null;
-        return true;
-      }
+      this.#clearNegativeOutcomeInBackground(probe);
       return false;
     }
-    return managementReachability;
+    return await probe();
+  }
+
+  /**
+   * Starts the management probe without awaiting it, clearing the retained
+   * negative outcome only if the probe answers `true`.
+   *
+   * The probe is the cached, coalesced one, so repeated reads during an
+   * outage share one in-flight probe rather than stacking them, and it never
+   * rejects. The clear is skipped when the probe is no longer current: a
+   * `disconnect()` drops it, and every newly recorded failure rebuilds it —
+   * so a late `true` can never erase a failure recorded after it started.
+   */
+  #clearNegativeOutcomeInBackground(probe: () => Promise<boolean | undefined>): void {
+    void probe().then((reachable) => {
+      if (reachable === true && this.#probe === probe) {
+        this.#evidence = null;
+      }
+    });
   }
 
   /** Creates one bounded, cached management-plane probe from the current transport. */
