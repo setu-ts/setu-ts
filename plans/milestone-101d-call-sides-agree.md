@@ -24,7 +24,8 @@ the React Router boundary.
   `packages/telemetry-plugin` (the type-level proof that `activeSpanContext()` feeds the codec, and
   one doc note), `packages/react-router-plugin` (documented refusal boundary, pinned by test),
   `packages/starters/full-stack-starter` (config snapshot accessor), plus the CLI full-stack
-  template's `require-user.server.ts` header comment.
+  template's `require-user.server.ts` header comment, and `apps/full-stack` (one refusing route and
+  its smoke assertion — §3.2's real-runtime pin; no package `src`).
 - **NOT this milestone:** a problem-details body for React Router DOCUMENT navigations (declined
   with cause in §3.2 — the error boundary is React Router's own contract); per-attempt interceptor
   re-execution in the SDK (interceptors run once per `request()`, `http-client.ts:189-193`, and the
@@ -89,8 +90,11 @@ the React Router boundary.
   the framework should ship it. The SDK cannot import the codec at runtime (type-only pin, §1), so
   the format is written in the SDK with a JSDoc naming the `common` codec as the authority — the
   M98n precedent. The `common` widening is what lets server-side code (and the telemetry plugin's
-  own tests) write `contextToTraceparent(telemetry.activeSpanContext())` without a cast, which is
-  the `TS2345` the register hit.
+  own tests) pass an `activeSpanContext()` result to `contextToTraceparent` without a cast, which is
+  the `TS2345` the register hit. The result is `SpanContext | undefined` (and the member itself is
+  optional on `ITelemetryService`), while `TraceparentSource` deliberately excludes `undefined`, so
+  a caller narrows first (`if (active !== undefined) contextToTraceparent(active)`); the widening
+  removes the cast, not the check.
 - **Test home:** `packages/sdk/test/unit/trace-context-interceptor.test.ts` (unit: valid context →
   header; `undefined`/malformed/all-zero → no header; caller's header wins) and
   `packages/sdk/test/e2e/trace-propagation.test.ts` (new: a real kernel app reads `traceparent` off
@@ -98,9 +102,10 @@ the React Router boundary.
   type-only pin does not scan — and echoes `traceId`/`spanId`; the SDK client with the interceptor
   over a fixed source thunk must produce the same ids). The `common` half is pinned in
   `packages/common/test/unit/trace-context.test.ts` with a case that passes a literal `SpanContext`
-  object, and in `packages/telemetry-plugin/test/e2e/trace-continuity-real.test.ts` with ONE added
-  line calling `contextToTraceparent(service.activeSpanContext())` on the real OTel service and
-  asserting the header names the active span. **Negative control:** the telemetry line is a compile
+  object, and in `packages/telemetry-plugin/test/e2e/trace-continuity-real.test.ts` with one added
+  case that reads `service.activeSpanContext()` on the real OTel service, fails the test when it is
+  `undefined` (narrowing it), then passes the narrowed `SpanContext` to `contextToTraceparent` and
+  asserts the header names the active span. **Negative control:** the telemetry line is a compile
   error (`TS2345`) with the widening reverted — `deno check` is the control; the e2e without the
   interceptor shows the server reading no `traceparent`.
 
@@ -122,12 +127,21 @@ the React Router boundary.
   request, so a marker header cannot survive to the bridge; and rewriting an HTML `403` body into
   JSON at the bridge would break every application whose boundary IS the intended page. The ROADMAP
   offers documentation as the second arm; it is the only arm that does not fight React Router.
-- **Test home:** `packages/react-router-plugin/test/integration/react-router-integration.test.ts`
-  gains "a route-middleware refusal keeps React Router's status and content type beside an RFC 9457
-  kernel route": one kernel app with `errorHandler({ format: 'rfc9457' })`, a fake `ServerBuild`
-  whose handler answers `403 text/html`, and a kernel route throwing a `403` — asserting `text/html`
-  on the SSR path and `application/problem+json` on the kernel path in the SAME application.
-  **Negative control:** a bridge that rewrote the SSR `403` would fail the content-type assertion.
+- **Test home:** two layers, because a fake `ServerBuild` can prove the bridge copies a response
+  verbatim but cannot exercise React Router's own refusal path. (1) The BRIDGE pin:
+  `packages/react-router-plugin/test/integration/react-router-integration.test.ts` gains "the bridge
+  keeps an SSR response's status and content type beside an RFC 9457 kernel route": one kernel app
+  with `errorHandler({ format: 'rfc9457' })`, a fake `ServerBuild` whose handler answers
+  `403 text/html`, and a kernel route throwing a `403` — asserting `text/html` on the SSR path and
+  `application/problem+json` on the kernel path in the SAME application. (2) The REFUSAL path, on
+  the real React Router runtime: `apps/full-stack` gains a route whose module exports a route
+  `middleware` that throws `data(null, { status: 403 })` and an `ErrorBoundary` rendering a marker
+  string, and `apps/full-stack/smoke.ts` (the real Vite build `check:apps` already runs in CI)
+  requests it as a document and asserts `403`, `text/html`, and the boundary's marker in the body,
+  beside a kernel route answering `application/problem+json` in the same app. **Negative controls:**
+  a bridge that rewrote the SSR `403` fails (1)'s content-type assertion; deleting the route's
+  `ErrorBoundary` makes (2) render the root boundary instead and fails the marker assertion, which
+  is what proves the response came from React Router's boundary rather than the kernel responder.
   The CLI comment is asserted by the existing template content test
   (`packages/cli/test/unit/templates/full-stack-app-files.test.ts`, extended with the sentence).
 
@@ -237,6 +251,7 @@ must stay green with the new interceptor module in the graph.
 | `packages/starters/full-stack-starter/src/from-config.ts`                                                                                                   | `WeakMap` registration; `fullStackConfigOf`; `FullStackConfigUnavailableError`                                                                                                                                                                                                                                                                                          |
 | `packages/starters/full-stack-starter/src/index.ts`                                                                                                         | barrel                                                                                                                                                                                                                                                                                                                                                                  |
 | `packages/cli/src/templates/full-stack-app-files.ts`                                                                                                        | `require-user.server.ts` header comment (§3.2); no behaviour change                                                                                                                                                                                                                                                                                                     |
+| `apps/full-stack/app/routes/…` (one route), `apps/full-stack/smoke.ts`                                                                                      | §3.2 real-runtime refusal pin: a route `middleware` throwing a `403` rendered by its `ErrorBoundary`, asserted through the real build                                                                                                                                                                                                                                   |
 | `packages/sdk/README.md`, `packages/react-router-plugin/README.md`, `packages/starters/full-stack-starter/README.md`, `packages/telemetry-plugin/README.md` | the §2 deliverables (telemetry: one sentence pointing at the SDK interceptor from the trace-correlation section)                                                                                                                                                                                                                                                        |
 | `PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`                                                                                                        | contract notes; `Unreleased` entries (the codegen `3xx` change and the `Retry-After` cap are behaviour changes to generated output and to retry timing, both named); the "regenerate a client that documents a `3xx`" step under the upgrade guide's `## Unreleased` heading — none exists yet, so whichever of M101c/M101d lands first adds it and the other reuses it |
 
@@ -246,7 +261,7 @@ must stay green with the new interceptor module in the graph.
 | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `packages/common/test/unit/trace-context.test.ts` (extended)                                | `trace-context.ts`                                          | a literal `SpanContext` and a `TelemetryContext` both format to the same header; every existing validation case unchanged |
 | `packages/common/test/unit/barrel-exports.test.ts` (extended)                               | `src/index.ts`                                              | `TraceparentSource` exported (compile-time assignment)                                                                    |
-| `packages/telemetry-plugin/test/e2e/trace-continuity-real.test.ts` (one case added)         | none in telemetry; the `common` widening                    | `contextToTraceparent(service.activeSpanContext())` on the real OTel service names the active span — the `TS2345` control |
+| `packages/telemetry-plugin/test/e2e/trace-continuity-real.test.ts` (one case added)         | none in telemetry; the `common` widening                    | the narrowed `service.activeSpanContext()` passed to `contextToTraceparent` names the active span — the `TS2345` control  |
 | `packages/sdk/test/unit/trace-context-interceptor.test.ts` (new)                            | `trace/trace-context-interceptor.ts`                        | §3.1 unit cases; the source is read per call (a source that changes between two requests yields two headers)              |
 | `packages/sdk/test/e2e/trace-propagation.test.ts` (new)                                     | `trace/trace-context-interceptor.ts`, `http/http-client.ts` | §3.1 kernel echo; without the interceptor the server reads no header                                                      |
 | `packages/sdk/test/unit/retry-strategy.test.ts` (extended)                                  | `retry/retry-strategy.ts`                                   | §3.4 cases against `runWithRetry(fn, policy, method, timing, signal)` with the fake `IClientTiming` recording sleeps      |
@@ -255,7 +270,8 @@ must stay green with the new interceptor module in the graph.
 | `packages/sdk/test/unit/openapi-codegen.test.ts` (extended)                                 | `codegen/openapi-codegen.ts`                                | §3.3 shapes; the new fixture is byte-identical to `generateOpenApiClient(doc)` output                                     |
 | `packages/sdk/test/e2e/generated-client.test.ts` (extended)                                 | `codegen/openapi-codegen.ts`                                | §3.3 live redirect case                                                                                                   |
 | `packages/sdk/test/unit/barrel-exports.test.ts`, `type-only-common.test.ts`                 | `src/index.ts`                                              | new exports present; no runtime edge into `common`                                                                        |
-| `packages/react-router-plugin/test/integration/react-router-integration.test.ts` (extended) | `handler/request-bridge.ts`                                 | §3.2 side-by-side shapes                                                                                                  |
+| `packages/react-router-plugin/test/integration/react-router-integration.test.ts` (extended) | `handler/request-bridge.ts`                                 | §3.2 (1) side-by-side shapes through the bridge                                                                           |
+| `apps/full-stack/smoke.ts` (extended, run by `check:apps`)                                  | none (example app)                                          | §3.2 (2) route-middleware `403` rendered by React Router's `ErrorBoundary` on the real runtime                            |
 | `packages/cli/test/unit/templates/full-stack-app-files.test.ts` (extended)                  | `templates/full-stack-app-files.ts`                         | the boundary sentence is present in the emitted `require-user.server.ts`                                                  |
 | `packages/starters/full-stack-starter/test/integration/from-config.test.ts` (extended)      | `from-config.ts`                                            | §3.5 identity assertions; the named error for a non-factory app                                                           |
 | `packages/starters/full-stack-starter/test/unit/barrel-exports.test.ts` (extended)          | `src/index.ts`                                              | accessor and error exported                                                                                               |

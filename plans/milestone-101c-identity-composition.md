@@ -91,7 +91,16 @@ M101h, which documents the final shapes this letter ships and must NOT re-docume
   `tenantBindingMismatch(session: ISession, tenantId: string | undefined): boolean`. Session-plugin
   imports all three (its local copies are deleted — the M47 frame-codec / M70n `validatedStateKey`
   shape: a key two packages must agree on byte-for-byte lives in `common`). The seal stays where it
-  is (`:75-80`): it already runs after `next()` and therefore sees a late tenant.
+  is (`:75-80`) — it runs after `next()` and therefore sees a late tenant — but its condition
+  narrows from "the binding differs from the current tenant" to "the session carries NO binding": a
+  bound session is never rebound. Without that, (b) would be undone one frame up: the tenant
+  middleware at 310 has already called `replaceTenant(ctx.request, b)` when it refuses, the session
+  middleware's `await next()` then resumes, and today's `readTenantBinding(session) !== current`
+  seals `b` over `a` and commits it, so the NEXT request under `b` passes the compare. Narrowing the
+  condition, rather than having the refusal set a skip marker, closes every path that resumes the
+  seal with a mismatched tenant — the refusal, a handler-written tenant, and any third-party
+  middleware — and is behaviour-identical on the load-compare path, where a mismatched bound session
+  never reaches `next()`.
 - **Why this and not the ROADMAP's two arms:** "defer the compare to commit" is unsafe — by commit
   the handler has run under the mismatched session, which is the cross-tenant write the binding
   exists to stop; it would turn a refusal into a silent after-the-fact drop. "Refuse the composition
@@ -101,16 +110,22 @@ M101h, which documents the final shapes this letter ships and must NOT re-docume
   `ctx.state` directly rather than calling `ISessionService.from(ctx)`, which throws when the
   session has not loaded (§1) — a throw-and-catch per request at priority 40 is not a probe.
 - **The one case that stays at commit:** a tenant written by application code INSIDE a handler is
-  seen by neither middleware before the handler; the seal records it and the NEXT request compares.
-  That is documented (C3), not fixed — no middleware can precede the handler's own write.
+  seen by neither middleware before the handler; on an UNBOUND session the seal records it and the
+  NEXT request compares, and on a bound session it is not resealed, so the next request under the
+  handler's tenant is refused. That is documented (C3), not fixed — no middleware can precede the
+  handler's own write.
 - **Test home:** `packages/multi-tenancy-plugin/test/integration/tenant-binding-order.test.ts` (new;
   a real kernel app with `SessionPlugin`, a custom `ITenantResolver` reading `ctx.request.user` at
   `middlewarePriority: 310`, and a fake auth middleware at 300 setting the principal). **Negative
   control:** without (b), a session minted under tenant `a` presented with a principal naming tenant
-  `b` answers `200` and the handler runs; with it, `403` and the handler does not run. A second case
-  keeps the default-order path byte-identical: with `resolver: 'header'` at 40 the refusal still
-  comes from the SESSION middleware (asserted by a marker the tenant-side compare does not set), so
-  the shipped behaviour is unchanged.
+  `b` answers `200` and the handler runs; with it, `403` and the handler does not run. The same case
+  then asserts the refusal did not rebind: the committed session's `__setu_tenant` is still `a`, a
+  follow-up request under tenant `a` with the returned cookie answers `200`, and a follow-up under
+  `b` is still `403`. **Negative control:** restore the seal's `!== current` condition — the binding
+  reads `b` after the refusal and the follow-up under `b` answers `200`. A second case keeps the
+  default-order path byte-identical: with `resolver: 'header'` at 40 the refusal still comes from
+  the SESSION middleware (asserted by a marker the tenant-side compare does not set), so the shipped
+  behaviour is unchanged.
 
 ### 3.2 V8-7 — the session README gains a "Tenant binding" section
 
@@ -286,7 +301,7 @@ adds the one error. Each changed barrel's `barrel-exports.test.ts` is extended (
 | `packages/common/src/index.ts`                                                                                                                                                                    | barrel: the five new symbols                                                                                                                                                                                 |
 | `packages/session-plugin/src/services/session-tenant-binding.ts`                                                                                                                                  | re-exports the `common` key; `readTenantBinding`/`sealTenantBinding` call the shared helper's key                                                                                                            |
 | `packages/session-plugin/src/services/session-service.ts`                                                                                                                                         | imports `SESSION_STATE_KEY` from `common`                                                                                                                                                                    |
-| `packages/session-plugin/src/middleware/session-middleware.ts`                                                                                                                                    | compare through `tenantBindingMismatch`; JSDoc gains the two-sided rule                                                                                                                                      |
+| `packages/session-plugin/src/middleware/session-middleware.ts`                                                                                                                                    | compare through `tenantBindingMismatch`; the seal runs only for an unbound session (§3.1); JSDoc gains the two-sided rule                                                                                    |
 | `packages/multi-tenancy-plugin/src/interfaces/index.ts`                                                                                                                                           | `dataStore` widened; the two ports become re-exports of `common`                                                                                                                                             |
 | `packages/multi-tenancy-plugin/src/middleware/tenant-middleware.ts`                                                                                                                               | tenant-side compare after `replaceTenant`                                                                                                                                                                    |
 | `packages/multi-tenancy-plugin/src/services/multi-tenancy-service.ts`                                                                                                                             | late-binding store slot; `TenantDataStoreNotReadyError`                                                                                                                                                      |
@@ -308,7 +323,7 @@ adds the one error. Each changed barrel's `barrel-exports.test.ts` is extended (
 | `packages/common/test/unit/barrel-exports.test.ts` (extended)                            | `src/index.ts`, `services/tenancy.ts`                                 | the five new symbols are exported; `services/tenancy.ts` is type-only, so its coverage is the compile-time assignment of a fixture to `ITenantDataStore` and `ITenantIsolationStrategy` declared against the barrel                                                                            |
 | `packages/session-plugin/test/unit/services/session-service.test.ts` (extended)          | `services/session-service.ts`                                         | the import-only change keeps every existing case green; the state key it writes is asserted equal to `common`'s `SESSION_STATE_KEY`                                                                                                                                                            |
 | `packages/multi-tenancy-plugin/test/unit/errors.test.ts` (extended)                      | `errors.ts`                                                           | `TenantDataStoreNotReadyError` carries its `name`, a message naming `onInit` and the factory arm, and is `instanceof Error`                                                                                                                                                                    |
-| `packages/session-plugin/test/unit/middleware/session-middleware.test.ts` (extended)     | `middleware/session-middleware.ts`                                    | load-time compare unchanged; a tenant stamped by a downstream middleware is sealed at commit                                                                                                                                                                                                   |
+| `packages/session-plugin/test/unit/middleware/session-middleware.test.ts` (extended)     | `middleware/session-middleware.ts`                                    | load-time compare unchanged; a tenant stamped by a downstream middleware is sealed at commit on an unbound session; a bound session whose tenant changes downstream is not rebound                                                                                                             |
 | `packages/session-plugin/test/unit/session-tenant-binding.test.ts` (extended)            | `services/session-tenant-binding.ts`                                  | the key is `common`'s constant, byte-identical                                                                                                                                                                                                                                                 |
 | `packages/session-plugin/test/unit/barrel-exports.test.ts`                               | `src/index.ts`                                                        | unchanged surface                                                                                                                                                                                                                                                                              |
 | `packages/multi-tenancy-plugin/test/unit/tenant-middleware.test.ts` (extended)           | `middleware/tenant-middleware.ts`                                     | with a session in `ctx.state` bound to `a` and a resolver answering `b`: `403`, `next` not called, body through `respondWithError`; no session in state → unchanged; equal → unchanged                                                                                                         |

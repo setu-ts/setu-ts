@@ -68,8 +68,11 @@ documents the option by hand for a reader who writes it by hand).
 
 ### 3.1 V8-30 — a field pattern may carry its own redactor
 
-- **Decision:** `RedactionPolicy.fields` widens from `Record<string, DataClassification>` to
-  `Record<string, DataClassification | FieldRedaction>` where
+- **Decision:** `RedactionPolicy.fields` widens from
+  `readonly fields: Readonly<Record<string, DataClassification>>` to
+  `readonly fields: Readonly<Record<string, DataClassification | FieldRedaction>>` — both `readonly`
+  modifiers kept, so the public mutation contract is unchanged and only the value type widens —
+  where
   `FieldRedaction = { readonly classification: DataClassification; readonly redactor?: Redactor }`
   (a new exported type). Selection precedence becomes, in order: the matched field's own `redactor`,
   then `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`.
@@ -215,8 +218,12 @@ both value forms.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-The three `src` files are the only code; every documentation deliverable names the EXISTING gate
-that pins it, because a doc correction with no gate is the M90h lesson.
+The four `src` files — three redaction modules plus the `packages/common/src/index.ts` barrel — are
+the only code. The barrel is a re-export, fully covered merely by being loaded, so (the M56
+convention) its per-file number proves nothing and its one new export is pinned instead by the
+compile-time assignment in `barrel-exports.test.ts`; the 90% bar applies as measured to the three
+modules. Every documentation deliverable names the EXISTING gate that pins it, because a doc
+correction with no gate is the M90h lesson.
 
 | Test file / gate                                                                     | src or doc covered                                                                                  | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -165,7 +165,8 @@ output.
 ### 3.4 SIGINT during a write batch completes the rollback
 
 - **Decision:** `writeFiles(fs, files, options?: { signal?: AbortSignal })` checks `signal.aborted`
-  before every file's write and before every directory creation; when set it throws
+  before every file's write and before every directory creation, AND again after each write settles
+  — the final write included — still inside the rollback-protected `try`; when set it throws
   `InterruptedError`, which the existing `catch` turns into the M99b rollback (restore pre-existing
   bytes, remove created files, remove created directories deepest-first) before rethrowing. Each
   writing command maps `InterruptedError` to `EXIT_INTERRUPTED` with "Interrupted; the files this
@@ -177,14 +178,18 @@ output.
 - **Why:** M99b built the compensation and documented at `file-writer.ts:254` that a signal cannot
   reach it; §3.3 makes the signal reach it. Checking BETWEEN writes rather than racing a write in
   progress is what keeps the rollback's invariant: a write that started is recorded in `attempted`
-  before it begins, so an interruption observed after it completes still restores it. The
-  `generate app` drift states X59 reached — siblings' discovery maps naming a member the manifest
-  does not — are the same batch, so the same rollback covers them. The retry hint exists because a
-  pre-fix tree (or a SIGKILL) still leaves debris, and the refusal's current wording blames the
-  user's files.
+  before it begins, so an interruption observed after it completes still restores it. The post-write
+  check is what makes §3.3's boundary exact: a signal that arrives while the LAST write is pending
+  arrived before the writes had all completed, so it rolls back; only a signal observed after
+  `writeFiles` has returned leaves the finished tree and exits `0`. The `generate app` drift states
+  X59 reached — siblings' discovery maps naming a member the manifest does not — are the same batch,
+  so the same rollback covers them. The retry hint exists because a pre-fix tree (or a SIGKILL)
+  still leaves debris, and the refusal's current wording blames the user's files.
 - **Test home:** `packages/cli/test/unit/write-files-rollback.test.ts` (an `AbortController` aborted
   by the fake fs on the Nth write: no new file remains, pre-existing bytes restored, the thrown
-  error is `InterruptedError`; aborted before the first write: zero `writeFile` calls),
+  error is `InterruptedError`; aborted before the first write: zero `writeFile` calls; aborted by
+  the fake fs DURING the final write, which then succeeds: `InterruptedError` and a complete
+  rollback, so no post-write check is skipped for the last file),
   `packages/cli/test/e2e/scaffold-interrupted.test.ts` (REAL filesystem:
   `setu new --template
   full-stack` with a signal aborted from a fake fs wrapper on the 17th write

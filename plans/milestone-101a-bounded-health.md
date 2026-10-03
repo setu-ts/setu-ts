@@ -274,24 +274,42 @@ fail fast. The new outage tests therefore pause.
   `SchedulerService` through `withDeadline` with `ProbeTiming` from the plugin's runtime; the
   deadline's rejection takes the EXISTING catch arm, so it is logged and settled `'lock-failed'` and
   the re-arm that follows the fire path runs — fires continue at the next slot instead of stopping.
-  `DistributedLockOptions.commandTimeoutMs` (M98l shape, default `15_000`) is additionally forwarded
+  `IDistributedLock.acquire` takes no cancellation signal (it is a port an application may
+  implement, so adding one is a contract change this letter does not make), so a deadline cannot
+  stop the acquire — it only abandons it. An abandoned acquire that later RESOLVES to a token would
+  hold the lock nobody will release: at the handler-mutex site every later fire is skipped as
+  contended until the TTL expires, and at the two slot sites the fire it claimed runs nowhere. So
+  each `withDeadline` site, when the bound fires, attaches a continuation to the abandoned promise
+  that releases a late non-null token (`release(key, token)`, best-effort, a failure logged once and
+  swallowed) and ignores a late `null` or rejection. That continuation is the correctness guarantee
+  for EVERY lock implementation. `DistributedLockOptions.commandTimeoutMs` is additionally forwarded
   to `RedisLock` on the lazy path so the parked `SET NX` is cancelled on the client rather than
-  landing late and holding the handler mutex until its TTL. `MemoryLock` is unaffected (synchronous
-  map). The scheduler health indicator is unchanged in this letter (§9).
+  landing late at all, and it must not outlast the call it bounds: when unset it DEFAULTS to the
+  resolved `acquireTimeoutMs` (and to the M98l `15_000` only when `acquireTimeoutMs` is `0`), and a
+  configured `commandTimeoutMs` greater than a non-zero `acquireTimeoutMs` is refused with a
+  `RangeError` at construction naming both values. `MemoryLock` is unaffected (synchronous map). The
+  scheduler health indicator is unchanged in this letter (§9).
 - **Why:** the lock is a port a caller may implement, so the bound has to sit on the CALL, not on
   one backend; the Redis-side bound is the §3.1 reasoning about parked commands. Five seconds is
   below every realistic `every` interval and above the ~2 s a healthy Redis round trip never
   approaches; the option exists because a WAN lock may need more.
 - **Test home:** `test/unit/scheduler-service.test.ts` (a lock whose `acquire` never settles: with
   fake timers the fire settles `'lock-failed'` when the bound fires, the logger receives one line,
-  and the next slot is armed; `0` waits; the delay-slot claim at registration is bounded too).
-  `test/unit/redis-lock.test.ts` + `distributed-lock.test.ts` (the option reaches the constructor;
-  injected client untouched). New `packages/scheduler-plugin/test/integration/outage-real.test.ts`
-  through a kernel app with `diagnostics`, an `every` job on a 1 s grid,
-  `distributedLock: { enabled: true, storage: 'redis', acquireTimeoutMs: 1000 }`, `docker pause` on
-  Redis: within 3 s the scheduler source's `lockFailed` increments and keeps incrementing; unpause →
-  `dispatched` resumes. **In CI** (Redis), guarded `ignore:` on `REDIS_URL`. Negative control:
-  revert the deadline → `count` freezes and `lockFailed` stays `0` for the whole paused window.
+  and the next slot is armed; `0` waits; the delay-slot claim at registration is bounded too; an
+  `acquire` that resolves to a token AFTER the bound is released with that exact key and token, at
+  each of the three sites, and the next fire's mutex acquire is not contended; a late `null` and a
+  late rejection call no `release`). `test/unit/redis-lock.test.ts` + `distributed-lock.test.ts`
+  (the option reaches the constructor; unset, it defaults to `acquireTimeoutMs`; `commandTimeoutMs`
+  above a non-zero `acquireTimeoutMs` throws `RangeError`; injected client untouched). New
+  `packages/scheduler-plugin/test/integration/outage-real.test.ts` through a kernel app with
+  `diagnostics`, an `every` job on a 1 s grid,
+  `distributedLock: { enabled: true, storage: 'redis', acquireTimeoutMs: 500 }` (strictly below the
+  interval, the documented configuration; `commandTimeoutMs` takes its derived `500`),
+  `docker pause` on Redis: within 3 s the scheduler source's `lockFailed` increments and keeps
+  incrementing; unpause → `dispatched` resumes. **In CI** (Redis), guarded `ignore:` on `REDIS_URL`.
+  Negative control: revert the deadline → `count` freezes and `lockFailed` stays `0` for the whole
+  paused window. Remove the late-token release → the unit case's next fire reports `'contended'`
+  against its own abandoned token.
 
 ### 3.8 One outage test per package, through the endpoints
 
@@ -328,13 +346,13 @@ barrel test).
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                        | Consumer                                      | Behavior (per implementation)                                                                                                          |
-| ------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `commandTimeoutMs` (cache store, queue Redis arm, Redis lock) | `createLazyRedisClient` / `RedisLock.connect` | lazy path: ioredis `commandTimeout`; `0` omits it; injected client: ignored and documented; out of range: `RangeError` at construction |
-| `acquireTimeoutMs` (scheduler)                                | `SchedulerService` acquire sites              | `withDeadline` around every acquire; expiry → the catch arm → `lock-failed`; `0` unbounded                                             |
-| `requestTimeoutMs` (Vault)                                    | `HashiCorpVaultProvider`                      | `withDeadline` + `init.signal` on every fetch; expiry/network failure → `SecretProviderUnavailableError` (503); `0` unbounded          |
-| `poolStats` (existing)                                        | `#probeWithRawQuery`, `database` indicator    | NEW reader: skips the queued probe when saturated; the indicator maps `'unknown'` + saturated capacity to `up`                         |
-| `dataPlaneEvidenceMs` (existing)                              | `ServiceBusBroker`                            | unchanged meaning; the negative outcome it retains is now answered without awaiting the probe                                          |
+| Option                                                        | Consumer                                      | Behavior (per implementation)                                                                                                                                                                                        |
+| ------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commandTimeoutMs` (cache store, queue Redis arm, Redis lock) | `createLazyRedisClient` / `RedisLock.connect` | lazy path: ioredis `commandTimeout`; `0` omits it; injected client: ignored and documented; out of range: `RangeError` at construction; Redis lock: unset → the resolved `acquireTimeoutMs`, above it → `RangeError` |
+| `acquireTimeoutMs` (scheduler)                                | `SchedulerService` acquire sites              | `withDeadline` around every acquire; expiry → the catch arm → `lock-failed`, and a late token is released; `0` unbounded                                                                                             |
+| `requestTimeoutMs` (Vault)                                    | `HashiCorpVaultProvider`                      | `withDeadline` + `init.signal` on every fetch; expiry/network failure → `SecretProviderUnavailableError` (503); `0` unbounded                                                                                        |
+| `poolStats` (existing)                                        | `#probeWithRawQuery`, `database` indicator    | NEW reader: skips the queued probe when saturated; the indicator maps `'unknown'` + saturated capacity to `up`                                                                                                       |
+| `dataPlaneEvidenceMs` (existing)                              | `ServiceBusBroker`                            | unchanged meaning; the negative outcome it retains is now answered without awaiting the probe                                                                                                                        |
 
 ## 5. Implementation files
 

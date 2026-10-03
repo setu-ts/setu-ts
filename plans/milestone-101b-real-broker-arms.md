@@ -116,23 +116,44 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
   UNCHANGED. `NatsBroker.subscribe` passes the encoded value as both `name` and `durable_name` and
   keeps `filter_subject: topic` verbatim (the SUBJECT may contain dots). The default
   `messaging-<uuid>` and every legal user queue are therefore byte-identical to today, so no
-  existing durable consumer is renamed. A legal queue that literally contains `_2e` can collide with
-  a dotted one; that is documented rather than removed by escaping `_` too, which would rename every
-  underscore queue in every running deployment.
+  existing durable consumer is renamed. The encoding alone is NOT injective: a legal queue that
+  literally contains an escape (`orders_2eeu`) encodes to the same name as a dotted one
+  (`orders.eu`). Escaping `_` too would remove that, but would rename every underscore queue in
+  every running deployment, so the collision is REFUSED instead, at both places it can be seen. (a)
+  In-process: the broker keeps a map of consumer name → raw queue for its own subscriptions on the
+  stream, and a `subscribe` whose distinct raw queue encodes to a name already mapped throws the new
+  exported `NatsConsumerNameCollisionError(queue, existingQueue, consumerName)`, naming both values,
+  before `jsm.consumers.add` is called. (b) Across processes: `jsm.consumers.add` now records the
+  raw queue as consumer `metadata: { 'setu.queue': <raw> }` (NATS 2.10+, which the CI
+  `nats:2-alpine -js` container is), and the "already exists" arm that today silently reuses the
+  consumer instead reads `jsm.consumers.info(stream, name)` and throws the same error when the
+  recorded raw queue differs, or when the existing `filter_subject` is not this `topic` — the second
+  condition also closes today's silent attach of a queue reused across two topics to the first
+  topic's consumer. A consumer with no `setu.queue` metadata (created before this letter) is
+  accepted when its filter matches, so no deployed consumer is refused on upgrade.
 - **Why:** the refusal is client-side (`jsmconsumer_api.js:51`), before the wire, on the exact name
   the inbox mints — so NATS `request()` has never worked against a real server, and any dotted user
   queue fails identically. A hash was rejected because it hides the queue name from an operator's
   `nats consumer ls`; the hex escape keeps it readable.
 - **Test home:** `test/unit/nats-consumer-name.test.ts` (the nine-character table as data; identity
-  for a legal name; injectivity over a corpus of dotted and wildcard names; the real `nats`
-  `validateDurableName` from the pinned package accepts every encoded output — a guarded real-import
-  assertion beside `nats-real-import.test.ts`). `test/unit/nats-broker.test.ts` (the encoded name
-  reaches `jsm.consumers.add` as `name` and `durable_name`; `filter_subject` keeps the dotted
-  topic). `test/integration/nats-real.test.ts` gains two cases: a `respond`/`request` round-trip
-  through a kernel app whose `streamSubjects` cover `<scope>.>` and `rr.inbox.>` (the subject set C3
-  documents), and a user subscription with `queue: 'orders.eu'` that delivers. **In CI**
-  (`NATS_URL`). Negative control: revert the encoding → the RPC case fails with the run's verbatim
-  `invalid durable name - durable name cannot contain '.'`.
+  for a legal name; injectivity over a corpus of dotted and wildcard names that contain no literal
+  escape sequence, and the `orders.eu` / `orders_2eeu` pair pinned as the known non-injective case;
+  the real `nats` `validateDurableName` from the pinned package accepts every encoded output — a
+  guarded real-import assertion beside `nats-real-import.test.ts`). `test/unit/nats-broker.test.ts`
+  (the encoded name reaches `jsm.consumers.add` as `name` and `durable_name`; `filter_subject` keeps
+  the dotted topic; `subscribe(t, h, { queue: 'orders.eu' })` then `{ queue: 'orders_2eeu' }` on one
+  broker rejects with `NatsConsumerNameCollisionError` naming both and makes no second `add`; an
+  "already exists" whose `info` carries another `setu.queue`, or another `filter_subject`, rejects
+  with the same error; one with no metadata and a matching filter attaches).
+  `test/integration/nats-real.test.ts` gains two cases: a `respond`/`request` round-trip through a
+  kernel app whose `streamSubjects` cover `<scope>.>` and `rr.inbox.>` (the subject set C3
+  documents), a user subscription with `queue: 'orders.eu'` that delivers, and the collision across
+  two broker instances — `orders.eu` in one, `orders_2eeu` in a second — where the second's
+  `subscribe` rejects with `NatsConsumerNameCollisionError` and the first keeps delivering. **In
+  CI** (`NATS_URL`). Negative control: revert the encoding → the RPC case fails with the run's
+  verbatim `invalid durable name - durable name cannot contain '.'`. Remove the "already exists"
+  `info` check → the cross-instance collision case's second `subscribe` resolves and attaches to the
+  first instance's consumer, so the two independent queues split one consumer's messages.
 
 ### 3.3 V8-26 — a Kafka topic that cannot be subscribed is named, and the consumer never crashes the process
 
@@ -185,6 +206,7 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 | ---------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
 | `PubSubSubscriptionBoundElsewhereError`              | class  | thrown by the real Pub/Sub adapter's `open()`; rejects `subscribe()`/`start()`; `instanceof` for an application   |
 | `KafkaTopicUnavailableError`                         | class  | thrown by `KafkaBroker.subscribe`; rejects `start()` for a declared subscription; `instanceof` for an application |
+| `NatsConsumerNameCollisionError`                     | class  | thrown by `NatsBroker.subscribe` (§3.2); rejects `start()` for a declared subscription; `instanceof`              |
 | `KafkaOptions.retry` / `KafkaMessagingOptions.retry` | option | `resolveClient` → `new Kafka({ retry })`                                                                          |
 
 `toJetStreamConsumerName` and `deriveDefaultSubscription` stay internal (pinned by the existing
@@ -206,11 +228,11 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `packages/messaging-plugin/src/brokers/pubsub-broker.ts`      | `deriveDefaultSubscription`, length refusal, facade `getMetadata`, binding check in the real adapter (§3.1) |
 | `packages/messaging-plugin/src/brokers/nats-consumer-name.ts` | `toJetStreamConsumerName` + the forbidden-character table (§3.2)                                            |
-| `packages/messaging-plugin/src/brokers/nats-broker.ts`        | encode `name`/`durable_name` (§3.2)                                                                         |
+| `packages/messaging-plugin/src/brokers/nats-broker.ts`        | encode `name`/`durable_name`; `setu.queue` metadata; collision refusal in-process and on "already exists"   |
 | `packages/messaging-plugin/src/brokers/kafka-broker.ts`       | named error, `run()` rejection reader, `retry` forwarding (§3.3)                                            |
 | `packages/messaging-plugin/src/interfaces/index.ts`           | `KafkaOptions.retry`, `KafkaMessagingOptions.retry`; JSDoc for C4                                           |
-| `packages/messaging-plugin/src/errors.ts`                     | the two error classes                                                                                       |
-| `packages/messaging-plugin/src/index.ts`                      | exports the two classes                                                                                     |
+| `packages/messaging-plugin/src/errors.ts`                     | the three error classes                                                                                     |
+| `packages/messaging-plugin/src/index.ts`                      | exports the three classes                                                                                   |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -225,7 +247,7 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 | `test/unit/kafka-broker.test.ts` (extend)      | `brokers/kafka-broker.ts`, `errors.ts`       | §3.3 unit cases against `new KafkaBroker(runtime, serializer, { client, retry, logger })`; `cause` identity                                                                                                                                          |
 | `test/unit/messaging-plugin.test.ts` (extend)  | `interfaces/index.ts`                        | the `kafka` arm forwards `retry`                                                                                                                                                                                                                     |
 | `test/integration/kafka-real.test.ts` (extend) | `brokers/kafka-broker.ts`                    | fresh-topic boot + delivery; injected-protocol-error boot rejects with the named error. **CI**, `ignore:` on `KAFKA_BROKERS`                                                                                                                         |
-| `test/unit/barrel-exports.test.ts` (extend)    | `index.ts`                                   | two classes added; the two helpers absent                                                                                                                                                                                                            |
+| `test/unit/barrel-exports.test.ts` (extend)    | `index.ts`                                   | three classes added; the two helpers absent                                                                                                                                                                                                          |
 
 Per-file numbers are read from the ANSI-stripped `deno task test:coverage:pkg messaging-plugin`
 table on the rebased branch before the first edit and after each change; `nats-consumer-name.ts` and

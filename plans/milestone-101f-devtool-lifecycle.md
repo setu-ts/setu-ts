@@ -162,12 +162,15 @@ option families and served in `/v1/cache` with a valid MAC.
   time a devtool port is allocated (default `basePort + 1000`, clamped to `MAX_PORT`;
   `--devtool-port` on `generate app --devtool` or `devtool enable` with no record yet sets it to
   that value), and a new `allocateDevtoolPort(manifest)` returns
-  `max(devtoolBasePort − 1, every devtoolPort) + 1`, probed for bindability exactly as
-  `allocatePort` is. `allocatePort` keeps walking BOTH kinds (so an application port can never land
-  on a connector port), `reallocate` assigns devtool ports from the devtool range, and
-  `readWorkspaceManifest` accepts an absent key (derived) and refuses a defined non-number, the
-  `devtoolPort` precedent at `manifest.ts:283-294`. The launcher reads only `members[].devtoolPort`
-  (§1), so it is unaffected.
+  `max(devtoolBasePort − 1, every devtoolPort) + 1`, then keeps advancing past any candidate that is
+  an existing member's application `port` or fails the bindability probe (`allocatePort`'s probe). A
+  stopped application is invisible to the probe, so the configured-port skip is what keeps a
+  connector off an application port the range overlaps — a `basePort + 1000` default does not stop a
+  workspace with hand-edited ports, or one past a thousand members, from overlapping. `allocatePort`
+  keeps walking BOTH kinds (so an application port can never land on a connector port), `reallocate`
+  assigns devtool ports from the devtool range, and `readWorkspaceManifest` accepts an absent key
+  (derived) and refuses a defined non-number, the `devtoolPort` precedent at `manifest.ts:283-294`.
+  The launcher reads only `members[].devtoolPort` (§1), so it is unaffected.
 - **Why:** allocating connector ports in the application sequence makes a devtool member consume two
   consecutive application numbers, which is what collided with the smoke's reserved range and what
   makes "this member's port is `5870`" ambiguous between an app and a connector. A fixed offset from
@@ -176,11 +179,12 @@ option families and served in `/v1/cache` with a valid MAC.
   survives a hand-edited `basePort`, because it is stored rather than derived on every read.
 - **Test home:** `packages/cli/test/unit/workspace-manifest.test.ts` (absent key → derived default;
   defined non-number → malformed), `packages/cli/test/unit/allocate-port.test.ts`
-  (`allocateDevtoolPort` starts at the range base and skips occupied ports; `allocatePort` still
-  skips connector ports), `packages/cli/test/unit/reallocate.test.ts` (devtool ports land in the
-  devtool range), `packages/cli/test/unit/devtool-manifest-merge.test.ts` (first allocation records
-  `devtoolBasePort`). **Negative control:** route `resolveDevtoolPort` back through `allocatePort` —
-  the allocation case asserts `5870` for a `5869` app port and fails.
+  (`allocateDevtoolPort` starts at the range base and skips occupied ports, and skips a member's
+  application `port` that sits at the range base even when nothing is bound to it; `allocatePort`
+  still skips connector ports), `packages/cli/test/unit/reallocate.test.ts` (devtool ports land in
+  the devtool range), `packages/cli/test/unit/devtool-manifest-merge.test.ts` (first allocation
+  records `devtoolBasePort`). **Negative control:** route `resolveDevtoolPort` back through
+  `allocatePort` — the allocation case asserts `5870` for a `5869` app port and fails.
 
 ### 3.5 The production image carries no connector (V8-21)
 
