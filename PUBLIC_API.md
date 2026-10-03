@@ -1368,12 +1368,18 @@ before the indicator reports it. A Drizzle registration that supplies
 `DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
 documented pool API — also publishes the returned `DatabasePoolCapacity` snapshot
 (`{ total, idle, waiting }`) under `data.capacity`. Omitted, the payload carries no capacity fields.
-Capacity is data, not policy: no threshold is applied and no status changes because of it
-(caller-facing pool-timeout status mapping is M90f). A snapshot the callback returns in a malformed
-shape is dropped exactly like an absent one — a broken reading is never published as a number. A
-callback that throws, or one whose counters violate the documented shape (a negative count, or
-`idle` exceeding `total`, which counts idle + in use), is dropped the same way: capacity is omitted
-for that poll and the indicator's own lifecycle and reachability answer stands.
+Capacity is data, not policy: no threshold is applied, and the snapshot changes one row only.
+**Since M101a**, when it shows every connection busy with callers waiting (`idle === 0` and
+`waiting > 0`), the probe queues no `SELECT 1` and the indicator reports `up` with
+`reachable: 'unknown'` — saturation, not an outage, so `/ready` does not pull every saturated
+replica at once. Without `poolStats` that row cannot be read, so a pool connection timeout or an
+unanswered probe reports `degraded` (a pool connection timeout reported `down` before M101a: the
+database never answered either way). Caller-facing pool-timeout status mapping is M90f. A snapshot
+the callback returns in a malformed shape is dropped exactly like an absent one — a broken reading
+is never published as a number. A callback that throws, or one whose counters violate the documented
+shape (a negative count, or `idle` exceeding `total`, which counts idle + in use), is dropped the
+same way: capacity is omitted for that poll and the indicator's own lifecycle and reachability
+answer stands.
 
 **Since M95b** the payload also carries `reachable` whenever the adapter carries a liveness probe
 (the optional `IDatabaseAdapter.isHealthy?()`): `true` — the backend answered; `false` — `down`; a
@@ -3028,6 +3034,13 @@ listener `ioredis` prints every reconnect failure to `console.error`, bypassing 
 redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
 unchanged; the indicator still reports the outage.
 
+**Command bound.** Since M101a the Redis store's `options.commandTimeoutMs` (default `15000`, `0`
+disables) is the ioredis `commandTimeout` on the client it builds. A paused or partitioned Redis
+keeps its socket open, so a command used to wait forever; it now rejects inside the bound, is
+counted `failed` in the cache observations, and the `cache` indicator reports `down`. Not applied to
+an injected client. A value outside `0`–`2147483647` throws `RangeError` when `CachePlugin(...)` is
+called.
+
 ### Cache diagnostics (M98i)
 
 `CachePlugin({ diagnostics: { enabled: true, alias: 'primary' } })` counts every backend call its
@@ -4583,19 +4596,20 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 
 ### Options
 
-| Option                                               | Provider                | Description                                                                                                                   |
-| ---------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                |
-| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                       |
-| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                      |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                           |
-| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                |
-| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                            |
-| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected). |
-| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                |
-| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                     |
-| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                     |
-| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                |
+| Option                                               | Provider                | Description                                                                                                                      |
+| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                   |
+| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                          |
+| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                         |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                              |
+| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                   |
+| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                               |
+| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).    |
+| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                   |
+| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                        |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                        |
+| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                   |
+| `options.requestTimeoutMs`                           | `vault`                 | Bound on one Vault request in ms; `0` disables. Default `5000`. A value outside `0`–`2147483647` throws `RangeError` at startup. |
 
 ### Exports
 
@@ -4603,6 +4617,12 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 - `SecretsService` — the `ISecretManager` implementation (provider + read cache).
 - `EnvProvider`, `AwsKmsProvider`, `GcpSecretManagerProvider`, `AzureKeyVaultProvider`,
   `HashiCorpVaultProvider` — provider classes.
+- `SecretProviderUnavailableError` — **since M101a**, a provider that cannot be reached, answered
+  **`503 Service Unavailable`** through a status hint. `HashiCorpVaultProvider` rejects with it when
+  a request fails on the network or does not answer inside `options.requestTimeoutMs`; the transport
+  error is kept as `cause` for the log and never reaches the response body. A Vault that answers
+  with an HTTP error is reachable and keeps its handling: `404` reads as `null`, any other error
+  status rejects with a plain `Error`. `provider` names the unreachable provider.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write
@@ -5546,17 +5566,22 @@ records the outcome of every real publish — the **data plane** — and `reacha
 FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs` (default
 `5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected topic or a
 quota error is an application-level fact, never an outage) resolves `false` until a successful
-publish or a positive management probe contradicts it. The plane distinction is the substance: the
-management round trip proves the **management** plane is reachable — evidence about the data plane,
-never proof of it — and that gap is what let a stopped namespace report `up` while every publish
-threw. Two further changes: every arm's probe is bounded by the indicator's `createCachedProbe`
-(5-second TTL, 2-second bound), so a probe that cannot answer — a **hung** broker, the condition a
-stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health` open; and
-the RabbitMQ probe is a real round trip (a throwaway channel open/close), replacing the
-connection-fault flag read that a hung broker never trips. Residual exposure, stated rather than
-implied: a deployment whose Service Bus management plane is unreachable and that publishes nothing
-keeps reporting `reachable: 'unknown'` with status `up` until its first publish — an operator who
-needs the signal can publish synthetically.
+publish or a positive management probe contradicts it. **Since M101a** that retained failure is
+answered at once: the management probe runs in the background and only a `true` answer clears the
+outcome, for the NEXT read. Before, `reachability()` awaited the probe, whose own 2-second bound
+tied the indicator's, so the indicator's bound fired first and a recorded outage was reported `up`.
+A failure inside a window the indicator has already cached as `up` is reported at the first poll
+after that 5-second cache expires. The plane distinction is the substance: the management round trip
+proves the **management** plane is reachable — evidence about the data plane, never proof of it —
+and that gap is what let a stopped namespace report `up` while every publish threw. Two further
+changes: every arm's probe is bounded by the indicator's `createCachedProbe` (5-second TTL, 2-second
+bound), so a probe that cannot answer — a **hung** broker, the condition a stopped one never
+produces — settles `reachable: 'unknown'` instead of holding `/health` open; and the RabbitMQ probe
+is a real round trip (a throwaway channel open/close), replacing the connection-fault flag read that
+a hung broker never trips. Residual exposure, stated rather than implied: a deployment whose Service
+Bus management plane is unreachable and that publishes nothing keeps reporting
+`reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
+can publish synthetically.
 
 ### Integration event contracts
 
@@ -5799,6 +5824,14 @@ app.register(QueuePlugin({
 `info`. Without a listener `ioredis` prints every reconnect failure to `console.error`, bypassing
 the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
 semantics are unchanged; the indicator still reports the outage.
+
+**Command bound.** Since M101a the `'redis'` adapter's `commandTimeoutMs` option (default `15000`,
+`0` disables) is the ioredis `commandTimeout` on the client it builds, so a paused server makes
+`add()` reject and a poll record the failure instead of waiting forever. Not applied to an injected
+`client`. A value outside `0`–`2147483647` throws `RangeError` when `QueuePlugin(...)` is called. A
+depth row in the observations describes the latest cycle only: a name that cycle did not read has no
+row, and the source's `failure` plus `depthCoverage: 'partial'` say why — an unreadable depth is
+never a retained zero.
 
 ### Declarative processors and behaviours
 
@@ -6109,7 +6142,15 @@ schedule until the registering plugin re-creates it. For durable background work
   scheduler (Cloudflare Workers); catch it by identity to branch on the refusal
 - **`SchedulerPluginOptions`** — Plugin configuration options (`timezone?`, `distributedLock?`)
 - **`DistributedLockOptions`** — Lock configuration (`enabled?`, `storage?`, `url?`, `client?`,
-  `lock?`, `ttlMs?`)
+  `lock?`, `ttlMs?`, `acquireTimeoutMs?`, `commandTimeoutMs?`). **Since M101a** every lock acquire
+  is bounded by `acquireTimeoutMs` (default `5000`, `0` waits indefinitely), whichever lock is in
+  use: an acquire still unsettled at the bound is a skipped fire — logged, counted `lockFailed` in
+  the execution observations, and re-armed for the next slot — and a token it returns later is
+  released. `commandTimeoutMs` is the ioredis `commandTimeout` on the client `RedisLock` builds
+  (default `acquireTimeoutMs`, or `15000` when that is `0`; never applied to an injected client or
+  lock); a timed-out `SET` may still apply on the server, so `RedisLock` releases that exact token
+  before rethrowing. Either value outside `0`–`2147483647`, or a `commandTimeoutMs` above a non-zero
+  `acquireTimeoutMs`, throws `RangeError` when `SchedulerPlugin(...)` is called
 - **`IDistributedLock`** — Lock seam (`acquire`/`release`) for a custom lock implementation
 - **`IRedisLockClient`** — Structural ioredis shape accepted by `distributedLock.client`
 - **`IScheduler`** — Scheduler service interface (re-exported from `@setu-ts/common`)
@@ -10200,6 +10241,9 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | `encodeFrameData(data)`                                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `decodeFrameData(payload)`                             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `createCachedProbe(options)`                           | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `withDeadline(run, options)`                           | function | **Since M101a.** Runs one backend call under a bound whose expiry is a recorded failure: `run` receives an `AbortSignal` to forward; the call is raced against the deadline (an injected seam may ignore the signal), and on expiry the signal is aborted and the promise REJECTS with `options.onTimeout()`. The call's own rejection is never swallowed. `timeoutMs: 0` arms no timer. The request-path counterpart of `createCachedProbe`, which never rejects. Prefer a client's native per-command timeout where one exists                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `deadlineRangeError(name, timeoutMs)`                  | function | **Since M101a.** Returns the `RangeError` naming `name` for a deadline outside `0`–`2147483647` (including `NaN`), or `null` when valid — so an option holder can refuse a bad value at construction with the same message `withDeadline` uses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `DeadlineOptions`                                      | type     | **Since M101a.** `{ timeoutMs, onTimeout, timing? }` for `withDeadline`; `timing` is the `setTimer`/`clearTimer` surface, typically `resolveProbeTiming(ctx.runtime)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `resolveProbeTiming(runtime)`                          | function | Resolves a probe's clock-and-timer surface — `{ hrtime, setTimer, clearTimer }` bound to the injected `IRuntimeServices` (e.g. `ctx.runtime`), ready to spread into `createCachedProbe`'s options. NO ambient `performance.now()`/`Date.now()` fallback: all time access outside `packages/runtime` goes through `IRuntimeServices` (AI_GUIDELINES §4), so a caller with no runtime to inject has no clock the probe may lawfully read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `createConnectionErrorReporter(options)`               | function | Builds a de-duplicating sink for one connection's error events from `{ source, logger }`, where `logger` is a thunk read at CALL time. The first error of a run, or one whose message differs from the previous, logs at `warn`; a repeat of the previous message logs at `debug` with a `repeats` count; `recovered()` after at least one error logs once at `info` and resets, so the next outage warns again. Only the error's message is logged, never its stack. Neither method throws — a failing logger or an unstringifiable value is swallowed, since the caller is an event-emitter listener. An accessor returning `undefined` drops the event (no log sink is registered; the owning package's `isHealthy` probe still reports the outage)                                                                                                                                                                                                                                        |
 | `attachConnectionErrorReporter(client, reporter)`      | function | Attaches a reporter to a client's `'error'` (→ `report`) and `'ready'` (→ `recovered`) events, returning `false` when the value exposes no `on` method. For clients a package BUILT: an injected client belongs to the caller, and adding an `'error'` listener to it would silence the caller's own handling, since `ioredis` falls back to `console.error` only when no listener exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |

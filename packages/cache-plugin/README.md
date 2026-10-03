@@ -52,6 +52,12 @@ application logger — the first error of an outage at `warn`, identical repeats
 recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
 injected client gets no listener: it belongs to the caller.
 
+`options.commandTimeoutMs` (Redis only, default `15000`, `0` disables) bounds each command on the
+client the store builds. A paused or partitioned server keeps its socket open, so without the bound
+a cache call waits forever; with it the call rejects, the diagnostics count it `failed`, and the
+`cache` health indicator reports `down`. It is not applied to an injected `client`, and a value
+outside `0`–`2147483647` throws `RangeError` when `CachePlugin(...)` is called.
+
 A `name` other than `'default'` derives the capability token as `cache.<name>`, so several caches
 can coexist in one application.
 

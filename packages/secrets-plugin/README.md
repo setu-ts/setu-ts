@@ -64,6 +64,15 @@ SecretsPlugin({
 Vault secrets store the string under the `value` field of the KV item; `rotate` writes a new
 version.
 
+Every Vault request is bounded by `options.requestTimeoutMs` (default `5000`, `0` disables). A
+request that fails on the network or does not answer in time rejects with
+`SecretProviderUnavailableError`, which carries a `503 Service Unavailable` status hint, so an
+application running `errorHandler` answers an outage with a retryable `503` instead of a masked
+`500`. The transport error is kept as `cause` for the log and never reaches the response body. A
+Vault that answers with an HTTP error is reachable, so it keeps the existing handling: `404` reads
+as `null`, any other error status rejects with a plain `Error`. A value outside `0`–`2147483647` is
+refused with a `RangeError` when the application starts.
+
 ### AWS Secrets Manager (KMS-backed)
 
 ```typescript
@@ -94,19 +103,20 @@ SecretsPlugin({
 
 ## Options
 
-| Option                                               | Provider                | Description                                                                                                                   |
-| ---------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                |
-| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                       |
-| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                      |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                           |
-| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                |
-| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                            |
-| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected). |
-| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                |
-| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, and KV mount.                                                                                    |
-| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected client facade (bypasses lazy import).                                                                                |
-| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                |
+| Option                                               | Provider                | Description                                                                                                                      |
+| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                   |
+| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                          |
+| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                         |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                              |
+| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                   |
+| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                               |
+| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).    |
+| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                   |
+| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, and KV mount.                                                                                       |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected client facade (bypasses lazy import).                                                                                   |
+| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                   |
+| `options.requestTimeoutMs`                           | `vault`                 | Bound on one Vault request in ms; `0` disables. Default `5000`. An outage rejects with `SecretProviderUnavailableError` (`503`). |
 
 ## API
 
@@ -115,6 +125,7 @@ SecretsPlugin({
 - `EnvProvider`, `AwsKmsProvider`, `GcpSecretManagerProvider`, `AzureKeyVaultProvider`,
   `HashiCorpVaultProvider` — provider classes.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered `501`.
+- `SecretProviderUnavailableError` — a provider that cannot be reached, answered `503`.
 - `IAwsSecretsClient`, `IGcpSecretsClient`, `IAzureSecretsClient`, `IVaultHttp` — structural
   injection types.
 
@@ -159,6 +170,7 @@ through the provider's own client facade, which bypasses the plugin's write path
 | `GcpSecretManagerProvider`        | class     |
 | `HashiCorpVaultProvider`          | class     |
 | `ReadOnlySecretProviderError`     | class     |
+| `SecretProviderUnavailableError`  | class     |
 | `SecretsService`                  | class     |
 | `AwsKmsProviderOptions`           | interface |
 | `AzureKeyVaultProviderOptions`    | interface |

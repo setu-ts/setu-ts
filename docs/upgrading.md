@@ -10,6 +10,39 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+Nothing below fails to compile; each change is a default that now applies to a running application.
+
+### Keep a scheduler lock bound below each job's interval
+
+Every distributed-lock acquire is now bounded by `distributedLock.acquireTimeoutMs`, default `5000`.
+An acquire still unsettled at the bound skips that fire. If a job runs more often than every five
+seconds, set `acquireTimeoutMs` below its interval. If you set `commandTimeoutMs`, it must not
+exceed a non-zero `acquireTimeoutMs`, or `SchedulerPlugin(...)` throws `RangeError`. `0` restores
+the old unbounded wait, which leaves the schedule parked while the lock backend is unreachable.
+
+### Check code that branches on a Vault error
+
+A Vault request that fails on the network or times out (default `requestTimeoutMs: 5000`) now
+rejects with `SecretProviderUnavailableError`, answered `503` through `errorHandler`, instead of a
+plain `Error` answered as a masked `500`. Catch it by identity if you handled the old error, and
+raise `requestTimeoutMs` if a slow Vault legitimately takes longer.
+
+### Review alerts keyed on the `database` and `queue` health data
+
+A Drizzle pool connection timeout now reports `degraded` instead of `down`, and, with `poolStats`
+supplied, a saturated pool reports `up` with `reachable: 'unknown'`. An alert that paged on `down`
+for pool exhaustion should watch `degraded` or `data.capacity` instead. Separately, a queue depth
+row the latest diagnostics cycle could not read is now absent rather than repeating the previous
+count; a dashboard should read `depthCoverage` instead of assuming every name has a row.
+
+### Raise a Redis command bound for a slow network
+
+Cache and queue Redis commands are now bounded at `15000` ms through `commandTimeoutMs`. An injected
+client is unaffected. Set `commandTimeoutMs` higher, or `0` to disable, if a command legitimately
+takes longer.
+
 ## 0.8.0
 
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at

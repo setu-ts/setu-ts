@@ -6,6 +6,56 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`withDeadline`, `deadlineRangeError` and `DeadlineOptions` in `common` (M101a).** A bound on one
+  backend call whose expiry is a REJECTION with the caller's own error, never a swallowed timeout:
+  the call receives an `AbortSignal`, is raced against the deadline in case it ignores the signal,
+  and its own rejection is never masked. It is the request-path counterpart of `createCachedProbe`,
+  which never rejects. `deadlineRangeError` lets an option holder refuse a bad bound at
+  construction.
+- **New bound options (M101a).** `CachePlugin`'s Redis store and `QueuePlugin`'s `'redis'` adapter
+  take `commandTimeoutMs` (default `15000`, `0` disables), applied as the ioredis `commandTimeout`
+  on the client they build. `SchedulerPlugin`'s `DistributedLockOptions` take `acquireTimeoutMs`
+  (default `5000`, `0` waits) and `commandTimeoutMs` (default `acquireTimeoutMs`, or `15000` when
+  that is `0`). The `vault` secrets provider takes `requestTimeoutMs` (default `5000`). None is
+  applied to an injected client or lock. An out-of-range value — including `NaN`, which
+  `Number(env.X)` yields for an unset variable — throws `RangeError` at startup.
+- **`SecretProviderUnavailableError` (M101a).** Exported by `@setu-ts/secrets-plugin` and carrying a
+  `503` status hint, so an application running `errorHandler` answers an unreachable provider with a
+  retryable `503` instead of a masked `500`. The transport error is kept as `cause` and never
+  reaches the response body.
+
+### Changed
+
+- **Every backend call M101a covers is now bounded by default, and an expired bound is a recorded
+  failure.** A paused or partitioned Redis keeps its socket open, so a cache, queue or
+  scheduler-lock command used to wait forever. It now rejects inside the bound: a cache call is
+  counted `failed` and the `cache` indicator reports `down`; `queue.add()` rejects and a poll
+  records the failure; a lock acquire that does not settle is a skipped fire, logged, counted
+  `lockFailed` and re-armed for the next slot, so a paused backend skips fires instead of stopping
+  the schedule. A token an abandoned acquire returns later is released, and `RedisLock` releases the
+  exact token of a timed-out `SET`, which can still apply once Redis answers. Verified against a
+  real paused Redis 7.
+- **A Vault request that fails on the network or does not answer in `requestTimeoutMs` now rejects
+  with `SecretProviderUnavailableError` (`503`)** instead of a plain error served as a masked `500`.
+  A Vault that answers with an HTTP error keeps its handling: `404` reads as `null`, any other error
+  status rejects with a plain `Error`.
+- **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
+  registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
+  `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
+  every saturated replica at once. A pool connection timeout now reports `degraded` rather than
+  `down` — the probe used to answer `false` for it, though the database never answered either way.
+  Verified against a live PostgreSQL 16 pool.
+- **A retained Service Bus outage is answered at once (M101a).** With a recorded network failure,
+  `reachability()` now returns `false` immediately and runs the management probe in the background,
+  where a `true` answer clears the outcome for the next read. It used to await that probe, whose
+  2-second bound tied the indicator's, so the indicator's bound fired first and a recorded outage
+  was reported `up`.
+- **Queue depth observations drop a row the latest cycle did not read (M101a)** instead of keeping
+  the previous count. The source's `failure` and `depthCoverage: 'partial'` say why; an unreadable
+  depth is never reported as a retained zero.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
