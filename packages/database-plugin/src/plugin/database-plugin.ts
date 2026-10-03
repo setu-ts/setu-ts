@@ -34,7 +34,12 @@ import { DynamoAdapter } from '../adapters/dynamo/dynamo-adapter.ts';
 import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
 import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
-import { isSaturated, readPoolCapacity } from '../health/database-capacity.ts';
+import {
+  isSaturated,
+  QueryProgressTracker,
+  readPoolCapacity,
+  readQueryProgress,
+} from '../health/database-capacity.ts';
 import type { DataSource } from '../repositories/base-repository.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -180,7 +185,13 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         clearTimer: (handle) => ctx.runtime.clearTimeout(handle),
       });
 
+      // M101a review fix: a saturated pool reads `up` only while queries are
+      // still completing, so a hung database behind a full pool — which shows
+      // the same `idle === 0 && waiting > 0` — reads `degraded`.
+      const progress = new QueryProgressTracker();
+
       ctx.health.register(`${token}`, async () => {
+        progress.observe(readQueryProgress(adapter), ctx.runtime.hrtime());
         const capacity = readPoolCapacity(adapter);
         const data = {
           adapter: adapterType,
@@ -230,11 +241,18 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         }
         if (reachable === undefined) {
           // M101a V8-3: a probe that did not answer while the pool reports
-          // every connection busy with callers waiting is SATURATION — data,
-          // not an outage. Failing `/ready` there would pull every saturated
-          // replica at once. `'unknown'` rather than `true`, because the
-          // database did not answer; the capacity rides beside it.
-          if (capacity !== undefined && isSaturated(capacity)) {
+          // every connection busy with callers waiting, AND queries are still
+          // completing, is SATURATION — data, not an outage. Failing `/ready`
+          // there would pull every saturated replica at once. `'unknown'`
+          // rather than `true`, because the database did not answer; the
+          // capacity rides beside it. A full pool whose queries have stopped
+          // completing is a hung database and falls through to `degraded`.
+          // Both are re-read here: the probe above awaited, and the snapshot
+          // taken before it may be stale.
+          const now = ctx.runtime.hrtime();
+          progress.observe(readQueryProgress(adapter), now);
+          const current = readPoolCapacity(adapter);
+          if (current !== undefined && isSaturated(current) && progress.progressedWithin(now)) {
             return { status: 'up', data: { ...data, reachable: 'unknown' } };
           }
           // A probe that EXISTS and did not answer is evidence of trouble:

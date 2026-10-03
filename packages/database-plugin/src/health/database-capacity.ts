@@ -110,3 +110,83 @@ export class PoolSaturatedProbeSkipped extends Error {
     this.name = 'PoolSaturatedProbeSkipped';
   }
 }
+
+/**
+ * Symbol key under which an adapter exposes a monotonically increasing count
+ * of the queries it has seen COMPLETE (M101a V8-3 review fix). Attached beside
+ * {@linkcode DATABASE_POOL_CAPACITY}, by the same adapter, for the same reason:
+ * a saturated pool and a hung database both show `idle === 0 && waiting > 0`,
+ * and only the second stops completing queries.
+ */
+export const DATABASE_QUERY_PROGRESS: unique symbol = Symbol.for(
+  'setu-ts.database-plugin.query-progress',
+);
+
+/**
+ * How recently a query must have been observed completing for a saturated
+ * pool to read `up` rather than `degraded`, in milliseconds.
+ *
+ * Progress is observed per health poll, by a change in the completed-query
+ * count since the previous poll, so detection of a hung database lags by at
+ * most one poll interval plus this window.
+ */
+export const QUERY_PROGRESS_WINDOW_MS = 10_000;
+
+/**
+ * Reads the completed-query count from an adapter that exposes the seam.
+ *
+ * @param adapter - The connected adapter
+ * @returns The count, or `undefined` when the adapter does not report one or
+ *   the reader returns something other than a finite non-negative number
+ */
+export function readQueryProgress(adapter: IDatabaseAdapter): number | undefined {
+  const reader = (adapter as unknown as Record<symbol, unknown>)[DATABASE_QUERY_PROGRESS];
+  if (typeof reader !== 'function') {
+    return undefined;
+  }
+  const count = (reader as () => unknown)();
+  return typeof count === 'number' && Number.isFinite(count) && count >= 0 ? count : undefined;
+}
+
+/**
+ * Tracks when an adapter's completed-query count last moved, on the caller's
+ * monotonic clock, so the health indicator can tell a saturated pool that is
+ * still serving from one waiting on a database that stopped answering.
+ */
+export class QueryProgressTracker {
+  #lastCount: number | undefined;
+  #lastProgressAt: number | undefined;
+
+  /**
+   * Records one poll's reading.
+   *
+   * The first reading has no predecessor: a non-zero count is taken as
+   * progress now, so a pool saturated at the first poll gets one window's
+   * benefit of the doubt; a zero count records nothing.
+   *
+   * @param count - The completed-query count, or `undefined` when unreported
+   * @param nowMs - A monotonic reading (`runtime.hrtime()`)
+   */
+  observe(count: number | undefined, nowMs: number): void {
+    if (count === undefined) {
+      return;
+    }
+    const previous = this.#lastCount;
+    this.#lastCount = count;
+    if (previous === undefined ? count > 0 : count !== previous) {
+      this.#lastProgressAt = nowMs;
+    }
+  }
+
+  /**
+   * Whether a query was observed completing within
+   * {@linkcode QUERY_PROGRESS_WINDOW_MS} of `nowMs`.
+   *
+   * @param nowMs - A monotonic reading on the same clock as {@link observe}
+   * @returns `false` when no progress has ever been observed
+   */
+  progressedWithin(nowMs: number): boolean {
+    return this.#lastProgressAt !== undefined &&
+      nowMs - this.#lastProgressAt <= QUERY_PROGRESS_WINDOW_MS;
+  }
+}

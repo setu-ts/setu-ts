@@ -767,29 +767,34 @@ The `database` indicator gates on the service's lifecycle first (a closed databa
 immediately), then reports reachability from the adapter's own probe. **Since M95b** the payload
 carries `reachable` whenever the adapter can probe:
 
-| `reachable`                             | Status     | `/ready` |
-| --------------------------------------- | ---------- | -------- |
-| `true`                                  | `up`       | 200      |
-| `false`                                 | `down`     | 503      |
-| `'unknown'`                             | `degraded` | 503      |
-| `'unknown'` while the pool is saturated | `up`       | 200      |
-| omitted                                 | `up`       | 200      |
+| `reachable`                                                        | Status     | `/ready` |
+| ------------------------------------------------------------------ | ---------- | -------- |
+| `true`                                                             | `up`       | 200      |
+| `false`                                                            | `down`     | 503      |
+| `'unknown'`                                                        | `degraded` | 503      |
+| `'unknown'` while the pool is saturated and queries are completing | `up`       | 200      |
+| omitted                                                            | `up`       | 200      |
 
 The rows are the whole decision. **Since M101a** a saturated pool is not an outage. When the Drizzle
 adapter's `poolStats` reports every connection busy with callers waiting (`idle === 0` and
 `waiting > 0`), the probe queues no `SELECT 1` behind the callers it would be measuring, and the
 indicator reports `up` with `reachable: 'unknown'` and the snapshot in `data.capacity` — failing
-`/ready` there would pull every saturated replica out of rotation at once. That row needs
-`poolStats`: without it the indicator cannot tell saturation from trouble, so a pool connection
-timeout or a probe that does not answer reports `degraded`. A pool connection timeout used to report
-`down` (it answered `false`); it is now `degraded`, because the database never answered either way.
-A probe that **exists and did not answer** inside the 2-second bound is evidence of trouble and
-reports `degraded` — never `up`, which is the claim that let a stopped database keep taking traffic
-(X51-1: the indicator used to read the lifecycle `isReady()`, which only says `connect()` once
-succeeded). An adapter that ships **no probe** is the opposite case: a probe that was never written
-is evidence of nothing, so the payload omits `reachable` and the status is today's — mapping a
-missing probe to `degraded` would fail `/ready` for every healthy Cosmos, Bigtable and DynamoDB
-application on upgrade.
+`/ready` there would pull every saturated replica out of rotation at once. A full pool is ALSO what
+a hung database looks like (every connection stuck on a server that never answers, callers piling
+up), so the row additionally requires that a query through the adapter completed within the last 10
+seconds. The indicator samples the adapter's completed-query count on each poll, so a hang is
+detected at most one poll interval plus that window after the last completion; a saturated pool
+whose queries have all stopped completing reports `degraded` and `/ready` answers 503. That row
+needs `poolStats`: without it the indicator cannot tell saturation from trouble, so a pool
+connection timeout or a probe that does not answer reports `degraded`. A pool connection timeout
+used to report `down` (it answered `false`); it is now `degraded`, because the database never
+answered either way. A probe that **exists and did not answer** inside the 2-second bound is
+evidence of trouble and reports `degraded` — never `up`, which is the claim that let a stopped
+database keep taking traffic (X51-1: the indicator used to read the lifecycle `isReady()`, which
+only says `connect()` once succeeded). An adapter that ships **no probe** is the opposite case: a
+probe that was never written is evidence of nothing, so the payload omits `reachable` and the status
+is today's — mapping a missing probe to `degraded` would fail `/ready` for every healthy Cosmos,
+Bigtable and DynamoDB application on upgrade.
 
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without

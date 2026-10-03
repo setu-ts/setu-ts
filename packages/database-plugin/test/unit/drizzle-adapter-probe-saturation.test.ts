@@ -15,7 +15,15 @@ import type { DatabasePoolCapacity } from '../../src/interfaces/index.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
 import { isPoolExhaustion } from '../../src/errors/classify.ts';
-import { isSaturated, PoolSaturatedProbeSkipped } from '../../src/health/database-capacity.ts';
+import {
+  DATABASE_QUERY_PROGRESS,
+  isSaturated,
+  PoolSaturatedProbeSkipped,
+  QUERY_PROGRESS_WINDOW_MS,
+  QueryProgressTracker,
+  readQueryProgress,
+} from '../../src/health/database-capacity.ts';
+import type { IDatabaseAdapter } from '@setu-ts/common';
 
 const tenants = pgTable('tenants', {
   id: text('id').primaryKey(),
@@ -163,4 +171,100 @@ describe('isSaturated', () => {
       expect(isSaturated(capacity)).toBe(expected);
     });
   }
+});
+
+describe('DrizzleAdapter completed-query count (M101a V8-3)', () => {
+  const saturated = () => ({ total: 3, idle: 0, waiting: 1 });
+
+  it('is absent without poolStats', async () => {
+    const { adapter } = makeAdapter(() => Promise.resolve({ rows: [] }));
+    await adapter.connect();
+    expect(readQueryProgress(adapter)).toBeUndefined();
+  });
+
+  it('counts resolved raw queries and data-source calls, inside a transaction too', async () => {
+    const { adapter } = makeAdapter(() => Promise.resolve({ rows: [] }), saturated);
+    await adapter.connect();
+    expect(readQueryProgress(adapter)).toBe(0);
+
+    await adapter.rawQuery('SELECT 1');
+    await adapter.createDataSource('Tenant').count({});
+    expect(readQueryProgress(adapter)).toBe(2);
+  });
+
+  it('counts a data-source call inside a transaction', async () => {
+    // pg-proxy has no transactions, so the bridge runs the work on the outer
+    // instance — enough to drive the transaction's data source.
+    const database = drizzle(() => Promise.resolve({ rows: [] }));
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(database, (instance, work) => work(instance as never)),
+      drizzleTables: { Tenant: tenants },
+      ...{ poolStats: saturated },
+    });
+    await adapter.connect();
+    const tx = await adapter.beginTransaction();
+    await tx.createDataSource('Tenant').count({});
+    await tx.commit();
+    expect(readQueryProgress(adapter)).toBe(1);
+  });
+
+  it('does not count a rejected query', async () => {
+    const { adapter } = makeAdapter(
+      () => Promise.reject(new Error('connect ECONNREFUSED')),
+      saturated,
+    );
+    await adapter.connect();
+    await expect(adapter.rawQuery('SELECT 1')).rejects.toThrow();
+    await expect(adapter.createDataSource('Tenant').count({})).rejects.toThrow();
+    expect(readQueryProgress(adapter)).toBe(0);
+  });
+});
+
+describe('readQueryProgress', () => {
+  const withReader = (reader: unknown) =>
+    ({ [DATABASE_QUERY_PROGRESS]: reader }) as unknown as IDatabaseAdapter;
+
+  it('reads a finite non-negative count', () => {
+    expect(readQueryProgress(withReader(() => 4))).toBe(4);
+  });
+
+  for (const bad of [-1, Number.NaN, Infinity, '3']) {
+    it(`refuses ${String(bad)}`, () => {
+      expect(readQueryProgress(withReader(() => bad))).toBeUndefined();
+    });
+  }
+});
+
+describe('QueryProgressTracker', () => {
+  it('has seen no progress before any reading', () => {
+    expect(new QueryProgressTracker().progressedWithin(0)).toBe(false);
+  });
+
+  it('ignores an unreported count', () => {
+    const tracker = new QueryProgressTracker();
+    tracker.observe(undefined, 0);
+    expect(tracker.progressedWithin(0)).toBe(false);
+  });
+
+  it('takes a first non-zero reading as progress now, and a first zero as none', () => {
+    const busy = new QueryProgressTracker();
+    busy.observe(5, 1_000);
+    expect(busy.progressedWithin(1_000 + QUERY_PROGRESS_WINDOW_MS)).toBe(true);
+    expect(busy.progressedWithin(1_001 + QUERY_PROGRESS_WINDOW_MS)).toBe(false);
+
+    const idle = new QueryProgressTracker();
+    idle.observe(0, 1_000);
+    expect(idle.progressedWithin(1_000)).toBe(false);
+  });
+
+  it('dates progress from the last reading that moved, and lets an unchanged count age out', () => {
+    const tracker = new QueryProgressTracker();
+    tracker.observe(0, 0);
+    tracker.observe(2, 100);
+    tracker.observe(2, 5_000);
+    expect(tracker.progressedWithin(100 + QUERY_PROGRESS_WINDOW_MS)).toBe(true);
+    expect(tracker.progressedWithin(101 + QUERY_PROGRESS_WINDOW_MS)).toBe(false);
+    tracker.observe(3, 20_000);
+    expect(tracker.progressedWithin(20_000)).toBe(true);
+  });
 });

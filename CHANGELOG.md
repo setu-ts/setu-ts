@@ -53,9 +53,11 @@ All notable changes to this project are documented here. The format follows
 - **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
   registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
   `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
-  every saturated replica at once. A pool connection timeout now reports `degraded` rather than
-  `down` — the probe used to answer `false` for it, though the database never answered either way.
-  Verified against a live PostgreSQL 16 pool.
+  every saturated replica at once — but only while queries through the adapter keep completing (one
+  within the last 10 seconds). A full pool with no completed query is a hung database and reports
+  `degraded`. A pool connection timeout now reports `degraded` rather than `down` — the probe used
+  to answer `false` for it, though the database never answered either way. Verified against a live
+  PostgreSQL 16 pool.
 - **A retained Service Bus outage is answered at once (M101a).** With a recorded network failure,
   `reachability()` now returns `false` immediately and runs the management probe in the background,
   where a `true` answer clears the outcome for the next read. It used to await that probe, whose

@@ -47,7 +47,8 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
 import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
-import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
+import type { DrizzleAdapterOptions, IDatabaseService } from '../../src/interfaces/index.ts';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { NormalizedQuery } from '@setu-ts/common';
 
 const users = pgTable('users', {
@@ -933,15 +934,13 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
     }
   });
 
-  it('a saturated real pool keeps /ready at 200 through the plugin (M101a V8-3)', {
-    ignore: skipLivePg,
-  }, async () => {
-    // Every connection held and a caller queued behind them: the shape that
-    // used to queue the probe too, time it out at the 2 s bound and fail
-    // `/ready` on a replica that was merely busy.
+  /**
+   * Boots a plugin app over a 3-connection pool and, when `serveFirst` is
+   * set, completes one repository read through it; then holds every
+   * connection and queues a caller behind them.
+   */
+  async function saturatedPoolApp(serveFirst: boolean) {
     const pool = new Pool({ connectionString: livePgUrl!, max: 3 });
-    const holders = await Promise.all([pool.connect(), pool.connect(), pool.connect()]);
-    const waiter = pool.connect();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -964,21 +963,62 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
       ],
     });
     await app.start();
+    if (serveFirst) {
+      await app.services.get<IDatabaseService>(CAPABILITIES.DATABASE).query('SELECT 1');
+    }
+    const holders = await Promise.all([pool.connect(), pool.connect(), pool.connect()]);
+    const waiter = pool.connect();
+    return {
+      app,
+      pool,
+      async read() {
+        const health = (await app.inject({ method: 'GET', url: 'http://localhost/health' }))
+          .json() as {
+            checks?: Record<string, { status: string; data?: { reachable?: unknown } }>;
+          };
+        const ready = (await app.inject({ method: 'GET', url: 'http://localhost/ready' }))
+          .statusCode;
+        return { database: health.checks?.['database'], ready };
+      },
+      async stop() {
+        for (const holder of holders) holder.release();
+        (await waiter).release();
+        await app.stop();
+        await pool.end();
+      },
+    };
+  }
+
+  it('a saturated real pool still completing queries keeps /ready at 200 (M101a V8-3)', {
+    ignore: skipLivePg,
+  }, async () => {
+    // Every connection held and a caller queued behind them: the shape that
+    // used to queue the probe too, time it out at the 2 s bound and fail
+    // `/ready` on a replica that was merely busy.
+    const booted = await saturatedPoolApp(true);
     try {
-      expect(pool.waitingCount).toBeGreaterThan(0);
-      const health = (await app.inject({ method: 'GET', url: 'http://localhost/health' }))
-        .json() as {
-          checks?: Record<string, { status: string; data?: { reachable?: unknown } }>;
-        };
-      expect(health.checks?.['database']?.status).toBe('up');
-      expect(health.checks?.['database']?.data?.reachable).toBe('unknown');
-      expect((await app.inject({ method: 'GET', url: 'http://localhost/ready' })).statusCode)
-        .toBe(200);
+      expect(booted.pool.waitingCount).toBeGreaterThan(0);
+      const { database, ready } = await booted.read();
+      expect(database?.status).toBe('up');
+      expect(database?.data?.reachable).toBe('unknown');
+      expect(ready).toBe(200);
     } finally {
-      for (const holder of holders) holder.release();
-      (await waiter).release();
-      await app.stop();
-      await pool.end();
+      await booted.stop();
+    }
+  });
+
+  it('a full real pool that has completed no query reads degraded (M101a V8-3)', {
+    ignore: skipLivePg,
+  }, async () => {
+    // The same capacity snapshot a hung database presents: nothing finishes,
+    // so the indicator must not call it saturation.
+    const booted = await saturatedPoolApp(false);
+    try {
+      const { database, ready } = await booted.read();
+      expect(database?.status).toBe('degraded');
+      expect(ready).toBe(503);
+    } finally {
+      await booted.stop();
     }
   });
 });

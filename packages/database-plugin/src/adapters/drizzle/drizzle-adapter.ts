@@ -35,6 +35,7 @@ import {
 } from '@setu-ts/common';
 import {
   DATABASE_POOL_CAPACITY,
+  DATABASE_QUERY_PROGRESS,
   isSaturated,
   PoolSaturatedProbeSkipped,
   readPoolCapacity,
@@ -217,6 +218,16 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    */
   [DATABASE_POOL_CAPACITY]?: () => DatabasePoolCapacity;
 
+  /**
+   * Internal completed-query count (M101a V8-3). Attached beside
+   * {@linkcode DATABASE_POOL_CAPACITY} — only with `poolStats`, since the
+   * indicator consults it only to tell a saturated pool from a hung database.
+   */
+  [DATABASE_QUERY_PROGRESS]?: () => number;
+
+  /** Queries this adapter has seen resolve: `rawQuery` and every data-source call. */
+  #completedQueries = 0;
+
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
   private _transactionBridge:
@@ -245,6 +256,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const poolStats = (this._options as DrizzleAdapterOptions | undefined)?.poolStats;
     if (poolStats !== undefined) {
       this[DATABASE_POOL_CAPACITY] = poolStats;
+      this[DATABASE_QUERY_PROGRESS] = () => this.#completedQueries;
     }
   }
 
@@ -451,9 +463,10 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         return { database: configuredDatabase, query: tx, scope: 'transaction' };
       },
 
-      createDataSource(entity: string): DataSource {
-        return createDrizzleDataSourceInner(tx, entity, tables, operators, entities);
-      },
+      createDataSource: (entity: string): DataSource =>
+        this.#countingCompletions(
+          createDrizzleDataSourceInner(tx, entity, tables, operators, entities),
+        ),
 
       async commit(): Promise<void> {
         hold.resolve();
@@ -502,6 +515,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     // function`, so `query()` could never work on any driver.
     const statement = new sqlClass(bindRawStatement(sql, params ?? [], tag));
     const result = await execute.call(this._db, statement);
+    this.#completedQueries++;
     return (result as { rows?: T[] }).rows ?? result as T[];
   }
 
@@ -515,13 +529,33 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
     const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
-    return createDrizzleDataSourceInner(
+    return this.#countingCompletions(createDrizzleDataSourceInner(
       this._db,
       entity,
       this.resolveTables(),
       this._operators!,
       entities,
-    );
+    ));
+  }
+
+  /**
+   * Wraps every method of a data source so each call that RESOLVES counts as
+   * a completed query (M101a V8-3). A rejection is not progress: a hung
+   * database rejects at the pool's connection timeout, if at all.
+   *
+   * @param source - The data source to wrap
+   * @returns A data source with the same methods and behavior
+   */
+  #countingCompletions(source: DataSource): DataSource {
+    const wrapped: Record<string, unknown> = {};
+    for (const [name, method] of Object.entries(source)) {
+      wrapped[name] = async (...args: unknown[]): Promise<unknown> => {
+        const result = await (method as (...a: unknown[]) => Promise<unknown>)(...args);
+        this.#completedQueries++;
+        return result;
+      };
+    }
+    return wrapped as unknown as DataSource;
   }
 
   /**

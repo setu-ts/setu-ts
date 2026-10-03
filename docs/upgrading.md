@@ -32,10 +32,12 @@ raise `requestTimeoutMs` if a slow Vault legitimately takes longer.
 ### Review alerts keyed on the `database` and `queue` health data
 
 A Drizzle pool connection timeout now reports `degraded` instead of `down`, and, with `poolStats`
-supplied, a saturated pool reports `up` with `reachable: 'unknown'`. An alert that paged on `down`
-for pool exhaustion should watch `degraded` or `data.capacity` instead. Separately, a queue depth
-row the latest diagnostics cycle could not read is now absent rather than repeating the previous
-count; a dashboard should read `depthCoverage` instead of assuming every name has a row.
+supplied, a saturated pool reports `up` with `reachable: 'unknown'` while its queries keep
+completing (a full pool with no completed query in 10 seconds reports `degraded`). An alert that
+paged on `down` for pool exhaustion should watch `degraded` or `data.capacity` instead. Separately,
+a queue depth row the latest diagnostics cycle could not read is now absent rather than repeating
+the previous count; a dashboard should read `depthCoverage` instead of assuming every name has a
+row.
 
 ### Raise `commandTimeoutMs` for a slow Redis network
 
