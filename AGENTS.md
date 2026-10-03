@@ -30,9 +30,10 @@ Do NOT add or duplicate project rules in this file — put them in `CLAUDE.md` o
 
 ## Step 0 — be on the milestone's feature branch
 
-`develop` and `main` are both protected. `develop` is the default branch and the target of every PR;
-`main` holds only the last release (CLAUDE.md "Branches"). Being on the wrong branch is the single
-most common way work goes wrong here, so confirm it before reading docs or writing code:
+`develop` and `main` are both protected. `develop` is the default branch and the target of every PR
+except release and hotfix PRs, which go into `main`; `main` holds only the last release (CLAUDE.md
+"Branches"). Being on the wrong branch is the single most common way work goes wrong here, so
+confirm it before reading docs or writing code:
 
 ```bash
 git branch --show-current
