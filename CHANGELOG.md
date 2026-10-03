@@ -6879,7 +6879,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
-[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.6.0...HEAD
+[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.8.0...HEAD
 [0.8.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.8.0
 [0.7.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.7.0
 [0.6.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.6.0
