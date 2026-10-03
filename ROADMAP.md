@@ -12212,6 +12212,338 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
       real Keycloak container. For 100a, a starter-composed application with NO hand-added
       `authMiddleware()` populates `ctx.request.user` and `userContext`.
 
+## Milestone 101: The `v0.8.0` Smoke Closeout
+
+**Source:** the `v0.8.0` regression run (`smoke/V080-REGRESSION.md`) plus the Part 13 and Part 14
+exercise blocks (`smoke/X57-FINDINGS.md`, `X58-FINDINGS.md`, `X59-FINDINGS.md`,
+`X60-X65-FINDINGS.md`), all run 2026-10-03 against the published `0.8.0` artifacts. **44 findings,
+two High.** V8-1 is the only release regression; every other row reproduces on a `0.7.0` control or
+rides surface that is new in `0.8.0`. The register is `smoke/DEFECTS.md`, rows V8-1…V8-44.
+
+**Grouped by SHAPE, not by package** — the rule this register has used since M70. Two letters share
+a package where the shapes differ: `messaging-plugin` is in M101a (health) and M101b (transports),
+`cli` is in M101e, M101f and M101g, and `auth-plugin` is in M101c and M101h.
+
+| Letter    | Shape                                                                     | Rows                                                 | Packages                                                                    |
+| --------- | ------------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------- |
+| **M101a** | health that reports healthy, and calls that hang, when a dependency fails | V8-1 **High**, V8-3, V8-4, V8-5, V8-23, V8-24        | `messaging`, `database`, `health`, `secrets`, `cache`, `queue`, `scheduler` |
+| **M101b** | message transports that fail against the real broker                      | V8-2 **High**, V8-6, V8-26                           | `messaging-plugin`                                                          |
+| **M101c** | tenancy and identity features that do not compose                         | V8-7, V8-8, V8-9, V8-25                              | `session`, `multi-tenancy`, `database`, `auth`, `http-security`             |
+| **M101d** | two sides of a service call that disagree                                 | V8-10, V8-11, V8-27, V8-28, V8-29                    | `sdk`, `telemetry`, `react-router`, `full-stack-starter`                    |
+| **M101e** | CLI commands that write where or when they should not                     | V8-16, V8-17, V8-35, V8-36, V8-37, V8-38, V8-41      | `cli`                                                                       |
+| **M101f** | the devtool lifecycle                                                     | V8-18, V8-19, V8-20, V8-21, V8-22, V8-34             | `cli`, `common`, every diagnostics source                                   |
+| **M101g** | scaffolds that are not wired                                              | V8-12–V8-15, V8-31–V8-33, V8-39, V8-40, + no-row gap | `cli`, `testing`, full-stack template                                       |
+| **M101h** | documentation, plus redaction setup that takes extra work                 | V8-30, V8-42, V8-43, V8-44                           | `common`, docs                                                              |
+
+**Sequence.** M101a first — it holds the only regression, and it is live in every deployment that
+pairs `ServiceBusBroker` with an orchestrator. M101b next, the other High. M101e and M101f then,
+because both change what the CLI writes and M101f's port and upgrade fixes sit on M101e's
+write-safety rules. M101c, M101d, M101g and M101h are independent of each other and of the rest.
+
+---
+
+### Milestone 101a: Health That Reports Healthy, and Calls That Hang, When a Dependency Fails
+
+**Package(s):** `packages/common`, `packages/messaging-plugin`, `packages/database-plugin`,
+`packages/secrets-plugin`, `packages/cache-plugin`, `packages/queue-plugin`,
+`packages/scheduler-plugin` (`health-plugin` needs no `src` change — `/ready` failing on `degraded`
+is by design, and the V8-3 decision lives in the database indicator; `common` gains the bounded-call
+helper the plan names)
+
+**Objective:** the two questions an operator asks during an outage — "is it down?" and "do my calls
+fail fast?" — answered wrongly in both directions: a dead broker reported `up`, a healthy database
+reported `down`, and reads against a hung backend that never settle.
+
+**V8-1 (High, REGRESSION) — a dead Service Bus is never reported `down` through `/health`.** After a
+proved-dead publish, `/health` answers `up`/`reachable:"unknown"` and `/ready` **200** at every
+sample through 30 s, on two emulator instances; `0.7.0` at least reported `down` for ~5 s (V7-4).
+M99a made `ServiceBusBroker.reachability()` (`service-bus-broker.ts:832`) await the management probe
+even on negative evidence, and `#recordDataPlaneOutcome(false)` (`:902`) rebuilds that probe,
+discarding its cache. Against an unreachable management plane the probe runs to
+`PROBE_TIMEOUT_MS = 2000` (`:47`), while the indicator wraps it in an EQUAL bound,
+`INDICATOR_PROBE_TIMEOUT_MS = 2000` (`plugin/messaging-plugin.ts:60`), with `fallback: undefined`
+(`:451`) — the outer bound wins the race, `undefined` maps to `up`, and it is cached for 5 s. No
+gate saw it because `service-bus-outage-real.test.ts` asserts `reachability()` directly and never
+`/health`. Fix in preference order: return `false` at once on negative evidence and consult the
+management probe only to CLEAR it; or make the indicator's bound strictly larger than the broker's.
+Either way the outage test goes through `/health` and `/ready`.
+
+**V8-3 — a saturated pool is reported as the database being unreachable.** Drizzle, `max: 3`, six
+long holders: with `connTimeout=1000` the indicator reports `down`/`reachable:false` and `/ready`
+503 while Postgres is up; with the node-postgres default it reports `degraded` after the 2 s bound —
+still 503. M95b's `#probeWithRawQuery` runs `SELECT 1` through the pool (`drizzle-adapter.ts:369`),
+which contradicts M90b's decision that saturation is data, not policy, and turns load into a
+cascading failure. Probe on a dedicated connection, or treat a pool timeout with `waiting > 0` as
+`up` with capacity data through the existing `poolStats` seam. Identical on `0.7.0`.
+
+**V8-4 — a secret read against a hung Vault never settles.** Health goes `down` in 2001 ms
+(correct); `GET` with `cacheTtl: 0` hangs past the client's 60 s. `providers/vault.ts:59` calls
+`fetch(url, init)` with no signal, and M90f's 503 classification covers database drivers only, so a
+stopped Vault answers a masked 500. Bound the fetch and brand the outage `503`.
+
+**V8-5 — Redis cache and queue commands have no timeout.** With Redis paused, `cache.get` was still
+pending at 15 s and `queue.add` hung; the cache inspector showed no failure and no in-flight work,
+and parked calls later counted as `succeeded`. M98l gave only the backplane a `commandTimeoutMs`;
+cache and queue need the same lazily-built `commandTimeout`, with a timed-out command recorded as a
+failure.
+
+**V8-23 — a stale queue depth row keeps `coverage: "complete"` and `ready: 0` through an outage**
+while the source reports `depth-read-timed-out`. A depth that could not be read is `unavailable`
+(M98f's own rule), never a retained zero.
+
+**V8-24 — a hung scheduler lock backend leaves no trace:** fires stop, no `lockFailed` is counted,
+and health stays `up`. Bound the lock call and record the timeout as `lockFailed`.
+
+**Why they are one letter.** Every row is the same reasoning error: an unbounded wait, or a bound
+that loses a race, converted into "fine". V8-1, V8-23 and V8-24 report healthy over a failure; V8-3
+reports a failure over health; V8-4 and V8-5 hang the caller while health is correct. Fixing them
+together means one rule — every backend call is bounded, and a bound that fires is a recorded
+failure — applied across seven packages, with one outage test per package driven through `/health`.
+
+**Regression note.** Only V8-1 regressed, and only through M99a's fix for V7-4. The rest are
+identical on `0.7.0` or concern `0.8.0` diagnostics surface.
+
+---
+
+### Milestone 101b: Message Transports That Fail Against the Real Broker
+
+**Package(s):** `packages/messaging-plugin`
+
+**Objective:** three broker arms that pass every fake-backed test and fail on first contact with the
+real server. Shares the package with M101a, not the shape.
+
+**V8-2 (High) — Pub/Sub's default subscription name is project-global.** `pubsub-broker.ts:37`
+defines `DEFAULT_QUEUE = 'messaging-consumers'` for every topic; `openSubscription` calls
+`createSubscription` (`:209`), swallows `ALREADY_EXISTS`, and attaches to the subscription bound to
+the FIRST topic. Measured on the emulator: the RPC responder listened on the orders topic,
+`request()` ended in `RequestTimeoutError`, and 4 of 6 orders messages were consumed by the
+responder and lost with no log while `/health` stayed `up`. This is the Kafka shared-group defect
+M90d fixed, left in Pub/Sub. Derive the default per topic, and treat `ALREADY_EXISTS` on a
+subscription bound to a DIFFERENT topic as an error.
+
+**V8-6 — NATS request/reply always fails against a real server**:
+`invalid durable name - durable name cannot contain '.'`. The reply inbox subscribes with
+`queue: 'rr.inbox.<uuid>'` (`brokers/inbox.ts:20`), and `NatsBroker.subscribe` uses the queue
+verbatim as the JetStream `durable_name` (`nats-broker.ts:522`); any user queue containing a dot
+fails the same way. Encode the durable name, and add a real-NATS RPC case — `nats-real.test.ts`
+drives no `request()`.
+
+**V8-26 — a Kafka subscription to a not-yet-existing topic kills boot** with a raw
+`KafkaJSProtocolError` naming no topic. kafkajs already retries `UNKNOWN_TOPIC_OR_PARTITION` (five
+retries, about nine seconds, the error is marked retriable) — what escaped was budget exhaustion on
+a broker with auto-create off, so no second retry loop: throw a named error naming the topic (the
+`JetStreamStreamError` precedent), forward the existing `retry` option, and document pre-creation.
+
+**Why they are one letter.** Each is a broker-specific naming or startup rule — a subscription's
+topic binding, a durable-name grammar, topic leadership at subscribe — that a permissive fake
+accepts. All three need the same deliverable: a real-backend case per arm that exercises RPC and a
+second topic, not one topic at a time. None is a regression; V8-2's arm was never run on `0.7.0`.
+
+---
+
+### Milestone 101c: Tenancy and Identity Features That Do Not Compose
+
+**Package(s):** `packages/session-plugin`, `packages/multi-tenancy-plugin`,
+`packages/database-plugin`, `packages/auth-plugin`, `packages/http-security-plugin`
+
+**Objective:** features that each work alone and silently stop working, or deny service, in the
+composition their own documentation describes.
+
+**V8-7 — `tenantBinding` is silently inert when the tenant comes from the signed-in principal.** The
+session middleware compares and seals at priority 260 (`session-plugin/src/errors.ts:45-58` names
+that priority), before `AuthPlugin`'s passive authentication at 300 sets the principal. The shipped
+`JwtResolver` reads the raw header at priority 40 and so IS present at compare time; the inert case
+is any tenant stamped after 260 — a custom resolver reading the principal, or a handler-written one.
+Deferring to commit is too late (the handler has run) and refusing at `register()` is
+unimplementable (the session plugin cannot see the tenancy priority), so the compare runs on
+whichever side sees the tenant second; the session README must say so.
+
+**V8-8 — tenant data isolation has no bridge to `database-plugin`.** `getRepository` writes to
+`ITenantDataStore` (memory only by default); `DatabasePlugin` repositories are tenant-blind, and an
+adapter cannot resolve `CAPABILITIES.DATABASE` at construction. `IDatabaseService` lives in
+`database-plugin`, not `common`, so multi-tenancy cannot type a store over it (§2.2): the port
+(`ITenantDataStore`) is promoted to `common` and `database-plugin` ships the implementation as a
+`RegistryFactory` resolved at `onInit` (the M70d arm) — or state in both READMEs that the two do not
+compose.
+
+**V8-9 — the README's SAML CSRF recipe 403s against Keycloak.** Keycloak sends
+`Referrer-Policy: no-referrer`, so Chrome posts the ACS with `Origin: null`; http-security CSRF has
+no path exclusion, so the only workaround trusts `null` on every route. Add a per-path exclusion and
+correct the recipe.
+
+**V8-25 — a foreign-browser SAML post consumes the victim's pending request.** The browser binding
+is checked AFTER the request is consumed, so an attacker's post fails closed and also burns the
+victim's login (a race-DoS). Check the binding before consuming.
+
+**Why they are one letter.** All four are ordering or scope decisions between identity components —
+a compare before the principal exists, a repository outside the tenant store, a CSRF check with no
+exemption, a consume before a bind check. None is reachable with one plugin alone.
+
+---
+
+### Milestone 101d: Two Sides of a Service Call That Disagree
+
+**Package(s):** `packages/sdk`, `packages/telemetry-plugin`, `packages/react-router-plugin`,
+`packages/starters/full-stack-starter`
+
+**Objective:** first-party components on the two ends of one call give different answers about the
+same request.
+
+**V8-10 — the SDK client does not propagate `traceparent`**, so a cross-member call starts a new
+trace. A hand-written interceptor fixes it, but `contextToTraceparent`
+(`common/src/trace-context.ts:51`) takes a `TelemetryContext` and not the `SpanContext`
+`activeSpanContext()` returns (`TS2345`). Add the interceptor to the SDK and accept the type both
+producers emit.
+
+**V8-11 — a React Router route-middleware refusal bypasses the error responder:** the web member's
+403 is a `text/html` error page while the API member answers RFC 9457. Route the refusal through
+`respondWithError`, or document the boundary.
+
+**V8-27 — the generated client types a documented 3xx as an error arm that can never fire.**
+`openapi-codegen.ts` makes every non-2xx an error arm, while `fetch` follows the redirect and the
+call resolves 200. Exclude 3xx from error arms or type the follow target.
+
+**V8-28 — SDK retry honours `Retry-After` uncapped:** a 429 with `Retry-After: 60` stalls the caller
+a minute. Cap it against the retry policy and surface the error past the cap.
+
+**V8-29 — `createFullStackAppFromConfig` gives post-factory code no access to the config snapshot**,
+so code after the factory reads a second load. Return or expose the snapshot.
+
+**Why they are one letter.** Each pair — client and server trace, RR and responder, document and
+fetch, server hint and client wait, factory and caller — owns half of one call, and the fix is
+always to make the second half read what the first half already decided.
+
+---
+
+### Milestone 101e: CLI Commands That Write Where or When They Should Not
+
+**Package(s):** `packages/cli`
+
+**Objective:** a CLI that writes into the wrong directory, after the user cancelled, or on a wrong
+premise, and reports success.
+
+**V8-16 — `setu generate <schematic>` writes into any directory** — empty, non-project, a project's
+parent, or a workspace root — and exits 0. Refuse outside a detected project.
+
+**V8-17 — Ctrl-C at an interactive `setu new` prompt scaffolds with defaults and exits 0**;
+`prompt()` → `null` is mapped to "take the default", and SIGINT to the process group is swallowed.
+`null` must abort with exit 130.
+
+**V8-35 — `generate app` resurrects a deleted member** as a one-file directory, and compose/k8s
+still build it. Reconcile the workspace manifest against the filesystem before writing.
+
+**V8-36 — a comment in `deno.json` makes `generate` report an installed plugin missing** and send
+the user to `setu add`, which refuses. Parse JSONC.
+
+**V8-37 — `setu add` installs a package the runtime cannot use** (`cloudflare-plugin` into Node).
+Refuse by runtime.
+
+**V8-38 — SIGINT during writes leaves a partial tree with no message,** and the retry blames the
+user's files. Apply M99b's compensating writer on interruption.
+
+**V8-41 — running the CLI inside a workspace writes the workspace `deno.lock`** and can initialise
+`node_modules`, and a modified root `deno.json` is reported `created`. Report modifications as such
+and avoid side-effecting resolution.
+
+**Why they are one letter.** Every row is a missing precondition on a write — where, whether the
+user still wants it, what the manifest actually says, whether the target can use it — and one
+write-safety rule in the command layer covers them all.
+
+---
+
+### Milestone 101f: The Devtool Lifecycle
+
+**Package(s):** `packages/cli`, `packages/common`, `packages/kernel`, `packages/diagnostics-plugin`,
+`packages/sdk`, every diagnostics source
+
+**Objective:** the M98c devtool works on a fresh scaffold and fails across its lifecycle — enabling
+on an older project, reallocating ports, building a production image, and trusting aliases.
+
+**V8-18 — `devtool enable`'s stale-factory remedy produces the silent failure it says it prevents:**
+applying only the printed signature is accepted, the app boots, and no connector ever binds, with no
+message. Print the complete edit, and make the entry fail loudly when the composition is dropped.
+
+**V8-19 — `devtool enable` on a `0.7.0` member adds `diagnostics-plugin@^0.8.0` and leaves
+`kernel`/`common`/`runtime` at `^0.7.0`,** so `check` and `dev` fail after reporting success; the
+devtool port is also allocated in the app-port sequence. Bump the set together or refuse.
+
+**V8-20 — `setu workspace ports --reallocate` moves the devtool port in the manifest but not in
+`main.dev.ts`,** so the connector binds the old port while the launcher dials the new one.
+
+**V8-21 — the generated production image carries a runnable connector:** `deno install` caches
+`diagnostics-plugin` and `main.dev.ts` is copied in, so an overridden command binds it inside the
+container. Exclude both from the production image.
+
+**V8-22 — diagnostics aliases accept bidi/format (Cf) characters** and deliver them verbatim in a
+signed body; only C0/C1 are rejected. No shared alias validator exists — there are thirteen private
+copies (`common`, the kernel projection, the diagnostics protocol, nine plugins, `sdk`), which is
+why the package list above is wider than `cli` + `common`: one predicate in `common` rejecting Cc
+and Cf replaces twelve of them (`sdk` keeps its documented local copy).
+
+**V8-34 — `devtool enable` on Node/Bun/Workers does not name the runtime** ("not a Setu-TS
+project"). Refuse by name.
+
+**Why they are one letter.** All six are stages of one feature's life after its first scaffold, and
+share the devtool's manifest, entry and port records.
+
+---
+
+### Milestone 101g: Scaffolds That Are Not Wired
+
+**Package(s):** `packages/cli`, the full-stack template (`packages/testing` needs no `src` change —
+the narrow `createApp` annotation is the CLI's)
+
+**Objective:** what `setu new`, `setu add` and `setu generate` write compiles and does not do what
+it is for until the developer wires it by hand.
+
+**V8-12** — the M91 `createTestApp({ app: createApp() })` recipe does not type-check on a generated
+project (`createApp(): IApplication` against the required `IKernelApplication`), and
+`setu add testing` is refused. **V8-13** — a workspace `libs/*` member imported from a full-stack
+member's `app/` passes `deno check` and fails `deno task build` (Vite does not read the Deno
+workspace). **V8-14** — `setu add <plugin>` on a starter-composed member gives no hint the starter
+bundles it, and the README path crashes with `Duplicate plugin name`. **V8-15** — workspace and
+full-stack `.gitignore` omit `node_modules/` while `nodeModulesDir: "auto"` creates it (73,632 files
+staged). **V8-31** — `generate ws-route` emits a dependency `setu add websocket` does not register;
+the member crashes at boot and the root `dev` runner stops every member. **V8-32** — `setu add`
+emits no wiring, `g guard` ignores an installed `auth-plugin`, and the standalone devtool port
+DEFAULTS to 4919 with no probe (`--devtool-port` exists on `new`, `generate app` and
+`devtool enable`; only the default is fixed — owned by M101f). **V8-33** — class-based
+`generate job` without a queue plugin emits an unwired functional job instead of refusing. **V8-39**
+— `deno task test` fails ("No test modules found") on every fresh Deno scaffold. **V8-40** —
+`setu add` re-sorts the whole import map and adds an unused `npm:@jsr/…` copy on an npm-build
+member.
+
+**No-row deliverable — no CLI path writes any plugin's `diagnostics` option.** In X60 all eleven
+diagnostics sources and `createObservedFetch` were hand-written (`X60-X65-FINDINGS.md`, generator
+gap #1). `devtool enable` or `setu add` must offer the option for installed plugins.
+
+**Why they are one letter.** Every row is generated output missing its registration, its build path
+or its harness — the M60 "generated code that is wired" bar, applied to what has shipped since.
+
+---
+
+### Milestone 101h: Documentation, Plus Redaction Setup That Takes Extra Work
+
+**Package(s):** `packages/common` (the only `src` change), plus the READMEs of `storage-plugin`,
+`auth-plugin`, `events-plugin` and the five further diagnostics-carrying plugins, `PUBLIC_API.md`
+and docs
+
+**Objective:** the code is correct and a reader following the documentation still cannot set it up.
+
+**V8-30 — redactors are keyed by classification,** so two treatments within one classification need
+invented classification strings. Allow a per-path redactor override in the policy. **V8-42** — the
+storage README never names `LocalStorageProviderOptions.rootDir`. **V8-43** — seven wiring gaps:
+multi-tenancy and telemetry option tables incomplete, the logger `'private'` example, the
+`RedactionPolicy` shape and the `DATA_CLASSIFICATIONS` table absent (both NAMES do appear in
+`PUBLIC_API.md` and the common README), `IPrincipal` undocumented, and a rate-limit key
+contradiction. **V8-44** — `authorizationDiagnostics` and `EventsDiagnosticsOptions` appear only as
+export-table rows.
+
+**Why they are one letter.** M95d's precedent: documentation that does not survive contact, carried
+on one branch with no behavioural risk — V8-30 is the one code change, and it is additive.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                       |
@@ -12395,3 +12727,11 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 100d      | ✅     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |
 | 100e      | ✅     | auth-plugin — passkeys (WebAuthn) ([#391](https://github.com/setu-ts/setu-ts/pull/391))                                                                                                                                                       |
 | 100f      | ✅     | auth-plugin — SAML 2.0 service provider (PR #393)                                                                                                                                                                                             |
+| 101a      | ⬜     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
+| 101b      | ⬜     | messaging-plugin — message transports that fail against the real broker                                                                                                                                                                       |
+| 101c      | ⬜     | session + multi-tenancy + database + auth + http-security — tenancy and identity features that do not compose                                                                                                                                 |
+| 101d      | ⬜     | sdk + telemetry + react-router + full-stack-starter — two sides of a service call that disagree                                                                                                                                               |
+| 101e      | ⬜     | cli — CLI commands that write where or when they should not                                                                                                                                                                                   |
+| 101f      | ⬜     | cli + common + diagnostics sources — the devtool lifecycle                                                                                                                                                                                    |
+| 101g      | ⬜     | cli + testing + full-stack template — scaffolds that are not wired                                                                                                                                                                            |
+| 101h      | ⬜     | common + docs — documentation, plus redaction setup that takes extra work                                                                                                                                                                     |
