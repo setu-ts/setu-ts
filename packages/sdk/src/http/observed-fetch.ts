@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext } from 'jsr:@setu-ts/common@^0.7.0';
+import type { IPlugin, IPluginContext } from 'jsr:@setu-ts/common@^0.8.0';
 
 import type { IClientTiming } from './contracts.ts';
 import { createDefaultFetch, type FetchTransport } from './default-fetch.ts';
@@ -38,7 +38,7 @@ export const OUTBOUND_HTTP_DIAGNOSTICS_TOKEN = 'outbound-http-diagnostics';
  *
  * @internal
  */
-export const SDK_VERSION = '0.7.0';
+export const SDK_VERSION = '0.8.0';
 
 /**
  * The fixed, value-free construction and registration refusals.

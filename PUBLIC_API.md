@@ -6755,6 +6755,8 @@ app.router.post('/users', async (ctx) => {
 
 ### Notes
 
+<!-- version:history -->
+
 - `IMailer.isHealthy?()` (OPTIONAL, added in `0.7.0`) reports the transport's REACHABILITY, distinct
   from whether the mailer was constructed: `true` reachable, `false` contacted and unreachable,
   `undefined` when the question cannot be asked — never read `undefined` as healthy. `MailService`
@@ -8101,7 +8103,7 @@ Install it with an explicit binary name, because Deno's default inference would 
 package (`cli`):
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.7.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
 ```
 
 `--min-dep-age 0` because Deno refuses a dependency published within the last 24 hours, and the CLI
@@ -11685,7 +11687,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.7.0
+deno add jsr:@setu-ts/sdk@^0.8.0
 ```
 
 ### createClient()
@@ -12157,6 +12159,9 @@ grpc.addService(AnotherDefinition, anotherImpl);
   runtime and `IGrpcService.available` is always `true`. The retired `setRpcHandler?` member is
   consulted by nothing, and `GrpcUnavailableError` remains exported only as published surface —
   nothing throws it.
+
+<!-- version:history -->
+
 - **Native gRPC-binary is refused by design.** Native gRPC (`application/grpc`, `+proto`, `+json`)
   relies on HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling, and
   no fetch-based server runtime exposes them to a `Response` — including Deno's `Deno.serve`,

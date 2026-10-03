@@ -150,6 +150,9 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   procedures.
 - **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are
   handled by generated Connect/gRPC client code in the application.
+
+<!-- version:history -->
+
 - **Native gRPC-binary is refused by design**: requests with a native gRPC content type
   (`application/grpc`, `application/grpc+proto`, `application/grpc+json`) are answered with a
   **Trailers-Only `UNIMPLEMENTED`** response — HTTP `200`, `content-type: application/grpc`, and

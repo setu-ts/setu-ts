@@ -342,7 +342,7 @@ describe('a scaffolded devtool project, driven end to end', () => {
     // The enable flow added the pin the entry resolves through — the exact
     // specifier the create-time paths write, not a registry fall-through.
     expect(after.imports['@setu-ts/diagnostics-plugin']).toBe(
-      'jsr:@setu-ts/diagnostics-plugin@^0.7.0',
+      'jsr:@setu-ts/diagnostics-plugin@^0.8.0',
     );
     // Repoint the pin at this workspace too, so the check and the boot below
     // measure the workspace source rather than a published JSR snapshot —

@@ -25,7 +25,7 @@ const MEMBER_DENO_JSON = JSON.stringify({
     test: 'deno test -A',
     'db:push': 'deno run -A tools/push.ts',
   },
-  imports: { '@setu-ts/common': 'jsr:@setu-ts/common@^0.7.0' },
+  imports: { '@setu-ts/common': 'jsr:@setu-ts/common@^0.8.0' },
   fmt: { lineWidth: 100 },
 });
 
@@ -70,8 +70,8 @@ describe('the devtool manifest merge', () => {
       fmt: Record<string, unknown>;
     };
     expect(member.imports).toEqual({
-      '@setu-ts/common': 'jsr:@setu-ts/common@^0.7.0',
-      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0',
+      '@setu-ts/common': 'jsr:@setu-ts/common@^0.8.0',
+      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.8.0',
     });
     expect(member.fmt).toEqual({ lineWidth: 100 });
     expect(member.tasks['db:push']).toBe('deno run -A tools/push.ts');
@@ -103,7 +103,7 @@ describe('the devtool manifest merge', () => {
       imports: Record<string, string>;
     };
     expect(member.imports).toEqual({
-      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0',
+      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.8.0',
     });
   });
 
@@ -126,7 +126,7 @@ describe('the devtool manifest merge', () => {
       'Refusing to replace the existing "@setu-ts/diagnostics-plugin" import',
     );
     expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.6.0');
-    expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.7.0');
+    expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.8.0');
     expect(h.fs.writes).toEqual([]);
   });
 
@@ -138,7 +138,7 @@ describe('the devtool manifest merge', () => {
         dev: 'deno run --allow-net --allow-env main.dev.ts',
         check: 'deno check main.ts setu.config.ts main.dev.ts',
       },
-      imports: { '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0' },
+      imports: { '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.8.0' },
     }) + '\n';
     h.fs.writeFile('/ws/apps/orders/deno.json', new TextEncoder().encode(memberSource));
     expect(await h.run(['enable', 'orders'])).toBe(0);

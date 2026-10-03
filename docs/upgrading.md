@@ -10,7 +10,7 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
-## Unreleased
+## 0.8.0
 
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at
 them. Neither affects a served request.
@@ -122,6 +122,8 @@ every resolved `signIn` as a completed sign-in must branch on `status` — on th
 holds a pending record, not the principal, so `requireAuth()` routes stay closed until the second
 factor is completed through `TotpService.completeSignIn`. Without an `mfa` option the second arm is
 never produced.
+
+<!-- version:history -->
 
 ## 0.7.0
 

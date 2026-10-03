@@ -27,6 +27,7 @@ import {
   readAtRevision,
   revisionExists,
   run,
+  undoReleaseRename,
   unreleasedSection,
 } from '../../scripts/check-changelog-coverage.ts';
 
@@ -313,5 +314,61 @@ describe('productionDeps', () => {
     }
     expect(out).toEqual(['to stdout']);
     expect(err).toEqual(['to stderr']);
+  });
+});
+
+describe('a release PR that has already renamed `Unreleased`', () => {
+  const cutChangelog = (body: string): string =>
+    `# Changelog\n\n## [Unreleased]\n\n## [0.8.0] — 2026-10-03\n\n### Added\n\n${body}\n\n` +
+    `## [0.7.0] — 2026-09-18\n\n- old\n`;
+  const tags = (...existing: readonly string[]) => (version: string) =>
+    Promise.resolve(existing.includes(version));
+
+  function deps(body: string, exists: readonly string[]): { deps: MainDeps; err: string[] } {
+    const err: string[] = [];
+    return {
+      err,
+      deps: {
+        readChangelog: () => Promise.resolve(cutChangelog(body)),
+        revisionExists: (revision) => Promise.resolve(exists.includes(revision.slice(1))),
+        readAtRevision: () => Promise.resolve(readme('Kept')),
+        readWorkingTree: () => Promise.resolve(readme('Kept', 'Minted')),
+        listReadmes: () => Promise.resolve(['packages/pkg/README.md']),
+        log: () => {},
+        error: (line) => err.push(line),
+      },
+    };
+  }
+
+  it('compares against the PREVIOUS release and reads the cut version section', async () => {
+    const { deps: d } = deps('- adds `Minted`', ['0.7.0']);
+    expect(await main(d)).toBe(0);
+  });
+
+  it('still fails an export the cut section does not name', async () => {
+    // Discriminates: a gate that read nothing would pass this too.
+    const { deps: d, err } = deps('- unrelated prose', ['0.7.0']);
+    expect(await main(d)).toBe(1);
+    expect(err.join('\n')).toContain('Minted');
+  });
+
+  it('treats the newest version as released once its tag exists', async () => {
+    expect(await undoReleaseRename(cutChangelog('x'), tags('0.8.0', '0.7.0'))).toBeNull();
+  });
+
+  it('is not a release in progress when the previous tag is missing too', async () => {
+    expect(await undoReleaseRename(cutChangelog('x'), tags())).toBeNull();
+  });
+
+  it('is not a release in progress with only one released section', async () => {
+    const single = '# Changelog\n\n## [Unreleased]\n\n## [0.7.0] — 2026-09-18\n\n- old\n';
+    expect(await undoReleaseRename(single, tags('0.7.0'))).toBeNull();
+  });
+
+  it('presents the cut section as Unreleased and names the previous version as base', async () => {
+    const result = await undoReleaseRename(cutChangelog('- adds `Minted`'), tags('0.7.0'));
+    expect(result?.base).toBe('0.7.0');
+    expect(unreleasedSection(result?.changelog ?? '')).toContain('`Minted`');
+    expect(result?.changelog).not.toContain('## [0.8.0]');
   });
 });
