@@ -5,7 +5,16 @@
  *
  * @module
  */
+import { deadlineRangeError, withDeadline } from '@setu-ts/common';
+import type { DeadlineOptions } from '@setu-ts/common';
 import type { IVaultHttp, SecretProvider } from '../interfaces/index.ts';
+import { SecretProviderUnavailableError } from '../errors.ts';
+
+/** Provider name carried on {@linkcode SecretProviderUnavailableError}. */
+const PROVIDER_NAME = 'HashiCorpVaultProvider';
+
+/** Default bound on one Vault request, in milliseconds. */
+const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
 /** HTTP status signalling an absent secret. */
 const HTTP_NOT_FOUND = 404;
@@ -30,6 +39,25 @@ export interface HashiCorpVaultProviderOptions {
   mount?: string | undefined;
   /** Injected `fetch`-shaped function; defaults to global `fetch`. */
   http?: IVaultHttp | undefined;
+  /**
+   * Bound on one Vault request, in milliseconds (M101a V8-4). A request that
+   * fails on the network or does not answer in time rejects with
+   * {@linkcode SecretProviderUnavailableError} (`503`) and its signal is
+   * aborted. `0` disables the bound. Must be a finite number in
+   * `0`–`2147483647`; anything else throws `RangeError` at construction.
+   *
+   * @default 5000
+   * @since 0.9.0
+   */
+  requestTimeoutMs?: number | undefined;
+  /**
+   * Timer surface the bound runs on. `SecretsPlugin` supplies the runtime's
+   * timers; a directly constructed provider falls back to the ambient
+   * `setTimeout`/`clearTimeout`.
+   *
+   * @since 0.9.0
+   */
+  timing?: DeadlineOptions['timing'];
 }
 
 /** Shape of a Vault KV v2 read response body. */
@@ -47,16 +75,25 @@ export class HashiCorpVaultProvider implements SecretProvider {
   readonly #token: string;
   readonly #mount: string;
   readonly #http: IVaultHttp;
+  readonly #timeoutMs: number;
+  readonly #timing: DeadlineOptions['timing'];
   #ready = false;
 
   /**
    * @param options - Vault connection/injection options
+   * @throws {RangeError} When `requestTimeoutMs` is out of range
    */
   constructor(options?: HashiCorpVaultProviderOptions) {
     this.#address = (options?.address ?? '').replace(/\/+$/, '');
     this.#token = options?.token ?? '';
     this.#mount = options?.mount ?? DEFAULT_MOUNT;
     this.#http = options?.http ?? ((url, init): Promise<Response> => fetch(url, init));
+    this.#timeoutMs = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const refusal = deadlineRangeError('requestTimeoutMs', this.#timeoutMs);
+    if (refusal !== null) {
+      throw refusal;
+    }
+    this.#timing = options?.timing;
   }
 
   connect(): Promise<void> {
@@ -84,10 +121,12 @@ export class HashiCorpVaultProvider implements SecretProvider {
    *
    * @param name - The secret path (relative to the mount)
    * @returns The value, or `null` when absent
+   * @throws {SecretProviderUnavailableError} When Vault cannot be reached or
+   *   does not answer within `requestTimeoutMs`
    * @throws {Error} On a non-404 HTTP error
    */
   async get(name: string): Promise<string | null> {
-    const res = await this.#http(this.#dataUrl(name), {
+    const res = await this.#request(this.#dataUrl(name), {
       method: 'GET',
       headers: { 'X-Vault-Token': this.#token },
     });
@@ -107,10 +146,12 @@ export class HashiCorpVaultProvider implements SecretProvider {
    *
    * @param name - The secret path (relative to the mount)
    * @param value - The new value
+   * @throws {SecretProviderUnavailableError} When Vault cannot be reached or
+   *   does not answer within `requestTimeoutMs`
    * @throws {Error} On any HTTP error
    */
   async set(name: string, value: string): Promise<void> {
-    const res = await this.#http(this.#dataUrl(name), {
+    const res = await this.#request(this.#dataUrl(name), {
       method: 'POST',
       headers: {
         'X-Vault-Token': this.#token,
@@ -139,7 +180,7 @@ export class HashiCorpVaultProvider implements SecretProvider {
       return false;
     }
     try {
-      const res = await this.#http(`${this.#address}/v1/sys/health`, { method: 'GET' });
+      const res = await this.#request(`${this.#address}/v1/sys/health`, { method: 'GET' });
       // Release the unread body so the connection is not held open.
       await res.body?.cancel().catch(() => {
         // A body the transport already closed cannot be cancelled; the
@@ -148,6 +189,26 @@ export class HashiCorpVaultProvider implements SecretProvider {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Sends one request under the `requestTimeoutMs` bound (M101a V8-4).
+   *
+   * A transport failure and an expired bound both become
+   * {@linkcode SecretProviderUnavailableError}: either way Vault did not
+   * answer, and the caller needs a retryable `503`, not a masked `500`. A
+   * response — any status — is returned unchanged.
+   */
+  async #request(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await withDeadline((signal) => this.#http(url, { ...init, signal }), {
+        timeoutMs: this.#timeoutMs,
+        onTimeout: () => new Error(`Vault did not answer within ${this.#timeoutMs} ms`),
+        ...(this.#timing !== undefined && { timing: this.#timing }),
+      });
+    } catch (error) {
+      throw new SecretProviderUnavailableError(PROVIDER_NAME, error);
     }
   }
 

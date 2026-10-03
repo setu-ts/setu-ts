@@ -1,7 +1,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import { httpStatusHintOf } from '@setu-ts/common';
 import { HashiCorpVaultProvider } from '../../src/providers/vault.ts';
+import { SecretProviderUnavailableError } from '../../src/errors.ts';
 import type { IVaultHttp } from '../../src/interfaces/index.ts';
 
 /** A recorded HTTP call. */
@@ -175,4 +177,128 @@ describe('HashiCorpVaultProvider', () => {
       await expect(provider.isHealthy()).resolves.toBe(false);
     });
   });
+});
+
+/** A timer surface nothing fires until the test calls `fire()`. */
+class ManualTimers {
+  readonly armed: Array<{ fn: () => void; ms: number }> = [];
+  readonly setTimer = (fn: () => void, ms: number): number => {
+    this.armed.push({ fn, ms });
+    return this.armed.length;
+  };
+  readonly clearTimer = (): void => {};
+  fire(): void {
+    const timer = this.armed.at(-1);
+    if (timer === undefined) throw new Error('no timer armed');
+    timer.fn();
+  }
+}
+
+/** Lets an in-flight request reach the injected `http`. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+describe('HashiCorpVaultProvider request bound (M101a V8-4)', () => {
+  const base = { address: 'https://vault.example.com', token: 'tok' };
+
+  it('rejects a read Vault never answers with a 503-branded error and aborts the request', async () => {
+    const timers = new ManualTimers();
+    let signal: AbortSignal | null | undefined;
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      timing: timers,
+      http: (_url, init) => {
+        signal = init?.signal;
+        return new Promise<Response>(() => {});
+      },
+    });
+    await provider.connect();
+
+    const pending = provider.get('database/password');
+    await flush();
+    expect(timers.armed[0]?.ms).toBe(5000);
+    timers.fire();
+
+    const error = await pending.then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretProviderUnavailableError);
+    expect(httpStatusHintOf(error)?.status).toBe(503);
+    expect((error as SecretProviderUnavailableError).provider).toBe('HashiCorpVaultProvider');
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('wraps a transport failure as unavailable, keeping it as the cause', async () => {
+    const failure = new TypeError('fetch failed');
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.reject(failure),
+    });
+    await provider.connect();
+
+    const error = await provider.set('a', 'b').then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretProviderUnavailableError);
+    expect((error as Error).cause).toBe(failure);
+    // The served sentence is fixed; the driver text stays in the log.
+    expect(httpStatusHintOf(error)?.detail).toBe(
+      'The secrets provider is temporarily unreachable.',
+    );
+  });
+
+  it('honors a configured bound, and 0 arms no timer at all', async () => {
+    const configured = new ManualTimers();
+    const p1 = new HashiCorpVaultProvider({
+      ...base,
+      requestTimeoutMs: 250,
+      timing: configured,
+      http: () => Promise.resolve(new Response(null, { status: 404 })),
+    });
+    await p1.connect();
+    expect(await p1.get('x')).toBeNull();
+    expect(configured.armed[0]?.ms).toBe(250);
+
+    const disabled = new ManualTimers();
+    const p2 = new HashiCorpVaultProvider({
+      ...base,
+      requestTimeoutMs: 0,
+      timing: disabled,
+      http: () => Promise.resolve(new Response(null, { status: 404 })),
+    });
+    await p2.connect();
+    expect(await p2.get('x')).toBeNull();
+    expect(disabled.armed).toHaveLength(0);
+  });
+
+  it('keeps an HTTP error from a Vault that answered as a plain error', async () => {
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response('boom', { status: 500 })),
+    });
+    await provider.connect();
+
+    const error = await provider.get('x').then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+  });
+
+  it('reports false from isHealthy when the bound fires', async () => {
+    const timers = new ManualTimers();
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      timing: timers,
+      http: () => new Promise<Response>(() => {}),
+    });
+    const pending = provider.isHealthy();
+    await flush();
+    timers.fire();
+    expect(await pending).toBe(false);
+  });
+
+  const refused: ReadonlyArray<number> = [-1, Number.NaN, Number.POSITIVE_INFINITY];
+  for (const value of refused) {
+    it(`refuses requestTimeoutMs ${value} at construction`, () => {
+      expect(() => new HashiCorpVaultProvider({ ...base, requestTimeoutMs: value })).toThrow(
+        RangeError,
+      );
+    });
+  }
 });
