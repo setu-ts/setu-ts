@@ -38,6 +38,10 @@ describe('SecretsService', () => {
 
     expect(await service.get('database/password')).toBe('s3cret');
     await expect(service.get('missing')).rejects.toThrow('Secret not found: missing');
+    // A caller-supplied name cannot forge a log line through the message.
+    await expect(service.get('x\r\nforged')).rejects.toThrow(
+      'Secret not found: x\\u000d\\u000aforged',
+    );
   });
 
   it('caches reads: a second get within TTL does not hit the provider', async () => {

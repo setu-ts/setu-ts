@@ -9,6 +9,7 @@ import { deadlineRangeError, withDeadline } from '@setu-ts/common';
 import type { DeadlineOptions } from '@setu-ts/common';
 import type { IVaultHttp, SecretProvider } from '../interfaces/index.ts';
 import { SecretProviderUnavailableError } from '../errors.ts';
+import { printableSecretName } from '../services/secret-name.ts';
 
 /** Provider name carried on {@linkcode SecretProviderUnavailableError}. */
 const PROVIDER_NAME = 'HashiCorpVaultProvider';
@@ -24,6 +25,14 @@ const DEFAULT_MOUNT = 'secret';
 
 /** KV field under which the secret string is stored. */
 const VALUE_FIELD = 'value';
+
+/**
+ * The largest response body a read accepts, in bytes (M101a security audit
+ * O2). A KV v2 read carries one string value plus metadata; a body past this
+ * is not a secret this provider wrote, and reading it whole would let a
+ * misbehaving server exhaust memory inside `requestTimeoutMs`.
+ */
+const MAX_RESPONSE_BYTES = 1_048_576;
 
 /**
  * Options for {@linkcode HashiCorpVaultProvider}.
@@ -74,6 +83,70 @@ interface VaultAnswer {
   readonly status: number;
   readonly ok: boolean;
   readonly text: string | null;
+  /** The body was larger than {@linkcode MAX_RESPONSE_BYTES} and was not read. */
+  readonly oversized: boolean;
+}
+
+/**
+ * Reads a response body as text, stopping at {@linkcode MAX_RESPONSE_BYTES}.
+ *
+ * @param res - The response whose body to read
+ * @returns The text, or `null` when the body was larger than the cap, in which
+ *   case the rest of it is cancelled
+ */
+async function readCappedText(res: Response): Promise<string | null> {
+  if (res.body === null) {
+    return '';
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    total += value.byteLength;
+    if (total > MAX_RESPONSE_BYTES) {
+      await reader.cancel().catch(() => {
+        // Already closed: nothing left to release.
+      });
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Turns a secret name into the URL path below the KV v2 `data/` segment
+ * (M101a security audit O1).
+ *
+ * Each `/`-separated segment is percent-encoded, so a name cannot add a query,
+ * a fragment or a `%2e%2e` that the server decodes. An empty, `.` or `..`
+ * segment is refused: it would let a name address a Vault endpoint outside
+ * the mount, with the token attached.
+ *
+ * @param name - The secret path relative to the mount
+ * @returns The encoded path
+ * @throws {Error} When a segment is empty, `.` or `..`
+ */
+function secretPath(name: string): string {
+  const segments = name.split('/');
+  for (const segment of segments) {
+    if (segment === '' || segment === '.' || segment === '..') {
+      throw new Error(
+        `Vault secret name ${printableSecretName(name)} has an empty, "." or ".." path segment`,
+      );
+    }
+  }
+  return segments.map(encodeURIComponent).join('/');
 }
 
 /** URL schemes a Vault address may use. */
@@ -167,8 +240,13 @@ export class HashiCorpVaultProvider implements SecretProvider {
     if (res.status === HTTP_NOT_FOUND) {
       return null;
     }
+    if (res.oversized) {
+      throw new Error(
+        `Vault read for ${printableSecretName(name)} exceeded ${MAX_RESPONSE_BYTES} bytes`,
+      );
+    }
     if (!res.ok) {
-      throw new Error(`Vault read failed for ${name}: HTTP ${res.status}`);
+      throw new Error(`Vault read failed for ${printableSecretName(name)}: HTTP ${res.status}`);
     }
     // Parsed outside the bound: a Vault that answered with a malformed body
     // is a plain error, not an unreachable provider.
@@ -196,7 +274,7 @@ export class HashiCorpVaultProvider implements SecretProvider {
       body: JSON.stringify({ data: { [VALUE_FIELD]: value } }),
     }, false);
     if (!res.ok) {
-      throw new Error(`Vault write failed for ${name}: HTTP ${res.status}`);
+      throw new Error(`Vault write failed for ${printableSecretName(name)}: HTTP ${res.status}`);
     }
   }
 
@@ -239,13 +317,14 @@ export class HashiCorpVaultProvider implements SecretProvider {
       return await withDeadline(async (signal) => {
         const res = await this.#http(url, { ...init, signal });
         if (readBody && res.ok) {
-          return { status: res.status, ok: true, text: await res.text() };
+          const text = await readCappedText(res);
+          return { status: res.status, ok: true, text, oversized: text === null };
         }
         await res.body?.cancel().catch(() => {
           // A body the transport already closed cannot be cancelled; the
           // status still answered.
         });
-        return { status: res.status, ok: res.ok, text: null };
+        return { status: res.status, ok: res.ok, text: null, oversized: false };
       }, {
         timeoutMs: this.#timeoutMs,
         onTimeout: () => new Error(`Vault did not answer within ${this.#timeoutMs} ms`),
@@ -258,6 +337,6 @@ export class HashiCorpVaultProvider implements SecretProvider {
 
   /** Builds the KV v2 data URL for a secret path. */
   #dataUrl(name: string): string {
-    return `${this.#address}/v1/${this.#mount}/data/${name}`;
+    return `${this.#address}/v1/${this.#mount}/data/${secretPath(name)}`;
   }
 }

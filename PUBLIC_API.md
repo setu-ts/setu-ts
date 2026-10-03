@@ -4626,7 +4626,10 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
   read included, so headers followed by silence count as no answer; the transport error is kept as
   `cause` for the log and never reaches the response body. A Vault that answers with an HTTP error
   is reachable and keeps its handling: `404` reads as `null`, any other error status rejects with a
-  plain `Error`. `provider` names the unreachable provider.
+  plain `Error`. `provider` names the unreachable provider. Since M101a the provider also
+  percent-encodes each `/`-separated segment of a secret name and refuses an empty, `.` or `..`
+  segment before sending anything; a read body over 1 MiB is refused with a plain `Error`; and a
+  name quoted in any `secrets-plugin` error message has its control characters escaped as `\uXXXX`.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write

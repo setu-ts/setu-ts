@@ -397,3 +397,100 @@ describe('HashiCorpVaultProvider body bound and address validation (M101a)', () 
     expect(provider.isReady()).toBe(true);
   });
 });
+
+describe('HashiCorpVaultProvider secret path and body size (M101a security audit)', () => {
+  const base = { address: 'https://vault.example.com', token: 'tok' };
+
+  for (const name of ['../../sys/health', 'a/../b', './a', 'a//b', '', 'a/']) {
+    it(`refuses ${JSON.stringify(name)} before any request is sent`, async () => {
+      const calls: Call[] = [];
+      const provider = new HashiCorpVaultProvider({
+        ...base,
+        http: fakeHttp(jsonResponse({}), calls),
+      });
+      await provider.connect();
+      await expect(provider.get(name)).rejects.toThrow('path segment');
+      await expect(provider.set(name, 'v')).rejects.toThrow('path segment');
+      expect(calls).toHaveLength(0);
+    });
+  }
+
+  it('percent-encodes each segment so a name cannot add a query or an encoded dot segment', async () => {
+    const calls: Call[] = [];
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: (url) => {
+        calls.push({ url });
+        return Promise.resolve(jsonResponse({ data: { data: { value: 'v' } } }));
+      },
+    });
+    await provider.connect();
+    await provider.get('app db/pass?x=1#f');
+    await provider.get('%2e%2e/a');
+    expect(calls[0].url).toBe(
+      'https://vault.example.com/v1/secret/data/app%20db/pass%3Fx%3D1%23f',
+    );
+    expect(calls[1].url).toBe('https://vault.example.com/v1/secret/data/%252e%252e/a');
+  });
+
+  it('refuses a body over 1 MiB as a plain error and cancels the rest of it', async () => {
+    let cancelled = false;
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 65_536;
+        controller.enqueue(new Uint8Array(65_536));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+    await provider.connect();
+    const error = await provider.get('big').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+    expect((error as Error).message).toBe('Vault read for big exceeded 1048576 bytes');
+    expect(cancelled).toBe(true);
+    expect(sent).toBeLessThanOrEqual(1_048_576 + 2 * 65_536);
+  });
+
+  it('reads a body of exactly 1 MiB', async () => {
+    const prefix = '{"data":{"data":{"value":"';
+    const suffix = '"}}}';
+    const value = 'x'.repeat(1_048_576 - prefix.length - suffix.length);
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(prefix + value + suffix, { status: 200 })),
+    });
+    await provider.connect();
+    expect(await provider.get('exact')).toBe(value);
+  });
+
+  it('reads a bodiless 200 as an empty body (a plain JSON error)', async () => {
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(null, { status: 200 })),
+    });
+    await provider.connect();
+    const error = await provider.get('a').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SyntaxError);
+  });
+
+  it('escapes control characters in a name it quotes', async () => {
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response('no', { status: 500 })),
+    });
+    await provider.connect();
+    await expect(provider.get('a\r\nforged')).rejects.toThrow(
+      'Vault read failed for a\\u000d\\u000aforged: HTTP 500',
+    );
+    await expect(provider.set('a\u007f', 'v')).rejects.toThrow(
+      'Vault write failed for a\\u007f: HTTP 500',
+    );
+  });
+});

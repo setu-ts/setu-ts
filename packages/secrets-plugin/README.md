@@ -75,6 +75,14 @@ existing handling (a plain `Error`; an unparseable body is one too): `404` reads
 other error status rejects with a plain `Error`. A value outside `0`–`2147483647` is refused with a
 `RangeError` when the application starts.
 
+**Since M101a** a secret name is checked and encoded before it reaches the URL. Each `/`-separated
+segment is percent-encoded, so `app db/pass` is read from `app%20db/pass`, and a name with an empty,
+`.` or `..` segment (`../../sys/health`, `a//b`, `a/`) is refused before any request is sent: it
+would otherwise address a Vault endpoint outside the mount with the token attached. A read whose
+response body exceeds 1 MiB is refused with a plain `Error` and the rest of the body is cancelled. A
+name quoted in an error message has its control characters written as `\uXXXX`, so a name cannot
+forge a log line.
+
 ### AWS Secrets Manager (KMS-backed)
 
 ```typescript

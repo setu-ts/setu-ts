@@ -553,3 +553,44 @@ Each is a place the shipped code or tests differ from the text above; the text i
   "options reach the store" row is proven by `test/integration/outage-real.test.ts` (CI), not a unit
   test: dropping the forwarding line makes it fail. There is no seam to read a built client's
   `commandTimeout` without one.
+
+## 11. Design security review (recorded after implementation, at the maintainer's direction)
+
+The maintainer requested a committed-tree security audit this plan did not schedule. Round 1 failed
+because no design review existed, so this one is recorded after implementation (the M98h/M98k
+precedent) rather than presented as having guided the design.
+
+**Flows reviewed.** The Vault request and body read (token in `X-Vault-Token`, `address` from
+configuration, secret name → URL path); dependency answers from Vault, Redis, PostgreSQL and Service
+Bus consumed by health and readiness; the `/health` and `/ready` bodies; the `RedisQueue` Lua
+transitions; the scheduler's distributed-lock acquisition.
+
+**Assets.** The Vault token, secret values, availability of the application (a hung dependency must
+not hang a probe or a request), and the truthfulness of `/ready`.
+
+**Attackers.** A caller whose input reaches a secret name or a queue job id; a slow, hung or hostile
+dependency (headers then silence, an unbounded body, a late reply); an operator misconfiguration (a
+`file:` address, a non-numeric bound); a reader of logs and probe bodies.
+
+**Obligations.**
+
+1. Every new dependency call is bounded in time, and a bound that is not a finite non-negative
+   number is refused at construction (never treated as "off").
+2. No error body or log line carries the Vault address's userinfo or the token.
+3. A secret name cannot leave the KV v2 data path: each segment is percent-encoded, and an empty,
+   `.` or `..` segment is refused before any request.
+4. A Vault answer is bounded in size (1 MiB), with the stream cancelled past the cap.
+5. A secret name quoted in an error message has its control characters escaped.
+6. Lua transitions take ids and payloads only through `KEYS`/`ARGV`, never by string building.
+7. A late lock token is released, and a hung or throwing lock does not run the job.
+8. An unobservable signal never reads as evidence of health beyond what is documented (§3.3, the
+   typed-seam case).
+
+**Findings.**
+
+| #  | Finding                                                                                               | Disposition                                                |
+| -- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| F1 | No design review in this plan                                                                         | Closed by this section                                     |
+| O1 | Vault name unencoded (`../` reached any endpoint with the token); CRLF name logged raw (pre-existing) | Fixed: obligations 3 and 5                                 |
+| O2 | Vault body unbounded in size (pre-existing)                                                           | Fixed: obligation 4                                        |
+| O3 | Typed seam + saturated pool reads `up` over a hung database                                           | Accepted, documented in the database README and PUBLIC_API |

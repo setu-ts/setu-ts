@@ -54,6 +54,13 @@ All notable changes to this project are documented here. The format follows
   absolute `http:`/`https:` URL, so a malformed address fails at startup rather than as a `503` on
   every read. A Vault that answers with an HTTP error keeps its handling: `404` reads as `null`, any
   other error status rejects with a plain `Error`.
+- **The Vault provider encodes secret names and caps response bodies (M101a security audit).** Each
+  `/`-separated segment of a name is percent-encoded, and a name with an empty, `.` or `..` segment
+  is refused before any request — `../../sys/health` used to reach another Vault endpoint with the
+  token attached. A name that relied on a literal `%`, `?` or `#` reaching Vault unencoded now reads
+  a different path. A read body over 1 MiB is refused with a plain `Error`. Secret names quoted in
+  `secrets-plugin` error messages have control characters escaped, so a name cannot forge a log
+  line.
 - **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
   registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
   `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
