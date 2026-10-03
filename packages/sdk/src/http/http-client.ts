@@ -13,10 +13,11 @@ import type {
   ClientRequest,
   ClientRequestContext,
   ClientResponse,
+  ClientRetryPolicy,
   IClientTiming,
   IHttpClient,
 } from './contracts.ts';
-import type { CircuitBreakerPolicy, RetryPolicy } from 'jsr:@setu-ts/common@^0.8.0';
+import type { CircuitBreakerPolicy } from 'jsr:@setu-ts/common@^0.8.0';
 
 import { HttpClientError } from '../errors.ts';
 import { createCircuitBreaker } from '../circuit-breaker/circuit-breaker.ts';
@@ -108,7 +109,7 @@ export class HttpClient implements IHttpClient {
    */
   #fetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
   #timing: IClientTiming;
-  #retry: RetryPolicy | undefined;
+  #retry: ClientRetryPolicy | undefined;
   #circuitBreaker: CircuitBreakerPolicy | undefined;
   #maxRequests: number | undefined;
   #windowMs: number | undefined;

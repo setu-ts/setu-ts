@@ -34,6 +34,12 @@ export function createClient(options: ClientOptions): IHttpClient {
     if (options.retry.limit < 1) {
       throw new Error('retry.limit must be >= 1');
     }
+    if (
+      options.retry.maxRetryAfterMs !== undefined &&
+      (!Number.isFinite(options.retry.maxRetryAfterMs) || options.retry.maxRetryAfterMs < 0)
+    ) {
+      throw new Error('retry.maxRetryAfterMs must be a finite non-negative number');
+    }
   }
 
   // Validate circuit breaker policy.

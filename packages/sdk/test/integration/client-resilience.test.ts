@@ -233,7 +233,12 @@ describe('client resilience composition', () => {
       baseUrl: 'https://api.example.com',
       timing,
       fetch: fetchImpl,
-      retry: { limit: 3, delay: 10, backoff: 'fixed' },
+      retry: {
+        limit: 3,
+        delay: 10,
+        backoff: 'fixed',
+        maxRetryAfterMs: 30_000,
+      },
     });
 
     const resp = await client.request({ method: 'GET', path: 'x' });
@@ -241,5 +246,35 @@ describe('client resilience composition', () => {
     expect(attempts).toEqual(2);
     // Retry-After: 30 → 30000ms, overrides the base delay of 10.
     expect(sleepDelays).toEqual([30000]);
+  });
+
+  it('surfaces an over-cap Retry-After response without sleeping or retrying', async () => {
+    const { timing, sleepDelays } = createTiming();
+    let attempts = 0;
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing,
+      fetch: () => {
+        attempts++;
+        return Promise.resolve(
+          new Response('', {
+            status: 429,
+            headers: { 'Retry-After': '60' },
+          }),
+        );
+      },
+      retry: { limit: 2, delay: 100, backoff: 'exponential' },
+    });
+
+    try {
+      await client.request({ method: 'GET', path: 'x' });
+      throw new Error('expected the 429 to surface');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpClientError);
+      expect((error as HttpClientError).status).toBe(429);
+      expect((error as HttpClientError).headers.get('retry-after')).toBe('60');
+    }
+    expect(attempts).toBe(1);
+    expect(sleepDelays).toEqual([]);
   });
 });

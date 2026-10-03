@@ -17,6 +17,7 @@ describe('@setu-ts/sdk barrel', () => {
       'createSseClient',
       'createRealtimeClient',
       'createObservedFetch',
+      'createTraceContextInterceptor',
     ].sort();
     expect(actual).toEqual(expected);
   });

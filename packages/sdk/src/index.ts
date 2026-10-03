@@ -20,6 +20,7 @@ export type {
   ClientRequestInterceptor,
   ClientResponse,
   ClientResponseInterceptor,
+  ClientRetryPolicy,
   IClientTiming,
   IHttpClient,
 } from './http/contracts.ts';
@@ -39,6 +40,9 @@ export {
   createApiKeyAuthInterceptor,
   createBearerAuthInterceptor,
 } from './auth/auth-interceptor.ts';
+
+// Distributed trace propagation
+export { createTraceContextInterceptor } from './trace/trace-context-interceptor.ts';
 
 // Errors
 export { ClientCircuitOpenError, HttpClientError, OpenApiCodegenError } from './errors.ts';

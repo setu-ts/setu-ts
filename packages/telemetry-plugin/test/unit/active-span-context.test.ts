@@ -3,6 +3,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { contextToTraceparent } from '@setu-ts/common';
 import type { ITelemetryService, SpanContext } from '@setu-ts/common';
 
 import { NoopTelemetryService, TelemetryService } from '../../src/services/telemetry-service.ts';
@@ -39,7 +40,12 @@ const SPAN: SpanContext = {
 
 describe('TelemetryService.activeSpanContext', () => {
   it("reports the host's active span", () => {
-    expect(new TelemetryService(hostReporting(SPAN)).activeSpanContext()).toEqual(SPAN);
+    const active = new TelemetryService(hostReporting(SPAN)).activeSpanContext();
+    expect(active).toEqual(SPAN);
+    if (active === undefined) throw new Error('expected an active span');
+    expect(contextToTraceparent(active)).toBe(
+      '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    );
   });
 
   it('reports undefined when nothing is active', () => {

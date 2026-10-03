@@ -5,6 +5,7 @@ import { OpenApiCodegenError } from '../../src/errors.ts';
 import { paramsDocument } from '../fixtures/params-document.ts';
 import { usersDocument } from '../fixtures/users-document.ts';
 import { inlineShapesDocument } from '../fixtures/inline-shapes-document.ts';
+import { redirectDocument } from '../fixtures/redirect-document.ts';
 import type {
   SdkOpenApiDocument,
   SdkOpenApiOperation,
@@ -1510,6 +1511,41 @@ describe('typed error responses (X11-7)', () => {
 
     expect(out).not.toContain('GetUserByIdError');
     expect(out).not.toContain('import { HttpClientError }');
+  });
+
+  it('omits redirect error arms and uses unknown for a redirect-only operation', () => {
+    const out = generateOpenApiClient(errDoc({
+      '303': { description: 'See other' },
+    }));
+
+    expect(out).not.toContain('GetUserByIdError');
+    expect(out).toContain('Promise<ClientResponse<unknown>>');
+    expect(out).toContain(
+      'Redirects are followed by the transport and are not observable as response arms.',
+    );
+  });
+
+  it('keeps the 2xx type and omits a companion redirect arm', () => {
+    const out = generateOpenApiClient(errDoc({
+      '200': {
+        description: 'OK',
+        content: { 'application/json': { schema: { type: 'string' } } },
+      },
+      '303': { description: 'See other' },
+    }));
+
+    expect(out).toContain('Promise<ClientResponse<string>>');
+    expect(out).not.toContain('GetUserByIdError');
+  });
+
+  it('emits the committed redirect fixture byte-for-byte', () => {
+    const generated = generateOpenApiClient(redirectDocument, {
+      sdkImport: '../../src/index.ts',
+    });
+    const fixture = Deno.readTextFileSync(
+      new URL('../fixtures/redirect-client.ts', import.meta.url),
+    );
+    expect(generated).toBe(fixture);
   });
 
   it('ignores a `default` response, which names no single status', () => {

@@ -214,7 +214,9 @@ const client = createClient({
 
 Retries transport rejections and statuses 408, 425, 429, 500-599. Only retries safe methods (GET,
 HEAD, OPTIONS, PUT, DELETE). When a retryable response carries a `Retry-After` header with
-delta-seconds, that delay replaces the computed backoff.
+delta-seconds, that delay replaces the computed backoff only when it is within the policy cap. Set
+`maxRetryAfterMs` explicitly, or omit it to use the policy's largest fixed/exponential backoff. A
+larger hint surfaces the original `HttpClientError` immediately, with its headers intact.
 
 ### Circuit Breaker
 
@@ -286,6 +288,11 @@ const client = createClient({
 
 Request interceptors receive a mutable `ClientRequestContext` (resolved `URL` and `Headers`) and
 execute once in registration order before the outbound attempt sequence.
+
+Use `createTraceContextInterceptor(telemetry)` to propagate the active span as a W3C `traceparent`.
+It reads `activeSpanContext()` per request, preserves a caller-supplied header, and omits invalid or
+absent contexts. The telemetry service is structural and imported type-only, so the SDK keeps its
+zero-runtime-dependency boundary.
 
 ### Response Interceptors
 
@@ -363,8 +370,8 @@ publish or format it has nowhere to go.
   suffixed name too. This matters because `@setu-ts/openapi-plugin` names a reused response schema
   `${operationId}Response${status}` — exactly the derivation used here — so a schema that is both
   reused and enclosed in an inline body used to abort generation outright.
-- **Declared error responses are typed.** An operation declaring a non-2xx response also emits a
-  union discriminated on the literal `status` and a narrowing guard:
+- **Declared error responses are typed.** An operation declaring a non-2xx, non-3xx response also
+  emits a union discriminated on the literal `status` and a narrowing guard:
 
   ```typescript
   try {
@@ -528,55 +535,57 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 
 ## Exports
 
-| Export                        | Kind      |
-| ----------------------------- | --------- |
-| `createApiKeyAuthInterceptor` | function  |
-| `createBearerAuthInterceptor` | function  |
-| `createClient`                | function  |
-| `createDefaultClientTiming`   | function  |
-| `createObservedFetch`         | function  |
-| `createRealtimeClient`        | function  |
-| `createSseClient`             | function  |
-| `generateOpenApiClient`       | function  |
-| `ClientCircuitOpenError`      | class     |
-| `HttpClientError`             | class     |
-| `OpenApiCodegenError`         | class     |
-| `CircuitBreakerPolicy`        | interface |
-| `ClientOptions`               | interface |
-| `ClientRateLimitPolicy`       | interface |
-| `ClientRequest`               | interface |
-| `ClientRequestContext`        | interface |
-| `ClientResponse`              | interface |
-| `IClientTiming`               | interface |
-| `IHttpClient`                 | interface |
-| `IRealtimeClient`             | interface |
-| `ISseClient`                  | interface |
-| `IWebSocketTransport`         | interface |
-| `ObservedFetch`               | interface |
-| `ObservedFetchOptions`        | interface |
-| `OpenApiCodegenOptions`       | interface |
-| `RawSseEvent`                 | interface |
-| `RealtimeClientOptions`       | interface |
-| `RealtimeMessage`             | interface |
-| `RealtimeReconnectOptions`    | interface |
-| `RetryPolicy`                 | interface |
-| `SdkOpenApiDocument`          | interface |
-| `SdkOpenApiOperation`         | interface |
-| `SdkOpenApiParameter`         | interface |
-| `SdkOpenApiPathItem`          | interface |
-| `SdkOpenApiRequestBody`       | interface |
-| `SdkOpenApiResponse`          | interface |
-| `SdkOpenApiSchema`            | interface |
-| `SseClientOptions`            | interface |
-| `SseEvent`                    | interface |
-| `SseReconnectOptions`         | interface |
-| `BackoffStrategy`             | type      |
-| `ClientRequestInterceptor`    | type      |
-| `ClientResponseInterceptor`   | type      |
-| `RealtimeClientState`         | type      |
-| `SseClientState`              | type      |
-| `SseEventMap`                 | type      |
-| `WebSocketFactory`            | type      |
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `createApiKeyAuthInterceptor`   | function  |
+| `createBearerAuthInterceptor`   | function  |
+| `createClient`                  | function  |
+| `createDefaultClientTiming`     | function  |
+| `createObservedFetch`           | function  |
+| `createRealtimeClient`          | function  |
+| `createSseClient`               | function  |
+| `createTraceContextInterceptor` | function  |
+| `generateOpenApiClient`         | function  |
+| `ClientCircuitOpenError`        | class     |
+| `HttpClientError`               | class     |
+| `OpenApiCodegenError`           | class     |
+| `CircuitBreakerPolicy`          | interface |
+| `ClientOptions`                 | interface |
+| `ClientRateLimitPolicy`         | interface |
+| `ClientRetryPolicy`             | type      |
+| `ClientRequest`                 | interface |
+| `ClientRequestContext`          | interface |
+| `ClientResponse`                | interface |
+| `IClientTiming`                 | interface |
+| `IHttpClient`                   | interface |
+| `IRealtimeClient`               | interface |
+| `ISseClient`                    | interface |
+| `IWebSocketTransport`           | interface |
+| `ObservedFetch`                 | interface |
+| `ObservedFetchOptions`          | interface |
+| `OpenApiCodegenOptions`         | interface |
+| `RawSseEvent`                   | interface |
+| `RealtimeClientOptions`         | interface |
+| `RealtimeMessage`               | interface |
+| `RealtimeReconnectOptions`      | interface |
+| `RetryPolicy`                   | interface |
+| `SdkOpenApiDocument`            | interface |
+| `SdkOpenApiOperation`           | interface |
+| `SdkOpenApiParameter`           | interface |
+| `SdkOpenApiPathItem`            | interface |
+| `SdkOpenApiRequestBody`         | interface |
+| `SdkOpenApiResponse`            | interface |
+| `SdkOpenApiSchema`              | interface |
+| `SseClientOptions`              | interface |
+| `SseEvent`                      | interface |
+| `SseReconnectOptions`           | interface |
+| `BackoffStrategy`               | type      |
+| `ClientRequestInterceptor`      | type      |
+| `ClientResponseInterceptor`     | type      |
+| `RealtimeClientState`           | type      |
+| `SseClientState`                | type      |
+| `SseEventMap`                   | type      |
+| `WebSocketFactory`              | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

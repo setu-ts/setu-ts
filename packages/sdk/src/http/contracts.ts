@@ -17,6 +17,19 @@ import type {
 
 export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy };
 
+/**
+ * Retry policy for the HTTP client.
+ *
+ * @since 0.9.0
+ */
+export type ClientRetryPolicy = RetryPolicy & {
+  /**
+   * Largest `Retry-After` delta the client will honor. A larger server hint
+   * surfaces the response error immediately instead of sleeping or retrying.
+   */
+  readonly maxRetryAfterMs?: number;
+};
+
 // ---------------------------------------------------------------------------
 // Client request / response
 // ---------------------------------------------------------------------------
@@ -161,7 +174,7 @@ export interface ClientOptions {
   readonly timing?: IClientTiming;
 
   /** Retry policy. `limit < 1` throws at construction. */
-  readonly retry?: RetryPolicy;
+  readonly retry?: ClientRetryPolicy;
 
   /** Circuit breaker policy. `threshold < 1` throws at construction. */
   readonly circuitBreaker?: CircuitBreakerPolicy;

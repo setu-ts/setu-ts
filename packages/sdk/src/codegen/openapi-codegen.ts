@@ -752,7 +752,7 @@ function getErrorArms(
     // `default` and a range code such as `4XX` name no single status, so neither
     // can become a discriminated arm.
     const status = parseStatusCode(code);
-    if (status === undefined || (status >= 200 && status < 300)) continue;
+    if (status === undefined || (status >= 200 && status < 400)) continue;
     const media = resp.content?.['application/json'];
     const rendered = media?.schema
       ? renderSchema(media.schema, new Set(), path, method)
@@ -974,7 +974,12 @@ function getSuccessTypes(
       } else out.push('void');
     }
   }
-  return out.length ? out : ['void'];
+  if (out.length > 0) return out;
+  const hasRedirect = Object.keys(op.responses).some((code) => {
+    const status = parseStatusCode(code);
+    return status !== undefined && status >= 300 && status < 400;
+  });
+  return [hasRedirect ? 'unknown' : 'void'];
 }
 
 /**
@@ -1097,6 +1102,12 @@ export function generateOpenApiClient(
 
   const shapes = operations.map((entry) => buildOpShape(entry, types));
   const anyErrors = shapes.some((shape) => shape.errorArms.length > 0);
+  const hasRedirects = operations.some((entry) =>
+    Object.keys(entry.operation.responses ?? {}).some((code) => {
+      const status = parseStatusCode(code);
+      return status !== undefined && status >= 300 && status < 400;
+    })
+  );
 
   // No lint pragma. The generator emits only lint-clean constructs, and a
   // NARROWED ignore cannot be emitted unconditionally either: `deno lint`
@@ -1106,6 +1117,9 @@ export function generateOpenApiClient(
   // replaced.
   L('/**');
   L(' * Auto-generated SDK client. Do not edit manually.');
+  if (hasRedirects) {
+    L(' * Redirects are followed by the transport and are not observable as response arms.');
+  }
   L(' */');
   L('');
   L(`import type { ClientResponse, IHttpClient } from '${opts.sdkImport}';`);

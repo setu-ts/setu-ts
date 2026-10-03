@@ -3919,6 +3919,10 @@ a React frontend with Server-Side Rendering (SSR) and file-based routing. React 
 framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
 assets are served over `runtime.fs?.readFile`.
 
+A route-middleware refusal on a document request is rendered by React Router's `ErrorBoundary` as
+HTML with the thrown status. The kernel error responder governs kernel routes and is deliberately
+not applied to that document protocol; API callers needing Problem Details call a kernel API route.
+
 ### Registration
 
 ```typescript
@@ -7689,6 +7693,7 @@ its implementation seam.
 | `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                                                   |
 | `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below.                      |
 | `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                                       |
+| `TraceparentSource`        | interface       | Structural `traceId?`/`spanId?`/`traceFlags?` input accepted by `contextToTraceparent`; both `TelemetryContext` and `SpanContext` satisfy it.                                                                                                                                                                  |
 | `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                                       |
 
 > **Implicit parent/child linking is conditional.** Since M75 the plugin DOES register an OTel
@@ -8999,19 +9004,21 @@ The three starters share one option chain:
 MicroserviceStarterOptions extends RestStarterOptions`, so an arm
 added to the REST tier is available on all three.
 
-| Export                         | Kind     | Package                                            |
-| ------------------------------ | -------- | -------------------------------------------------- |
-| `createRestApp`                | function | `rest-starter`                                     |
-| `buildRestPlugins`             | function | `rest-starter`                                     |
-| `RestStarterOptions`           | type     | `rest-starter`                                     |
-| `RealtimeArm`                  | type     | all three (re-exported along the tier's pin chain) |
-| `createMicroserviceApp`        | function | `microservice-starter`                             |
-| `buildMicroservicePlugins`     | function | `microservice-starter`                             |
-| `MicroserviceStarterOptions`   | type     | `microservice-starter`                             |
-| `createFullStackApp`           | function | `full-stack-starter`                               |
-| `buildFullStackPlugins`        | function | `full-stack-starter`                               |
-| `createFullStackAppFromConfig` | function | `full-stack-starter`                               |
-| `FullStackStarterOptions`      | type     | `full-stack-starter`                               |
+| Export                            | Kind     | Package                                                              |
+| --------------------------------- | -------- | -------------------------------------------------------------------- |
+| `createRestApp`                   | function | `rest-starter`                                                       |
+| `buildRestPlugins`                | function | `rest-starter`                                                       |
+| `RestStarterOptions`              | type     | `rest-starter`                                                       |
+| `RealtimeArm`                     | type     | all three (re-exported along the tier's pin chain)                   |
+| `createMicroserviceApp`           | function | `microservice-starter`                                               |
+| `buildMicroservicePlugins`        | function | `microservice-starter`                                               |
+| `MicroserviceStarterOptions`      | type     | `microservice-starter`                                               |
+| `createFullStackApp`              | function | `full-stack-starter`                                                 |
+| `buildFullStackPlugins`           | function | `full-stack-starter`                                                 |
+| `createFullStackAppFromConfig`    | function | `full-stack-starter`                                                 |
+| `fullStackConfigOf`               | function | Returns the exact config snapshot used by the config-driven factory. |
+| `FullStackConfigUnavailableError` | class    | Thrown when the accessor receives an app built by another factory.   |
+| `FullStackStarterOptions`         | type     | `full-stack-starter`                                                 |
 
 Each arm is one plugin's option object, threaded through unchanged. **Gated arms are absent unless
 supplied**, so a starter called with no options registers exactly its always-on set:
@@ -9073,6 +9080,9 @@ where
 `FromConfigOptions = { config?: ConfigPluginOptions; env?: Readonly<Record<string, unknown>> }`. The
 resolver is called exactly once; if it throws, or configuration fails to load, the returned promise
 rejects and no partially-composed application exists.
+
+`fullStackConfigOf(app): IConfig` returns that exact snapshot for post-factory code. It throws the
+exported `FullStackConfigUnavailableError` when the application was built by another factory.
 
 **`env` is required on Cloudflare Workers.** Bindings arrive as the `env` argument of the `fetch`
 handler, never process-wide, so runtime services built before a request report an EMPTY environment
@@ -11735,7 +11745,7 @@ interface ClientOptions {
   headers?: Record<string, string>;
   fetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
   timing?: IClientTiming;
-  retry?: RetryPolicy;
+  retry?: ClientRetryPolicy;
   circuitBreaker?: CircuitBreakerPolicy;
   rateLimit?: ClientRateLimitPolicy;
   requestInterceptors?: ClientRequestInterceptor[];
@@ -11743,17 +11753,17 @@ interface ClientOptions {
 }
 ```
 
-| Option                 | Consumer                     | Behavior                                                      |
-| ---------------------- | ---------------------------- | ------------------------------------------------------------- |
-| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`         |
-| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win         |
-| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`         |
-| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`           |
-| `retry`                | retry strategy               | `limit < 1` throws at construction                            |
-| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                        |
-| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                  |
-| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution            |
-| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure |
+| Option                 | Consumer                     | Behavior                                                         |
+| ---------------------- | ---------------------------- | ---------------------------------------------------------------- |
+| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`            |
+| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win            |
+| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`            |
+| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`              |
+| `retry`                | retry strategy               | `limit < 1` throws; `maxRetryAfterMs` caps honoured server hints |
+| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                           |
+| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                     |
+| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution               |
+| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure    |
 
 ### ClientRequest
 
@@ -11792,6 +11802,10 @@ Request interceptors receive a mutable `ClientRequestContext` (resolved `URL` an
 execute once in registration order before the outbound attempt sequence. Response interceptors
 receive a successful `ClientResponse<T>` and its immutable request description; they are skipped
 entirely when the request throws.
+
+`createTraceContextInterceptor(source)` reads `source.activeSpanContext?()` per request, validates
+the W3C identifiers, and sets `traceparent` unless the caller already supplied it. Missing or
+invalid active contexts set nothing.
 
 ### IClientTiming and createDefaultClientTiming()
 
@@ -11919,7 +11933,7 @@ interface OpenApiCodegenOptions {
 | Component type           | PascalCase from the component name (`User` → `export type User`)                                                                                                                                                                                                                                                                                                                               |
 | Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                                                                                                                                                                                                                                                                      |
 | Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                                                                                                                                                                                                                                                                     |
-| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx response                                                                                                                                                                                                                                                                     |
+| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx, non-3xx response                                                                                                                                                                                                                                                            |
 | Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                                                                                                                                                                                                                                                                        |
 | Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                                                                                                                                                                                                                                                                         |
 | Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                                                                                                                                                                                                                                                                                |
@@ -11942,7 +11956,7 @@ _slow type_: it blocks automatic `.d.ts` generation, so a consumer could not pub
 containing the generated file — while the file's own header tells them not to edit it. Naming the
 interface is also the only way a consumer can name the client's type.
 
-**Declared error responses are typed.** For each operation declaring a non-2xx response the
+**Declared error responses are typed.** For each operation declaring a non-2xx, non-3xx response the
 generator emits a union discriminated on the literal `status`, plus a narrowing guard:
 
 ```typescript
@@ -11956,6 +11970,10 @@ export function isGetUserByIdError(e: unknown): e is GetUserByIdError { … }
 keeps meaning exactly what it did. The union must be discriminated on `status` to be usable —
 `HttpClientError<A> | HttpClientError<B>` is not, because `status` is `number` on both arms. A
 `default` response and range codes such as `4XX` are skipped: they name no single status.
+
+Declared `3xx` responses are also skipped because the web transport follows redirects before the
+client observes a response. An operation with only declared redirects returns `unknown`, the honest
+type for the follow target body that the source document does not describe.
 
 **Generated output is `deno fmt`- and `deno lint`-clean.** Two-space indentation, nested inline
 object types indented, no lint pragma (`{}` is emitted as `Record<PropertyKey, never>`, which is

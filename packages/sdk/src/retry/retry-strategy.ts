@@ -11,8 +11,7 @@
  * @internal
  */
 
-import type { IClientTiming } from '../http/contracts.ts';
-import type { RetryPolicy } from 'jsr:@setu-ts/common@^0.8.0';
+import type { ClientRetryPolicy, IClientTiming } from '../http/contracts.ts';
 
 import { HttpClientError } from '../errors.ts';
 
@@ -58,13 +57,15 @@ function parseRetryAfterDelta(headers: Headers): number | null {
  */
 export async function runWithRetry<T>(
   fn: () => Promise<T>,
-  policy: RetryPolicy,
+  policy: ClientRetryPolicy,
   method: string,
   timing: IClientTiming,
   signal?: AbortSignal,
 ): Promise<T> {
   let lastError: unknown;
   const canRetry = SAFE_METHODS.has(method.toUpperCase());
+  const maxRetryAfterMs = policy.maxRetryAfterMs ??
+    (policy.backoff === 'exponential' ? policy.delay * 2 ** (policy.limit - 1) : policy.delay);
 
   for (let attempt = 1; attempt <= policy.limit; attempt++) {
     try {
@@ -94,6 +95,7 @@ export async function runWithRetry<T>(
       if (!isRetryable) throw error;
       if (!canRetry) throw error;
       if (attempt === policy.limit) throw error;
+      if (retryAfter !== null && retryAfter > maxRetryAfterMs) throw error;
 
       // Compute backoff delay: `delay * 2^(attempt - 1)`, matching
       // resilience-plugin's server-side schedule.

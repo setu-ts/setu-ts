@@ -103,6 +103,7 @@ export {
   TRACEPARENT_HEADER,
   TRACESTATE_HEADER,
 } from './trace-context.ts';
+export type { TraceparentSource } from './trace-context.ts';
 
 // HTTP abstractions
 export type {

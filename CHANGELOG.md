@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Service-call agreement (M101d).** The SDK adds `createTraceContextInterceptor` and
+  `ClientRetryPolicy`; the full-stack starter adds `fullStackConfigOf` and
+  `FullStackConfigUnavailableError` for the exact composition snapshot; and
+  `contextToTraceparent` accepts the new `TraceparentSource` shared by both telemetry context
+  shapes.
+
+### Changed
+
+- SDK-generated clients no longer expose unreachable `3xx` error arms; redirect-only operations
+  return `unknown`. Retry policies now cap honoured `Retry-After` delays and surface the original
+  response error immediately when the hint exceeds the cap.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added

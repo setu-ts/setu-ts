@@ -72,6 +72,10 @@ logger plugin still boots, with nothing emitted.
 The request-span middleware reads and writes the W3C `traceparent` header, so traces join across
 services without extra configuration.
 
+For outbound calls made with `@setu-ts/sdk`, add its `createTraceContextInterceptor(telemetry)` to
+the client's request interceptors. It reads this plugin's active span and carries the same trace to
+the receiving service.
+
 Span **nesting** is a separate mechanism with its own preconditions. In real OTel mode the plugin
 registers an async-local context manager and `withSpan` runs its callback with the span active, so
 nested work — including messaging publishes — becomes a child span. That applies only when all three

@@ -10,6 +10,14 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Regenerate clients whose OpenAPI document declares `3xx` responses
+
+Generated SDK clients no longer emit error unions for `3xx` responses because `fetch` follows the
+redirect before the client can observe that status. Regenerate affected clients; redirect-only
+operations now return `unknown`, representing the follow target body the document does not name.
+
 ## 0.8.0
 
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at

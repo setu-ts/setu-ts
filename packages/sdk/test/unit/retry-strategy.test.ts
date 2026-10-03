@@ -152,9 +152,41 @@ describe('runWithRetry', () => {
       }
       return Promise.resolve('ok');
     };
-    await runWithRetry(fn, { limit: 2, delay: 10, backoff: 'fixed' }, 'GET', timing);
+    await runWithRetry(
+      fn,
+      { limit: 2, delay: 10, backoff: 'fixed', maxRetryAfterMs: 3000 },
+      'GET',
+      timing,
+    );
     // Retry-After: 3 → 3000ms, overrides base delay of 10.
     expect(sleepCalls[0].ms).toEqual(3000);
+  });
+
+  it('surfaces a Retry-After beyond the explicit cap without sleeping', async () => {
+    const { timing, sleepCalls } = createTiming();
+    const error = httpError(429, { 'Retry-After': '60' });
+    await expect(
+      runWithRetry(
+        () => Promise.reject(error),
+        { limit: 2, delay: 100, backoff: 'fixed', maxRetryAfterMs: 500 },
+        'GET',
+        timing,
+      ),
+    ).rejects.toBe(error);
+    expect(sleepCalls).toEqual([]);
+  });
+
+  it('defaults the cap to the largest exponential policy backoff', async () => {
+    const { timing, sleepCalls } = createTiming();
+    await expect(
+      runWithRetry(
+        () => Promise.reject(httpError(503, { 'Retry-After': '1' })),
+        { limit: 3, delay: 100, backoff: 'exponential' },
+        'GET',
+        timing,
+      ),
+    ).rejects.toBeInstanceOf(HttpClientError);
+    expect(sleepCalls).toEqual([]);
   });
 
   it('honors Retry-After delta-seconds of 30 (30000ms)', async () => {
@@ -167,7 +199,12 @@ describe('runWithRetry', () => {
       }
       return Promise.resolve('ok');
     };
-    await runWithRetry(fn, { limit: 2, delay: 10, backoff: 'fixed' }, 'GET', timing);
+    await runWithRetry(
+      fn,
+      { limit: 2, delay: 10, backoff: 'fixed', maxRetryAfterMs: 30000 },
+      'GET',
+      timing,
+    );
     expect(sleepCalls[0].ms).toEqual(30000);
   });
 

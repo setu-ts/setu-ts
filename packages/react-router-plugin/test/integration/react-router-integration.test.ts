@@ -15,6 +15,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { errorHandler, forbidden } from '@setu-ts/exceptions';
 import type { IPluginContext, RouteHandler } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
@@ -136,6 +137,47 @@ describe('react-router integration (real socket)', () => {
       const page = await fetch(`http://127.0.0.1:${port}/dashboard`);
       expect(page.headers.get('content-type')).toContain('text/html');
       expect(await page.text()).toContain('SSR');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('keeps SSR HTML refusals distinct from RFC 9457 kernel refusals', async () => {
+    const port = findFreePort();
+    const handler: SsrRequestHandler = () =>
+      Promise.resolve(
+        new Response('<html><body>route boundary: forbidden</body></html>', {
+          status: 403,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      );
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ReactRouterPlugin({
+          serverBuildPath: './build/server',
+          loadRequestHandler: fakeLoader(handler),
+        }),
+      ],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }), {
+      name: 'error-handler',
+      priority: 0,
+    });
+    app.router.get('/api/refused', () => {
+      throw forbidden('API refusal');
+    });
+    await app.start({ port });
+    try {
+      const page = await fetch(`http://127.0.0.1:${port}/forbidden`);
+      expect(page.status).toBe(403);
+      expect(page.headers.get('content-type')).toContain('text/html');
+      expect(await page.text()).toContain('route boundary: forbidden');
+
+      const api = await fetch(`http://127.0.0.1:${port}/api/refused`);
+      expect(api.status).toBe(403);
+      expect(api.headers.get('content-type')).toContain('application/problem+json');
+      expect((await api.json() as { title: string }).title).toBe('Forbidden');
     } finally {
       await app.stop();
     }
