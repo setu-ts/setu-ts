@@ -784,17 +784,22 @@ a hung database looks like (every connection stuck on a server that never answer
 up), so the row additionally requires that a query through the adapter completed within the last 10
 seconds. The indicator samples the adapter's completed-query count on each poll, so a hang is
 detected at most one poll interval plus that window after the last completion; a saturated pool
-whose queries have all stopped completing reports `degraded` and `/ready` answers 503. That row
-needs `poolStats`: without it the indicator cannot tell saturation from trouble, so a pool
-connection timeout or a probe that does not answer reports `degraded`. A pool connection timeout
-used to report `down` (it answered `false`); it is now `degraded`, because the database never
-answered either way. A probe that **exists and did not answer** inside the 2-second bound is
-evidence of trouble and reports `degraded` — never `up`, which is the claim that let a stopped
-database keep taking traffic (X51-1: the indicator used to read the lifecycle `isReady()`, which
-only says `connect()` once succeeded). An adapter that ships **no probe** is the opposite case: a
-probe that was never written is evidence of nothing, so the payload omits `reachable` and the status
-is today's — mapping a missing probe to `degraded` would fail `/ready` for every healthy Cosmos,
-Bigtable and DynamoDB application on upgrade.
+whose queries have all stopped completing reports `degraded` and `/ready` answers 503. Only queries
+the adapter runs are counted (`query()`, repositories, the Unit of Work's data sources): once
+`getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native instance, its queries
+bypass the adapter, so progress is unobservable and a saturated pool keeps reading `up` — the
+indicator cannot then tell a hang from load. Queries the application runs on its own Drizzle
+instance are not counted either; an application that queries mainly that way should expect a busy
+pool to read `degraded`. That row needs `poolStats`: without it the indicator cannot tell saturation
+from trouble, so a pool connection timeout or a probe that does not answer reports `degraded`. A
+pool connection timeout used to report `down` (it answered `false`); it is now `degraded`, because
+the database never answered either way. A probe that **exists and did not answer** inside the
+2-second bound is evidence of trouble and reports `degraded` — never `up`, which is the claim that
+let a stopped database keep taking traffic (X51-1: the indicator used to read the lifecycle
+`isReady()`, which only says `connect()` once succeeded). An adapter that ships **no probe** is the
+opposite case: a probe that was never written is evidence of nothing, so the payload omits
+`reachable` and the status is today's — mapping a missing probe to `degraded` would fail `/ready`
+for every healthy Cosmos, Bigtable and DynamoDB application on upgrade.
 
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without

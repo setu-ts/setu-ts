@@ -16,9 +16,14 @@ import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
 import { isPoolExhaustion } from '../../src/errors/classify.ts';
 import {
+  DRIZZLE_QUERY_HANDLE,
+  type DrizzleQueryHandleProvider,
+} from '../../src/query/drizzle-query.ts';
+import {
   DATABASE_QUERY_PROGRESS,
   isSaturated,
   PoolSaturatedProbeSkipped,
+  QUERY_PROGRESS_UNOBSERVABLE,
   QUERY_PROGRESS_WINDOW_MS,
   QueryProgressTracker,
   readQueryProgress,
@@ -208,6 +213,30 @@ describe('DrizzleAdapter completed-query count (M101a V8-3)', () => {
     expect(readQueryProgress(adapter)).toBe(1);
   });
 
+  it('reports progress unobservable once the typed seam hands out the outer instance', async () => {
+    const { adapter } = makeAdapter(() => Promise.resolve({ rows: [] }), saturated);
+    await adapter.connect();
+    await adapter.rawQuery('SELECT 1');
+    expect(readQueryProgress(adapter)).toBe(1);
+    adapter[DRIZZLE_QUERY_HANDLE]();
+    expect(readQueryProgress(adapter)).toBe(QUERY_PROGRESS_UNOBSERVABLE);
+  });
+
+  it('reports progress unobservable once the typed seam hands out a transaction', async () => {
+    const database = drizzle(() => Promise.resolve({ rows: [] }));
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(database, (instance, work) => work(instance as never)),
+      drizzleTables: { Tenant: tenants },
+      ...{ poolStats: saturated },
+    });
+    await adapter.connect();
+    const tx = await adapter.beginTransaction();
+    expect(readQueryProgress(adapter)).toBe(0);
+    (tx as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE]();
+    await tx.commit();
+    expect(readQueryProgress(adapter)).toBe(QUERY_PROGRESS_UNOBSERVABLE);
+  });
+
   it('does not count a rejected query', async () => {
     const { adapter } = makeAdapter(
       () => Promise.reject(new Error('connect ECONNREFUSED')),
@@ -228,6 +257,10 @@ describe('readQueryProgress', () => {
     expect(readQueryProgress(withReader(() => 4))).toBe(4);
   });
 
+  it('reads null as unobservable progress', () => {
+    expect(readQueryProgress(withReader(() => null))).toBe(QUERY_PROGRESS_UNOBSERVABLE);
+  });
+
   for (const bad of [-1, Number.NaN, Infinity, '3']) {
     it(`refuses ${String(bad)}`, () => {
       expect(readQueryProgress(withReader(() => bad))).toBeUndefined();
@@ -240,10 +273,11 @@ describe('QueryProgressTracker', () => {
     expect(new QueryProgressTracker().progressedWithin(0)).toBe(false);
   });
 
-  it('ignores an unreported count', () => {
+  it('ignores an unreported or unobservable count', () => {
     const tracker = new QueryProgressTracker();
     tracker.observe(undefined, 0);
-    expect(tracker.progressedWithin(0)).toBe(false);
+    tracker.observe(QUERY_PROGRESS_UNOBSERVABLE, 1);
+    expect(tracker.progressedWithin(1)).toBe(false);
   });
 
   it('takes a first non-zero reading as progress now, and a first zero as none', () => {

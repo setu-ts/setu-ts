@@ -45,7 +45,9 @@ All notable changes to this project are documented here. The format follows
   client the adapter builds. They used to run as separate commands, so a command that timed out
   locally but was applied by the server afterwards could leave a reserved job in neither the ready
   nor the processing set, lost with its payload still stored. An injected client without `eval`
-  keeps the separate commands. Verified against a live Redis 7.
+  keeps the separate commands. A `reserve` the server applies after its local timeout still leaves
+  the job in the processing set, and nothing reclaims it, so it needs moving back by hand. Verified
+  against a live Redis 7.
 - **A Vault request that fails on the network or does not answer in `requestTimeoutMs` now rejects
   with `SecretProviderUnavailableError` (`503`)** instead of a plain error served as a masked `500`.
   The bound covers reading the response body too. `connect()` now refuses an address that is not an
@@ -57,8 +59,10 @@ All notable changes to this project are documented here. The format follows
   `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
   every saturated replica at once — but only while queries through the adapter keep completing (one
   within the last 10 seconds). A full pool with no completed query is a hung database and reports
-  `degraded`. A pool connection timeout now reports `degraded` rather than `down` — the probe used
-  to answer `false` for it, though the database never answered either way. Verified against a live
+  `degraded`. Once `getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native
+  instance, its queries bypass the adapter, so progress is unobservable and a saturated pool reads
+  `up`. A pool connection timeout now reports `degraded` rather than `down` — the probe used to
+  answer `false` for it, though the database never answered either way. Verified against a live
   PostgreSQL 16 pool.
 - **A retained Service Bus outage is answered at once (M101a).** With a recorded network failure,
   `reachability()` now returns `false` immediately and runs the management probe in the background,

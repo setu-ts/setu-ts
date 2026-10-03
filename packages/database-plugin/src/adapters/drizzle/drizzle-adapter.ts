@@ -222,11 +222,21 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * Internal completed-query count (M101a V8-3). Attached beside
    * {@linkcode DATABASE_POOL_CAPACITY} — only with `poolStats`, since the
    * indicator consults it only to tell a saturated pool from a hung database.
+   * Returns `null` once the typed query seam has handed out the native
+   * instance, since those queries never cross the adapter and cannot be
+   * counted.
    */
-  [DATABASE_QUERY_PROGRESS]?: () => number;
+  [DATABASE_QUERY_PROGRESS]?: () => number | null;
 
   /** Queries this adapter has seen resolve: `rawQuery` and every data-source call. */
   #completedQueries = 0;
+
+  /**
+   * Whether the typed query seam (`getDrizzleDatabase` /
+   * `getDrizzleTransaction`) has handed out a native instance. Its queries
+   * bypass {@link #completedQueries}, so from then on progress is unobservable.
+   */
+  #nativeHandleIssued = false;
 
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
@@ -256,7 +266,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const poolStats = (this._options as DrizzleAdapterOptions | undefined)?.poolStats;
     if (poolStats !== undefined) {
       this[DATABASE_POOL_CAPACITY] = poolStats;
-      this[DATABASE_QUERY_PROGRESS] = () => this.#completedQueries;
+      this[DATABASE_QUERY_PROGRESS] = () =>
+        this.#nativeHandleIssued ? null : this.#completedQueries;
     }
   }
 
@@ -415,6 +426,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     if (!this._db || !this._configuredDatabase) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
+    this.#nativeHandleIssued = true;
     return { database: this._configuredDatabase, query: this._db, scope: 'outer' };
   }
 
@@ -459,7 +471,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const rollbackSentinel = { code: 'ROLLBACK_SENTINEL' };
 
     const handle: IAdapterTransaction & DrizzleQueryHandleProvider = {
-      [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
+      [DRIZZLE_QUERY_HANDLE]: (): NativeDrizzleQueryHandle => {
+        this.#nativeHandleIssued = true;
         return { database: configuredDatabase, query: tx, scope: 'transaction' };
       },
 

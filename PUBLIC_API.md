@@ -1372,9 +1372,11 @@ Capacity is data, not policy: no threshold is applied, and the snapshot changes 
 **Since M101a**, when it shows every connection busy with callers waiting (`idle === 0` and
 `waiting > 0`), the probe queues no `SELECT 1` and the indicator reports `up` with
 `reachable: 'unknown'` while queries through the adapter are still completing (one completed within
-the last 10 seconds; with none, a full pool is a hung database and reports `degraded`) — saturation,
-not an outage, so `/ready` does not pull every saturated replica at once. Without `poolStats` that
-row cannot be read, so a pool connection timeout or an unanswered probe reports `degraded` (a pool
+the last 10 seconds; with none, a full pool is a hung database and reports `degraded`; once
+`getDrizzleDatabase`/`getDrizzleTransaction` has handed out the native instance, whose queries
+bypass the adapter, progress is unobservable and a saturated pool reads `up`) — saturation, not an
+outage, so `/ready` does not pull every saturated replica at once. Without `poolStats` that row
+cannot be read, so a pool connection timeout or an unanswered probe reports `degraded` (a pool
 connection timeout reported `down` before M101a: the database never answered either way).
 Caller-facing pool-timeout status mapping is M90f. A snapshot the callback returns in a malformed
 shape is dropped exactly like an absent one — a broken reading is never published as a number. A

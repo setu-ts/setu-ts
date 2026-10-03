@@ -245,12 +245,15 @@ elapsed. It errs late by construction: dropping a payload early would discard ex
 data the option exists to keep. Exact per-payload expiry is not expressible here — Redis has no
 per-member TTL on a sorted set, and the payloads share one hash.
 
-The payload move is issued **before** the dead-set insert, and that order is load-bearing: no two of
-these commands are atomic, and a sweep starts from the dead set, so a member that became visible
-before its payload was written can be swept by a concurrent `deadLetter` — deleting the member and
-stranding the payload where no later sweep can reach it. Writing first means a sweep either misses
-the id, and a later one collects it, or finds both together. Ordering closes that window; it does
-not make the sequence atomic, so a process that dies mid-sequence can still leave a payload behind.
+With a client exposing `eval` — always true of the client the adapter builds — the payload move and
+the dead-set insert run as one Lua script and are atomic (M101a). The rest of this paragraph
+describes an injected client without `eval`, which keeps separate commands. The payload move is
+issued **before** the dead-set insert, and that order is load-bearing: no two of these commands are
+atomic, and a sweep starts from the dead set, so a member that became visible before its payload was
+written can be swept by a concurrent `deadLetter` — deleting the member and stranding the payload
+where no later sweep can reach it. Writing first means a sweep either misses the id, and a later one
+collects it, or finds both together. Ordering closes that window; it does not make the sequence
+atomic, so a process that dies mid-sequence can still leave a payload behind.
 
 Setting it MOVES a dead job's payload from `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and
 the expiry is applied to that key and the dead set. It is never applied to the live jobs hash: that
@@ -268,6 +271,14 @@ In-memory queue for testing and local development. Jobs are lost on restart.
 
 Redis-backed queue using sorted sets for delayed job storage. Supports persistence and distributed
 processing.
+
+Since M101a each transition (`enqueue`, `reserve`, `ack`, `requeue`, dead-lettering) runs as one Lua
+script through the client's `eval`, so a command that times out locally cannot leave a job half
+moved. An injected client without `eval` keeps the separate commands. The scripts touch several
+`queue:<name>:*` keys with no hash tag, so a Redis Cluster client is not supported: it would refuse
+them with `CROSSSLOT`. A `reserve` the server applies after its local timeout leaves the job in
+`queue:<name>:processing`, and nothing reclaims that set, so such a job has to be moved back by
+hand.
 
 ### RabbitMqQueue
 

@@ -33,7 +33,7 @@ interface Row {
   readonly probe: boolean | 'reject';
   readonly capacity: DatabasePoolCapacity | undefined;
   /** Completed-query counts the adapter reports on successive reads. */
-  readonly completed: ReadonlyArray<number> | undefined;
+  readonly completed: ReadonlyArray<number | null> | undefined;
   readonly status: 'up' | 'degraded' | 'down';
   readonly reachable: true | false | 'unknown';
 }
@@ -60,6 +60,22 @@ const ROWS: ReadonlyArray<Row> = [
     probe: 'reject',
     capacity: SATURATED,
     completed: undefined,
+    status: 'degraded',
+    reachable: 'unknown',
+  },
+  {
+    name: 'no answer + saturated + progress unobservable (typed seam in use) → up',
+    probe: 'reject',
+    capacity: SATURATED,
+    completed: [null, null],
+    status: 'up',
+    reachable: 'unknown',
+  },
+  {
+    name: 'no answer + idle capacity + progress unobservable → degraded',
+    probe: 'reject',
+    capacity: IDLE,
+    completed: [null, null],
     status: 'degraded',
     reachable: 'unknown',
   },
@@ -113,7 +129,7 @@ function adapterFor(row: Row): IDatabaseAdapter {
   const counts = [...(row.completed ?? [])];
   const adapter: IDatabaseAdapter & {
     [DATABASE_POOL_CAPACITY]?: () => DatabasePoolCapacity;
-    [DATABASE_QUERY_PROGRESS]?: () => number;
+    [DATABASE_QUERY_PROGRESS]?: () => number | null;
   } = {
     connect: () => Promise.resolve(),
     disconnect: () => Promise.resolve(),

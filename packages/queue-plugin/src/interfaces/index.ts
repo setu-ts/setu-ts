@@ -260,8 +260,9 @@ export interface QueuePluginOptions {
    * a caller that retries on rejection can run the job twice, and should give
    * the job an idempotent handler. Each queue transition runs as one Lua script
    * (see `IRedisQueueClient.eval`), so a timeout leaves it whole or absent; a
-   * `reserve` applied after its timeout leaves the job in the processing set,
-   * not lost from both sets.
+   * `reserve` applied after its timeout leaves the job and its payload in the
+   * processing set. Nothing reclaims a processing-set member, so that job is
+   * not dispatched again until it is moved back to the ready set by hand.
    *
    * @since 0.9.0
    */
@@ -470,8 +471,9 @@ export interface RedisQueueOptions {
    * a caller that retries on rejection can run the job twice, and should give
    * the job an idempotent handler. Each queue transition runs as one Lua script
    * (see `IRedisQueueClient.eval`), so a timeout leaves it whole or absent; a
-   * `reserve` applied after its timeout leaves the job in the processing set,
-   * not lost from both sets.
+   * `reserve` applied after its timeout leaves the job and its payload in the
+   * processing set. Nothing reclaims a processing-set member, so that job is
+   * not dispatched again until it is moved back to the ready set by hand.
    *
    * @since 0.9.0
    */

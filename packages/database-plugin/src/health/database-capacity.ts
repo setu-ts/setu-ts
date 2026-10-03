@@ -133,18 +133,33 @@ export const DATABASE_QUERY_PROGRESS: unique symbol = Symbol.for(
 export const QUERY_PROGRESS_WINDOW_MS = 10_000;
 
 /**
+ * The reading an adapter returns from its {@linkcode DATABASE_QUERY_PROGRESS}
+ * reader when it can no longer see every query the application runs — for
+ * the Drizzle adapter, once the typed query seam has handed out the native
+ * instance, whose queries never cross the adapter.
+ */
+export const QUERY_PROGRESS_UNOBSERVABLE = 'unobservable';
+
+/**
  * Reads the completed-query count from an adapter that exposes the seam.
  *
  * @param adapter - The connected adapter
- * @returns The count, or `undefined` when the adapter does not report one or
- *   the reader returns something other than a finite non-negative number
+ * @returns The count; {@linkcode QUERY_PROGRESS_UNOBSERVABLE} when the reader
+ *   returns `null` (the adapter cannot see all traffic, so a count that does
+ *   not move proves nothing); or `undefined` when the adapter does not report
+ *   progress or the reader returns anything else
  */
-export function readQueryProgress(adapter: IDatabaseAdapter): number | undefined {
+export function readQueryProgress(
+  adapter: IDatabaseAdapter,
+): number | typeof QUERY_PROGRESS_UNOBSERVABLE | undefined {
   const reader = (adapter as unknown as Record<symbol, unknown>)[DATABASE_QUERY_PROGRESS];
   if (typeof reader !== 'function') {
     return undefined;
   }
   const count = (reader as () => unknown)();
+  if (count === null) {
+    return QUERY_PROGRESS_UNOBSERVABLE;
+  }
   return typeof count === 'number' && Number.isFinite(count) && count >= 0 ? count : undefined;
 }
 
@@ -164,11 +179,12 @@ export class QueryProgressTracker {
    * progress now, so a pool saturated at the first poll gets one window's
    * benefit of the doubt; a zero count records nothing.
    *
-   * @param count - The completed-query count, or `undefined` when unreported
+   * @param count - A {@linkcode readQueryProgress} reading; anything but a
+   *   count records nothing
    * @param nowMs - A monotonic reading (`runtime.hrtime()`)
    */
-  observe(count: number | undefined, nowMs: number): void {
-    if (count === undefined) {
+  observe(count: ReturnType<typeof readQueryProgress>, nowMs: number): void {
+    if (typeof count !== 'number') {
       return;
     }
     const previous = this.#lastCount;

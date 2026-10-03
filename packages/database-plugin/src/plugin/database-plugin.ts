@@ -36,6 +36,7 @@ import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import {
   isSaturated,
+  QUERY_PROGRESS_UNOBSERVABLE,
   QueryProgressTracker,
   readPoolCapacity,
   readQueryProgress,
@@ -249,10 +250,18 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           // completing is a hung database and falls through to `degraded`.
           // Both are re-read here: the probe above awaited, and the snapshot
           // taken before it may be stale.
+          // An adapter that cannot see all traffic reports progress as
+          // unobservable: a count that does not move then proves nothing, so
+          // a saturated pool keeps the pre-M101a-review reading (`up`) rather
+          // than pulling every busy replica at once.
           const now = ctx.runtime.hrtime();
-          progress.observe(readQueryProgress(adapter), now);
+          const completed = readQueryProgress(adapter);
+          progress.observe(completed, now);
           const current = readPoolCapacity(adapter);
-          if (current !== undefined && isSaturated(current) && progress.progressedWithin(now)) {
+          if (
+            current !== undefined && isSaturated(current) &&
+            (completed === QUERY_PROGRESS_UNOBSERVABLE || progress.progressedWithin(now))
+          ) {
             return { status: 'up', data: { ...data, reachable: 'unknown' } };
           }
           // A probe that EXISTS and did not answer is evidence of trouble:
