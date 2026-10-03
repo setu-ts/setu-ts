@@ -155,6 +155,13 @@ async function readCappedText(res: Response): Promise<string | null> {
  *   longer than {@linkcode MAX_SECRET_PATH_LENGTH} characters
  */
 function secretPath(name: string): string {
+  // Encoding never shortens a name, so a name already over the cap is
+  // refused first, before anything quotes it or splits it.
+  if (name.length > MAX_SECRET_PATH_LENGTH) {
+    throw new Error(
+      `Vault secret name is longer than ${MAX_SECRET_PATH_LENGTH} characters once encoded`,
+    );
+  }
   const segments = name.split('/');
   for (const segment of segments) {
     if (segment === '' || segment === '.' || segment === '..') {

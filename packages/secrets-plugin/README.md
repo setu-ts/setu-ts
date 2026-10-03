@@ -84,7 +84,7 @@ A read whose response body exceeds 1 MiB is refused with a plain `Error` and the
 cancelled; the body is copied into one buffer as it arrives, so the memory a read holds is bounded
 by that 1 MiB whatever size of chunk the dependency sends. A name quoted in an error message has its
 C0 and C1 control characters, DEL, and the Unicode line and paragraph separators written as
-`\uXXXX`, so a name cannot start a new log line.
+`\uXXXX`, so a name cannot start a new log line, and only its first 256 characters are quoted.
 
 ### AWS Secrets Manager (KMS-backed)
 

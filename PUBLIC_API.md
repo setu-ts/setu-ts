@@ -4631,7 +4631,7 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
   segment, or a name longer than 4096 characters once encoded, before sending anything; a read body
   over 1 MiB is refused with a plain `Error`, with memory held per read bounded by the same 1 MiB;
   and a name quoted in any `secrets-plugin` error message has its C0 and C1 control characters, DEL,
-  and U+2028/U+2029 escaped as `\uXXXX`.
+  and U+2028/U+2029 escaped as `\uXXXX`, cut after 256 characters.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write

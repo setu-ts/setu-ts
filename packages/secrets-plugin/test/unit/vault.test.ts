@@ -539,6 +539,16 @@ describe('HashiCorpVaultProvider secret path and body size (M101a security audit
       );
     }
     expect(calls).toHaveLength(0);
+    // A name over the cap that also has a refusable segment is refused for its
+    // length, without quoting it (round-3 L3: the segment message quoted it).
+    const hostile = '\u0001'.repeat(1_000_000) + '/';
+    for (const call of [() => provider.get(hostile), () => provider.set(hostile, 'v')]) {
+      const error = await call().catch((e: unknown) => e);
+      expect((error as Error).message).toBe(
+        'Vault secret name is longer than 4096 characters once encoded',
+      );
+    }
+    expect(calls).toHaveLength(0);
     await provider.get(longest).catch(() => undefined);
     expect(calls).toHaveLength(1);
   });

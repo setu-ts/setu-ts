@@ -1,7 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { printableSecretName } from '../../src/services/secret-name.ts';
+import { MAX_PRINTED_NAME_LENGTH, printableSecretName } from '../../src/services/secret-name.ts';
 
 describe('printableSecretName (M101a security audit)', () => {
   it('returns a name without control characters unchanged', () => {
@@ -22,5 +22,18 @@ describe('printableSecretName (M101a security audit)', () => {
 
   it('leaves the first printable code point after C1 alone', () => {
     expect(printableSecretName('\u00a0é')).toBe('\u00a0é');
+  });
+
+  it('bounds the quoted length at MAX_PRINTED_NAME_LENGTH', () => {
+    expect(MAX_PRINTED_NAME_LENGTH).toBe(256);
+  });
+
+  it('cuts a long name at 256 characters and counts the rest', () => {
+    const printed = printableSecretName('a'.repeat(256) + '\r'.repeat(1_000_000));
+    expect(printed).toBe('a'.repeat(256) + '… (1000000 more characters)');
+  });
+
+  it('quotes a name of exactly 256 characters whole', () => {
+    expect(printableSecretName('b'.repeat(256))).toBe('b'.repeat(256));
   });
 });

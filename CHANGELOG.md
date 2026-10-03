@@ -62,7 +62,8 @@ All notable changes to this project are documented here. The format follows
   instead of failing in the transport and reading as an outage (`503`). A read body over 1 MiB is
   refused with a plain `Error`, and the memory a read holds stays within that 1 MiB however small
   the chunks a dependency sends. Secret names quoted in `secrets-plugin` error messages have C0 and
-  C1 control characters, DEL, and U+2028/U+2029 escaped, so a name cannot start a new log line.
+  C1 control characters, DEL, and U+2028/U+2029 escaped, so a name cannot start a new log line, and
+  quoted only up to its first 256 characters.
 - **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
   registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
   `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
