@@ -7,11 +7,14 @@ drift out of sync.
 **Before doing anything in this repo — and especially before starting a milestone — open and read
 `CLAUDE.md` in full, then follow it.** It covers:
 
-- **Step 0 for every milestone: be on the milestone's feature branch.** `main` is protected — one
-  `feat/[milestone]-[description]` branch per milestone holds ALL its work AND its fixes until it
-  merges. Confirm with `git branch --show-current` BEFORE reading docs or writing code; resume the
-  existing `feat/…` branch if work is in progress. Do NOT open a `fix/…` branch for an unmerged
-  milestone — that is only for defects in already-merged `main`. Never work on or commit to `main`.
+- **Step 0 for every milestone: be on the milestone's feature branch.** `develop` (the default and
+  integration branch every PR targets, except release and hotfix PRs into `main`) and `main` (the
+  last release only) are both protected — one `feat/[milestone]-[description]` branch per milestone
+  holds ALL its work AND its fixes until it merges. Confirm with `git branch --show-current` BEFORE
+  reading docs or writing code; resume the existing `feat/…` branch if work is in progress. Do NOT
+  open a `fix/…` branch for an unmerged milestone — that is only for defects in already-merged
+  `develop`. Start a new `feat/…` branch from `origin/develop`. Never work on or commit to `develop`
+  or `main`.
 - the documentation you MUST read first (AI_GUIDELINES.md, ROADMAP.md, ARCHITECTURE.md,
   PUBLIC_API.md, and the `@setu-ts/common` interfaces you will implement);
 - the verification gates (`deno task fmt:check` / `lint` / `check` / `test` / `test:coverage` /

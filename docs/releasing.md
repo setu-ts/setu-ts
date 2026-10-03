@@ -80,6 +80,14 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 
 ### 1. Prepare, on a `release/…` branch
 
+`develop` is where every milestone and fix integrates; `main` holds only the last release. Cut the
+release branch from `develop`:
+
+```fish
+git fetch origin
+git switch -c release/v0.3.0 origin/develop
+```
+
 - Bump `version` in every workspace member's `deno.json`.
 - **Bump the cross-package specifiers to match, and do not trust the count in this sentence.** Under
   semver a `^0.1.0` range does **not** match a `0.1.0-alpha.1` prerelease, so a version bump that
@@ -293,10 +301,17 @@ module JSDoc opens with `@module` so the package's README is what renders on jsr
 
 ### 3. Merge, then publish
 
-Open a PR, let CI pass, merge to `main`. Then from `main`:
+Open the PR from `release/vX.Y.Z` into **`main`** (not `develop`, the default base, so pass
+`--base main` to `gh pr create`), let CI pass, and merge it **with a merge commit**. The `main`
+ruleset refuses squash and rebase: either would give `main` a commit `develop` does not have, and
+every later release and back-merge would conflict on it. Merging into `main` also redeploys the
+public website — Cloudflare Workers Builds watches `main` — which is why only a release reaches it.
+Then switch to `main` and bring it up to the merge commit, so verification, publishing and the tag
+all run on what `main` now holds — staying on `release/vX.Y.Z` would tag its pre-merge commit:
 
 ```fish
-git pull
+git switch main
+git pull --ff-only origin main
 deno task release:verify 0.3.0
 env JSR_TOKEN=jsrp_… deno task release:publish
 ```
@@ -314,6 +329,20 @@ not want a tag claiming otherwise. Once it succeeds:
 git tag v0.3.0
 git push origin v0.3.0
 ```
+
+**Then back-merge `main` into `develop`.** The release branch's version bumps, lockfile updates and
+CHANGELOG rename exist only on `main` until this lands, so the next milestone would otherwise start
+from pre-release manifests:
+
+```fish
+gh pr create --base develop --head main --title 'chore(release): back-merge v0.3.0 into develop' \
+  --body 'Brings the v0.3.0 release commits onto develop.' --label maintainer-review
+```
+
+Merge it with a **merge commit** as well: a squash would leave `develop` without `main`'s history,
+so the next release PR would re-apply this one's changes and conflict. A defect in a published
+release that cannot wait for the next one follows the same shape from a `hotfix/…` branch cut from
+`main`: PR into `main`, patch release, back-merge.
 
 ### 4. Set the page metadata — every release, not only a first publish
 

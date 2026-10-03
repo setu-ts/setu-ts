@@ -2,9 +2,9 @@
 
 This rule is specific to Roo Code's **Code** mode. Follow `CLAUDE.md` for the branch and commit
 conventions (one `feat/…` branch per milestone; conventional commit messages; never work on or
-commit to `main`; push and PRs are human-only). This file adds the mode-specific gate: leaving the
-tree dirty when you switch out of Code is the single most common way work gets lost, because **no
-other mode can commit it for you**.
+commit to `develop` or `main`; push and PRs are human-only). This file adds the mode-specific gate:
+leaving the tree dirty when you switch out of Code is the single most common way work gets lost,
+because **no other mode can commit it for you**.
 
 ## Hard rules
 

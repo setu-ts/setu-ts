@@ -11,13 +11,13 @@ review tooling lands), never on a milestone `feat/…` branch.
 
 ## Ground rules for this audit
 
-- **Scope = the package's CURRENT `src/` on `main`,** not a historical merge diff. It is what ships
-  today and folds in the later add-ons (14b/15b/16b/39 live inside their packages). Review the whole
-  `src/` tree of the package, guided by `CLAUDE.md` ("Self-review checklist", "Before reporting a
-  task done") and the package's section in `PUBLIC_API.md`.
-- **These are DEFECTS IN MERGED `main`, so fixes go on `fix/<pkg>-review` branches** — one per
-  package — never a `feat/…` branch and never a direct commit to `main` (`CLAUDE.md` §branches).
-  Each `fix/…` branch merges via its own PR (human-only push + PR).
+- **Scope = the package's CURRENT `src/` on `develop`,** not a historical merge diff. It is what the
+  next release ships and folds in the later add-ons (14b/15b/16b/39 live inside their packages).
+  Review the whole `src/` tree of the package, guided by `CLAUDE.md` ("Self-review checklist",
+  "Before reporting a task done") and the package's section in `PUBLIC_API.md`.
+- **These are DEFECTS IN MERGED `develop`, so fixes go on `fix/<pkg>-review` branches** — one per
+  package — never a `feat/…` branch and never a direct commit to `develop` or `main` (`CLAUDE.md`
+  §branches). Each `fix/…` branch merges via its own PR (human-only push + PR).
 - **Correctness findings BLOCK** (they become a `fix/…` PR); reuse/simplification/efficiency
   findings are **advisory** (apply the low-risk ones in the same `fix/…` PR, record the rest here).
 - **One package (or one listed small group) per session. Never "just one more".** Read this tracker,
@@ -63,8 +63,8 @@ Status legend: ⬜ pending · 🔵 reviewing · 🟡 findings logged (fix pendin
 **Roo (bulk pass), per row:**
 
 1. Orchestrator spawns a **Code Review**-mode subtask: "review the current `src/` of
-   `packages/<pkg>` on `main` at the listed effort; return a ranked findings report." (Read-only —
-   the mode has no `edit` access.)
+   `packages/<pkg>` on `develop` at the listed effort; return a ranked findings report." (Read-only
+   — the mode has no `edit` access.)
 2. Append the returned findings to the "Findings log" below under that package; set the row to 🟡
    (or 🟢 if none).
 3. For each **correctness** finding: orchestrator spawns a **Code**-mode subtask on a
