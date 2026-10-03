@@ -7220,11 +7220,11 @@ Ordered by the sequence they should be worked, not by severity alone.
   (`decorator-plugin`, `validation-plugin`, `common`, `kernel`, `testing`, `static-plugin`,
   `auth-plugin`, `session-plugin`, `audit-plugin`, `react-router-plugin`,
   `realtime-backplane-plugin`, `sse-plugin`, `starters`, docs). Plan:
-  [`plans/archive/milestone-70n-decorators-di-docs.md`](plans/archive/milestone-70n-decorators-di-docs.md).
-  `@ValidateBody(schema)` does not validate anything — it only feeds OpenAPI (E1) — and `@Body()`
-  re-reads the raw request, discarding validation transforms, defaults and coercions (E2). Closes
-  with the remaining rows no other workstream absorbs (C2, X3-1, X3-3, X3-4, X3-5, X3-6, X3-8, X3-9,
-  X4-5, X4-7, X4-11, X5-5, X5-7, X5-9, X7-9, X9-10, D8).
+  `plans/archive/milestone-70n-decorators-di-docs.md`. `@ValidateBody(schema)` does not validate
+  anything — it only feeds OpenAPI (E1) — and `@Body()` re-reads the raw request, discarding
+  validation transforms, defaults and coercions (E2). Closes with the remaining rows no other
+  workstream absorbs (C2, X3-1, X3-3, X3-4, X3-5, X3-6, X3-8, X3-9, X4-5, X4-7, X4-11, X5-5, X5-7,
+  X5-9, X7-9, X9-10, D8).
 
   **Two rows this line assigned are already closed, and the row list is corrected rather than left
   to be re-done**: **C1** (the `validatedBody` state key that does not exist) shipped in **M70m**
