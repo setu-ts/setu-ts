@@ -272,6 +272,37 @@ export interface DistributedLockOptions {
    * @default 30000
    */
   ttlMs?: number;
+
+  /**
+   * How long one lock acquire may run before the fire it serves is skipped
+   * and counted `lock-failed` (M101a V8-24). Bounds every acquire the
+   * scheduler makes — the fire slot, the handler mutex and the `delay` slot
+   * claimed at registration — for EVERY lock, including an injected `lock`,
+   * so a lock backend that stops answering skips fires instead of stopping
+   * them. Keep it below the job's interval. An acquire abandoned at the bound
+   * that later returns a token has that token released.
+   *
+   * `0` disables the bound. Must be a number from `0` to `2147483647`.
+   *
+   * @default 5000
+   * @since 0.9.0
+   */
+  acquireTimeoutMs?: number;
+
+  /**
+   * ioredis `commandTimeout` for the Redis client the lock BUILDS
+   * (`storage: 'redis'` with no `client`), so a parked `SET NX` rejects on
+   * the client rather than waiting for the TCP connection. Never applied to an
+   * injected `client` or `lock`.
+   *
+   * Defaults to the resolved `acquireTimeoutMs` (and to `15000` when that is
+   * `0`); a value greater than a non-zero `acquireTimeoutMs` is refused,
+   * because the command must not outlast the call it bounds. `0` disables the
+   * bound.
+   *
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
 }
 
 /**
@@ -392,4 +423,12 @@ export interface RedisLockOptions {
    * @since 0.8.0
    */
   connectionErrorReporter?: ConnectionErrorReporter;
+  /**
+   * ioredis `commandTimeout` for the client the lock BUILDS; never applied to
+   * an injected `client`. `0` disables it.
+   *
+   * @default 15000
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
 }

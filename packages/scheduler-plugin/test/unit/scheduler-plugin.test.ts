@@ -3,7 +3,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { HealthIndicatorFn, IPlugin } from '@setu-ts/common';
+import type { HealthIndicatorFn, ILogger, IPlugin, IScheduler } from '@setu-ts/common';
 import { SchedulerPlugin } from '../../src/plugin/scheduler-plugin.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
@@ -175,5 +175,66 @@ describe('SchedulerPlugin', () => {
 
     // Service registered
     expect(registeredServices.has('scheduler')).toBe(true);
+  });
+});
+
+describe('SchedulerPlugin acquire bound (M101a V8-24)', () => {
+  it('refuses out-of-range lock timeouts when the plugin is created', () => {
+    expect(() => SchedulerPlugin({ distributedLock: { acquireTimeoutMs: -1 } })).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      SchedulerPlugin({ distributedLock: { acquireTimeoutMs: 100, commandTimeoutMs: 200 } })
+    ).toThrow('must not exceed distributedLock.acquireTimeoutMs');
+  });
+
+  it('threads acquireTimeoutMs into the service, bounding an injected lock', async () => {
+    const errors: string[] = [];
+    const logger = {
+      error: (msg: string) => errors.push(msg),
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
+      child: () => logger,
+    } as unknown as ILogger;
+    const plugin = SchedulerPlugin({
+      distributedLock: {
+        lock: {
+          acquire: () => new Promise<string | null>(() => {}),
+          release: () => Promise.resolve(),
+        },
+        acquireTimeoutMs: 250,
+      },
+    });
+    const runtime = new FakeRuntime();
+    const services = new Map<string, unknown>();
+    const closeCallbacks: Array<() => Promise<void>> = [];
+    const ctx = {
+      runtime,
+      logger,
+      services: {
+        register<T>(token: string, service: T) {
+          services.set(token, service);
+        },
+      },
+      health: { register(_name: string, _fn: HealthIndicatorFn) {} },
+      lifecycle: {
+        onClose(fn: () => Promise<void>) {
+          closeCallbacks.push(fn);
+        },
+      },
+    };
+    // @ts-ignore — ctx shape matches IPluginContext for test purposes
+    await plugin.register(ctx);
+    const scheduler = services.get('scheduler') as IScheduler;
+    await scheduler.every('tick', 100, () => {});
+
+    const firing = runtime.advance(100);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await runtime.advance(250);
+    await firing;
+
+    expect(errors).toEqual(["Job 'tick': could not claim fire slot"]);
+    await closeCallbacks[0]();
   });
 });

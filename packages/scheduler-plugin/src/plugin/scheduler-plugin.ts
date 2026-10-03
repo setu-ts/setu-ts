@@ -9,7 +9,6 @@
 import type {
   HealthIndicatorFn,
   IIngressBehavior,
-  ILogger,
   IPlugin,
   IRuntimeServices,
   IScheduler,
@@ -31,10 +30,11 @@ import type {
   SchedulerJobEntry,
   SchedulerPluginOptions,
 } from '../interfaces/index.ts';
-import { resolveLock } from '../lock/distributed-lock.ts';
+import { resolveLock, resolveLockTimeouts } from '../lock/distributed-lock.ts';
 import type { ILifecyclableLock } from '../lock/distributed-lock.ts';
 import { withIngressBehaviors } from '../jobs/job-executor.ts';
 import { SchedulerService } from '../services/scheduler-service.ts';
+import type { SchedulerServiceOptions } from '../services/scheduler-service.ts';
 import {
   attachSchedulerCollector,
   detachSchedulerCollector,
@@ -70,6 +70,10 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
   if (timezone !== 'UTC') {
     throw new Error('Non-UTC timezones are not supported in this release');
   }
+
+  // M101a V8-24: both lock bounds are refused here, before any application
+  // exists, rather than at `start()`.
+  const { acquireTimeoutMs } = resolveLockTimeouts(options?.distributedLock);
 
   // The registration arms are split ONCE, here at plugin construction, so
   // `register` and the `onInit` hook each read a single list (the M70d arm
@@ -186,6 +190,7 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       const serviceOptions = {
         logger: ctx.logger,
         ttlMs: options?.distributedLock?.ttlMs,
+        acquireTimeoutMs,
       };
       const service = declaredBehaviors
         ? new BehaviorChainSchedulerService(
@@ -335,7 +340,7 @@ class BehaviorChainSchedulerService extends SchedulerService {
   constructor(
     runtime: IRuntimeServices,
     lock: IDistributedLock,
-    options: { logger?: ILogger | undefined; ttlMs?: number | undefined },
+    options: SchedulerServiceOptions,
     behaviors: readonly IIngressBehavior[],
     chainReady?: Promise<void>,
   ) {
