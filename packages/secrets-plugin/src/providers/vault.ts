@@ -34,6 +34,16 @@ const VALUE_FIELD = 'value';
  */
 const MAX_RESPONSE_BYTES = 1_048_576;
 
+/** The first allocation for a Vault answer; it doubles up to the cap. */
+const INITIAL_BODY_BUFFER_BYTES = 16_384;
+
+/**
+ * The longest encoded secret path, in characters (M101a security audit L2).
+ * A longer name is refused as an input error before any request, rather than
+ * failing inside the transport and reading as an outage.
+ */
+const MAX_SECRET_PATH_LENGTH = 4096;
+
 /**
  * Options for {@linkcode HashiCorpVaultProvider}.
  *
@@ -99,29 +109,35 @@ async function readCappedText(res: Response): Promise<string | null> {
     return '';
   }
   const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
+  // Each chunk is copied into one owned buffer and then released. Keeping the
+  // chunks instead would keep their backing buffers alive, and a runtime may
+  // hand a tiny chunk over a much larger one (Deno: 16 bytes over 64 KiB), so
+  // the memory held would not be bounded by the byte count.
+  let buffer = new Uint8Array(INITIAL_BODY_BUFFER_BYTES);
   let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) {
       break;
     }
-    total += value.byteLength;
-    if (total > MAX_RESPONSE_BYTES) {
+    const end = total + value.byteLength;
+    if (end > MAX_RESPONSE_BYTES) {
       await reader.cancel().catch(() => {
         // Already closed: nothing left to release.
       });
       return null;
     }
-    chunks.push(value);
+    if (end > buffer.byteLength) {
+      const grown = new Uint8Array(
+        Math.min(MAX_RESPONSE_BYTES, Math.max(buffer.byteLength * 2, end)),
+      );
+      grown.set(buffer.subarray(0, total));
+      buffer = grown;
+    }
+    buffer.set(value, total);
+    total = end;
   }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
+  return new TextDecoder().decode(buffer.subarray(0, total));
 }
 
 /**
@@ -135,7 +151,8 @@ async function readCappedText(res: Response): Promise<string | null> {
  *
  * @param name - The secret path relative to the mount
  * @returns The encoded path
- * @throws {Error} When a segment is empty, `.` or `..`
+ * @throws {Error} When a segment is empty, `.` or `..`, or the encoded path is
+ *   longer than {@linkcode MAX_SECRET_PATH_LENGTH} characters
  */
 function secretPath(name: string): string {
   const segments = name.split('/');
@@ -146,7 +163,13 @@ function secretPath(name: string): string {
       );
     }
   }
-  return segments.map(encodeURIComponent).join('/');
+  const path = segments.map(encodeURIComponent).join('/');
+  if (path.length > MAX_SECRET_PATH_LENGTH) {
+    throw new Error(
+      `Vault secret name is longer than ${MAX_SECRET_PATH_LENGTH} characters once encoded`,
+    );
+  }
+  return path;
 }
 
 /** URL schemes a Vault address may use. */

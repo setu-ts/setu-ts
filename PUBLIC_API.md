@@ -4628,8 +4628,10 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
   is reachable and keeps its handling: `404` reads as `null`, any other error status rejects with a
   plain `Error`. `provider` names the unreachable provider. Since M101a the provider also
   percent-encodes each `/`-separated segment of a secret name and refuses an empty, `.` or `..`
-  segment before sending anything; a read body over 1 MiB is refused with a plain `Error`; and a
-  name quoted in any `secrets-plugin` error message has its control characters escaped as `\uXXXX`.
+  segment, or a name longer than 4096 characters once encoded, before sending anything; a read body
+  over 1 MiB is refused with a plain `Error`, with memory held per read bounded by the same 1 MiB;
+  and a name quoted in any `secrets-plugin` error message has its C0 and C1 control characters, DEL,
+  and U+2028/U+2029 escaped as `\uXXXX`.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write

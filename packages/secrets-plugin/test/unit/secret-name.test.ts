@@ -13,4 +13,14 @@ describe('printableSecretName (M101a security audit)', () => {
       'a\\u000d\\u000ab\\u0000\\u001f\\u007f',
     );
   });
+
+  it('escapes C1 controls (NEL, CSI) and the Unicode line and paragraph separators', () => {
+    expect(printableSecretName('a\u0085b\u009b31mc\u2028d\u2029e\u0080\u009f')).toBe(
+      'a\\u0085b\\u009b31mc\\u2028d\\u2029e\\u0080\\u009f',
+    );
+  });
+
+  it('leaves the first printable code point after C1 alone', () => {
+    expect(printableSecretName('\u00a0é')).toBe('\u00a0é');
+  });
 });

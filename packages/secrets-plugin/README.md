@@ -78,10 +78,13 @@ other error status rejects with a plain `Error`. A value outside `0`–`21474836
 **Since M101a** a secret name is checked and encoded before it reaches the URL. Each `/`-separated
 segment is percent-encoded, so `app db/pass` is read from `app%20db/pass`, and a name with an empty,
 `.` or `..` segment (`../../sys/health`, `a//b`, `a/`) is refused before any request is sent: it
-would otherwise address a Vault endpoint outside the mount with the token attached. A read whose
-response body exceeds 1 MiB is refused with a plain `Error` and the rest of the body is cancelled. A
-name quoted in an error message has its control characters written as `\uXXXX`, so a name cannot
-forge a log line.
+would otherwise address a Vault endpoint outside the mount with the token attached. A name longer
+than 4096 characters once encoded is refused the same way, as an input error rather than an outage.
+A read whose response body exceeds 1 MiB is refused with a plain `Error` and the rest of the body is
+cancelled; the body is copied into one buffer as it arrives, so the memory a read holds is bounded
+by that 1 MiB whatever size of chunk the dependency sends. A name quoted in an error message has its
+C0 and C1 control characters, DEL, and the Unicode line and paragraph separators written as
+`\uXXXX`, so a name cannot start a new log line.
 
 ### AWS Secrets Manager (KMS-backed)
 

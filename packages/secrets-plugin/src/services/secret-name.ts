@@ -3,16 +3,18 @@
  * audit O1).
  *
  * A secret name is caller input. A raw CR or LF in it would let a caller
- * forge a log line, so every C0 control character and DEL is written as a
- * `\uXXXX` escape. A name without control characters is returned unchanged.
+ * forge a log line, so every C0 control character, DEL, every C1 control
+ * character (which includes NEL and the terminal CSI), and the Unicode line
+ * and paragraph separators are written as `\uXXXX` escapes. A name without
+ * them is returned unchanged.
  *
  * @module
  * @internal
  */
 
-/** C0 control characters and DEL. */
+/** C0 and C1 control characters, DEL, and U+2028/U+2029. */
 // deno-lint-ignore no-control-regex
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
 
 /**
  * Escapes the control characters in a secret name.

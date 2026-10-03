@@ -58,9 +58,11 @@ All notable changes to this project are documented here. The format follows
   `/`-separated segment of a name is percent-encoded, and a name with an empty, `.` or `..` segment
   is refused before any request — `../../sys/health` used to reach another Vault endpoint with the
   token attached. A name that relied on a literal `%`, `?` or `#` reaching Vault unencoded now reads
-  a different path. A read body over 1 MiB is refused with a plain `Error`. Secret names quoted in
-  `secrets-plugin` error messages have control characters escaped, so a name cannot forge a log
-  line.
+  a different path. A name longer than 4096 characters once encoded is refused as an input error
+  instead of failing in the transport and reading as an outage (`503`). A read body over 1 MiB is
+  refused with a plain `Error`, and the memory a read holds stays within that 1 MiB however small
+  the chunks a dependency sends. Secret names quoted in `secrets-plugin` error messages have C0 and
+  C1 control characters, DEL, and U+2028/U+2029 escaped, so a name cannot start a new log line.
 - **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
   registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
   `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull

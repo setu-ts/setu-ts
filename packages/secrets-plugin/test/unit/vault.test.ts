@@ -458,6 +458,91 @@ describe('HashiCorpVaultProvider secret path and body size (M101a security audit
     expect(sent).toBeLessThanOrEqual(1_048_576 + 2 * 65_536);
   });
 
+  it('copies each chunk as it arrives instead of keeping views over the transport buffer', async () => {
+    // Every chunk is a 4-byte view over ONE shared buffer that the source
+    // overwrites before the next read, the shape a runtime produces when it
+    // hands small chunks over a larger backing buffer. Retaining the views
+    // would both pin that buffer and read back only the last write.
+    const text = '{"data":{"data":{"value":"' + 'abcd'.repeat(9000) + '"}}}';
+    const bytes = new TextEncoder().encode(text);
+    const shared = new Uint8Array(65_536);
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= bytes.byteLength) {
+          controller.close();
+          return;
+        }
+        const piece = bytes.subarray(offset, offset + 4);
+        shared.fill(0x7a);
+        shared.set(piece, 0);
+        offset += piece.byteLength;
+        controller.enqueue(new Uint8Array(shared.buffer, 0, piece.byteLength));
+      },
+    }, { highWaterMark: 0 }); // pull only on a pending read, so a chunk is consumed first
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+    await provider.connect();
+    expect(await provider.get('chunked')).toBe('abcd'.repeat(9000));
+  });
+
+  it('reads a many-chunk body ending exactly at the cap and refuses one byte more', async () => {
+    const prefix = '{"data":{"data":{"value":"';
+    const suffix = '"}}}';
+    const value = 'y'.repeat(1_048_576 - prefix.length - suffix.length);
+    const chunked = (extra: string) => {
+      const bytes = new TextEncoder().encode(prefix + value + extra + suffix);
+      let offset = 0;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (offset >= bytes.byteLength) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(bytes.slice(offset, offset + 1000));
+          offset += 1000;
+        },
+      });
+    };
+    const exact = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(chunked(''), { status: 200 })),
+    });
+    await exact.connect();
+    expect(await exact.get('exact')).toBe(value);
+    const over = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(chunked('y'), { status: 200 })),
+    });
+    await over.connect();
+    await expect(over.get('over')).rejects.toThrow('exceeded 1048576 bytes');
+  });
+
+  it('refuses a name longer than 4096 encoded characters as an input error, sending nothing', async () => {
+    const calls: Call[] = [];
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: fakeHttp(jsonResponse({}), calls),
+    });
+    await provider.connect();
+    const longest = 'a'.repeat(4096);
+    const tooLong = 'a'.repeat(4097);
+    const encodedTooLong = '%'.repeat(1366); // 1366 × 3 = 4098 encoded characters
+    for (const name of [tooLong, encodedTooLong]) {
+      const error = await provider.get(name).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+      expect((error as Error).message).toBe(
+        'Vault secret name is longer than 4096 characters once encoded',
+      );
+    }
+    expect(calls).toHaveLength(0);
+    await provider.get(longest).catch(() => undefined);
+    expect(calls).toHaveLength(1);
+  });
+
   it('reads a body of exactly 1 MiB', async () => {
     const prefix = '{"data":{"data":{"value":"';
     const suffix = '"}}}';

@@ -579,8 +579,10 @@ dependency (headers then silence, an unbounded body, a late reply); an operator 
 2. No error body or log line carries the Vault address's userinfo or the token.
 3. A secret name cannot leave the KV v2 data path: each segment is percent-encoded, and an empty,
    `.` or `..` segment is refused before any request.
-4. A Vault answer is bounded in size (1 MiB), with the stream cancelled past the cap.
-5. A secret name quoted in an error message has its control characters escaped.
+4. A Vault answer is bounded in size (1 MiB), with the stream cancelled past the cap, and the memory
+   a read holds is bounded by the same cap: chunks are copied as they arrive, never retained.
+5. A secret name quoted in an error message has its C0 and C1 control characters, DEL and U+2028/
+   U+2029 escaped; a name longer than 4096 encoded characters is refused as an input error.
 6. Lua transitions take ids and payloads only through `KEYS`/`ARGV`, never by string building.
 7. A late lock token is released, and a hung or throwing lock does not run the job.
 8. An unobservable signal never reads as evidence of health beyond what is documented (§3.3, the
@@ -588,9 +590,12 @@ dependency (headers then silence, an unbounded body, a late reply); an operator 
 
 **Findings.**
 
-| #  | Finding                                                                                               | Disposition                                                |
-| -- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| F1 | No design review in this plan                                                                         | Closed by this section                                     |
-| O1 | Vault name unencoded (`../` reached any endpoint with the token); CRLF name logged raw (pre-existing) | Fixed: obligations 3 and 5                                 |
-| O2 | Vault body unbounded in size (pre-existing)                                                           | Fixed: obligation 4                                        |
-| O3 | Typed seam + saturated pool reads `up` over a hung database                                           | Accepted, documented in the database README and PUBLIC_API |
+| #  | Finding                                                                                                      | Disposition                                                                 |
+| -- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| F1 | No design review in this plan                                                                                | Closed by this section                                                      |
+| O1 | Vault name unencoded (`../` reached any endpoint with the token); CRLF name logged raw (pre-existing)        | Fixed: obligations 3 and 5                                                  |
+| O2 | Vault body unbounded in size (pre-existing)                                                                  | Fixed: obligation 4                                                         |
+| O3 | Typed seam + saturated pool reads `up` over a hung database                                                  | Accepted, documented in the database README and PUBLIC_API                  |
+| H1 | Round 2: 16-byte chunks each pinned a 64 KiB backing buffer, so a read under the 1 MiB cap peaked at 2.4 GiB | Fixed: chunks copied into one owned buffer (peak 131 MiB on the same probe) |
+| L1 | Round 2: NEL, CSI and U+2028 reached log lines raw                                                           | Fixed: obligation 5 widened to C1 and the separators                        |
+| L2 | Round 2: a ≥65 KB name failed in the transport and read as `503`                                             | Fixed: 4096-character encoded-path cap, refused before any request          |
