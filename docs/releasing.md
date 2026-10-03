@@ -306,10 +306,12 @@ Open the PR from `release/vX.Y.Z` into **`main`** (not `develop`, the default ba
 ruleset refuses squash and rebase: either would give `main` a commit `develop` does not have, and
 every later release and back-merge would conflict on it. Merging into `main` also redeploys the
 public website — Cloudflare Workers Builds watches `main` — which is why only a release reaches it.
-Then from `main`:
+Then switch to `main` and bring it up to the merge commit, so verification, publishing and the tag
+all run on what `main` now holds — staying on `release/vX.Y.Z` would tag its pre-merge commit:
 
 ```fish
-git pull
+git switch main
+git pull --ff-only origin main
 deno task release:verify 0.3.0
 env JSR_TOKEN=jsrp_… deno task release:publish
 ```

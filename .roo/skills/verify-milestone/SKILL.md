@@ -21,7 +21,7 @@ milestone is NOT verified. Never report "verified" from the gates' exit codes al
 ```bash
 git branch --show-current      # must be the milestone's feat/… branch, never develop or main
 git log --oneline develop..HEAD   # the milestone's commits
-git diff --stat develop..HEAD     # the changed files — this is your review scope
+git diff --stat develop...HEAD    # the changed files — this is your review scope
 git status --short             # MUST be empty — see the clean-tree rule below
 ```
 
@@ -51,7 +51,7 @@ Then read, in order:
    implementations, transaction-scoped repositories, and two whole test files silently missing — the
    plan was right and nothing checked the code against it. **The committed-doc-conflicts table is a
    commitment too**: each row names a doc correction as a PR deliverable, so for each one run
-   `git diff develop..HEAD -- <the file that row names>` and read what actually moved. M70b's plan
+   `git diff develop...HEAD -- <the file that row names>` and read what actually moved. M70b's plan
    promised a package README's `contains` prose be rewritten; the diff changed only that README's
    export table, so the package kept promising behavior the same milestone had just changed.
 3. `PUBLIC_API.md` — the section for this package. Every `src/index.ts` export must be documented
@@ -133,7 +133,7 @@ Check each item and note where it holds or fails:
 - **CHANGELOG.md carries every behavior change, with migration text for each breaking one** — a
   `packages/*/src` change that moves a released default, refuses input it used to accept, or alters
   a response body needs an entry naming what restores the old behavior. Run
-  `git diff develop..HEAD -- CHANGELOG.md`; empty output on a milestone that changed a default is a
+  `git diff develop...HEAD -- CHANGELOG.md`; empty output on a milestone that changed a default is a
   finding, not a detail for the PR body. This has slipped twice — M66 shipped two breaking
   configuration changes with the file untouched, M70b shipped three, and no gate saw either.
 

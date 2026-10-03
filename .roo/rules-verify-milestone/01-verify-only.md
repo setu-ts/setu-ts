@@ -80,11 +80,11 @@ time pressure drops, and each has shipped broken with every gate green:
 
 - **The plan under `plans/` is a commitment.** Every design decision must exist in code, every
   planned test file must exist, and each row of the committed-doc-conflicts table names a doc
-  correction to check with `git diff develop..HEAD -- <the file that row names>`.
+  correction to check with `git diff develop...HEAD -- <the file that row names>`.
 - **The ROADMAP deliverable list is the probe list.** One behavioral observation per entry. A
   deliverable you cannot observe running is not delivered, whatever the checkbox says.
 - **`CHANGELOG.md` carries every released-behavior change, with migration text for breaking ones.**
-  `git diff develop..HEAD -- CHANGELOG.md` coming back empty on a milestone that moved a default is
+  `git diff develop...HEAD -- CHANGELOG.md` coming back empty on a milestone that moved a default is
   a finding in its own right (M66 shipped two such changes with the file untouched; M70b shipped
   three).
 - **Tracking is flipped on this branch** — the ROADMAP "Progress Tracking" row is ✅ and CLAUDE.md's

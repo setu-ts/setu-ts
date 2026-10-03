@@ -928,7 +928,8 @@ Closes #123
 
 ### 15.3 No Direct Commits to Main or Develop
 
-- All changes go through pull requests, and every PR targets `develop`, the default branch.
+- All changes go through pull requests. PRs target `develop`, the default branch, except release and
+  hotfix PRs, which target `main`.
 - `main` holds only the last release: it changes only through a release or hotfix PR, merged with a
   merge commit, and every merge into it is followed by a back-merge PR from `main` into `develop`.
 - No direct commits to `develop`, `main` or `master`.

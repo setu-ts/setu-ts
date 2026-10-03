@@ -12,12 +12,12 @@ never appears in any JSR-published package's dependency graph (see AI_GUIDELINES
 
 **Step 0 — be on the milestone's feature branch before you touch anything.** `develop` and `main`
 are both protected; never work on either and never commit to either directly (AI_GUIDELINES §15.3).
-`develop` is the default branch and the integration branch every PR targets; `main` holds only the
-last release and changes only through a release PR (see "Branches" under Key conventions). A
-milestone gets exactly ONE feature branch — `feat/[milestone]-[description]` (e.g.
-`feat/m4-logger-plugin`) — and ALL work for that milestone lives on it: the initial implementation
-AND every follow-up fix, review change, or bug repair, right up until the branch is merged. Your
-FIRST action is:
+`develop` is the default branch and the integration branch every PR targets except release and
+hotfix PRs; `main` holds only the last release and changes only through a release or hotfix PR (see
+"Branches" under Key conventions). A milestone gets exactly ONE feature branch —
+`feat/[milestone]-[description]` (e.g. `feat/m4-logger-plugin`) — and ALL work for that milestone
+lives on it: the initial implementation AND every follow-up fix, review change, or bug repair, right
+up until the branch is merged. Your FIRST action is:
 
 ```bash
 git branch --show-current            # what am I on?
@@ -6072,18 +6072,18 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).
-- **Two long-lived branches, and every PR targets `develop`.** `develop` is the default branch,
-  where milestones, fixes and docs integrate. `main` means "the last release": it moves only when a
-  release PR merges, and each merge to `main` redeploys the public website (Cloudflare Workers
-  Builds watches `main`). Both are protected by rulesets ("protect develop", "protect main"), which
-  name each branch explicitly — never point one at `~DEFAULT_BRANCH`, since that silently moves
-  protection when the default changes. The release flow is `docs/releasing.md`'s: cut
-  `release/vX.Y.Z` from `develop`, PR it into `main` with a MERGE COMMIT (the `main` ruleset refuses
-  squash and rebase, because either rewrites the history `develop` must share), tag that merge
-  commit, then open a back-merge PR `main` → `develop`, also as a merge commit, so the release's
-  version-bump commits reach `develop`. A defect in a PUBLISHED release that cannot wait for the
-  next one goes on `hotfix/[issue]-[description]` cut from `main`, PRs into `main`, ships as a patch
-  release, and back-merges the same way.
+- **Two long-lived branches; PRs target `develop` except release and hotfix PRs, which target
+  `main`.** `develop` is the default branch, where milestones, fixes and docs integrate. `main`
+  means "the last release": it moves only when a release PR merges, and each merge to `main`
+  redeploys the public website (Cloudflare Workers Builds watches `main`). Both are protected by
+  rulesets ("protect develop", "protect main"), which name each branch explicitly — never point one
+  at `~DEFAULT_BRANCH`, since that silently moves protection when the default changes. The release
+  flow is `docs/releasing.md`'s: cut `release/vX.Y.Z` from `develop`, PR it into `main` with a MERGE
+  COMMIT (the `main` ruleset refuses squash and rebase, because either rewrites the history
+  `develop` must share), tag that merge commit, then open a back-merge PR `main` → `develop`, also
+  as a merge commit, so the release's version-bump commits reach `develop`. A defect in a PUBLISHED
+  release that cannot wait for the next one goes on `hotfix/[issue]-[description]` cut from `main`,
+  PRs into `main`, ships as a patch release, and back-merges the same way.
 - Branches: one `feat/[milestone]-[description]` per milestone — all of that milestone's work and
   fixes stay on it until it merges; `fix/[issue]-[description]` is only for defects in
   already-merged `develop`; `docs/[description]` is for a documentation-only change that is not a
