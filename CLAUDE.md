@@ -5603,7 +5603,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   arm, `MailPlugin` listed BEFORE `ViewPlugin` so the edge rather than array order is what orders
   them; `ViewRenderError` and `UnresolvedSuspenseError` propagate unwrapped with the provider never
   reached. Four negative controls each observed failing and reverted. All changed `src` files at
-  100% branch/function/line) — complete (PR pending)
+  100% branch/function/line. **Two pre-existing defects the verification surfaced are fixed here at
+  the maintainer's direction** (the M58 `g controller` / M59 `detectRuntime` precedent): the log and
+  SendGrid providers accepted a send while disconnected — after `app.stop()` the log provider
+  reported success and SendGrid still POSTed a real email, while SMTP and SES refused — and the
+  `@since` gate skipped every `@since 0.1.0` tag, because that line shipped only as `0.1.0-alpha.*`,
+  reporting them as "ahead of the registry". The gate now checks such a tag against the line's last
+  prerelease, which took it from 946 verified tags to 1,728 and surfaced 62 wrong ones — the
+  MongoDB, DynamoDB and cursor-paging surfaces of `database-plugin` tagged `0.1.0` while shipping in
+  `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
+  registry rather than guessed) — complete (PR pending)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

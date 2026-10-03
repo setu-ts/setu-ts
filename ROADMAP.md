@@ -12628,6 +12628,13 @@ registers it into `ctx.container` during its own `register()`, which runs after 
 there is nothing to find at the time the lookup runs; the refusal message says to register a
 provider of the token in the registry.
 
+**Folded in at the maintainer's direction (pre-existing, found by verification).** The log and
+SendGrid providers now refuse a send while disconnected, as SMTP and SES already did — a send after
+`app.stop()` had reported success on the log provider and POSTed a real email through SendGrid. And
+the `@since` gate, which skipped every `@since 0.1.0` tag because that line shipped only as
+prereleases, now checks such a tag against the line's last prerelease; the 62 wrong tags it surfaced
+are corrected to the version the registry shows first shipping each symbol.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                       |

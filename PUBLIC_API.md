@@ -6797,8 +6797,10 @@ app.router.post('/users', async (ctx) => {
 - `TemplateEngine.render(name, data)` returns `Promise<RenderedTemplate>` (asynchronous since M102,
   because `IViewEngine.render` may answer a promise); every refusal is a rejection.
 - `LogProvider` never sends real email — it records each message (`.messages`), forwards to `sink`,
-  and logs via `ctx.logger`. `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only;
-  `SendGridProvider` is the Cloudflare Workers-portable path.
+  and logs via `ctx.logger`. Like every provider, it refuses a send outside `connect()`..
+  `disconnect()` with `'LogProvider is not connected'`, so a send after `app.stop()` rejects.
+  `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only; `SendGridProvider` is the
+  Cloudflare Workers-portable path.
 
 ---
 

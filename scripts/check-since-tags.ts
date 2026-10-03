@@ -23,13 +23,14 @@
  *
  * The registry is queried once per fetched artifact and cached for the run,
  * never once per tag. A version the registry has not published is SKIPPED
- * rather than failed in exactly two cases — it is newer than everything
+ * rather than failed in exactly one case — it is newer than everything
  * published (the normal state on a release branch, which must never be
- * blocked), or some published version shares its release line (`@since
- * 0.1.0`, a line that shipped only as `0.1.0-alpha.*`). Any OTHER unpublished
- * version is reported: it names a release that was skipped over and can never
- * appear, which absence alone cannot distinguish. See
- * {@linkcode mayBeSkipped}.
+ * blocked). A plain release whose line shipped only as prereleases (`@since
+ * 0.1.0`, a line that shipped only as `0.1.0-alpha.*`) is checked against the
+ * line's last prerelease instead. Any OTHER unpublished version is reported:
+ * it names a release that was skipped over and can never appear, which
+ * absence alone cannot distinguish. See {@linkcode mayBeSkipped} and
+ * {@linkcode lineStandIn}.
  *
  * A network failure is NOT an exit 77 here. `check:docs` is an `&&` chain of
  * `deno run` invocations, so any non-zero status fails the task — 77
@@ -298,21 +299,18 @@ function releaseTriple(version: string): readonly [number, number, number] | nul
 
 /**
  * Whether a tag naming an unpublished version may be skipped rather than
- * reported. Two cases qualify, and they are different questions:
+ * reported: exactly when the version is NEWER than every version the registry
+ * holds — the normal state on a release branch, which must never be blocked.
  *
- * 1. The version is NEWER than every version the registry holds — the normal
- *    state on a release branch, which must never be blocked.
- * 2. Some published version shares its release line. `@since 0.1.0` is the
- *    repo-wide spelling for "since the first release", and that line shipped
- *    only as `0.1.0-alpha.*`, so the exact string is absent while the release
- *    it names plainly exists.
- *
- * Absence from the published list is NOT by itself either question, and
+ * Absence from the published list is NOT by itself that question, and
  * conflating them left a permanent blind spot: a version that was never
  * released and never will be (`0.6.1`, on a line that went `0.6.0` -> `0.7.0`)
  * is absent forever, so it was skipped forever while the message claimed it
  * was "ahead of the registry". Four such tags were live on `main` and this
  * gate could not have reported any of them.
+ *
+ * A version whose release line shipped only as prereleases is not a skip
+ * either; {@linkcode lineStandIn} resolves it to a version that can be checked.
  *
  * @param version - The version the tag claims
  * @param published - Every version the registry holds for that package
@@ -323,12 +321,68 @@ function mayBeSkipped(version: string, published: readonly string[]): boolean {
   if (triple === null) return true;
   const [major, minor, patch] = triple;
   const lines = published.map(releaseTriple).filter((t) => t !== null);
-  if (lines.some(([m, n, p]) => m === major && n === minor && p === patch)) return true;
   return lines.every(([m, n, p]) => {
     if (major !== m) return major > m;
     if (minor !== n) return minor > n;
     return patch > p;
   });
+}
+
+/**
+ * Orders two prerelease suffixes (`alpha.9`, `alpha.10`) the way semver does:
+ * dot-separated identifiers compared left to right, numeric ones numerically
+ * and below alphanumeric ones, with a shorter run of equal identifiers first.
+ * A plain lexical compare would put `alpha.10` before `alpha.9`.
+ *
+ * @param a - A prerelease suffix, without its leading `-`
+ * @param b - Another
+ * @returns Negative, zero or positive, as for `Array.prototype.sort`
+ */
+export function comparePrerelease(a: string, b: string): number {
+  const left = a.split('.');
+  const right = b.split('.');
+  for (let i = 0; i < Math.min(left.length, right.length); i++) {
+    const x = left[i] as string;
+    const y = right[i] as string;
+    const xNum = /^\d+$/.test(x);
+    const yNum = /^\d+$/.test(y);
+    if (xNum && yNum) {
+      const diff = Number(x) - Number(y);
+      if (diff !== 0) return diff;
+    } else if (xNum !== yNum) {
+      return xNum ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return left.length - right.length;
+}
+
+/**
+ * The published version a plain-release tag is checked against when that
+ * exact release never shipped but its LINE did, as prereleases only.
+ *
+ * `@since 0.1.0` is the repo-wide spelling for "since the first release", and
+ * that line shipped only as `0.1.0-alpha.*` — so the exact string is absent
+ * forever. This gate used to SKIP such a tag, reporting it as "ahead of the
+ * registry", which made every one of the ~780 `0.1.0` tags in the corpus
+ * unverifiable: a tag claiming `0.1.0` on a symbol added in `0.5.0` passed.
+ * The line's LAST published prerelease is the stand-in, because "since 0.1.0"
+ * means "present by the end of the 0.1.0 line"; a symbol absent there arrived
+ * in a later release and its tag is wrong. Only a tag naming a plain release
+ * is resolved this way — a prerelease tag is compared exactly.
+ *
+ * @param version - The version the tag claims
+ * @param published - Every version the registry holds for that package
+ * @returns The stand-in version, or `null` when the line shipped no prerelease
+ *   or the tag is itself a prerelease
+ */
+export function lineStandIn(version: string, published: readonly string[]): string | null {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) return null;
+  const candidates = published
+    .filter((v) => v.startsWith(`${version}-`))
+    .sort((a, b) => comparePrerelease(a.slice(version.length + 1), b.slice(version.length + 1)));
+  return candidates.at(-1) ?? null;
 }
 
 /**
@@ -526,30 +580,40 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
           pushSkip(tag, `${packageName} has no published versions to compare against`);
           continue;
         }
+        let checked = tag.version;
         if (!meta.versions.includes(tag.version)) {
-          if (mayBeSkipped(tag.version, meta.versions)) {
+          const standIn = lineStandIn(tag.version, meta.versions);
+          if (standIn !== null) {
+            checked = standIn;
+          } else if (mayBeSkipped(tag.version, meta.versions)) {
             pushSkip(
               tag,
               `${tag.version} is not on the registry yet — a tag ahead of the registry is ` +
                 `skipped, not failed, so a release branch cannot be blocked`,
             );
             continue;
+          } else {
+            findings.push({
+              file: tag.file,
+              line: tag.line,
+              version: tag.version,
+              kind: 'version-absent',
+              message: `${packageName} has no ${tag.version} — the tag names a version that ` +
+                `was never published, and is older than one that was, so it can never appear. ` +
+                `Name the release that ships the symbol.`,
+            });
+            continue;
           }
-          findings.push({
-            file: tag.file,
-            line: tag.line,
-            version: tag.version,
-            kind: 'version-absent',
-            message: `${packageName} has no ${tag.version} — the tag names a version that ` +
-              `was never published, and is older than one that was, so it can never appear. ` +
-              `Name the release that ships the symbol.`,
-          });
-          continue;
         }
+        // When the line shipped only as prereleases, the message names both
+        // the claimed version and the release actually read.
+        const checkedLabel = checked === tag.version
+          ? tag.version
+          : `${checked} (the last release of the ${tag.version} line)`;
         let content: string | null;
         try {
           content = await fileFor(
-            registryFileUrl(registryBase, packageName, tag.version, modulePathFor(member, file)),
+            registryFileUrl(registryBase, packageName, checked, modulePathFor(member, file)),
           );
         } catch (error) {
           pushSkip(tag, String(error));
@@ -561,7 +625,7 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
             line: tag.line,
             version: tag.version,
             kind: 'file-absent',
-            message: `${packageName}@${tag.version} does not contain ` +
+            message: `${packageName}@${checkedLabel} does not contain ` +
               `${modulePathFor(member, file)} — the tag names a release that does not ` +
               `ship the file the symbol lives in.`,
           });
@@ -576,7 +640,7 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
           line: tag.line,
           version: tag.version,
           kind: 'symbol-absent',
-          message: `${tag.symbol} is absent from ${packageName}@${tag.version}'s ` +
+          message: `${tag.symbol} is absent from ${packageName}@${checkedLabel}'s ` +
             `${modulePathFor(member, file)} — the tag names a release that does not ` +
             `ship the symbol it sits on.`,
         });

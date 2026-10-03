@@ -32,7 +32,7 @@ import { UnsupportedQueryFeatureError } from '../../errors.ts';
  * `credentials` remains opaque because the AWS SDK also accepts a credential
  * provider function; it crosses this dependency boundary unchanged.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoClientConfiguration {
   /** The AWS region supplied to `DynamoDBClient`. */
@@ -70,7 +70,7 @@ export type DynamoCommandConstructor<TInput, TOutput> = new (
  * This is deliberately structural so a test double can implement every
  * command constructor without importing the optional SDK.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoSdkModule {
   /** The AWS DynamoDB client constructor. */
@@ -111,7 +111,7 @@ export interface DynamoClientLoader {
  *
  * @param client - An application-owned structural client facade
  * @returns A loader that resolves the supplied client unchanged
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function createInjectedDynamoLoader(client: IDynamoClient): DynamoClientLoader {
   return { load: (): Promise<IDynamoClient> => Promise.resolve(client) };
@@ -181,7 +181,7 @@ function assertTransportSecurity(configuration: DynamoClientConfiguration): void
  *
  * @param configuration - Settings passed to the native `DynamoDBClient`
  * @returns A loader that imports and adapts the AWS SDK when used
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function createLazyDynamoLoader(
   configuration: DynamoClientConfiguration,
@@ -201,7 +201,7 @@ export function createLazyDynamoLoader(
  * @param module - The native SDK module or a structural test double
  * @param configuration - Settings supplied to the native client constructor
  * @returns The structural client driven by database adapter code
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function adaptDynamoSdkModule(
   module: DynamoSdkModule,

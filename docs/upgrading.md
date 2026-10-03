@@ -29,6 +29,13 @@ refuses to extend or implement a union, so `interface X extends MailTemplate` (`
 carries the released `{ html?, text? }` shape. Anything that only holds or assigns a `MailTemplate`
 value needs no change.
 
+### Connect a `LogProvider` before sending through it directly
+
+`@setu-ts/mail-plugin`'s `LogProvider` and `SendGridProvider` now reject a send while not connected,
+matching the SMTP and SES providers. Through `MailPlugin` nothing changes, because the plugin
+connects the provider during `register()`. A test that constructs `new LogProvider()` and sends on
+it without connecting must add `await provider.connect()` first.
+
 ## 0.8.0
 
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at

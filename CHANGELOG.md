@@ -29,11 +29,28 @@ All notable changes to this project are documented here. The format follows
   placeholder key) is now a rejection rather than a synchronous throw. `MailService` is unaffected
   (it awaits). A direct caller of `TemplateEngine` adds an `await`; the constructor also gains an
   optional second parameter, the view engine, which the plugin supplies. See `docs/upgrading.md`.
+- **BREAKING: the log and SendGrid mail providers refuse a send while not connected.** Both accepted
+  a send outside `connect()`..`disconnect()`, unlike the SMTP and SES providers: a send after
+  `app.stop()` reported success on the log provider and still POSTed a real email through SendGrid.
+  Both now reject with `'LogProvider is not connected'` / `'SendGridProvider is not
+  connected'`.
+  Through `MailPlugin` nothing changes before `stop()`, since the plugin connects the provider
+  during `register()`. A test constructing `LogProvider` directly must now call
+  `await provider.connect()` before sending.
 - **BREAKING: `MailTemplate` is a union type, no longer an interface (M102).** It is now
   `MailStringTemplate | MailComponentTemplate`, so `interface X extends MailTemplate` fails with
   `TS2312` and `class Y implements MailTemplate` with `TS2422`. Extend or implement
   `MailStringTemplate` instead, which has the released `{ html?, text? }` shape. A value typed
   `MailTemplate`, and every object literal assigned to one, compiles unchanged.
+
+### Fixed
+
+- **62 `@since` tags named a release that does not ship their symbol.** The MongoDB, DynamoDB and
+  cursor-paging surfaces of `@setu-ts/database-plugin` (61 tags) carried `@since 0.1.0` while first
+  shipping in `0.2.0`, and the kernel router's `ROUTE_ENTRY` first shipped in `0.3.0`. Each is
+  corrected to the first published version whose file contains the symbol. They survived because the
+  `@since` gate skipped every `0.1.0` tag — that line shipped only as `0.1.0-alpha.*` — and now
+  checks such a tag against the line's last prerelease instead.
 
 ## [0.8.0] — 2026-10-03
 

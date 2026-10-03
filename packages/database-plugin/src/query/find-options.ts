@@ -56,7 +56,7 @@ export interface FindOptions {
  * distinct named type so the repository surface can document it separately
  * from the `findAll` options.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export type PageOptions = FindOptions;
 
