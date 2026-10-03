@@ -38,6 +38,10 @@ import type { CompiledSignIn } from '../sign-in/config.ts';
 import { registerSignInRoutes } from '../sign-in/routes.ts';
 import { AuthSessionService } from '../sign-in/auth-session-service.ts';
 import { AuthSessionStrategy } from '../strategies/auth-session-strategy.ts';
+import { compilePasskeys } from '../passkeys/ceremonies.ts';
+import type { CompiledPasskeys } from '../passkeys/ceremonies.ts';
+import { PasskeyCeremonies } from '../passkeys/ceremonies.ts';
+import { registerPasskeyRoutes } from '../passkeys/routes.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 const AUTH_MIDDLEWARE_PRIORITY = 300;
@@ -103,6 +107,12 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   const compiledSignIn: CompiledSignIn | null = options.signIn === undefined
     ? null
     : compileSignIn(options.signIn);
+  // Passkeys (M100e): validated at construction too, beside the sign-in arm,
+  // so a malformed origin or rpId refuses before an application exists.
+  const compiledPasskeys: CompiledPasskeys | null =
+    compiledSignIn === null || compiledSignIn.passkeys === null
+      ? null
+      : compilePasskeys(compiledSignIn.passkeys);
   if (options.http !== undefined && compiledIssuers.length === 0 && compiledSignIn === null) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: http is only read for issuers and signIn; configure one or drop http',
@@ -336,6 +346,25 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           keySets,
           debug,
         });
+
+        // Passkeys (M100e): the ceremonies ride the same session and
+        // auth-session services the sign-in arm built, and register the four
+        // ceremony routes under the sign-in base path.
+        if (compiledPasskeys !== null) {
+          const ceremonies = new PasskeyCeremonies({
+            config: compiledPasskeys,
+            runtime,
+            sessionService,
+            authSession: authSessionService,
+            debug,
+            mfaConfigured: compiledSignIn.mfa !== null,
+          });
+          registerPasskeyRoutes({
+            router: ctx.router,
+            basePath: compiledSignIn.basePath,
+            ceremonies,
+          });
+        }
 
         // Abort discovery fetches at the START of stop(), as the issuer key sets
         // do: the kernel drains in-flight requests before onClose, so a login

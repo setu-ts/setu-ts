@@ -266,6 +266,23 @@ export class AuthSessionService implements IAuthSessionService {
   }
 
   /**
+   * Reads the methods recorded for the session's signed-in principal.
+   *
+   * Internal promotion seam (see {@linkcode PendingPromotion}); not part of
+   * `IAuthSessionService`.
+   *
+   * @param ctx - The request context whose session is read
+   * @returns The recorded methods, or `null` when the session holds no identity
+   * @throws {Error} If the session middleware did not run for this request
+   */
+  currentMethods(ctx: IRequestContext): readonly AuthMethod[] | null {
+    const record = parseAuthSessionRecord(
+      this.#sessionService.from(ctx).get(AUTH_SESSION_KEY),
+    );
+    return record === null ? null : record.methods;
+  }
+
+  /**
    * Reads the pending second-factor record, if one exists and has not expired.
    *
    * @param ctx - The request context whose session is read
@@ -364,6 +381,13 @@ export interface PendingPromotion {
    * honouring the pending-record TTL the auth-session service owns.
    */
   promotePending(ctx: IRequestContext, method: AuthMethod): 'signed-in' | 'no-pending';
+  /**
+   * The methods recorded for the session's signed-in principal, or `null` when
+   * none is signed in. Read by the passkey registration gate, which must know
+   * whether the session proved a second factor — a principal alone does not
+   * say.
+   */
+  currentMethods(ctx: IRequestContext): readonly AuthMethod[] | null;
 }
 
 /**
@@ -383,7 +407,11 @@ export function asPendingPromotion(
   // The two interfaces share no members, so the narrowing goes through
   // `unknown` with the check done at runtime rather than trusting the type.
   const candidate: unknown = service;
-  if (candidate === null || typeof (candidate as PendingPromotion).promotePending !== 'function') {
+  if (
+    candidate === null ||
+    typeof (candidate as PendingPromotion).promotePending !== 'function' ||
+    typeof (candidate as PendingPromotion).currentMethods !== 'function'
+  ) {
     return null;
   }
   return candidate as PendingPromotion;

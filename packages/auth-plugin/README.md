@@ -497,9 +497,10 @@ a shared implementation, and must implement `stageSecret`, `confirmSecret`, `cla
 `reserveAttempt` and `consumeRecoveryCode` as single atomic operations (a compare-and-set or a
 transaction) — each one closes a race that a read followed by a write reopens.
 
-A password-only application sets `providers: []` with `mfa` (an empty list is refused without it)
-and records its own principal through `IAuthSessionService.signIn`, as the `/login` route below
-does; `signIn` then supplies the auth-session capability, the pending state and the logout route.
+A password-only application sets `providers: []` with `mfa` (an empty list is refused unless `mfa`
+or `passkeys` is set) and records its own principal through `IAuthSessionService.signIn`, as the
+`/login` route below does; `signIn` then supplies the auth-session capability, the pending state and
+the logout route.
 
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
@@ -626,7 +627,9 @@ app.router.get('/account/bank', {
   password during the pending state can enrol one. If that matters, enrol factors only from a
   signed-in session, or have `mfa.required` answer `true` only for principals that already have one.
   An administrator reset that cannot obtain proof calls `ITotpStore.deleteEnrolment` directly,
-  behind its own authorization.
+  behind its own authorization. A PASSKEY is a second factor too: with `signIn.mfa` configured, a
+  one-factor session cannot register one — not even the first — unless `PasskeyOptions.mayRegister`
+  admits it, so a stolen password cannot add a passkey beside a TOTP factor (see Passkeys).
 - **Pending sign-in.** When `mfa.required` returns `true`, `signIn` does NOT sign the session in. It
   stores a `PendingSignIn` record under a private session key and returns `second-factor-required`.
   The session is anonymous until `completeSignIn` (or `completeSignInWithRecoveryCode`) succeeds, at
@@ -677,6 +680,133 @@ app.router.get('/account/bank', {
   append `otp` to the pending record's methods, so a password sign-in that finished with either ends
   up with `methods: ['pwd', 'otp']` and `amr: ['pwd', 'otp']`. `requireMfa()` accepts `otp` or
   `pop`.
+
+## Passkeys (WebAuthn)
+
+`signIn.passkeys` registers the four ceremony routes — `POST <basePath>/passkeys/register/options`,
+`POST <basePath>/passkeys/register/verify`, `POST <basePath>/passkeys/login/options` and
+`POST <basePath>/passkeys/login/verify` (`basePath` defaults to `/auth`) — and lets a passkey
+assertion with user verification count as the second factor for `signIn.mfa`'s step-up model.
+Registration and authentication ceremonies are WebAuthn Level 2 with attestation conveyance `none`;
+ES256, RS256 and EdDSA credentials are accepted.
+
+The verifier is **zero-dependency**: a bounded CBOR/COSE decoder over `runtime.subtle`. It does not
+use `@simplewebauthn/server`, because importing that library installs a global `Reflect.getMetadata`
+polyfill in every application that enables passkeys (its `reflect-metadata` dependency) and
+advertises ML-DSA-44 on some runtimes only — the framework requires no reflection library, and the
+plugin keeps that true. The library appears only in the package's own differential test, as a test
+oracle.
+
+Verification checks `clientDataJSON` (ceremony type, the session-held challenge, the origin against
+an exact allowlist, `crossOrigin` refused), `authenticatorData` (RP ID hash, user-present and
+user-verified flags), and the signature over `authenticatorData ‖ SHA-256(clientDataJSON)`.
+Challenges are held in the session with a 5-minute expiry AND claimed once in the credential store:
+on the default encrypted-cookie session strategy an older cookie still carries a consumed challenge,
+and a synced passkey's counter is always `0`, so the session alone cannot stop a replayed assertion.
+
+```typescript
+import type { IPrincipal } from '@setu-ts/common';
+import { AuthPlugin, MemoryPasskeyStore } from '@setu-ts/auth-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SessionPlugin } from '@setu-ts/session-plugin';
+
+/** The application's own principal lookup; `null` refuses the sign-in. */
+function loadPrincipal(principalId: string): Promise<IPrincipal | null> {
+  return Promise.resolve(null);
+}
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!' }),
+    AuthPlugin({
+      signIn: {
+        providers: [],
+        mfa: { required: (principal) => principal.roles?.includes('admin') === true },
+        passkeys: {
+          rpId: 'example.com',
+          rpName: 'My App',
+          origins: ['https://example.com'],
+          store: new MemoryPasskeyStore(),
+          resolvePrincipal: loadPrincipal,
+        },
+      },
+    }),
+  ],
+});
+```
+
+The browser calls the routes with `navigator.credentials` and the CSRF header token the session
+plugin's form CSRF check requires:
+
+```js
+const options = await fetch('/auth/passkeys/login/options', {
+  method: 'POST',
+  headers: { 'x-csrf-token': csrfToken },
+}).then((r) => r.json());
+
+// The options are JSON (base64url strings); WebAuthn needs ArrayBuffers. Registration
+// does the same with `parseCreationOptionsFromJSON` before `navigator.credentials.create`.
+const assertion = await navigator.credentials.get({
+  publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options),
+});
+
+const result = await fetch('/auth/passkeys/login/verify', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+  body: JSON.stringify(assertion),
+}).then((r) => r.json());
+// { status: 'signed-in' } — or { status: 'second-factor-required' }
+```
+
+Credentials are the application's data: `PasskeyOptions.store` is a required `IPasskeyStore`, and
+the shipped `MemoryPasskeyStore` is single-process. A multi-instance application supplies a shared
+implementation and **must implement `updateCounter` as an atomic compare-and-advance** — it stores
+the observed counter only when it is greater than the stored one (or both are zero) and reports
+whether it did. A read-then-write lets two concurrent assertions both validate against the same
+stored value and lets the lower one overwrite the higher, which is exactly how a cloned
+authenticator's stale counter slips through. **`save` must be an atomic compare-and-set** — it
+stores a NEW credential only when its id is absent AND the principal holds fewer than
+`options.maxPerPrincipal` credentials, both checked in the same atomic step as the insert, and
+answers `'saved'`, `'duplicate'` or `'limit'`. A blind write lets two concurrent registrations of
+the same credential id both succeed and lets the later record silently replace the earlier one,
+`principalId` included; a count read before a separate write lets a burst of concurrent
+registrations overshoot the cap. `claimChallenge` must be atomic too.
+
+Under the default `userVerification: 'required'` a UV-unset assertion is refused everywhere — the
+options told the browser user verification is required, so the server enforces it. Under
+`'preferred'` or `'discouraged'` a UV-unset assertion is refused for a username-less sign-in and
+accepted only as the second factor after a first one: without user verification it proves possession
+alone, and recording `pop` for it would satisfy `requireMfa()` with one factor.
+
+A passkey-only application needs no provider and no `mfa`: `signIn: { providers: [], passkeys }` is
+accepted, and the `passkeys` option is validated when `AuthPlugin(...)` is called, so a malformed
+origin or `rpId` refuses before an application exists. The recorded method is always `pop` (proof of
+possession) — never `hwk`/`swk`, which the plugin cannot know with attestation unverified.
+
+**Registration is gated.** Registering a passkey requires a signed-in principal (401 otherwise), and
+a principal who ALREADY holds a passkey must have proved a second factor (`otp` or `pop`) in the
+current session — otherwise a stolen password alone could enrol the attacker's own authenticator,
+whose later assertions are recorded as `pop` and pass `requireMfa()`. That is refused with
+`403 second-factor-required`, at both `register/options` and `register/verify`.
+
+The FIRST passkey depends on whether `signIn.mfa` is configured. Without it (a passkey-only
+application) the first passkey is trusted on first use. **With it, and no `mayRegister`, the first
+passkey needs a proven second factor too** — the principal may hold a TOTP factor this plugin cannot
+see, and a stolen password must not enrol an authenticator that then satisfies `requireMfa()`. A
+user with no factor yet therefore cannot add a first passkey until the application says so:
+`PasskeyOptions.mayRegister` receives the principal, the session's recorded `methods` and the
+principal's `credentialCount`, is consulted after the built-in rules, and decides the first passkey
+when it is set — admit a password-only first enrolment only for a principal that holds no other
+factor. `false` or a throw answers `403 registration-refused`. One principal holds at most 16
+credentials (`409 credential-limit`, enforced atomically by the store's `save`), and only the six
+defined WebAuthn `transports` values are stored, each once. An EC2 key is checked to be a point on
+P-256 at registration, because the runtimes disagree on whether Web Crypto does.
+
+Attestation statements are NOT verified: `attestation: 'none'` is requested, any `fmt` the client
+sends is accepted with its statement unread, and the stored credential records
+`attestation: 'unverified'`. Verifying attestations against trust roots is out of scope.
 
 ## Refresh Tokens
 
@@ -859,6 +989,7 @@ MIT
 | `MemoryRateLimitStore`              | class     |
 | `MemoryRefreshTokenStore`           | class     |
 | `MemoryTotpStore`                   | class     |
+| `MemoryPasskeyStore`                | class     |
 | `PasswordHasher`                    | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
@@ -882,6 +1013,7 @@ MIT
 | `JwtSignOptions`                    | interface |
 | `LocalOptions`                      | interface |
 | `MfaOptions`                        | interface |
+| `IPasskeyStore`                     | interface |
 | `OAuth2Provider`                    | interface |
 | `OidcProvider`                      | interface |
 | `ProviderTokens`                    | interface |
@@ -910,6 +1042,11 @@ MIT
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |
 | `SignInProvider`                    | type      |
+| `PasskeyOptions`                    | interface |
+| `PasskeyRegistrationContext`        | interface |
+| `PasskeySaveOptions`                | interface |
+| `PasskeySaveResult`                 | type      |
+| `StoredPasskey`                     | interface |
 | `TokenEndpointAuth`                 | type      |
 | `TotpCompleteSignInResult`          | type      |
 | `TotpProofResult`                   | type      |
