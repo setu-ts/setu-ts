@@ -8,7 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { createApplication } from '../../../kernel/src/index.ts';
-import { RuntimePlugin } from '../../../runtime/src/index.ts';
+import { createRuntimeServices, RuntimePlugin } from '../../../runtime/src/index.ts';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import type { IDiagnosticsPlugin } from '../../src/interfaces/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
@@ -19,7 +19,10 @@ import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
  * @param pluginOptions - Optional plugin option overrides
  * @returns The running app, port, and plugin
  */
-async function startApp(pluginOptions?: { ttlMs?: number }): Promise<{
+async function startApp(
+  pluginOptions?: { ttlMs?: number; maxSessionLifetimeMs?: number },
+  subtle?: SubtleCrypto,
+): Promise<{
   app: ReturnType<typeof createApplication>;
   port: number;
   plugin: IDiagnosticsPlugin;
@@ -35,7 +38,17 @@ async function startApp(pluginOptions?: { ttlMs?: number }): Promise<{
     ...pluginOptions,
   });
   const app = createApplication({
-    plugins: [RuntimePlugin(), plugin],
+    plugins: [
+      RuntimePlugin(
+        subtle === undefined ? undefined : {
+          platform: 'deno',
+          adapters: {
+            deno: () => ({ ...createRuntimeServices({ platform: 'deno' }), subtle }),
+          },
+        },
+      ),
+      plugin,
+    ],
     diagnostics: {},
   });
   await app.start();
@@ -89,6 +102,56 @@ describe('Lifecycle', () => {
     diagnostics.close();
     await app.stop();
   });
+
+  for (const operation of ['digest', 'sign'] as const) {
+    it(`revoke during a renewal ${operation} releases no successful body`, async () => {
+      let blockCall = false;
+      let signalCallStarted: () => void = () => {};
+      let releaseCall: () => void = () => {};
+      const callStarted = new Promise<void>((resolve) => {
+        signalCallStarted = resolve;
+      });
+      const callReleased = new Promise<void>((resolve) => {
+        releaseCall = resolve;
+      });
+      const base = createRuntimeServices({ platform: 'deno' }).subtle;
+      const delayedSubtle = new Proxy(base, {
+        get(target, property): unknown {
+          if (property === operation) {
+            const original = Reflect.get(target, property, target) as (
+              ...args: unknown[]
+            ) => Promise<ArrayBuffer>;
+            return async (...args: unknown[]): Promise<ArrayBuffer> => {
+              if (blockCall) {
+                signalCallStarted();
+                await callReleased;
+              }
+              return await original.apply(target, args);
+            };
+          }
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const { app, port, plugin } = await startApp(
+        { ttlMs: 1_000, maxSessionLifetimeMs: 3_000 },
+        delayedSubtle,
+      );
+      const diagnostics = client(port);
+      await diagnostics.session();
+
+      blockCall = true;
+      const renewal = diagnostics.renew();
+      await callStarted;
+      const revocation = plugin.revoke();
+      releaseCall();
+
+      await expect(renewal).rejects.toThrow();
+      await revocation;
+      diagnostics.close();
+      await app.stop();
+    });
+  }
 
   it('a failed parent startup closes an already-open listener', async () => {
     const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });

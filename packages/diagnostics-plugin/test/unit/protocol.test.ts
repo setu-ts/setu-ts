@@ -18,6 +18,7 @@ import {
   isInspectorsManifest,
   isSnapshotProjection,
   legacyStatusBody,
+  parseRenewBody,
   parseStatusBody,
   parseTarget,
   projectBatch,
@@ -26,6 +27,7 @@ import {
   projectHealthSnapshot,
   projectSnapshot,
   PROTOCOL_ERRORS,
+  renewBody,
   statusBody,
 } from '../../src/protocol/protocol.ts';
 import { minimalBatch, minimalSnapshot, TEST_INSTANCE_ID } from '../fixtures/helpers.ts';
@@ -42,6 +44,12 @@ describe('Protocol — canonical target parsing', () => {
     expect(parseTarget('/v1/snapshot', '')).toEqual({
       op: 'snapshot',
       canonicalTarget: '/v1/snapshot',
+      after: 0,
+      limit: 0,
+    });
+    expect(parseTarget('/v1/renew', '')).toEqual({
+      op: 'renew',
+      canonicalTarget: '/v1/renew',
       after: 0,
       limit: 0,
     });
@@ -77,6 +85,9 @@ describe('Protocol — canonical target parsing', () => {
       ['/v1/events', 'after%3D0&limit=1'],
       // Query field violations on the fixed targets
       ['/v1/status', 'x=1'],
+      ['/v1/renew', 'x=1'],
+      ['/v1/renew/', ''],
+      ['/v1/Renew', ''],
       ['/v1/snapshot', 'after=0'],
       ['/v1/health', 'x=1'],
       ['/v1/health/', ''],
@@ -177,6 +188,51 @@ describe('Protocol — status body and fixed errors', () => {
       expiresInMs: 899_999,
       inspectors: currentInspectorsManifest(),
     });
+  });
+
+  it('builds and parses renewable status and renew bodies exactly', () => {
+    const status = statusBody(TEST_INSTANCE_ID, 999, currentInspectorsManifest(), {
+      maxRemainingMs: 2_999,
+    });
+    expect(parseStatusBody(status)).toEqual({
+      instanceId: TEST_INSTANCE_ID,
+      expiresInMs: 999,
+      inspectors: currentInspectorsManifest(),
+      renewal: { maxRemainingMs: 2_999 },
+    });
+    const body = renewBody(TEST_INSTANCE_ID, 1_000, 2_500);
+    expect(parseRenewBody(body)).toEqual({
+      instanceId: TEST_INSTANCE_ID,
+      expiresInMs: 1_000,
+      maxRemainingMs: 2_500,
+    });
+  });
+
+  it('refuses malformed renewal advertisements and bodies', () => {
+    const manifest = currentInspectorsManifest();
+    const base = { version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: 1 };
+    expect(parseStatusBody({ ...base, renewal: { maxRemainingMs: 2 } })).toBe(null);
+    expect(
+      parseStatusBody({ ...base, inspectors: manifest, renewal: { maxRemainingMs: 0 } }),
+    ).toBe(null);
+    expect(
+      parseStatusBody({ ...base, inspectors: manifest, renewal: { maxRemainingMs: 2.5 } }),
+    ).toBe(null);
+    expect(
+      parseStatusBody({ ...base, expiresInMs: 0.5, inspectors: manifest }),
+    ).not.toBeNull();
+    expect(
+      parseStatusBody({
+        ...base,
+        expiresInMs: 0.5,
+        inspectors: manifest,
+        renewal: { maxRemainingMs: 2 },
+      }),
+    ).toBe(null);
+    expect(parseRenewBody({ ...renewBody(TEST_INSTANCE_ID, 1, 2), extra: true })).toBe(null);
+    expect(parseRenewBody(renewBody(TEST_INSTANCE_ID, 1.5, 2))).toBe(null);
+    expect(parseRenewBody(renewBody(TEST_INSTANCE_ID, 3, 2))).toBe(null);
+    expect(parseRenewBody(null)).toBe(null);
   });
 
   it('builds the legacy M98b status body with exactly the three fields', () => {

@@ -116,12 +116,4 @@ export interface PublicationHold {
  * released CLI's `--devtool` scaffolding imports `@setu-ts/diagnostics-plugin`,
  * so its generated projects could not install.
  */
-export const PUBLICATION_HOLDS: readonly PublicationHold[] = [
-  {
-    packageDir: 'packages/diagnostics-plugin',
-    reason: 'M98o (diagnostics session renewal) extends protocol v1 with an optional status ' +
-      'member, which a published client would refuse. The status shape freezes at first ' +
-      "publication, so this package must not publish before M98o merges; M98o's PR removes " +
-      'this hold.',
-  },
-];
+export const PUBLICATION_HOLDS: readonly PublicationHold[] = [];

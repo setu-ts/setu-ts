@@ -82,6 +82,14 @@ function fakeServer(
     legacyStatus?: boolean;
     /** The manifest to serve in the status body; defaults to the current one. */
     statusInspectors?: Record<string, boolean>;
+    /** Advertise renewal in status. */
+    renewal?: boolean;
+    /** Decide renewal presence independently for each status exchange. */
+    statusRenewal?: () => boolean;
+    /** Override the status body's `expiresInMs` (e.g. a fractional legacy value). */
+    statusExpiresInMs?: number;
+    /** Override the renewal response body. */
+    renewBody?: Record<string, unknown>;
     /** The body to serve for `/v1/health`; defaults to a ready snapshot. */
     healthBody?: Record<string, unknown>;
     /** The body to serve for `/v1/config`; defaults to a ready snapshot. */
@@ -157,12 +165,24 @@ function fakeServer(
         const body: Record<string, unknown> = {
           version: 1,
           instanceId: TEST_INSTANCE_ID,
-          expiresInMs: 899_000,
+          expiresInMs: overrides.statusExpiresInMs ?? 899_000,
         };
         if (!overrides.legacyStatus) {
           body.inspectors = overrides.statusInspectors ?? currentInspectorsManifest();
         }
+        if (overrides.statusRenewal?.() ?? overrides.renewal) {
+          body.renewal = { maxRemainingMs: 28_000_000 };
+        }
         bodyText = JSON.stringify(body);
+      } else if (target === '/v1/renew') {
+        bodyText = JSON.stringify(
+          overrides.renewBody ?? {
+            version: 1,
+            instanceId: TEST_INSTANCE_ID,
+            expiresInMs: 900_000,
+            maxRemainingMs: 27_999_000,
+          },
+        );
       } else if (target === '/v1/snapshot') {
         bodyText = JSON.stringify(overrides.snapshotBody?.() ?? minimalSnapshot());
       } else if (target === '/v1/health') {
@@ -556,6 +576,150 @@ describe('Client — pairing and reads', () => {
     for (let i = 1; i < sequences.length; i++) {
       expect(sequences[i]).toBeGreaterThan(sequences[i - 1]);
     }
+    client.close();
+  });
+});
+
+describe('Client — session renewal', () => {
+  it('pairs through session() and renews through the authenticated target', async () => {
+    const { client, requests } = buildClient({ server: { renewal: true } });
+    const initial = await client.session();
+    expect(initial).toEqual({
+      expiresInMs: 899_000,
+      renewal: { maxRemainingMs: 28_000_000 },
+    });
+    expect(Object.isFrozen(initial)).toBe(true);
+    expect(Object.isFrozen(initial.renewal)).toBe(true);
+    const renewed = await client.renew();
+    expect(renewed).toEqual({
+      expiresInMs: 900_000,
+      renewal: { maxRemainingMs: 27_999_000 },
+    });
+    expect(requests.map((request) => request.target)).toEqual(['/v1/status', '/v1/renew']);
+    client.close();
+  });
+
+  it('reports whole milliseconds for a fractional status without renewal', async () => {
+    // A non-renewable server sends the pre-M98o fractional monotonic value
+    // (measured on Deno: e.g. 899992.600016); the client contract is integer.
+    for (const legacyStatus of [false, true]) {
+      const { client } = buildClient({
+        server: { statusExpiresInMs: 899_992.600016, legacyStatus },
+      });
+      const lifetime = await client.session();
+      expect(lifetime).toEqual({ expiresInMs: 899_992, renewal: null });
+      expect(Number.isSafeInteger(lifetime.expiresInMs)).toBe(true);
+      client.close();
+    }
+  });
+
+  it('pairs first and sends no renew request when renewal is unsupported', async () => {
+    const { client, requests } = buildClient();
+    await expect(client.renew()).rejects.toThrow(CLIENT_ERRORS.notRenewable);
+    expect(requests.map((request) => request.target)).toEqual(['/v1/status']);
+    client.close();
+  });
+
+  it('refuses a changed renewal presence without latching terminal pairing failure', async () => {
+    let statusCalls = 0;
+    const { client } = buildClient({
+      server: {
+        statusRenewal() {
+          statusCalls += 1;
+          return statusCalls !== 2;
+        },
+      },
+    });
+    await client.session();
+    await expect(client.session()).rejects.toThrow(CLIENT_ERRORS.connection);
+    expect((await client.renew()).expiresInMs).toBe(900_000);
+    client.close();
+  });
+
+  it('refuses malformed renew bodies', async () => {
+    const bodies: readonly Record<string, unknown>[] = [
+      {
+        version: 1,
+        instanceId: 'wrong',
+        expiresInMs: 1,
+        maxRemainingMs: 2,
+      },
+      {
+        version: 1,
+        instanceId: TEST_INSTANCE_ID,
+        expiresInMs: 3,
+        maxRemainingMs: 2,
+      },
+      {
+        version: 1,
+        instanceId: TEST_INSTANCE_ID,
+        expiresInMs: 1,
+        maxRemainingMs: 2,
+        extra: true,
+      },
+    ];
+    for (const renewBody of bodies) {
+      const { client } = buildClient({ server: { renewal: true, renewBody } });
+      await expect(client.renew()).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    }
+  });
+});
+
+describe('Client — refusal bodies', () => {
+  /**
+   * A refusal body that records whether it was read or cancelled. A zero
+   * high-water mark means nothing is pulled unless a reader asks.
+   */
+  function trackedRefusal(status: number) {
+    const tracker = { pulled: 0, cancelled: 0 };
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        tracker.pulled += 1;
+        controller.enqueue(new TextEncoder().encode('canary-refusal-body'));
+        controller.close();
+      },
+      cancel() {
+        tracker.cancelled += 1;
+      },
+    }, { highWaterMark: 0 });
+    return { tracker, response: new Response(body, { status }) };
+  }
+
+  for (const status of [400, 401, 429, 503]) {
+    it(`cancels an unread ${status} refusal body on the initial exchange`, async () => {
+      const { tracker, response } = trackedRefusal(status);
+      const { client } = buildClient({ client: { fetch: () => Promise.resolve(response) } });
+      await expect(client.session()).rejects.toThrow(CLIENT_ERRORS.connection);
+      await Promise.resolve();
+      expect(tracker).toEqual({ pulled: 0, cancelled: 1 });
+      client.close();
+    });
+  }
+
+  it('cancels an unread refusal body on a paired operation', async () => {
+    const honest = recording(fakeServer(crypto.subtle, { renewal: true }).fetch);
+    const { tracker, response } = trackedRefusal(401);
+    const { client } = buildClient({
+      client: {
+        fetch: (input, init) =>
+          String(input).endsWith('/v1/renew') ? Promise.resolve(response) : honest(input, init),
+      },
+    });
+    await client.session();
+    await expect(client.renew()).rejects.toThrow(CLIENT_ERRORS.connection);
+    await Promise.resolve();
+    expect(tracker).toEqual({ pulled: 0, cancelled: 1 });
+    // Non-terminal: the paired client keeps working.
+    expect((await client.session()).renewal).not.toBe(null);
+    client.close();
+  });
+
+  it('refuses a bodiless refusal with the same fixed error', async () => {
+    const { client } = buildClient({
+      client: { fetch: () => Promise.resolve(new Response(null, { status: 401 })) },
+    });
+    await expect(client.session()).rejects.toThrow(CLIENT_ERRORS.connection);
     client.close();
   });
 });

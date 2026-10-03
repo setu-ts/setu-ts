@@ -11,12 +11,25 @@ import type {
   ILocalDiagnosticsListener,
   ILocalDiagnosticsListenerFactory,
   IPluginContext,
+  IRequest,
+  IResponse,
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 import type { DiagnosticsPluginOptions } from '../../src/interfaces/index.ts';
 import { DiagnosticsPlugin, PLUGIN_ERRORS } from '../../src/plugin/diagnostics-plugin.ts';
-import { MutableClock, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import {
+  fakeRequest,
+  fakeSource,
+  importTestKey,
+  minimalBatch,
+  minimalSnapshot,
+  MutableClock,
+  signRequest,
+  TEST_INSTANCE_ID,
+  TEST_KEY_BYTES,
+  TEST_SESSION_ID,
+} from '../fixtures/helpers.ts';
 
 /**
  * A fake listener recording closes.
@@ -65,10 +78,16 @@ function fakeContext(
   diagnostics: unknown,
   gate?: Promise<void>,
   logger?: { info(message: string): void },
+  timers?: {
+    setTimeout(fn: () => void, ms: number): unknown;
+    clearTimeout(handle: unknown): void;
+  },
 ): {
   ctx: IPluginContext;
   hooks: Record<string, Array<() => unknown>>;
   listened: ListenRecord[];
+  handlers: Array<(request: IRequest) => IResponse | Promise<IResponse>>;
+  clock: MutableClock;
 } {
   const hooks: Record<string, Array<() => unknown>> = {
     bootstrap: [],
@@ -76,9 +95,11 @@ function fakeContext(
     close: [],
   };
   const listened: ListenRecord[] = [];
+  const handlers: Array<(request: IRequest) => IResponse | Promise<IResponse>> = [];
   const clock = new MutableClock();
   const factoryListener: ILocalDiagnosticsListenerFactory = {
     listen(options) {
+      handlers.push(options.handler);
       listened.push({
         port: options.port,
         handlerPresent: typeof options.handler === 'function',
@@ -93,6 +114,8 @@ function fakeContext(
   return {
     hooks,
     listened,
+    handlers,
+    clock,
     ctx: {
       services: {
         get(token: string) {
@@ -113,8 +136,9 @@ function fakeContext(
       runtime: {
         hrtime: () => clock.hrtime(),
         subtle: crypto.subtle,
-        setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
-        clearTimeout: (handle: unknown) => clearTimeout(handle as number),
+        setTimeout: timers?.setTimeout ?? ((fn: () => void, ms: number) => setTimeout(fn, ms)),
+        clearTimeout: timers?.clearTimeout ??
+          ((handle: unknown) => clearTimeout(handle as number)),
       } as unknown as IPluginContext['runtime'],
       app: { diagnostics } as unknown as IPluginContext['app'],
       ...(logger === undefined ? {} : { logger }),
@@ -131,6 +155,77 @@ const OPTIONS: DiagnosticsPluginOptions = {
   sessionId: TEST_SESSION_ID,
   sessionKey: TEST_KEY_BYTES,
 };
+
+async function fakeStatusRequest(key: CryptoKey, sequence: number): Promise<IRequest> {
+  const mac = await signRequest(crypto.subtle, key, '/v1/status', sequence);
+  return fakeRequest({
+    url: `http://127.0.0.1:${OPTIONS.port}/v1/status`,
+    headers: {
+      host: `127.0.0.1:${OPTIONS.port}`,
+      'x-setu-session': TEST_SESSION_ID,
+      'x-setu-sequence': String(sequence),
+      'x-setu-mac': mac,
+    },
+  });
+}
+
+async function fakeRenewRequest(key: CryptoKey, sequence: number): Promise<IRequest> {
+  const mac = await signRequest(
+    crypto.subtle,
+    key,
+    '/v1/renew',
+    sequence,
+    TEST_INSTANCE_ID,
+  );
+  return fakeRequest({
+    url: `http://127.0.0.1:${OPTIONS.port}/v1/renew`,
+    headers: {
+      host: `127.0.0.1:${OPTIONS.port}`,
+      'x-setu-session': TEST_SESSION_ID,
+      'x-setu-sequence': String(sequence),
+      'x-setu-instance': TEST_INSTANCE_ID,
+      'x-setu-mac': mac,
+    },
+  });
+}
+
+/**
+ * Fake runtime timers that count outstanding handles and fire the oldest one
+ * on demand, so re-arming is observable without real time.
+ *
+ * @returns The timer seam plus inspection helpers
+ */
+function countedTimers() {
+  let nextHandle = 1;
+  const callbacks = new Map<number, () => void>();
+  const delays: number[] = [];
+  return {
+    delays,
+    setTimeout(fn: () => void, ms: number): number {
+      const handle = nextHandle++;
+      callbacks.set(handle, fn);
+      delays.push(ms);
+      return handle;
+    },
+    clearTimeout(handle: unknown): void {
+      callbacks.delete(handle as number);
+    },
+    outstanding(): number {
+      return callbacks.size;
+    },
+    peek(): (() => void) | undefined {
+      return callbacks.values().next().value;
+    },
+    fire(): void {
+      const [handle, fn] = callbacks.entries().next().value ?? [];
+      if (handle === undefined || fn === undefined) {
+        throw new Error('no outstanding timer');
+      }
+      callbacks.delete(handle);
+      fn();
+    },
+  };
+}
 
 describe('Plugin — metadata and validation', () => {
   it('declares the connector dependency, provides nothing, and revokes', () => {
@@ -169,6 +264,22 @@ describe('Plugin — metadata and validation', () => {
     expect(() => DiagnosticsPlugin({ ...OPTIONS, ttlMs: 3_600_001 })).toThrow(
       PLUGIN_ERRORS.invalidTtl,
     );
+    for (const maxSessionLifetimeMs of [999, 43_200_001, 2_000.5, Number.NaN]) {
+      expect(() =>
+        DiagnosticsPlugin({
+          ...OPTIONS,
+          ttlMs: 1_000,
+          maxSessionLifetimeMs,
+        })
+      ).toThrow(PLUGIN_ERRORS.invalidMaxSessionLifetime);
+    }
+    expect(() =>
+      DiagnosticsPlugin({
+        ...OPTIONS,
+        ttlMs: 1_000,
+        maxSessionLifetimeMs: 43_200_000,
+      })
+    ).not.toThrow();
   });
 
   it('refuses registration when kernel diagnostics were not enabled', () => {
@@ -256,6 +367,133 @@ describe('Plugin — activation', () => {
     await plugin.revoke();
     expect(listener.closeCount).toEqual(1);
   });
+
+  it('re-arms a renewable expiry and closes only at the renewed boundary', async () => {
+    let nextHandle = 1;
+    const callbacks = new Map<number, () => void>();
+    const delays: number[] = [];
+    const timers = {
+      setTimeout(fn: () => void, ms: number): number {
+        const handle = nextHandle++;
+        callbacks.set(handle, fn);
+        delays.push(ms);
+        return handle;
+      },
+      clearTimeout(handle: unknown): void {
+        callbacks.delete(handle as number);
+      },
+    };
+    const listener = fakeListener();
+    const plugin = DiagnosticsPlugin({
+      ...OPTIONS,
+      ttlMs: 100,
+      maxSessionLifetimeMs: 300,
+    });
+    const source = fakeSource(minimalSnapshot(), minimalBatch());
+    const { ctx, hooks, handlers, clock } = fakeContext(
+      listener,
+      source,
+      undefined,
+      undefined,
+      timers,
+    );
+    plugin.register(ctx);
+    await hooks.bootstrap[0]();
+    expect(delays).toEqual([100]);
+
+    const key = await importTestKey(crypto.subtle);
+    await handlers[0](await fakeStatusRequest(key, 1));
+    clock.advance(50);
+    await handlers[0](await fakeRenewRequest(key, 2));
+
+    clock.advance(50);
+    const first = callbacks.get(1);
+    callbacks.delete(1);
+    first?.();
+    expect(listener.closeCount).toBe(0);
+    expect(delays).toEqual([100, 50]);
+
+    clock.advance(50);
+    const second = callbacks.get(2);
+    callbacks.delete(2);
+    second?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(listener.closeCount).toBe(1);
+    expect(callbacks.size).toBe(0);
+  });
+
+  it('revokes at the activation cap even though the session was renewed', async () => {
+    const timers = countedTimers();
+    const listener = fakeListener();
+    const plugin = DiagnosticsPlugin({ ...OPTIONS, ttlMs: 100, maxSessionLifetimeMs: 150 });
+    const { ctx, hooks, handlers, clock } = fakeContext(
+      listener,
+      fakeSource(minimalSnapshot(), minimalBatch()),
+      undefined,
+      undefined,
+      timers,
+    );
+    plugin.register(ctx);
+    await hooks.bootstrap[0]();
+    const key = await importTestKey(crypto.subtle);
+    await handlers[0](await fakeStatusRequest(key, 1));
+    clock.advance(60);
+    // Renewal is clamped to the cap: expiry moves from 100 to 150, not 160.
+    await handlers[0](await fakeRenewRequest(key, 2));
+
+    clock.advance(40);
+    timers.fire();
+    expect(listener.closeCount).toBe(0);
+    expect(timers.delays).toEqual([100, 50]);
+
+    clock.advance(50);
+    timers.fire();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(listener.closeCount).toBe(1);
+    expect(timers.outstanding()).toBe(0);
+  });
+
+  for (const stop of ['stopping', 'close', 'revoke'] as const) {
+    it(`leaves no outstanding timer when ${stop} runs while a re-arm is pending`, async () => {
+      const timers = countedTimers();
+      const listener = fakeListener();
+      const plugin = DiagnosticsPlugin({ ...OPTIONS, ttlMs: 100, maxSessionLifetimeMs: 300 });
+      const { ctx, hooks, handlers, clock } = fakeContext(
+        listener,
+        fakeSource(minimalSnapshot(), minimalBatch()),
+        undefined,
+        undefined,
+        timers,
+      );
+      plugin.register(ctx);
+      await hooks.bootstrap[0]();
+      const key = await importTestKey(crypto.subtle);
+      await handlers[0](await fakeStatusRequest(key, 1));
+      clock.advance(50);
+      await handlers[0](await fakeRenewRequest(key, 2));
+      clock.advance(50);
+      timers.fire();
+      // The re-armed handle is the live one.
+      expect(timers.outstanding()).toBe(1);
+      const pending = timers.peek();
+
+      if (stop === 'revoke') {
+        await plugin.revoke();
+      } else {
+        await hooks[stop][0]();
+      }
+      expect(listener.closeCount).toBe(1);
+      expect(timers.outstanding()).toBe(0);
+      // A callback that was already dequeued when revocation landed re-arms
+      // nothing.
+      clock.advance(1_000);
+      pending?.();
+      expect(timers.outstanding()).toBe(0);
+      expect(listener.closeCount).toBe(1);
+    });
+  }
 
   it('does not reopen after revocation and never reactivates', async () => {
     const listener = fakeListener();

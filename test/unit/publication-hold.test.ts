@@ -55,10 +55,10 @@ describe('publicationHoldRefusal', () => {
   });
 });
 
-describe('the committed hold', () => {
-  it('holds diagnostics-plugin for M98o while it stays a published package', () => {
+describe('the completed M98o hold', () => {
+  it('removes the diagnostics-plugin hold while keeping it published', () => {
     const hold = PUBLICATION_HOLDS.find((h) => h.packageDir === 'packages/diagnostics-plugin');
-    expect(hold?.reason).toContain('M98o');
+    expect(hold).toBeUndefined();
     // Kept in the publish list on purpose: moving it to UNPUBLISHED_PACKAGES
     // would let a release skip it silently.
     expect(PUBLISHED_PACKAGES).toContain('packages/diagnostics-plugin');
@@ -70,25 +70,12 @@ describe('the committed hold', () => {
   });
 });
 
-describe('the release scripts with the hold present', () => {
-  it('release:publish --dry-run refuses before simulating any package', async () => {
-    // No --allow-net and no JSR_TOKEN: the refusal must come before the first
-    // registry lookup or `deno publish`, or this run could not reach it.
-    const { code, out } = await run([
-      'run',
-      '--allow-read',
-      '--allow-env=JSR_TOKEN',
-      'scripts/publish-packages.ts',
-      '--dry-run',
-    ]);
-    expect(code).toBe(1);
-    expect(out).toContain('Refusing to publish');
-    expect(out).toContain('packages/diagnostics-plugin');
-    expect(out).not.toContain('Simulating');
-    expect(out).not.toContain('[1/');
+describe('the release scripts after M98o', () => {
+  it('has no active publication hold', () => {
+    expect(publicationHoldRefusal(PUBLICATION_HOLDS, PUBLISHED_PACKAGES)).toBeNull();
   });
 
-  it('release:verify reports the hold and does not fail because of it', async () => {
+  it('release:verify no longer reports the completed hold', async () => {
     const version = (JSON.parse(
       await Deno.readTextFile(new URL('packages/kernel/deno.json', ROOT)),
     ) as { version: string }).version;
@@ -98,7 +85,7 @@ describe('the release scripts with the hold present', () => {
       'scripts/verify-release.ts',
       version,
     ]);
-    expect(out).toContain('publication hold — packages/diagnostics-plugin');
+    expect(out).not.toContain('publication hold — packages/diagnostics-plugin');
     expect(out).not.toMatch(/✗ .*hold/);
     expect(code).toBe(0);
   });

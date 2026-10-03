@@ -69,6 +69,81 @@ describe('Session — monotonic expiry', () => {
   });
 });
 
+describe('Session — renewal', () => {
+  it('extends from now without shortening or exceeding the activation cap', async () => {
+    const clock = new MutableClock();
+    const session = await DiagnosticsSessionState.create(
+      crypto.subtle,
+      TEST_SESSION_ID,
+      TEST_KEY_BYTES,
+      1_000,
+      clock,
+      3_000,
+    );
+    expect(session.isRenewable).toBe(true);
+    expect(session.lifetime(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 3_000 });
+
+    clock.advance(600);
+    // The renew result is read from the same instant as the mutation.
+    expect(session.renew(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 2_400 });
+    expect(session.lifetime(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 2_400 });
+    // An immediate repeat cannot bank another TTL.
+    expect(session.renew(clock)?.expiresInMs).toEqual(1_000);
+    expect(session.lifetime(clock)?.expiresInMs).toEqual(1_000);
+
+    clock.advance(900);
+    expect(session.renew(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 1_500 });
+    clock.advance(500);
+    expect(session.renew(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 1_000 });
+    // Past the cap a renewal is accepted but cannot extend.
+    clock.advance(400);
+    expect(session.renew(clock)).toEqual({ expiresInMs: 600, maxRemainingMs: 600 });
+    clock.advance(600);
+    expect(session.renew(clock)).toBe(null);
+    expect(session.lifetime(clock)).toEqual({ expiresInMs: 0, maxRemainingMs: 0 });
+  });
+
+  it('uses one fractional activation reading and reports safe whole milliseconds', async () => {
+    const clock = new MutableClock();
+    clock.now = 1_000.75;
+    const session = await DiagnosticsSessionState.create(
+      crypto.subtle,
+      TEST_SESSION_ID,
+      TEST_KEY_BYTES,
+      1_000,
+      clock,
+      1_000,
+    );
+    clock.advance(0.25);
+    expect(session.lifetime(clock)).toEqual({ expiresInMs: 999, maxRemainingMs: 999 });
+  });
+
+  it('leaves legacy and revoked sessions non-renewable', async () => {
+    const clock = new MutableClock();
+    const session = await DiagnosticsSessionState.create(
+      crypto.subtle,
+      TEST_SESSION_ID,
+      TEST_KEY_BYTES,
+      1_000,
+      clock,
+    );
+    expect(session.isRenewable).toBe(false);
+    expect(session.lifetime(clock)).toBe(null);
+    expect(session.renew(clock)).toBe(null);
+
+    const renewable = await DiagnosticsSessionState.create(
+      crypto.subtle,
+      TEST_SESSION_ID,
+      TEST_KEY_BYTES,
+      1_000,
+      clock,
+      2_000,
+    );
+    renewable.revoke();
+    expect(renewable.renew(clock)).toBe(null);
+  });
+});
+
 describe('Session — the atomic sequence gate', () => {
   it('accepts strictly increasing sequences and rejects equal or lower ones', async () => {
     const clock = new MutableClock();

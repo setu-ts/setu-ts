@@ -114,6 +114,7 @@ const diagnostics = DiagnosticsPlugin({
   port: ${input.devtoolPort}, // IPv4 loopback only; the listener refuses any other hostname
   sessionId,
   sessionKey,
+  maxSessionLifetimeMs: 28_800_000,
 });
 
 const app = await createApp(undefined, {

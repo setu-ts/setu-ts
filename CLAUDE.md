@@ -5551,6 +5551,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   profile, so an assertion with no `Issuer`/`NameID` element but same-named attributes supplied
   both. The store is now capped (`maxPendingRequests`, oldest evicted, amortized sweeps) and both
   values are read from the signed elements; round 2 passed on `cc4cdd30` — complete (PR #393).
+- **Milestone 98o** (`packages/diagnostics-plugin` + `packages/cli` — diagnostics session renewal):
+  an opt-in `maxSessionLifetimeMs` (from `ttlMs` up to 12 hours of awake, monotonic time) lets the
+  native client renew the SAME session — same key, session ID, instance binding and sequence space —
+  through a signed `GET /v1/renew` inside protocol v1, advertised by an optional status `renewal`
+  member. Renewal runs inside the existing synchronous post-verify gate, never shortens or revives a
+  session, and cannot bank time past `now + ttlMs` or the activation-time cap. Without the option
+  the status bytes and the expiry timer are unchanged; with it the timer re-arms for the renewed
+  remainder, so real expiry still drops the key and closes the listener. The client gains
+  `session()` and `renew()` returning `DiagnosticsSessionLifetime`, and the CLI's generated devtool
+  entry sets an 8-hour cap. The publication hold M98o required was removed here. Code review found a
+  whole-millisecond JSDoc/PUBLIC_API claim false for non-renewable sessions (the client now floors
+  `expiresInMs`), a dead connector branch, skipped plan-committed tests, and a missed ROADMAP
+  citation (C7). The independent committed-tree audit of `9e3db547` passed with no findings; its one
+  out-of-scope observation — the client never cancelled an unread refusal body — was fixed on this
+  branch. Verified beyond the gates: the client on Node, Bun and Deno against a Deno server, process
+  freeze/resume, and a live 364 s machine suspend showing the cap counts awake time — complete (PR
+  #392).
 - **Next milestone** — **M98o** (`diagnostics-plugin` — diagnostics session renewal).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

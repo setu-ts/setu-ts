@@ -31,13 +31,14 @@ async function signForPort(
   port: number,
   target: string,
   sequence: number,
+  instance = '',
 ): Promise<string> {
   return await signFields(
     subtle,
     key,
     requestMacFields(
       TEST_SESSION_ID,
-      '',
+      instance,
       String(sequence),
       `127.0.0.1:${port}`,
       target,
@@ -50,7 +51,9 @@ async function signForPort(
  *
  * @returns The running app, its port, and the plugin instance
  */
-async function startApp(): Promise<{
+async function startApp(
+  options?: { readonly ttlMs?: number; readonly maxSessionLifetimeMs?: number },
+): Promise<{
   app: ReturnType<typeof createApplication>;
   port: number;
   plugin: { revoke(): Promise<void> };
@@ -63,6 +66,7 @@ async function startApp(): Promise<{
     port,
     sessionId: TEST_SESSION_ID,
     sessionKey: TEST_KEY_BYTES,
+    ...options,
   });
   const app = createApplication({
     plugins: [RuntimePlugin(), plugin],
@@ -70,6 +74,19 @@ async function startApp(): Promise<{
   });
   await app.start();
   return { app, port, plugin };
+}
+
+function signedRaw(
+  port: number,
+  target: string,
+  sequence: number,
+  mac: string,
+  instance?: string,
+): string {
+  return `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+    `X-Setu-Session: ${TEST_SESSION_ID}\r\nX-Setu-Sequence: ${sequence}\r\n` +
+    (instance === undefined ? '' : `X-Setu-Instance: ${instance}\r\n`) +
+    `X-Setu-Mac: ${mac}\r\n\r\n`;
 }
 
 /**
@@ -220,6 +237,92 @@ describe('Security — hostile raw requests over a real socket', () => {
       request('b'.repeat(32), mac),
     );
     expect(wrongSession.status).toEqual(401);
+    await app.stop();
+  });
+
+  it('authenticates renewal and refuses wrong keys, instances, replay, and revocation', async () => {
+    const { app, port, plugin } = await startApp({
+      ttlMs: 1_000,
+      maxSessionLifetimeMs: 3_000,
+    });
+    const key = await importTestKey(crypto.subtle);
+
+    const statusMac = await signForPort(crypto.subtle, key, port, '/v1/status', 1);
+    const status = await rawRequest(port, signedRaw(port, '/v1/status', 1, statusMac));
+    expect(status.status).toEqual(200);
+    const instance = (JSON.parse(status.body) as { instanceId: string }).instanceId;
+
+    const renewMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 2, instance);
+    const renewRequest = signedRaw(port, '/v1/renew', 2, renewMac, instance);
+    expect((await rawRequest(port, renewRequest)).status).toEqual(200);
+    expect((await rawRequest(port, renewRequest)).status).toEqual(401);
+
+    const wrongKey = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(32).fill(0xa5),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const wrongKeyMac = await signForPort(
+      crypto.subtle,
+      wrongKey,
+      port,
+      '/v1/renew',
+      3,
+      instance,
+    );
+    expect(
+      (await rawRequest(port, signedRaw(port, '/v1/renew', 3, wrongKeyMac, instance))).status,
+    ).toEqual(401);
+
+    const wrongInstance = '00000000-0000-4000-8000-000000000099';
+    const wrongInstanceMac = await signForPort(
+      crypto.subtle,
+      key,
+      port,
+      '/v1/renew',
+      3,
+      wrongInstance,
+    );
+    expect(
+      (await rawRequest(
+        port,
+        signedRaw(port, '/v1/renew', 3, wrongInstanceMac, wrongInstance),
+      )).status,
+    ).toEqual(401);
+
+    const finalMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 4, instance);
+    expect(
+      (await rawRequest(port, signedRaw(port, '/v1/renew', 4, finalMac, instance))).status,
+    ).toEqual(200);
+
+    await plugin.revoke();
+    await expect(rawRequest(port, signedRaw(port, '/v1/renew', 4, finalMac, instance))).rejects
+      .toThrow();
+    await app.stop();
+  });
+
+  it('closes the listener at the renewal cap so a renewed session cannot outlive it', async () => {
+    const { app, port } = await startApp({ ttlMs: 200, maxSessionLifetimeMs: 400 });
+    const key = await importTestKey(crypto.subtle);
+    const statusMac = await signForPort(crypto.subtle, key, port, '/v1/status', 1);
+    const status = await rawRequest(port, signedRaw(port, '/v1/status', 1, statusMac));
+    expect(status.status).toEqual(200);
+    const instance = (JSON.parse(status.body) as { instanceId: string }).instanceId;
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const renewMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 2, instance);
+    // Positive control: a renewal inside the cap is served.
+    expect((await rawRequest(port, signedRaw(port, '/v1/renew', 2, renewMac, instance))).status)
+      .toEqual(200);
+
+    // Past the 400 ms cap the expiry timer has dropped the key and closed
+    // the port: the next connection is refused, not answered.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const lateMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 3, instance);
+    await expect(rawRequest(port, signedRaw(port, '/v1/renew', 3, lateMac, instance))).rejects
+      .toThrow();
     await app.stop();
   });
 

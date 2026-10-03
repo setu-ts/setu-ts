@@ -73,6 +73,8 @@ const diagnostics = DiagnosticsPlugin({
   port,
   sessionId,
   sessionKey,
+  ttlMs: 5_000,
+  maxSessionLifetimeMs: 15_000,
 });
 
 const app = createApplication({
@@ -111,6 +113,12 @@ const client = createDiagnosticsClient({
 
 const snapshot = await client.snapshot();
 console.log(`paired and read snapshot: state=${snapshot.state} nodes=${snapshot.nodes.length}`);
+const lifetime = await client.session();
+const renewed = await client.renew();
+console.log(
+  `renewed session: before=${lifetime.expiresInMs} after=${renewed.expiresInMs} ` +
+    `cap=${renewed.renewal?.maxRemainingMs ?? 0}`,
+);
 
 await app.inject({ method: 'GET', url: DEMO_ROUTE });
 const batch = await client.read(0, 8);

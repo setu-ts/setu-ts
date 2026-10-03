@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Diagnostics session renewal (M98o).** `DiagnosticsPluginOptions.maxSessionLifetimeMs` opts a
+  launch into renewing its existing authenticated session for up to 12 hours of awake monotonic
+  time. Protocol v1 gains signed `GET /v1/renew` and an optional status `renewal` member; the native
+  client gains required `session()` and `renew()` methods returning the new
+  `DiagnosticsSessionLifetime`. Renewal keeps the same key, session ID, instance binding and
+  sequence space, remains behind replay/rate/instance gates, and the expiry timer re-arms only for
+  opted-in sessions. The CLI's generated devtool entry selects an 8-hour cap. These required client
+  methods widen the previously unpublished `IDiagnosticsClient` interface. The client also now
+  cancels an unread non-200 response body, which it never parses, instead of leaving the
+  connection's body open until garbage collection.
+
 - **SAML 2.0 service provider (M100f).** A `saml` arm of `AuthPluginOptions.signIn.providers` (the
   published `SamlProvider` type) makes the application a SAML 2.0 SP for an enterprise IdP, landing
   in the same signed-in session as every other method with `methods: ['fed']`, so `signIn.mfa` and

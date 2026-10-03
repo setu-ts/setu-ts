@@ -20,7 +20,10 @@ import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
  *
  * @returns The running app, its HTTP port, the connector port, the plugin
  */
-async function startRealApplication(): Promise<{
+async function startRealApplication(options?: {
+  ttlMs?: number;
+  maxSessionLifetimeMs?: number;
+}): Promise<{
   app: ReturnType<typeof createApplication>;
   httpPort: number;
   connectorPort: number;
@@ -38,6 +41,10 @@ async function startRealApplication(): Promise<{
     port: connectorPort,
     sessionId: TEST_SESSION_ID,
     sessionKey: TEST_KEY_BYTES,
+    ...(options?.ttlMs === undefined ? {} : { ttlMs: options.ttlMs }),
+    ...(options?.maxSessionLifetimeMs === undefined
+      ? {}
+      : { maxSessionLifetimeMs: options.maxSessionLifetimeMs }),
   });
   const app = createApplication({
     plugins: [
@@ -58,6 +65,37 @@ async function startRealApplication(): Promise<{
 }
 
 describe('Local connector e2e', () => {
+  it('renews past the initial TTL and closes at the absolute cap', async () => {
+    const { app, connectorPort } = await startRealApplication({
+      ttlMs: 1_000,
+      maxSessionLifetimeMs: 2_000,
+    });
+    const client = createDiagnosticsClient({
+      endpoint: `http://127.0.0.1:${connectorPort}`,
+      sessionId: TEST_SESSION_ID,
+      sessionKey: TEST_KEY_BYTES,
+      subtle: crypto.subtle,
+      fetch,
+      timing: { setTimeout, clearTimeout },
+    });
+    const paired = await client.session();
+    expect(paired.renewal).not.toBe(null);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await client.renew();
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect((await client.snapshot()).state).toBe('running');
+    const capped = await client.renew();
+    // Past half the 2 s cap, one more TTL would overshoot it: the renewal is
+    // clamped, so the window now ends exactly at the cap.
+    expect(capped.renewal).not.toBe(null);
+    expect(capped.renewal!.maxRemainingMs).toBeLessThan(1_000);
+    expect(capped.expiresInMs).toEqual(capped.renewal!.maxRemainingMs);
+    await new Promise((resolve) => setTimeout(resolve, 950));
+    await expect(client.snapshot()).rejects.toThrow();
+    client.close();
+    await app.stop();
+  });
+
   it('pairs, reads, observes a request, revokes, refuses reuse, and the parent keeps serving', async () => {
     const { app, httpPort, connectorPort, plugin } = await startRealApplication();
     const client = createDiagnosticsClient({

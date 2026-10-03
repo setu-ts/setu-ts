@@ -21,9 +21,28 @@
       "mac": "e02911ae473fbcd2512b598fdf3e2a13ea38658f570f90d5251bff8e6164c53e"
     }
   },
+  "renewExchange": {
+    "request": {
+      "method": "GET",
+      "target": "/v1/renew",
+      "sequence": "2",
+      "instance": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "macInput": "setu-diagnostics-v1\nrequest\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n2\nGET\n127.0.0.1:4919\n/v1/renew",
+      "mac": "8e90463eb562e38aceca13b1fb3ac13ae74b04cf0f2bd4fe8ff5270e3ea91a36"
+    },
+    "response": {
+      "status": 200,
+      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000,\"maxRemainingMs\":2700000}",
+      "bodySha256": "353f5abba1be4e0e6b72114ae06c5223b0c558c01b87a7c029f954cd90e9d729",
+      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n2\n/v1/renew\n200\n353f5abba1be4e0e6b72114ae06c5223b0c558c01b87a7c029f954cd90e9d729",
+      "mac": "ff59331f842915dcbe245fedc2566c69b9133882fbeea96fe97376ac5738004d"
+    }
+  },
   "rejectedTargets": [
     "/v1/status/",
     "/v1/status?x=1",
+    "/v1/renew/",
+    "/v1/renew?x=1",
     "/v1/unknown",
     "/v2/status",
     "/v1/snapshot?after=0",

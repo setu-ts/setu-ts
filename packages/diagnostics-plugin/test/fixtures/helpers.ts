@@ -98,12 +98,14 @@ export function fakeRequest(init: {
  * @param subtle - The subtle crypto to use
  * @param clock - The clock to create the session on
  * @param ttlMs - Lifetime; defaults to one hour
+ * @param maxSessionLifetimeMs - Optional absolute renewal cap
  * @returns The session
  */
 export function createTestSession(
   subtle: SubtleCrypto,
   clock: MutableClock,
   ttlMs = 3_600_000,
+  maxSessionLifetimeMs?: number,
 ): Promise<DiagnosticsSessionState> {
   return DiagnosticsSessionState.create(
     subtle,
@@ -111,6 +113,7 @@ export function createTestSession(
     TEST_KEY_BYTES,
     ttlMs,
     clock,
+    maxSessionLifetimeMs,
   );
 }
 

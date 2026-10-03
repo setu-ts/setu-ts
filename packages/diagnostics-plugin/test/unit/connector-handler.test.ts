@@ -121,11 +121,17 @@ async function buildHarness(options?: {
   configSource?: IConfigDiagnosticsSource | null;
   cacheSources?: readonly ICacheDiagnosticsSource[];
   schedulerSources?: readonly ISchedulerDiagnosticsSource[];
+  maxSessionLifetimeMs?: number;
 }): Promise<HandlerHarness> {
   const clock = new MutableClock();
   // The 15-minute default TTL: what the fixture's frozen-clock status body
   // and the expiresInMs assertions expect.
-  const session = await createTestSession(crypto.subtle, clock, 900_000);
+  const session = await createTestSession(
+    crypto.subtle,
+    clock,
+    900_000,
+    options?.maxSessionLifetimeMs,
+  );
   const key = await importTestKey(crypto.subtle);
   const source = fakeSource(
     options?.snapshot ?? minimalSnapshot(),
@@ -383,6 +389,137 @@ async function statusRequest(key: CryptoKey, sequence: number) {
     },
   });
 }
+
+async function renewRequest(
+  key: CryptoKey,
+  sequence: number,
+  instance = TEST_INSTANCE_ID,
+) {
+  const mac = await signRequest(crypto.subtle, key, '/v1/renew', sequence, instance);
+  return fakeRequest({
+    url: `http://${HOST}/v1/renew`,
+    headers: {
+      host: HOST,
+      'x-setu-session': TEST_SESSION_ID,
+      'x-setu-sequence': String(sequence),
+      'x-setu-instance': instance,
+      'x-setu-mac': mac,
+    },
+  });
+}
+
+describe('Connector handler — renewal', () => {
+  it('advertises, authenticates, renews, and replay-protects the same session', async () => {
+    const { handler, key, clock, session } = await buildHarness({
+      maxSessionLifetimeMs: 2_700_000,
+    });
+    const status = inspect(await handler(await statusRequest(key, 1)));
+    expect(status.body.renewal).toEqual({ maxRemainingMs: 2_700_000 });
+    clock.advance(500_000);
+    const renewed = inspect(await handler(await renewRequest(key, 2)));
+    expect(renewed.status).toBe(200);
+    expect(renewed.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      expiresInMs: 900_000,
+      maxRemainingMs: 2_200_000,
+    });
+    expect(session.remainingMs(clock)).toBe(900_000);
+    expect(inspect(await handler(await renewRequest(key, 2))).status).toBe(401);
+  });
+
+  it('refuses unsupported renewal only after authentication and instance checks', async () => {
+    const { handler, key } = await buildHarness();
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toBe(200);
+    expect(
+      inspect(
+        await handler(
+          await renewRequest(key, 2, '00000000-0000-4000-8000-000000000000'),
+        ),
+      ).status,
+    ).toBe(401);
+    expect(inspect(await handler(await renewRequest(key, 3))).status).toBe(400);
+  });
+
+  it('refuses renewal after expiry without reviving the session', async () => {
+    const { handler, key, clock, session } = await buildHarness({
+      maxSessionLifetimeMs: 2_700_000,
+    });
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toBe(200);
+    clock.advance(900_000);
+    expect(inspect(await handler(await renewRequest(key, 2))).body.error).toBe('expired');
+    expect(session.remainingMs(clock)).toBe(0);
+  });
+
+  it('answers expired with no body when expiry lands between admission and renewal', async () => {
+    const { handler, key, clock, session } = await buildHarness({
+      maxSessionLifetimeMs: 2_700_000,
+    });
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toBe(200);
+    // Admission passes; the (fractional, advancing) clock then reaches the
+    // expiry before the renewal reads it — the only way `renew` declines.
+    const admit = session.admitAfterVerify.bind(session);
+    session.admitAfterVerify = (sequence, gateClock) => {
+      const admitted = admit(sequence, gateClock);
+      clock.advance(900_000);
+      return admitted;
+    };
+    const view = inspect(await handler(await renewRequest(key, 2)));
+    expect(view.status).toBe(401);
+    expect(view.body).toEqual({ version: 1, error: 'expired' });
+    expect(view.headers.get('x-setu-mac')).toBe(null);
+    // Nothing was renewed: the session stays expired.
+    expect(session.remainingMs(clock)).toBe(0);
+  });
+
+  it('refuses a rate-limited renewal without moving the expiry', async () => {
+    const { handler, key, clock, session } = await buildHarness({
+      maxSessionLifetimeMs: 2_700_000,
+    });
+    // Forty honest statuses at one instant spend the session's burst.
+    for (let sequence = 1; sequence <= 40; sequence++) {
+      const instance = sequence === 1 ? '' : TEST_INSTANCE_ID;
+      const mac = await signRequest(crypto.subtle, key, '/v1/status', sequence, instance);
+      const headers: Record<string, string> = {
+        host: HOST,
+        'x-setu-session': TEST_SESSION_ID,
+        'x-setu-sequence': String(sequence),
+        'x-setu-mac': mac,
+      };
+      if (instance !== '') {
+        headers['x-setu-instance'] = instance;
+      }
+      const response = await handler(fakeRequest({ url: `http://${HOST}/v1/status`, headers }));
+      expect(inspect(response).status).toBe(200);
+    }
+    // 10 ms refills a fifth of a token: still over budget, and a renewal
+    // applied now WOULD move the expiry by 10 ms — so the assertion below
+    // discriminates.
+    clock.advance(10);
+    const view = inspect(await handler(await renewRequest(key, 41)));
+    expect(view.status).toBe(429);
+    expect(view.body).toEqual({ version: 1, error: 'rate-limited' });
+    expect(session.remainingMs(clock)).toBe(899_990);
+  });
+
+  it('refuses a renewal presenting no instance before verification', async () => {
+    const { handler, key } = await buildHarness({ maxSessionLifetimeMs: 2_700_000 });
+    const unbound = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/renew`,
+        headers: {
+          host: HOST,
+          'x-setu-session': TEST_SESSION_ID,
+          'x-setu-sequence': '1',
+          'x-setu-mac': 'A'.repeat(43),
+        },
+      }),
+    );
+    expect(inspect(unbound).body).toEqual({ version: 1, error: 'invalid-request' });
+    // Refused before admission: sequence 1 is still available for pairing.
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toBe(200);
+  });
+});
 
 describe('Connector handler — authentication and binding', () => {
   it('serves the signed status exchange and binds the instance', async () => {
@@ -1242,6 +1379,27 @@ describe('Connector handler — fixture vectors', () => {
         .map((byte) => byte.toString(16).padStart(2, '0')).join('');
     expect(await sign(request.macInput)).toEqual(request.mac);
     expect(await sign(response.macInput)).toEqual(response.mac);
+  });
+
+  it('serves the independently computed renewal exchange byte-for-byte', async () => {
+    const { handler, session } = await buildHarness({ maxSessionLifetimeMs: 2_700_000 });
+    session.bindInstance(TEST_INSTANCE_ID);
+    const request = fixture.renewExchange.request;
+    const response = await handler(
+      fakeRequest({
+        url: `http://${fixture.authority}${request.target}`,
+        headers: {
+          host: fixture.authority,
+          'x-setu-session': fixture.sessionId,
+          'x-setu-sequence': request.sequence,
+          'x-setu-instance': request.instance,
+          'x-setu-mac': request.mac,
+        },
+      }),
+    );
+    const view = inspect(response);
+    expect(view.bodyText).toEqual(fixture.renewExchange.response.body);
+    expect(view.headers.get('x-setu-mac')).toEqual(fixture.renewExchange.response.mac);
   });
 
   it('refuses every fixture-rejected target', async () => {
