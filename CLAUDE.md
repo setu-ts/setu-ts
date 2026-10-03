@@ -5578,6 +5578,20 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (`jsr:@setu-ts/common@<version>`) is a bump site a `^`-only sweep misses (see
   `docs/releasing.md`), and an in-place edit to the published `[0.7.0]` CHANGELOG section (the M99c
   Blob default) was reverted to its tag text, since 0.7.0 did not have that behaviour.
+- **Milestone 101a** (`common` + `messaging-plugin` + `database-plugin` + `secrets-plugin` +
+  `cache-plugin` + `queue-plugin` + `scheduler-plugin` — health that reports healthy, and calls that
+  hang, when a dependency fails): one rule, built on the new `withDeadline` in `common`, applied
+  across seven packages — every backend call is bounded, and an expired bound is a recorded failure.
+  V8-1 (the regression): a retained Service Bus outage answers `false` at once, with the management
+  probe only clearing it in the background. V8-3: a saturated Drizzle pool (seen through
+  `poolStats`) is `up` with `reachable: 'unknown'`, and a pool timeout is `degraded` rather than
+  `down`. V8-4: Vault requests are bounded by `requestTimeoutMs` and an outage rejects with the new
+  `SecretProviderUnavailableError` (`503`). V8-5: cache and queue Redis commands carry
+  `commandTimeoutMs`. V8-23: an unread queue depth row is absent, never a retained zero. V8-24: a
+  hung lock acquire is bounded by `acquireTimeoutMs`, counted `lockFailed`, re-armed, and a late
+  token released. Every bound refuses an out-of-range value (including `NaN`) at startup. Proven
+  against a real paused Redis 7 (CI, pinned by `test/apps-gate.test.ts`), PostgreSQL 16, Vault and
+  the Service Bus emulator — complete (PR pending).
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
