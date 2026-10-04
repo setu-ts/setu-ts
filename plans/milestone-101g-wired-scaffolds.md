@@ -28,7 +28,10 @@ referenced here and never restated.
   `generate ws-route` boots (V8-31, V8-32); `g guard` composing the installed `auth-plugin` (V8-32);
   class-based `generate job` refusing without a queue (V8-33); `setu add` inserting one line without
   re-sorting and without an unused npm copy (V8-40); and the no-row deliverable — a CLI path that
-  writes each installed plugin's `diagnostics` option.
+  writes each installed plugin's `diagnostics` option; and a second no-row deliverable — a browser
+  gate (§3.10) that verifies hydration, asset delivery and client-side navigation of the full-stack
+  example AND a fresh full-stack scaffold on every merge, which M37c left manual because CI
+  installed no browser.
 - **NOT this milestone:** the standalone devtool port (M101f §3.8); the kernel's duplicate-plugin
   error text suggesting `override: true` (the error is the kernel's, `plugin-resolver.ts`, and the
   V8-14 remedy belongs in the CLI's message — named in §9); an auth `--mfa`/login-route schematic
@@ -341,6 +344,39 @@ templates.
 
 Every entry is `enabled: true`; the gate is the `devtool` parameter, not the option.
 
+### 3.10 A browser gate for the full-stack scaffold (no row; the M37c manual suite, committed)
+
+- **Decision:** a Playwright suite, `apps/full-stack/browser/full-stack.browser.test.ts`, written
+  with `describe`/`it` and driving a REAL Chromium through `npm:playwright` against (a) the running
+  `apps/full-stack` example and (b) a `setu new --template full-stack` project scaffolded by the e2e
+  helper, built with the real Vite build and booted. It asserts the eleven checks M37c ran by hand
+  and recorded in `apps/full-stack/README.md`: SSR content at `/`, `/products` and `/login`;
+  hydration (a client-side state change with no document reload); all eight referenced assets served
+  by the framework's own static handler with `200` and the right content type; a `<Form>` submit
+  performed as a client-side transition rather than a navigation; the session cookie `HttpOnly`;
+  and, with JavaScript disabled, the login form degrading to a real `POST` that still answers `302`.
+  The suite runs under a new root task `check:browser` and a new CI job `browser` in `ci.yml` that
+  installs Chromium (`npx playwright install --with-deps chromium`) in that job ALONE — the four
+  ordinary gates, `check:apps` and the compat jobs stay browser-free, so a browser is never a
+  prerequisite for the suite a contributor runs. Locally the task resolves the browser from
+  Playwright's own cache; absent, it exits **77** with the install command (the `check:apps` skip
+  convention), and the gate is deliberately NOT in `ALLOW_SKIP`, so a CI runner without the browser
+  FAILS rather than passing over it (the M37c `full-stack` precedent).
+- **Why:** M37c's own lesson is that a gate which only requests what its author believed worked is
+  not coverage, and the browser half has been exactly that since it shipped — eleven checks with no
+  owner, re-run only when someone remembers. V8-13 (a full-stack member whose Vite build resolves a
+  workspace library) is a build-path row, and the only proof a build path is RIGHT is a browser
+  executing what it produced. The `v0.9.0` client-brief run (ROADMAP M104) also needs a browser
+  instrument for its UI acceptance criteria; this gate is that instrument, which is why it lands in
+  this letter rather than later.
+- **Negative control:** abort the client entry bundle (M37c's own control) — the hydration and
+  transition checks fail while the SSR checks still pass; and point the asset assertion at a bundle
+  the handler does not serve — the eight-asset check fails naming the missing one.
+- **Test home:** the suite IS the test; its harness (browser resolution, exit 77, the scaffold step)
+  lives in `apps/full-stack/browser/harness.ts` with a unit test for the resolution decision
+  (`browser present` / `absent → 77 with the install line`), since that branch is what decides
+  whether the gate can go silent.
+
 ## 4. Exported surface — every symbol names its consumer
 
 `packages/cli/src/index.ts` changes in one way: `SchematicMetadata.requiresPluginWhen?` (§3.6), an
@@ -381,6 +417,8 @@ No new CLI flag.
 | `packages/cli/src/commands/devtool.ts`, `new.ts`, `app.ts`                                                                                | §3.8 module write and config edit, on M101f's merge rules                                                                                                  |
 | `packages/cli/src/workspace/dev-runner.ts`                                                                                                | §3.6 comment naming the fail-fast decision                                                                                                                 |
 | `packages/cli/test/fixtures/devtool-sources/*.ts`                                                                                         | §3.8 committed type fixture reached by `deno check`                                                                                                        |
+| `apps/full-stack/browser/full-stack.browser.test.ts`, `apps/full-stack/browser/harness.ts`                                                | §3.10 the Playwright suite and its browser-resolution/exit-77 harness                                                                                      |
+| `.github/workflows/ci.yml` (`browser` job), `deno.json` (`check:browser`), `apps/full-stack/deno.json`, `apps/full-stack/README.md`       | §3.10 the one job that installs Chromium; the task; the README's "not committed" paragraph replaced                                                        |
 | `ROADMAP.md`, `PUBLIC_API.md`, `packages/testing/README.md`, `packages/storage-plugin/README.md`, `packages/cli/README.md`, `docs/cli.md` | C3–C7, the `testing` row, the devtool-sources paragraph                                                                                                    |
 | `CHANGELOG.md`, `docs/upgrading.md`                                                                                                       | the annotation change for existing projects; `setu add` now wiring; `g guard` output change (behaviour change to generated output, the M58 precedent)      |
 
@@ -404,6 +442,8 @@ No new CLI flag.
 | `packages/cli/test/e2e/workspace-e2e.test.ts`                                                   | end to end (BOOTED)                                              | full-stack member importing a library builds and serves; `git status` lists no `node_modules`; `add storage` on the full-stack member prints the arm                                                                                                                                               |
 | `packages/cli/test/e2e/devtool-e2e.test.ts`                                                     | end to end (BOOTED)                                              | signed `/v1/health` and `/v1/cache` populated under `deno task dev`; `disabled` under `deno task start`                                                                                                                                                                                            |
 | `packages/cli/test/unit/barrel-exports.test.ts`                                                 | `src/index.ts`                                                   | the one optional field; nothing else                                                                                                                                                                                                                                                               |
+| `apps/full-stack/browser/full-stack.browser.test.ts` (REAL Chromium)                            | end to end (BOOTED, browser)                                     | the eleven M37c checks on the example AND a fresh `--template full-stack` scaffold; both §3.10 negative controls                                                                                                                                                                                   |
+| `apps/full-stack/browser/harness.test.ts`                                                       | `apps/full-stack/browser/harness.ts`                             | browser present → runs; absent → exit 77 naming the install command; `ALLOW_SKIP` membership refused by `test/apps-gate.test.ts`                                                                                                                                                                   |
 
 ## 7. Verification gates
 
@@ -417,11 +457,13 @@ deno task test
 deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/function/line every src file
 deno task publish:check
 deno task release:verify 0.8.0
+deno task check:browser     # §3.10 — real Chromium; exits 77 (never silently passes) when no browser is installed
 ```
 
-Negative controls, each observed failing and reverted: the eight named in §3.1–§3.8. Controls §3.2,
-§3.5 and §3.8 must be run against the BOOTED project (a text assertion on the emitted config cannot
-see a Vite resolution, a kernel dependency check, or which sources report `ready`).
+Negative controls, each observed failing and reverted: the eight named in §3.1–§3.8 and the two in
+§3.10. Controls §3.2, §3.5 and §3.8 must be run against the BOOTED project (a text assertion on the
+emitted config cannot see a Vite resolution, a kernel dependency check, or which sources report
+`ready`).
 
 ## 8. Risks & mitigations
 
@@ -441,6 +483,10 @@ see a Vite resolution, a kernel dependency check, or which sources report `ready
 - `DEVTOOL_SOURCES` registers sources that cost backend reads (health scheduled, queue depths) →
   gated on the `devtool` argument so a production run constructs every plugin as before; the e2e
   asserts `disabled` under `deno task start`.
+- A browser in CI is a new flake surface (download, GPU, timeouts) → Chromium only, installed in ONE
+  job with Playwright's pinned version, assertions on DOM state rather than screenshots, and a
+  per-check timeout; a flake is a finding against the harness, never a reason to add the gate to
+  `ALLOW_SKIP`.
 - M101f's `devtool enable` merge and this letter's config edit touch the same command → this branch
   rebases on M101f and extends `factoryRefusal`'s proceed outcome rather than adding a second
   classifier.
