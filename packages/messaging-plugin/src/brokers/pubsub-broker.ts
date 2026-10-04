@@ -73,12 +73,16 @@ function deriveDefaultSubscription(defaultQueue: string, topic: string): string 
 /**
  * Reports whether the fully-qualified topic the service says a subscription is
  * bound to is the topic the caller asked for. The caller may name a topic
- * either short (`orders`) or fully qualified (`projects/p/topics/orders`).
+ * either short (`orders`, meaning THIS project's) or fully qualified
+ * (`projects/p/topics/orders`). Compared exactly: Pub/Sub allows cross-project
+ * subscriptions, so a `/topics/orders` suffix alone would accept a subscription
+ * bound to another project's same-named topic.
  */
-function isSameTopic(boundTopic: string, requestedTopic: string): boolean {
-  return requestedTopic.startsWith('projects/')
-    ? boundTopic === requestedTopic
-    : boundTopic.endsWith(`/topics/${requestedTopic}`);
+function isSameTopic(boundTopic: string, requestedTopic: string, projectId: string): boolean {
+  const expected = requestedTopic.startsWith('projects/')
+    ? requestedTopic
+    : `projects/${projectId}/topics/${requestedTopic}`;
+  return boundTopic === expected;
 }
 
 /**
@@ -281,7 +285,7 @@ export function adaptPubSubModule(
         // `topic` cannot prove the binding either, so it is refused too.
         const [metadata] = await sub.getMetadata();
         const boundTopic = metadata.topic ?? '';
-        if (!isSameTopic(boundTopic, topic)) {
+        if (!isSameTopic(boundTopic, topic, options.projectId)) {
           throw new PubSubSubscriptionBoundElsewhereError(
             subscription,
             boundTopic === '' ? '(unknown)' : boundTopic,

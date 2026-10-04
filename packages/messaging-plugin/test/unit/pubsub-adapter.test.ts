@@ -45,10 +45,14 @@ describe('adaptPubSubModule', () => {
       >;
     };
     mod.topics = new Map();
+    let fakeProjectId = '';
     mod.subscriptions = new Map();
 
     mod.PubSub = class {
-      constructor(_options: { projectId: string; credentials?: unknown }) {}
+      constructor(options: { projectId: string; credentials?: unknown }) {
+        // The real SDK reports topics under the project it was built for.
+        fakeProjectId = options.projectId;
+      }
       topic(name: string) {
         if (!mod.topics.has(name)) {
           mod.topics.set(name, { messages: [], subscriptions: new Map() });
@@ -116,7 +120,7 @@ describe('adaptPubSubModule', () => {
           },
           getMetadata(): Promise<[{ topic?: string | null }]> {
             // The service reports the fully-qualified topic name.
-            return Promise.resolve([{ topic: `projects/demo/topics/${entry.topic}` }]);
+            return Promise.resolve([{ topic: `projects/${fakeProjectId}/topics/${entry.topic}` }]);
           },
         };
       }
@@ -483,6 +487,37 @@ describe('adaptPubSubModule', () => {
       await expect(transport.open('orders', 'shared', () => {})).rejects.toBeInstanceOf(
         PubSubSubscriptionBoundElsewhereError,
       );
+    });
+
+    it('refuses a subscription bound to a same-named topic in ANOTHER project', async () => {
+      // Pub/Sub allows cross-project subscriptions, so `/topics/orders` alone
+      // does not identify the topic: a short `orders` means THIS project's.
+      const mod = {
+        PubSub: class {
+          topic() {
+            return { createSubscription: () => Promise.reject({ code: 6 }) };
+          }
+          subscription() {
+            return {
+              on: () => {},
+              close: () => Promise.resolve(),
+              delete: () => Promise.resolve(),
+              getMetadata: () => Promise.resolve([{ topic: 'projects/other/topics/orders' }]),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      } as unknown as PubSubSdkModule;
+      const transport = adaptPubSubModule(mod, { projectId: 'demo' });
+
+      const err = await transport.open('orders', 'sub', () => {}).then(
+        () => null,
+        (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
+      );
+      expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
+      expect(err?.boundTopic).toBe('projects/other/topics/orders');
     });
 
     it('refuses when the service reports no topic, since the binding is unproven', async () => {

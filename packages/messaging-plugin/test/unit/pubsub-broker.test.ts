@@ -883,10 +883,14 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
       };
     const mod = {} as FakeMod;
     mod.topics = new Map();
+    let fakeProjectId = '';
     mod.subscriptions = new Map();
 
     mod.PubSub = class {
-      constructor(_options: { projectId: string; credentials?: unknown }) {}
+      constructor(options: { projectId: string; credentials?: unknown }) {
+        // The real SDK reports topics under the project it was built for.
+        fakeProjectId = options.projectId;
+      }
       topic(name: string) {
         if (!mod.topics.has(name)) {
           mod.topics.set(name, { messages: [], subscriptions: new Map() });
@@ -954,7 +958,7 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
           },
           getMetadata(): Promise<[{ topic?: string | null }]> {
             // The service reports the fully-qualified topic name.
-            return Promise.resolve([{ topic: `projects/demo/topics/${entry.topic}` }]);
+            return Promise.resolve([{ topic: `projects/${fakeProjectId}/topics/${entry.topic}` }]);
           },
         };
       }
