@@ -12550,6 +12550,17 @@ member.
 diagnostics sources and `createObservedFetch` were hand-written (`X60-X65-FINDINGS.md`, generator
 gap #1). `devtool enable` or `setu add` must offer the option for installed plugins.
 
+**Second no-row deliverable — a browser gate for the full-stack scaffold.** Since M37c, hydration,
+static-asset delivery and client-side navigation of the full-stack example have been verified
+"manually against Chrome via Playwright" and never on a merge, because CI installs no browser. The
+gate is a Playwright suite run in its own CI job (a browser installed there and nowhere else, so the
+four ordinary gates stay browser-free) against BOTH `apps/full-stack` and a freshly scaffolded
+`--template full-stack` project, asserting the eleven M37c checks: SSR content, hydration, the eight
+referenced assets served by the framework's handler, a `<Form>` submit as a client-side transition,
+the `HttpOnly` session cookie, and the degraded real-POST login with JavaScript disabled. It is
+deliberately NOT in `ALLOW_SKIP`, so a runner without a browser fails rather than passes over it. It
+is also the instrument the `v0.9.0` client-brief run (M104) uses for its UI acceptance criteria.
+
 **Why they are one letter.** Every row is generated output missing its registration, its build path
 or its harness — the M60 "generated code that is wired" bar, applied to what has shipped since.
 
@@ -12835,6 +12846,86 @@ on the default, so a browser falls back exactly as `t()` does. The third sealed 
 costs about 170 ns per request (measured against `develop`), inside the 1 µs threshold. Twenty
 negative controls were observed failing and reverted.
 
+## Milestone 104: The `v0.9.0` Client-Brief Run
+
+**Package(s):** none — an exercise block, run against the PUBLISHED `0.9.0` artifacts; its findings
+become `smoke/DEFECTS.md` rows (V9-…) and its defects become the `v0.9.0` closeout letters.
+
+**Objective:** measure the two things no exercise so far has measured — whether the framework is
+production-ready for a WHOLE product rather than for one capability at a time, and how fast one
+product gets delivered with it — by handing a fresh agent a fictional client's requirements document
+and a deadline, and judging the result the way the client would.
+
+**Why a brief rather than another catalogue block.** Every block since Part 5 probes one capability
+per exercise (`X2` the REST API, `X11` the generated SDK, `X60` the devtool) and asks "does this
+work?". The regression runs ask "did this stop working?". Neither asks the question a team adopting
+the framework asks: "can I ship my product with it, and how long does that take?" The per-capability
+blocks also cannot see the seams BETWEEN capabilities under one deadline — the moment a session
+cookie, a tenant resolver, an outside issuer and a cached page have to agree in one application,
+with the clock running. M103's audit found exactly one such seam (the Cloudflare cache key knew the
+locale and not the tenant) by accident, nine rounds in; a product build finds them on purpose.
+
+**The brief.** Written as a client writes one, never naming a plugin or a package:
+
+- **A product with a shape.** A multi-tenant B2B application with a browser UI and an API — tenants
+  and users, a billing or ordering domain with real state transitions, notifications by mail, an
+  audit trail, an admin area, and a public REST surface a partner integrates against.
+- **Functional requirements** as user stories with acceptance criteria the agent can run.
+- **Non-functional requirements** stated as a client states them: sign-in through the client's
+  identity provider, tenant data never crossing, personal data redacted from logs and exports, a
+  readiness story the client's platform team can probe, a stated availability target, localized UI
+  for two markets, and a named deploy target (Kubernetes) with a container image.
+- **A deadline** in wall-clock hours, and a definition of done: the acceptance criteria pass against
+  the deployed product, from a browser and from the partner's generated client.
+
+The brief itself lives with the register (`smoke/v0.9.0/CLIENT-BRIEF.md`, local-only like every
+brief before it); this section carries the mechanism, which is the durable half.
+
+**Method.**
+
+1. **Cold start against the published packages** (Part 6's rule): the agent has the brief, the
+   public docs and jsr.io, and nothing from this repository's history. It scaffolds with the CLI and
+   records the Part 14 table — what the CLI wrote versus what was hand-written, every document
+   consulted and whether it misled, every failed attempt, and wall-clock per step. That table is the
+   delivery-speed baseline; later runs of the same brief against later releases are compared against
+   it.
+2. **Build to the brief's definition of done**, not to a probe: the acceptance criteria are executed
+   against the deployed product — through a browser for the UI stories (the M101g browser harness is
+   the instrument, which is why that gate lands before this run), and through a client generated
+   from the product's own `/openapi.json` for the partner stories.
+3. **Then the usual passes against the finished product**: the outage block (each backend stopped
+   and restarted, `/ready` and the UI observed), a security pass by a second fresh agent following
+   `.roo/skills/security-audit/SKILL.md` against the product rather than a package, and the
+   regression rows the `0.9.0` release claims.
+4. **Record by shape.** Findings enter `smoke/DEFECTS.md` as V9-rows and are grouped by SHAPE into
+   closeout letters, the rule since M70. Three outcomes are recorded separately and never folded: a
+   defect in the framework, a gap in the documentation, and time the agent spent that the framework
+   could have saved (the generator-gap list Part 14 started).
+
+**What "production ready" and "fast" mean here, so the run can fail.** The run fails as a readiness
+measure if any acceptance criterion cannot be met without changing framework source, or if the
+outage or security pass finds a High. It fails as a speed measure if the hand-written share of the
+application's own wiring exceeds what Part 14 measured for X60 (~100 of 144 lines were the
+diagnostics options M101g's no-row deliverable removes), or if any single step in the table exceeds
+the brief's deadline budget for it. Those thresholds are the first ones written down; the next run
+revises them against this one's table.
+
+**Dependencies.** Runs AFTER the `v0.9.0` cut (the brief targets published artifacts) and after
+M101g (the browser harness it uses for UI acceptance). M101c and M101e–h closing first is preferred
+but not required — a row already owned by an open letter is recorded against that letter, not
+re-filed.
+
+**Deliverables**
+
+- [ ] `smoke/v0.9.0/CLIENT-BRIEF.md` — the brief, with acceptance criteria and the deadline budget
+- [ ] The product built cold against `0.9.0`, with the Part 14 delivery table completed
+- [ ] Acceptance criteria executed from a browser and from a generated partner client
+- [ ] Outage pass and a fresh-agent security pass against the deployed product
+- [ ] V9-rows in `smoke/DEFECTS.md`, grouped by shape into closeout letters, plus the generator-gap
+      list and the delivery-speed baseline recorded in `smoke/EXERCISES.md` Part 15
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                       |
@@ -13028,3 +13119,4 @@ negative controls were observed failing and reverted.
 | 101h      | ⬜     | common + docs — documentation, plus redaction setup that takes extra work                                                                                                                                                                     |
 | 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |
 | 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |
+| 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
