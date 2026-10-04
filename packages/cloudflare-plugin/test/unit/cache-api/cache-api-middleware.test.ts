@@ -55,6 +55,7 @@ function contextFor(
     readonly method?: string;
     readonly services?: IServiceRegistry;
     readonly locale?: string;
+    readonly tenant?: string;
   },
 ): IRequestContext {
   return createTestContext({
@@ -62,6 +63,7 @@ function contextFor(
       url,
       method: (options?.method ?? 'GET') as 'GET',
       ...(options?.locale === undefined ? {} : { locale: options.locale }),
+      ...(options?.tenant === undefined ? {} : { tenant: { id: options.tenant } }),
     },
     ...(options?.services === undefined ? {} : { services: options.services }),
   });
@@ -277,6 +279,81 @@ describe('cacheApiMiddleware — miss', () => {
     expect(cache.matches).toEqual([
       'https://example.test/page?setu-cache-locale=de&setu-cache-locale=de',
     ]);
+  });
+
+  it('keys a tenanted request on its tenant, so two tenants never share an entry', async () => {
+    // Pre-fix, the key was the bare URL: tenant A's /dashboard was served to
+    // tenant B for the TTL, through a cache `Vary` cannot reach.
+    const cache = new FakeCacheApi();
+    for (const tenant of ['acme', 'globex']) {
+      const ctx = contextFor('https://example.test/dashboard?page=1', { tenant });
+      await cacheApiMiddleware({ cache })(ctx, () => {
+        ctx.response.json({ tenant });
+        return Promise.resolve();
+      });
+    }
+    expect(cache.puts.map((put) => put.key)).toEqual([
+      'https://example.test/dashboard?page=1&setu-cache-tenant=acme',
+      'https://example.test/dashboard?page=1&setu-cache-tenant=globex',
+    ]);
+  });
+
+  it("appends the tenant before the locale, encoding each, so the last of each name is the request's own", async () => {
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/page', { tenant: 'a&b=c', locale: 'de' });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([
+      'https://example.test/page?setu-cache-tenant=a%26b%3Dc&setu-cache-locale=de',
+    ]);
+  });
+
+  it('serves a tenant-less request carrying the reserved tenant parameter uncached', async () => {
+    // Its key would be exactly `/page`'s key for tenant `acme`, so an app that
+    // resolves the tenant only on some routes would let an anonymous request
+    // fill a tenant's entry — including one that also carries a locale.
+    for (const locale of [undefined, 'de']) {
+      const cache = new FakeCacheApi();
+      const anonymous = contextFor(
+        'https://example.test/page?setu-cache-tenant=acme',
+        locale === undefined ? {} : { locale },
+      );
+      await cacheApiMiddleware({ cache })(anonymous, () => {
+        anonymous.response.json({ link: anonymous.request.url });
+        return Promise.resolve();
+      });
+      expect(cache.matches).toEqual([]);
+      expect(cache.puts).toEqual([]);
+      expect(anonymous.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
+    }
+    // Control: the same URL with the tenant resolved is keyed and cached.
+    const cache = new FakeCacheApi();
+    const tenanted = contextFor('https://example.test/page?setu-cache-tenant=acme', {
+      tenant: 'acme',
+    });
+    await cacheApiMiddleware({ cache })(tenanted, () => {
+      tenanted.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([
+      'https://example.test/page?setu-cache-tenant=acme&setu-cache-tenant=acme',
+    ]);
+  });
+
+  it('serves a request whose tenant id is not well-formed uncached, never a 500', async () => {
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/page', {
+      tenant: JSON.parse('"\\ud800"') as string,
+      locale: 'de',
+    });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([]);
+    expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
   });
 
   it('serves a request whose locale is not well-formed uncached, never a 500', async () => {
