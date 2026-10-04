@@ -5577,7 +5577,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   five first-party call contracts. The SDK propagates an active trace and caps `Retry-After`;
   generated clients no longer claim observable `3xx` error arms; React Router refusal ownership is
   explicit; and post-factory code can read the exact full-stack configuration snapshot — complete
-  (PR pending).
+  (PR #403).
 - **Release `v0.8.0`** — on `release/v0.8.0`, 2026-10-03 (PR #394). **49 packages**; first publish
   of `diagnostics-plugin`, so `release:create-packages` and `release:link-repos` run before the tag.
   Scope was M98a–M98o, M99a–M99e and M100a–M100f. The sdk manifest's pinned mapping value
