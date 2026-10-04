@@ -168,9 +168,9 @@ describe('cacheApiMiddleware — miss', () => {
     ]);
   });
 
-  it('encodes the locale and drops a fragment, so the key always ends in the locale', async () => {
+  it("encodes the locale, so the key always ends in the request's own locale", async () => {
     const cache = new FakeCacheApi();
-    const ctx = contextFor('https://example.test/page?a=1#frag', {
+    const ctx = contextFor('https://example.test/page?a=1', {
       locale: 'en&setu-cache-locale=de',
     });
     await cacheApiMiddleware({ cache })(ctx, () => {
@@ -180,6 +180,44 @@ describe('cacheApiMiddleware — miss', () => {
     expect(cache.matches).toEqual([
       'https://example.test/page?a=1&setu-cache-locale=en%26setu-cache-locale%3Dde',
     ]);
+  });
+
+  it('serves a URL carrying a fragment uncached, with or without a locale', async () => {
+    // The Cache API ignores fragments when matching, while Deno and Node hand
+    // the fragment to the handler — `/page#x` would fill `/page`'s entry.
+    for (const locale of [undefined, 'de']) {
+      const cache = new FakeCacheApi();
+      const ctx = contextFor(
+        'https://example.test/page#<x>',
+        locale === undefined ? {} : { locale },
+      );
+      let ran = false;
+      await cacheApiMiddleware({ cache })(ctx, () => {
+        ran = true;
+        ctx.response.json({ link: ctx.request.url });
+        return Promise.resolve();
+      });
+      expect(ran).toBe(true);
+      expect(cache.matches).toEqual([]);
+      expect(cache.puts).toEqual([]);
+      expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
+    }
+  });
+
+  it('serves a request whose locale is not well-formed uncached, never a 500', async () => {
+    // A lone surrogate, as `replaceLocale` may restore from stored data:
+    // `encodeURIComponent` throws `URIError` on it.
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/page', {
+      locale: JSON.parse('"\\ud800"') as string,
+    });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([]);
+    expect(cache.puts).toEqual([]);
+    expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
   });
 
   it('honours a custom key function on BOTH the read and the write', async () => {

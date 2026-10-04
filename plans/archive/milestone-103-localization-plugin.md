@@ -674,12 +674,23 @@ text is left as written; this section is authoritative where they disagree.
 - The `basePath` refusal message, option JSDoc and `PUBLIC_API.md` row now name the dot-segment
   refusal N3 added.
 
-Sixteen negative controls were each observed failing and reverted: the locale segment dropped from
+**Found by the round-4 re-audit (fresh agent, `07d5b528`), fixed on this branch:**
+
+- **N6 (Low) — dropping the fragment rested on a false premise.** Deno and Node deliver a client's
+  fragment to the handler, so `/page#x` with the fragment dropped from the key filled `/page`'s
+  entry with a response reflecting `x` (and the Cache API ignores fragments when matching, so
+  keeping it would not help either). A URL carrying a fragment is now served uncached, with or
+  without a locale; a browser never sends one.
+- **N7 (Low) — a lone-surrogate locale answered 500.** `encodeURIComponent` throws on it, which an
+  application restoring a stored preference through `replaceLocale` could reach. Such a request is
+  now served uncached.
+
+Eighteen negative controls were each observed failing and reverted: the locale segment dropped from
 the cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
 ignoring `q=0`, the header split before slicing, `Content-Language` written from the initial locale,
 a prototype lookup in the formatter, the warned-key cap removed, `Cookie` dropped from `Vary`, and
 the catalogue route's default overlay dropped, the `cacheControl` probe removed, and the candidate
 length cap removed; and, after the audits, the Cloudflare locale key reverted to the bare URL,
-`append` reverted to `set`, the dot-segment guard removed, and the key re-serialized from the parsed
-query. The planted `@setu-ts/common` value import is a permanent negative control inside the e2e
-suite.
+`append` reverted to `set`, the dot-segment guard removed, the key re-serialized from the parsed
+query, and each of the two bypass guards (fragment, ill-formed locale) removed. The planted
+`@setu-ts/common` value import is a permanent negative control inside the e2e suite.

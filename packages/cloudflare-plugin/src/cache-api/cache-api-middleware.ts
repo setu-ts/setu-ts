@@ -104,20 +104,34 @@ const LOCALE_KEY_PARAM = 'setu-cache-locale';
  * The default cache key: the request URL, carrying the resolved locale when
  * there is one (M103). Without a locale the key is the URL unchanged, so an
  * application without the localization plugin keeps byte-identical keys.
+ *
+ * Answers `undefined` — the request is then served uncached — in the two
+ * cases where no key can keep that request apart from another:
+ *
+ * - **the URL carries a fragment.** Deno and Node deliver one to the handler
+ *   when a client sends it, while the Cache API ignores fragments when it
+ *   matches, so `/page#x` would fill the entry `/page` is served from with a
+ *   response reflecting `x`. A browser never sends a fragment, so nothing
+ *   legitimate is lost; workerd strips it before the handler.
+ * - **the locale is not well-formed UTF-16** (a lone surrogate), which
+ *   `encodeURIComponent` cannot encode. The localization plugin only ever
+ *   resolves supported tags; this guards a value an application restores
+ *   with `replaceLocale`.
  */
-function defaultKey(ctx: IRequestContext): string {
+function defaultKey(ctx: IRequestContext): string | undefined {
+  const url = ctx.request.url;
+  if (url.includes('#')) {
+    return undefined;
+  }
   const locale = ctx.request.locale;
   if (locale === undefined) {
-    return ctx.request.url;
+    return url;
   }
-  // The fragment is dropped (a server never receives one, but a synthetic
-  // request may carry it, and the key must not end inside it). Serializing an
-  // already-parsed URL is idempotent, so the query text is kept as it arrived.
-  const url = new URL(ctx.request.url);
-  url.hash = '';
-  const base = url.href;
-  const separator = base.includes('?') ? '&' : '?';
-  return `${base}${separator}${LOCALE_KEY_PARAM}=${encodeURIComponent(locale)}`;
+  if (!locale.isWellFormed()) {
+    return undefined;
+  }
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}${LOCALE_KEY_PARAM}=${encodeURIComponent(locale)}`;
 }
 
 /**
@@ -131,6 +145,8 @@ function defaultKey(ctx: IRequestContext): string {
  * Skipped without error, each reported as `X-Cache-Api: BYPASS` or `MISS`:
  *
  * - `bypass` returned `true`;
+ * - with the default key, the URL carries a fragment or the locale is not
+ *   well-formed, so no key could keep the request apart from another;
  * - no cache handle is available (not running on Cloudflare Workers);
  * - the response is a live stream — teeing it would double the memory the
  *   stream exists to avoid and change its flush timing (the M42 guard
@@ -185,6 +201,11 @@ export function cacheApiMiddleware(options?: CacheApiMiddlewareOptions): Middlew
     }
 
     const key = keyFn !== undefined ? keyFn(ctx) : defaultKey(ctx);
+    if (key === undefined) {
+      await next();
+      ctx.response.header(STATUS_HEADER, 'BYPASS');
+      return;
+    }
 
     const hit = await cache.match(key);
     if (hit !== undefined) {
