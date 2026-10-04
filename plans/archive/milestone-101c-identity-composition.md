@@ -413,3 +413,57 @@ Recorded here rather than edited into §3.3, which stays as the design that was 
   column is named on the strategy instead (`database: new ColumnPerTenant('org_id')`).
   `DatabaseTenantDataStoreOptions` is no longer exported; the constructor's optional `tenantColumn`
   argument stays for a store used outside the plugin.
+
+## 11. Design security review (recorded after implementation)
+
+This plan carried no design security review although all four rows sit on a trust boundary (tenancy,
+CSRF, federated sign-in). It is recorded here after implementation, before the committed-tree audit
+— the M101a/M101b precedent — and is a requirement the audit checks the code against, not a
+description reverse-engineered from it. It awaits the maintainer's approval.
+
+**Reviewed flows.** (1) A request whose tenant is resolved before (priority 40) or after (priority
+310) the session loads, presenting a session cookie sealed under some tenant. (2) A tenant-scoped
+repository call through `createDatabaseTenantDataStore()` over a real `IDatabaseService`. (3) A
+`POST` to a non-ACS route and to the SAML ACS, under `HttpSecurityPlugin({ csrf: { exclude } })` and
+the session plugin's form CSRF, with `Origin` absent, `null`, foreign and same-origin. (4) A SAML
+ACS post of a captured response by a browser that did not start the login.
+
+**Assets.** Each tenant's rows; the binding between a session and its tenant; a victim's pending
+SAML request (the ability to complete a login they started); the CSRF protection of every
+non-excluded route.
+
+**Attackers.** A1, an authenticated user of tenant `a` presenting their own session, principal or
+tenant header naming tenant `b`. A2, a cross-site page driving the user's browser (form `POST`,
+opaque `Origin: null`). A3, a party holding a victim's captured SAML response but not the victim's
+browser binding cookie (none, or one from their own login).
+
+**Obligations for the implementation audit.**
+
+- O1. A session sealed under `a` is refused (`403`, handler not run) under `b` in BOTH middleware
+  orders, and the refusal does not re-bind it; positive control: the same session under `a` is
+  served. `SessionPlugin({ tenantBinding: false })` compares on neither side in either order.
+- O2. Through the bridge, tenant `b` cannot read, find (including with a filter naming the tenant
+  column), update, re-tenant or delete a row tenant `a` wrote, on the memory adapter AND on a real
+  backend whose primary key is not `id`; positive control: `a` round-trips its own row. A payload
+  naming the tenant column on `create`/`update` cannot place a row in another tenant.
+- O3. `CsrfOptions.exclude` exempts only the listed paths: an `Origin: null` or foreign-origin
+  `POST` to any non-excluded path is still refused; near-miss paths (trailing slash, case, prefix,
+  query string) are not exempted by a literal entry; a `g`-flagged pattern matches on every call.
+  Positive control: the documented recipe signs in through an `Origin: null` ACS post.
+- O4. A3's post of the victim's response is refused and does NOT consume the victim's pending
+  request, whether A3 presents no binding cookie or their own; positive control: the victim's post
+  then signs in, and a replay after that is refused. The concurrent-post single-winner property of
+  M100f still holds.
+- O5. No refusal on these paths echoes caller input or another tenant's data (the `403` and `401`
+  bodies are fixed strings).
+
+**Design-review findings.**
+
+| #  | Threat                                                                           | Resolution                                                                                                          |
+| -- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| D1 | A tenant resolved after the session loads is never compared (V8-7)               | Tenant-side compare through the shared `tenantBindingMismatch`; seal narrowed to unbound sessions                   |
+| D2 | `tenantBinding: false` honored on one side only                                  | Session middleware publishes `SESSION_TENANT_BINDING_STATE_KEY`; the tenant side compares only when it reads `true` |
+| D3 | The bridge addresses rows by a field the backend does not key on                 | Key lookups through `repository.findById`; tenant column checked on the returned row                                |
+| D4 | Caller filter or payload overrides the tenant column                             | Column spread/stamped last; stripped from every `update` payload                                                    |
+| D5 | A global `trustedOrigins: ['null']` workaround admits every opaque-origin `POST` | Path-scoped `exclude` through the shared `createPathMatcher`                                                        |
+| D6 | node-saml's failure-path `removeAsync` consumes the victim's request (V8-25)     | Binding compared inside `getAsync` before any consumption; `removeAsync` inert once refused                         |
