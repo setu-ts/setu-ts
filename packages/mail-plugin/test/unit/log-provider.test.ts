@@ -42,8 +42,27 @@ describe('LogProvider', () => {
 
   it('works with no logger and no sink, and joins a single recipient string', async () => {
     const provider = new LogProvider();
+    await provider.connect();
     await provider.send({ from: 'me@x.com', to: 'solo@x.com', subject: 'S' });
     expect(provider.messages).toHaveLength(1);
     expect(provider.messages[0]?.to).toBe('solo@x.com');
+  });
+
+  it('rejects a send before connect and after disconnect, recording nothing', async () => {
+    // The SMTP and SES providers refuse a send outside connect..disconnect;
+    // the log provider recorded it, so a send after app.stop() reported
+    // success. Observed through `.catch`, so a synchronous throw would fail.
+    const sunk: OutgoingMail[] = [];
+    const provider = new LogProvider({ sink: (m) => sunk.push(m) });
+    const before = await provider.send(MESSAGE).then(() => 'resolved', (e: Error) => e.message);
+    expect(before).toBe('LogProvider is not connected');
+
+    await provider.connect();
+    await provider.disconnect();
+    const after = await provider.send(MESSAGE).then(() => 'resolved', (e: Error) => e.message);
+    expect(after).toBe('LogProvider is not connected');
+
+    expect(provider.messages).toHaveLength(0);
+    expect(sunk).toHaveLength(0);
   });
 });

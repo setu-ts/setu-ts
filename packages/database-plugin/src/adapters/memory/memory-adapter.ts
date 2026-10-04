@@ -167,7 +167,7 @@ function overlayKey(entity: string, id: EntityKey, keyColumns: readonly string[]
  * @param store - The entity store to search
  * @param id - The primary key value to match
  * @returns The record index, or `-1` when not found
- * @since 0.1.0
+ * @since 0.2.0
  */
 function findRecordIndexForRecords(
   records: readonly Record<string, unknown>[],
@@ -199,7 +199,7 @@ function findRecordIndexForRecords(
  * @param store - The entity store to search
  * @param id - The primary key value to match
  * @returns The record index, or `-1` when not found
- * @since 0.1.0
+ * @since 0.2.0
  */
 function findRecordIndex(store: EntityStore, id: EntityKey): number {
   return findRecordIndexForRecords(store.records, store, id);

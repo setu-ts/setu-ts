@@ -3,6 +3,9 @@
   "version": "0.8.0",
   "license": "MIT",
   "exports": "./src/index.ts",
+  "imports": {
+    "@hono/hono": "jsr:@hono/hono@^4.12.30"
+  },
   "test": {
     "permissions": {
       "read": true,

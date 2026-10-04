@@ -72,9 +72,17 @@ export class LogProvider implements MailProvider {
   /**
    * Records and logs a message.
    *
+   * Refused outside `connect()`..`disconnect()`, like every other provider, so
+   * a send after `app.stop()` reports the failure rather than a delivery that
+   * a real provider would have refused.
+   *
    * @param message - The outgoing mail
+   * @throws {Error} If the provider is not connected (as a rejection)
    */
   send(message: OutgoingMail): Promise<void> {
+    if (!this.#ready) {
+      return Promise.reject(new Error('LogProvider is not connected'));
+    }
     this.#messages.push(message);
     this.#sink?.(message);
     this.#logger?.info('mail sent (log provider)', {

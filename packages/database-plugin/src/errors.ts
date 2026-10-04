@@ -198,7 +198,7 @@ export class UnsupportedFilterOperatorError extends Error {
  *   }
  * }
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export class UnsupportedRawQueryError extends Error {
   /** Discriminant for consumers that cannot use `instanceof` across realms. */
@@ -342,7 +342,7 @@ export class UnsupportedQueryFeatureError extends Error {
  *   }
  * }
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export class MongoTransactionUnavailableError extends Error {
   /** Discriminant for consumers that cannot use `instanceof` across realms. */

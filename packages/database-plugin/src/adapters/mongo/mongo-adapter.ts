@@ -52,7 +52,7 @@ import type { MongoTarget } from './mongo-mapping.ts';
  *   options: { url: 'mongodb://localhost:27017/mydb' },
  * }));
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export class MongoAdapter implements IDatabaseAdapter {
   /** MongoDB snapshot isolation is not the portable serializable guarantee. */
@@ -328,7 +328,7 @@ export type { MongoTarget };
  *
  * @param url - The connection string
  * @returns The database name, or `undefined` when none is encoded
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function parseDatabaseFromUrl(url: string): string | undefined {
   const match = /^mongodb(?:\+srv)?:\/\/[^/]+\/([^/?]+)/.exec(url);
