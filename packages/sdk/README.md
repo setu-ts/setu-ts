@@ -218,6 +218,10 @@ delta-seconds, that delay replaces the computed backoff only when it is within t
 `maxRetryAfterMs` explicitly, or omit it to use the policy's largest fixed/exponential backoff. A
 larger hint surfaces the original `HttpClientError` immediately, with its headers intact.
 
+At construction, `limit` must be a positive safe integer, `delay` must be finite and non-negative,
+and the largest derived exponential delay must remain finite. Runtime strings and non-finite values
+are rejected so they cannot disable the default server-hint cap.
+
 ### Circuit Breaker
 
 ```typescript

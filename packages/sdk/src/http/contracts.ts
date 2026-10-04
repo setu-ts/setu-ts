@@ -173,7 +173,7 @@ export interface ClientOptions {
   /** Timing abstraction. Defaults to `createDefaultClientTiming()`. */
   readonly timing?: IClientTiming;
 
-  /** Retry policy. `limit < 1` throws at construction. */
+  /** Retry policy. Invalid/non-finite counts, delays, and derived backoffs throw at construction. */
   readonly retry?: ClientRetryPolicy;
 
   /** Circuit breaker policy. `threshold < 1` throws at construction. */

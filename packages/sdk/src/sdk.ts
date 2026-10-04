@@ -15,7 +15,9 @@ import { createDefaultClientTiming } from './http/timing.ts';
  * Create a configured HTTP client.
  *
  * Validates policy values at construction:
- * - `retry.limit >= 1`
+ * - `retry.limit` is a positive safe integer
+ * - `retry.delay` is finite and non-negative
+ * - the largest exponential retry delay remains finite
  * - `circuitBreaker.threshold >= 1`
  * - `rateLimit.maxRequests >= 1` and `rateLimit.windowMs > 0`
  *
@@ -31,8 +33,17 @@ export function createClient(options: ClientOptions): IHttpClient {
 
   // Validate retry policy.
   if (options.retry) {
-    if (options.retry.limit < 1) {
-      throw new Error('retry.limit must be >= 1');
+    if (!Number.isSafeInteger(options.retry.limit) || options.retry.limit < 1) {
+      throw new Error('retry.limit must be a positive safe integer');
+    }
+    if (!Number.isFinite(options.retry.delay) || options.retry.delay < 0) {
+      throw new Error('retry.delay must be a finite non-negative number');
+    }
+    if (
+      options.retry.backoff === 'exponential' &&
+      !Number.isFinite(options.retry.delay * 2 ** (options.retry.limit - 1))
+    ) {
+      throw new Error('retry exponential backoff must remain finite');
     }
     if (
       options.retry.maxRetryAfterMs !== undefined &&

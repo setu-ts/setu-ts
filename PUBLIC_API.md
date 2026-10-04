@@ -11767,7 +11767,7 @@ type ClientRetryPolicy = RetryPolicy & {
 | `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win                                                                                                     |
 | `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`                                                                                                     |
 | `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`                                                                                                       |
-| `retry`                | retry strategy               | `limit < 1` throws                                                                                                                                        |
+| `retry`                | retry strategy               | `limit` must be a positive safe integer; `delay` must be finite and non-negative; the largest derived exponential delay must remain finite                |
 | `maxRetryAfterMs`      | retry strategy               | `ClientRetryPolicy` member; must be finite and non-negative. A larger `Retry-After` surfaces the response error immediately, without sleeping or retrying |
 | `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                                                                                                                    |
 | `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                                                                                                              |
@@ -11776,7 +11776,8 @@ type ClientRetryPolicy = RetryPolicy & {
 
 When `maxRetryAfterMs` is absent, the cap is the policy's largest computed backoff: `delay` for
 fixed backoff, or `delay * 2 ** (limit - 1)` for exponential backoff. A `Retry-After` at or below
-the effective cap replaces the computed delay.
+the effective cap replaces the computed delay. Policy validation rejects runtime strings and
+non-finite values so the derived cap cannot fail open.
 
 ### ClientRequest
 
