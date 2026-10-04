@@ -247,14 +247,23 @@ naming the topic and the consumer group; `retry: { retries: 0 }` names it at onc
 topic, or enable auto-creation.
 
 `retry` is also forwarded to `new Kafka({ retry })` for kafkajs's own retries, unless a `client` is
-injected. A consumer crash kafkajs declines to restart rejects its `run()` promise; the broker
-reports it through the logger instead of letting it become an unhandled rejection.
+injected. A consumer's `run()` can reject — kafkajs's crash handler rethrows a disconnect that fails
+— and the broker reports that through the logger instead of letting it become an unhandled
+rejection.
 
-Stopping releases every consumer cleanly: `disconnect()` and `unsubscribe()` wait for an in-flight
-group join to settle (bounded at 10 s) before disconnecting the consumer, and a released consumer
-refuses kafkajs's crash-restart — otherwise a consumer stopped mid-join rejoined after `app.stop()`
-and held the process open. On a broker with Kafka's default `group.initial.rebalance.delay.ms` (3
-s), stopping an application moments after it started therefore takes a few seconds.
+A consumer that crashes with an error kafkajs would retry is restarted by the broker, after the
+crash's own `retryTime` (else `retry.initialRetryTime`) — the delay kafkajs's own restart uses. The
+broker declines kafkajs's restart in favour of its own so that stopping can always reach the
+restarted consumer.
+
+Stopping releases every consumer: `disconnect()` and `unsubscribe()` cancel a scheduled restart,
+wait up to 10 s for an in-flight group join to settle, then disconnect the consumer. A join still
+pending at 10 s is not disconnected under — that neither stops a join that later succeeds nor
+returns before kafkajs's pending JoinGroup is answered — so the release returns and the consumer is
+disconnected the moment its join settles or fails. Until then the process stays alive, and a record
+delivered in that window is left uncommitted for the group to redeliver. On a broker with Kafka's
+default `group.initial.rebalance.delay.ms` (3 s), stopping an application moments after it started
+takes a few seconds.
 
 ## Request-reply
 

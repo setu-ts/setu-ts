@@ -764,9 +764,9 @@ export interface KafkaOptions {
    */
   replyTopic?: string;
   /**
-   * Optional logger. Reads a consumer crash kafkajs declines to restart (a
-   * rejected `consumer.run()`), which would otherwise be an unhandled
-   * rejection.
+   * Optional logger. Reads a consumer whose `consumer.run()` rejects —
+   * kafkajs's crash handler rethrows a disconnect that fails — which would
+   * otherwise be an unhandled rejection.
    */
   logger?: { error: (msg: string) => void };
 }

@@ -139,9 +139,9 @@ All notable changes to this project are documented here. The format follows
   at boot with a raw `KafkaJSProtocolError` naming no topic. `subscribe()` now retries that one
   error within `retry` (kafkajs's defaults, about 9 s) and the topic is found; a broker that does
   not auto-create rejects after the budget with `KafkaTopicUnavailableError`. A consumer that failed
-  to join is disconnected rather than leaked, and a `run()` rejection kafkajs declines to restart is
-  reported through `KafkaOptions.logger` (its first reader) instead of escaping as an unhandled
-  rejection.
+  to join is disconnected rather than leaked, and a rejected `run()` (kafkajs's crash handler
+  rethrows a disconnect that fails) is reported through `KafkaOptions.logger` (its first reader)
+  instead of escaping as an unhandled rejection.
 - **A NATS consumer records its raw queue as `setu.queue` metadata (M101b).** Consumer metadata
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
@@ -155,10 +155,21 @@ All notable changes to this project are documented here. The format follows
   consumer whose group JOIN was still in flight (about 3 s on a broker with Kafka's default
   `group.initial.rebalance.delay.ms`): kafkajs's `stop()` is a no-op until the join completes, so
   disconnecting closed the connections under it, which kafkajs treats as a retriable crash and
-  restarts — the consumer rejoined after `app.stop()`. Releasing a consumer now waits for its join
-  to settle (bounded at 10 s, so `app.stop()` can take that long for a just-started consumer) and
-  each consumer refuses kafkajs's crash-restart once released. Found by the M101b security audit;
-  both predate M101b.
+  restarts — the consumer rejoined after `app.stop()`. Releasing a consumer now waits up to 10 s for
+  its join to settle and then disconnects it; a join still pending at 10 s is disconnected the
+  moment it settles, after `app.stop()` has returned, because disconnecting under it neither stops a
+  join that later succeeds nor returns before kafkajs's pending JoinGroup is answered. A record
+  delivered to a released consumer is left uncommitted for the group to redeliver. Found by the
+  M101b security audit; both predate M101b.
+
+- **A Kafka consumer stopped while kafkajs was restarting it no longer rejoins after `app.stop()`.**
+  After a broker restart or a connection reset, kafkajs restarts a crashed consumer behind its own
+  timer. A stop that landed once that restart had begun found nothing to stop — kafkajs's `stop()`
+  drops a runner that is still joining — so the restarted consumer joined the group after shutdown,
+  consumed and committed messages with the stopped application's handler, and held the process open
+  (measured on Kafka 4.0). The broker now declines kafkajs's restart and restarts the consumer
+  itself after the same delay, so a stop cancels a pending restart and waits for one in progress.
+  Found by the M101b security audit; predates M101b.
 
 - **A Kafka application exits after `app.stop()`.** `KafkaBroker.disconnect()` and a subscription's
   `unsubscribe()` called the kafkajs consumer's `stop()`, which halts fetching but leaves the

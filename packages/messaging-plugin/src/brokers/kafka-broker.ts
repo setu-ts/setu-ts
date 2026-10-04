@@ -119,12 +119,45 @@ const MAX_CAUSE_DEPTH = 5;
 
 /**
  * How long releasing a consumer waits for an in-flight group join to settle
- * before disconnecting it anyway (M101b security audit F3). A join is a few ms
- * on a broker with `group.initial.rebalance.delay.ms=0` and about 3 s with
- * Kafka's default; the bound only stops a join that never settles from holding
- * shutdown open for good.
+ * (M101b security audit F3, N1). A join is a few ms on a broker with
+ * `group.initial.rebalance.delay.ms=0` and about 3 s with Kafka's default.
+ * The bound applies to the WAIT only: a join still pending when it passes is
+ * not disconnected then — disconnecting under a join neither stops a join that
+ * later succeeds nor returns before kafkajs's pending JoinGroup is answered —
+ * but the moment it settles, after the release has returned.
  */
 const JOIN_SETTLE_TIMEOUT_MS = 10_000;
+
+/**
+ * kafkajs's consumer `retry` default (`kafkajs/src/index.js:149`), which any
+ * consumer-level `retry` REPLACES. Passed beside the restart hook so the
+ * consumer keeps the retry count it had before the hook existed (M101b
+ * security audit O5).
+ */
+const KAFKAJS_CONSUMER_RETRIES = 5;
+
+/**
+ * The delay before restarting a crashed consumer: the crash's own `retryTime`
+ * when it carries a positive one, as kafkajs's restart reads it
+ * (`kafkajs/src/consumer/index.js:293`), else `fallback`.
+ *
+ * @param error - The crash kafkajs reported
+ * @param fallback - The configured initial retry time
+ * @returns The delay in milliseconds
+ */
+function restartDelay(error: unknown, fallback: number): number {
+  let retryTime: unknown;
+  try {
+    retryTime = (error as { retryTime?: unknown } | null)?.retryTime;
+  } catch {
+    // A throwing getter must not escape kafkajs's crash handler, where it
+    // would become an unhandled rejection (plan §10 obligation 6).
+    return fallback;
+  }
+  return typeof retryTime === 'number' && Number.isFinite(retryTime) && retryTime > 0
+    ? retryTime
+    : fallback;
+}
 
 /**
  * The subscribe-retry budget when {@link KafkaOptions.retry} leaves a field
@@ -219,10 +252,14 @@ interface ActiveConsumer {
   consumer: unknown;
   running: boolean;
   /**
-   * Settles once the consumer's `run()` has — that is, once kafkajs has
-   * finished its group join or run its crash handler. Never rejects.
+   * Settles once the consumer's latest `run()` has — that is, once kafkajs
+   * has finished its group join or run its crash handler. Never rejects.
    */
   started: Promise<void>;
+  /** Starts consumption again after a crash; replaces {@link started}. */
+  run: () => void;
+  /** The restart scheduled after a crash, while it has not begun. */
+  restartTimer: { handle: unknown } | null;
 }
 
 /**
@@ -561,23 +598,29 @@ export class KafkaBroker implements MessageBrokerAdapter {
       consumer(
         options: {
           groupId: string;
-          retry: { restartOnFailure(error: Error): Promise<boolean> };
+          retry: { retries: number; restartOnFailure(error: Error): Promise<boolean> };
         },
       ): unknown;
     };
-    // Set once the entry exists, below. kafkajs consults `restartOnFailure`
-    // before restarting a crashed consumer; refusing once this consumer has
-    // been released (or the broker disconnected) stops a disconnect that
-    // closed the connections under an in-flight join from REJOINING after
-    // shutdown (M101b security audit F3). kafkajs merges consumer `retry`
-    // over the client's, so the forwarded `KafkaOptions.retry` is kept; an
-    // injected factory may ignore the field.
-    let entry: ActiveConsumer | undefined;
+    // The broker owns crash restarts
+    // (M101b security audit N2): kafkajs consults `restartOnFailure` only for
+    // a retriable crash, after its crash handler has already stopped and
+    // disconnected the consumer, and runs its own restart behind a timer and
+    // a group join the broker cannot see — so a release during that join
+    // could neither stop it (kafkajs's `stop()` drops a runner that is not yet
+    // running) nor cancel it. The hook therefore always declines, and
+    // schedules the broker's own restart while the consumer is still wanted.
+    // An injected factory may ignore the field.
     const realConsumer = realFactory.consumer({
       groupId,
       retry: {
-        restartOnFailure: () =>
-          Promise.resolve(entry?.running === true && generation === this.#generation),
+        retries: KAFKAJS_CONSUMER_RETRIES,
+        restartOnFailure: (error: Error) => {
+          // kafkajs consults this only from a running consumer's crash
+          // handler, so `activeConsumer` (declared below) is always set.
+          this.#scheduleRestart(activeConsumer, error);
+          return Promise.resolve(false);
+        },
       },
     });
 
@@ -619,73 +662,81 @@ export class KafkaBroker implements MessageBrokerAdapter {
       throw err;
     }
 
-    const activeConsumer: ActiveConsumer = {
-      id: subscriptionId,
-      consumer: realConsumer,
-      running: true,
-      started: Promise.resolve(),
-    };
-    entry = activeConsumer;
-    this.#activeConsumers.set(subscriptionId, activeConsumer);
-
-    // Run consumer with eachMessage handler.
-    //
     // `partition` MUST come from the outer eachMessage payload (kafkajs's
     // `EachMessagePayload`), never off the message record: real `KafkaMessage`
     // carries no `partition`, so reading it there yields `undefined` and the
     // documented `partition:offset` identity degrades to `"undefined:<offset>"`
     // — colliding across partitions and breaking the de-duplication the
     // identity exists for (90d verification, Finding 1).
-    // M101b: kafkajs restarts a consumer that crashes with a retriable cause,
-    // and REJECTS `run()` for one it declines to restart. Nothing else holds
-    // that promise, so an unread rejection would be an unhandled rejection
-    // that terminates the process; it is reported and the consumer marked
-    // stopped instead.
-    const runPromise = consumerTyped.run({
-      eachMessage: async ({ partition, message }) => {
-        const msgTyped = message as unknown as {
-          key: Uint8Array | null;
-          value: Uint8Array | null;
-          timestamp: string;
-          headers?: Record<
-            string,
-            Uint8Array | string | readonly (Uint8Array | string)[] | undefined
-          >;
-          offset: string;
-        };
-
-        const valueBytes = msgTyped.value ?? new Uint8Array(0);
-        const content = new TextDecoder().decode(valueBytes);
-        const deserialized = this.#serializer.deserialize<T>(content);
-
-        const metadata: MessageMetadata = {
-          topic,
-          messageId: `${partition}:${msgTyped.offset}`,
-          timestamp: new Date(parseInt(msgTyped.timestamp, 10)),
-          // Dropping an undecodable value rather than throwing is load-bearing
-          // here: this runs inside `eachMessage`, where a throw prevents the
-          // offset commit and kafka redelivers the record — so one malformed
-          // header from a foreign producer would become an unbounded loop.
-          headers: normalizeTransportHeaders(msgTyped.headers),
-        };
-
-        // Handler success triggers auto-commit; failure prevents commit
-        await handler(deserialized, metadata);
-      },
-    });
-    activeConsumer.started = runPromise.then(() => {}, () => {});
-    runPromise.catch((err: unknown) => {
-      activeConsumer.running = false;
-      try {
-        this.#logger?.error(
-          `Kafka consumer for topic ${JSON.stringify(topic)} (group ${
-            JSON.stringify(groupId)
-          }) stopped: ${describeError(err)}`,
-        );
-      } catch {
-        // The logger is the last-resort sink; its own failure is swallowed.
+    const eachMessage = async (
+      { partition, message }: { topic: string; partition: number; message: unknown },
+    ): Promise<void> => {
+      // A released consumer handles nothing (M101b security audit N2): a join
+      // that settles after its release delivers before the deferred
+      // disconnect stops it. Throwing leaves the offset uncommitted, so the
+      // group redelivers the record to a member that is still wanted.
+      if (!activeConsumer.running) {
+        throw new Error('KafkaBroker released this consumer; the record is left uncommitted');
       }
-    });
+      const msgTyped = message as unknown as {
+        key: Uint8Array | null;
+        value: Uint8Array | null;
+        timestamp: string;
+        headers?: Record<
+          string,
+          Uint8Array | string | readonly (Uint8Array | string)[] | undefined
+        >;
+        offset: string;
+      };
+
+      const valueBytes = msgTyped.value ?? new Uint8Array(0);
+      const content = new TextDecoder().decode(valueBytes);
+      const deserialized = this.#serializer.deserialize<T>(content);
+
+      const metadata: MessageMetadata = {
+        topic,
+        messageId: `${partition}:${msgTyped.offset}`,
+        timestamp: new Date(parseInt(msgTyped.timestamp, 10)),
+        // Dropping an undecodable value rather than throwing is load-bearing
+        // here: this runs inside `eachMessage`, where a throw prevents the
+        // offset commit and kafka redelivers the record — so one malformed
+        // header from a foreign producer would become an unbounded loop.
+        headers: normalizeTransportHeaders(msgTyped.headers),
+      };
+
+      // Handler success triggers auto-commit; failure prevents commit
+      await handler(deserialized, metadata);
+    };
+
+    const activeConsumer: ActiveConsumer = {
+      id: subscriptionId,
+      consumer: realConsumer,
+      running: true,
+      started: Promise.resolve(),
+      restartTimer: null,
+      // `run()` can REJECT — kafkajs's crash handler rethrows a disconnect
+      // that fails — and nothing else holds that promise, so an unread
+      // rejection would be an unhandled rejection that terminates the
+      // process. It is reported and the consumer marked stopped instead.
+      run: () => {
+        const runPromise = consumerTyped.run({ eachMessage });
+        activeConsumer.started = runPromise.then(() => {}, () => {});
+        runPromise.catch((err: unknown) => {
+          activeConsumer.running = false;
+          try {
+            this.#logger?.error(
+              `Kafka consumer for topic ${JSON.stringify(topic)} (group ${
+                JSON.stringify(groupId)
+              }) stopped: ${describeError(err)}`,
+            );
+          } catch {
+            // The logger is the last-resort sink; its own failure is swallowed.
+          }
+        });
+      },
+    };
+    this.#activeConsumers.set(subscriptionId, activeConsumer);
+    activeConsumer.run();
 
     return {
       unsubscribe: async (): Promise<void> => {
@@ -706,30 +757,70 @@ export class KafkaBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Releases a consumer: waits for an in-flight group join to settle, bounded
-   * by {@link JOIN_SETTLE_TIMEOUT_MS}, then disconnects it (M101b security
-   * audit F3).
+   * Schedules the broker's own restart of a crashed consumer (M101b security
+   * audit N2), after the delay kafkajs's restart would use.
    *
-   * kafkajs's `stop()` is a no-op until the join completes, so disconnecting
-   * mid-join closed the connections under the join instead — a retriable
-   * crash kafkajs then RESTARTS, and the consumer rejoined after shutdown,
-   * consuming messages and holding the process open. Once `run()` has
-   * settled, `stop()` really stops the runner and cancels any pending
-   * restart. `disconnect()`, not `stop()`: it also closes the connection.
+   * Called from kafkajs's `restartOnFailure`, which runs only for a retriable
+   * crash and only once kafkajs has stopped and disconnected the consumer. A
+   * released consumer is not restarted; a release before the timer fires
+   * clears it, and one after it fires waits for the restart's
+   * {@link ActiveConsumer.started}.
+   *
+   * @param entry - The crashed consumer's entry
+   * @param error - The crash kafkajs reported
+   */
+  #scheduleRestart(entry: ActiveConsumer, error: Error): void {
+    if (!entry.running) return;
+    const delay = restartDelay(error, this.#subscribeRetry.initialRetryTime);
+    // At most one restart is pending, and it is the one a release clears: a
+    // replaced timer left running would start a consumer nothing tracks.
+    if (entry.restartTimer !== null) this.#runtime.clearTimeout(entry.restartTimer.handle);
+    entry.restartTimer = {
+      handle: this.#runtime.setTimeout(() => {
+        entry.restartTimer = null;
+        entry.run();
+      }, delay),
+    };
+  }
+
+  /**
+   * Releases a consumer: cancels a scheduled restart, waits for an in-flight
+   * group join to settle — bounded by {@link JOIN_SETTLE_TIMEOUT_MS} — and
+   * disconnects it (M101b security audit F3, N1, N2).
+   *
+   * kafkajs's `stop()` only stops a runner whose join has completed; for one
+   * still joining it is a no-op that also DROPS kafkajs's only reference to
+   * the runner. Disconnecting then closes the connections, but a join waiting
+   * out a backoff holds none and later succeeds — leaving a consumer that runs
+   * after shutdown and that nothing can stop. So the consumer is disconnected
+   * only once its latest `run()` has settled; when the bound passes first, the
+   * disconnect is deferred to that moment and this returns. `disconnect()`,
+   * not `stop()`: it also closes the connection.
    *
    * @param consumer - The consumer entry to release
    */
   async #releaseConsumer(consumer: ActiveConsumer): Promise<void> {
     consumer.running = false;
+    if (consumer.restartTimer !== null) {
+      this.#runtime.clearTimeout(consumer.restartTimer.handle);
+      consumer.restartTimer = null;
+    }
+    const started = consumer.started;
+    const disconnect = (): Promise<void> =>
+      (consumer.consumer as { disconnect(): Promise<void> }).disconnect();
     let handle: unknown;
-    await Promise.race([
-      consumer.started,
-      new Promise<void>((resolve) => {
-        handle = this.#runtime.setTimeout(resolve, JOIN_SETTLE_TIMEOUT_MS);
+    const settled = await Promise.race([
+      started.then(() => true),
+      new Promise<boolean>((resolve) => {
+        handle = this.#runtime.setTimeout(() => resolve(false), JOIN_SETTLE_TIMEOUT_MS);
       }),
     ]);
     this.#runtime.clearTimeout(handle);
-    await (consumer.consumer as { disconnect(): Promise<void> }).disconnect();
+    if (settled) {
+      await disconnect();
+      return;
+    }
+    started.then(disconnect).catch(() => {});
   }
 
   /**
