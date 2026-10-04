@@ -123,6 +123,7 @@ describe('devtool enable refuses by name and writes nothing', () => {
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/package.json': '{}',
+      '/ws/apps/orders/.setu-member': '',
       '/ws/apps/orders/setu.config.ts': CURRENT_CONFIG,
     });
     expect(await h.run(['enable', 'orders'])).toBe(1);
@@ -158,6 +159,43 @@ describe('devtool enable refuses by name and writes nothing', () => {
     expect(await h.run(['enable', 'orders'])).toBe(2);
     expect(h.err.text()).toContain('takes no member name outside a workspace');
     expect(h.fs.writes).toEqual([]);
+  });
+
+  it('reads deno.jsonc but refuses to rewrite away its comments', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.jsonc': `{
+        // Kept by the developer.
+        "tasks": { "start": "deno run --allow-net main.ts", },
+      }`,
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('/ws/deno.jsonc is JSONC');
+    expect(h.err.text()).toContain('"@setu-ts/diagnostics-plugin"');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('returns 130 without writes when already interrupted', async () => {
+    const fs = createFakeFs({
+      '/ws/deno.json': JSON.stringify({
+        tasks: { start: 'deno run --allow-net main.ts' },
+      }),
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const err = createRecorder();
+    expect(
+      await runDevtoolCommand(parseArgs(['enable']), {
+        fs,
+        cwd: '/ws',
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+      }),
+    ).toBe(130);
+    expect(fs.writes).toEqual([]);
+    expect(err.text()).toContain('Interrupted;');
   });
 
   it('refuses an out-of-range --devtool-port', async () => {
@@ -730,6 +768,7 @@ describe('generate app --devtool branch coverage', () => {
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/package.json': '{}',
+      '/ws/apps/orders/.setu-member': '',
     });
     const errors: string[] = [];
     const code = await runAppCommand(parseArgs(['app', 'billing', '--devtool']), {

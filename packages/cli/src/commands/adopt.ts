@@ -14,7 +14,15 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { APP_VERB, EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
+import {
+  APP_VERB,
+  EXIT_ERROR,
+  EXIT_INTERRUPTED,
+  EXIT_OK,
+  EXIT_USAGE,
+  PROGRAM_NAME,
+} from '../constants.ts';
+import { interruptionMessage, throwIfInterrupted } from '../utils/interruption.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
@@ -62,6 +70,8 @@ export interface AdoptDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -231,6 +241,17 @@ export async function runAdoptCommand(
     return EXIT_ERROR;
   }
 
+  try {
+    throwIfInterrupted(deps.interrupt);
+  } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
+    throw cause;
+  }
+
   // Moves first, so the root's `deno.json` is written into a directory the
   // project's own has already left.
   for (const file of plan.files) {
@@ -255,8 +276,17 @@ export async function runAdoptCommand(
   }
 
   try {
-    await writeFiles(deps.fs, planned);
+    await writeFiles(
+      deps.fs,
+      planned,
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
     return EXIT_ERROR;
   }
@@ -281,8 +311,17 @@ export async function runAdoptCommand(
   }
   if (rewritten !== undefined) {
     try {
-      await writeFiles(deps.fs, [{ path: entryPath, contents: rewritten, managed: true }]);
+      await writeFiles(
+        deps.fs,
+        [{ path: entryPath, contents: rewritten, managed: true }],
+        deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      );
     } catch (cause) {
+      const interrupted = interruptionMessage(cause);
+      if (interrupted !== undefined) {
+        deps.error(interrupted);
+        return EXIT_INTERRUPTED;
+      }
       deps.error(
         `Failed to rewrite ${entryPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
       );

@@ -30,6 +30,12 @@ export interface PromptChoice {
   readonly label: string;
 }
 
+/** The outcome of asking one interactive CLI question. */
+export type PromptSelection =
+  | { readonly kind: 'answer'; readonly value: string }
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'cancelled' };
+
 /** Asks the scaffold questions `setu new` accepts as flags. */
 export interface Prompter {
   /**
@@ -37,9 +43,9 @@ export interface Prompter {
    *
    * @param question - The question text; the default is rendered inside it
    * @param choices - The acceptable answers, first being the default
-   * @returns The chosen value, or undefined when no answer could be taken
+   * @returns The answer, cancellation, or inability to ask
    */
-  select(question: string, choices: readonly PromptChoice[]): Promise<string | undefined>;
+  select(question: string, choices: readonly PromptChoice[]): Promise<PromptSelection>;
 }
 
 /**
@@ -69,14 +75,17 @@ export function createTerminalPrompter(
   isTerminal: () => boolean,
   promptFn: (message: string) => string | null,
   log: (message: string) => void,
+  interrupt?: AbortSignal,
 ): Prompter {
   const print = (message: string): void => log(escapeTerminalControls(message));
   return {
-    select(question: string, choices: readonly PromptChoice[]): Promise<string | undefined> {
+    select(question: string, choices: readonly PromptChoice[]): Promise<PromptSelection> {
       // The SECOND line of defense against blocking a non-interactive run: the
       // primary guarantee is that `ask` is optional and gates do not pass it,
       // and the third is `prompt()`'s own measured null return here.
-      if (!isTerminal() || choices.length === 0) return Promise.resolve(undefined);
+      if (!isTerminal() || choices.length === 0) {
+        return Promise.resolve({ kind: 'unavailable' });
+      }
 
       const fallback = choices[0];
       const menu = choices.map((choice) => `  ${choice.value} — ${choice.label}`).join('\n');
@@ -86,10 +95,12 @@ export function createTerminalPrompter(
         const answer = promptFn(`${question} [${fallback.value}] `);
         // Both "stdin was never a terminal" and "the user pressed Ctrl-D"
         // arrive here; both mean stop asking, never "take the default".
-        if (answer === null) return Promise.resolve(undefined);
-        if (answer === '') return Promise.resolve(fallback.value);
+        if (answer === null || interrupt?.aborted === true) {
+          return Promise.resolve({ kind: 'cancelled' });
+        }
+        if (answer === '') return Promise.resolve({ kind: 'answer', value: fallback.value });
         const match = choices.find((choice) => choice.value === answer);
-        if (match !== undefined) return Promise.resolve(match.value);
+        if (match !== undefined) return Promise.resolve({ kind: 'answer', value: match.value });
         print(
           `"${escapeName(answer)}" is not one of: ${
             choices.map((choice) => choice.value).join(', ')

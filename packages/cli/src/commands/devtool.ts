@@ -28,11 +28,14 @@ import { stringFlag } from '../args.ts';
 import {
   CONFIG_MODULE,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   PROGRAM_NAME,
   VERSION,
 } from '../constants.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
+import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
@@ -84,6 +87,8 @@ export interface DevtoolCommandDependencies {
   readonly error: (message: string) => void;
   /** Checks whether a candidate port is currently bindable. */
   readonly portAvailable?: PortProbe;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /** One planned change to an existing file, or a new file this command creates. */
@@ -127,8 +132,11 @@ interface DenoJsonHandle {
  * @throws {SyntaxError} When the source is not JSON — callers refuse with
  * the file named rather than letting this escape
  */
-function openDenoJson(path: string, source: string): DenoJsonHandle {
-  const record = JSON.parse(source) as Record<string, unknown>;
+function openDenoJson(path: string, value: unknown): DenoJsonHandle {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('manifest root must be an object');
+  }
+  const record = value as Record<string, unknown>;
   const rawTasks = record['tasks'];
   const tasks: Record<string, string> = rawTasks !== null && typeof rawTasks === 'object'
     ? { ...(rawTasks as Record<string, string>) }
@@ -154,6 +162,43 @@ function openDenoJson(path: string, source: string): DenoJsonHandle {
       return `${JSON.stringify(out, null, 2)}\n`;
     },
   };
+}
+
+type WritableManifestRead =
+  | { readonly kind: 'ok'; readonly handle: DenoJsonHandle }
+  | { readonly kind: 'missing'; readonly expectedPath: string }
+  | { readonly kind: 'refused'; readonly message: string };
+
+async function readWritableDenoManifest(
+  fs: IFileSystem,
+  directory: string,
+): Promise<WritableManifestRead> {
+  const candidates = ['deno.json', 'deno.jsonc'] as const;
+  for (const file of candidates) {
+    const path = joinPath(directory, file);
+    const read = await readJsonManifest(fs, path);
+    if (read.kind === 'missing') continue;
+    if (read.kind === 'unreadable') {
+      return { kind: 'refused', message: `Cannot read ${path} as JSON: ${read.reason}` };
+    }
+    if (read.format === 'jsonc' || file === 'deno.jsonc') {
+      return {
+        kind: 'refused',
+        message: `${path} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+          `Add this line under "imports" yourself: ` +
+          `"${DEVTOOL_DEPENDENCY}": "${DEVTOOL_IMPORT}"`,
+      };
+    }
+    try {
+      return { kind: 'ok', handle: openDenoJson(path, read.value) };
+    } catch (cause) {
+      return {
+        kind: 'refused',
+        message: `Cannot read ${path}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      };
+    }
+  }
+  return { kind: 'missing', expectedPath: joinPath(directory, 'deno.json') };
 }
 
 /**
@@ -398,23 +443,19 @@ async function enableInWorkspace(
   const handles: DenoJsonHandle[] = [];
   const planned: PlannedWrite[] = [];
 
-  const memberManifestPath = joinPath(dir, memberRoot, 'deno.json');
-  let memberSource: string;
-  try {
-    memberSource = new TextDecoder().decode(await deps.fs.readFile(memberManifestPath));
-  } catch {
+  const memberRead = await readWritableDenoManifest(deps.fs, joinPath(dir, memberRoot));
+  if (memberRead.kind === 'missing') {
     return reportInapplicable(
       deps,
       `No deno.json in ${joinPath(memberRoot)} — this is not a Setu-TS project member.`,
     );
   }
-  let memberHandle: DenoJsonHandle;
-  try {
-    memberHandle = openDenoJson(memberManifestPath, memberSource);
-  } catch {
-    deps.error(`Cannot read ${memberManifestPath} as JSON; fix it and run this again.`);
+  if (memberRead.kind === 'refused') {
+    deps.error(memberRead.message);
     return EXIT_ERROR;
   }
+  const memberHandle = memberRead.handle;
+  const memberManifestPath = memberHandle.path;
   handles.push(memberHandle);
 
   const start = memberHandle.tasks['start'];
@@ -450,24 +491,20 @@ async function enableInWorkspace(
   // only place it can happen. Three outcomes: unmodified CLI output is
   // widened; already widened is a no-op; anything else is the developer's edit
   // and refuses with its current value.
-  const rootManifestPath = joinPath(dir, 'deno.json');
-  let rootSource: string;
-  try {
-    rootSource = new TextDecoder().decode(await deps.fs.readFile(rootManifestPath));
-  } catch {
+  const rootRead = await readWritableDenoManifest(deps.fs, dir);
+  if (rootRead.kind === 'missing') {
     return reportInapplicable(
       deps,
       `No deno.json in ${dir}: a Deno workspace root declares one, and the root \`dev\`` +
         ` task's grant must be widened in place for the devtool to run.`,
     );
   }
-  let rootHandle: DenoJsonHandle;
-  try {
-    rootHandle = openDenoJson(rootManifestPath, rootSource);
-  } catch {
-    deps.error(`Cannot read ${rootManifestPath} as JSON; fix it and run this again.`);
+  if (rootRead.kind === 'refused') {
+    deps.error(rootRead.message);
     return EXIT_ERROR;
   }
+  const rootHandle = rootRead.handle;
+  const rootManifestPath = rootHandle.path;
   handles.push(rootHandle);
   const expectedRunAll = workspaceProfile('deno').runAll;
   const currentRunAll = rootHandle.tasks['dev'];
@@ -554,8 +591,17 @@ async function enableInWorkspace(
   }
 
   try {
-    await writeFiles(deps.fs, planned as readonly GeneratedFile[]);
+    await writeFiles(
+      deps.fs,
+      planned as readonly GeneratedFile[],
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(
       `Failed to enable the devtool: ${cause instanceof Error ? cause.message : String(cause)}`,
     );
@@ -599,23 +645,19 @@ async function enableStandalone(
     return EXIT_USAGE;
   }
 
-  const manifestPath = joinPath(dir, 'deno.json');
-  let manifestSource: string;
-  try {
-    manifestSource = new TextDecoder().decode(await deps.fs.readFile(manifestPath));
-  } catch {
+  const manifestRead = await readWritableDenoManifest(deps.fs, dir);
+  if (manifestRead.kind === 'missing') {
     return reportInapplicable(
       deps,
       `No deno.json in ${dir} — this is not a Setu-TS project.`,
     );
   }
-  let handle: DenoJsonHandle;
-  try {
-    handle = openDenoJson(manifestPath, manifestSource);
-  } catch {
-    deps.error(`Cannot read ${manifestPath} as JSON; fix it and run this again.`);
+  if (manifestRead.kind === 'refused') {
+    deps.error(manifestRead.message);
     return EXIT_ERROR;
   }
+  const handle = manifestRead.handle;
+  const manifestPath = handle.path;
 
   const configPath = joinPath(dir, CONFIG_MODULE);
   let configSource: string;
@@ -695,8 +737,17 @@ async function enableStandalone(
   }
 
   try {
-    await writeFiles(deps.fs, planned as readonly GeneratedFile[]);
+    await writeFiles(
+      deps.fs,
+      planned as readonly GeneratedFile[],
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(
       `Failed to enable the devtool: ${cause instanceof Error ? cause.message : String(cause)}`,
     );

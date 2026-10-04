@@ -9,6 +9,9 @@ framework.
 deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
 ```
 
+Use the global install, or pass `--no-config --no-lock` to an ad-hoc `deno run` inside a project so
+Deno does not write the CLI's dependency graph into the project's lockfile.
+
 The `-n setu` is required, not decorative: Deno derives the binary name from the package, which for
 a package called `cli` would install a binary named `cli`. All help text shows `setu`.
 
@@ -159,7 +162,7 @@ receives positionals only, so no plugin command can read any other flag.
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
 error (unknown command or schematic, missing argument, unknown `--runtime`, an option the command
 does not recognize, or a name that cannot form an identifier — empty after normalization, or
-digit-leading such as `2fa`).
+digit-leading such as `2fa`), and `130` interrupted or cancelled with the run's writes removed.
 
 A relative `--dir` is resolved against the working directory.
 
@@ -363,6 +366,7 @@ MIT
 | `GeneratedFile`    | interface |
 | `PromptChoice`     | interface |
 | `Prompter`         | interface |
+| `PromptSelection`  | type      |
 | `SchematicOptions` | interface |
 | `AppLoader`        | type      |
 | `ModuleLoader`     | type      |

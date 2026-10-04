@@ -10,6 +10,7 @@ import { stringFlag } from '../args.ts';
 import {
   APP_VERB,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   isTargetRuntime,
@@ -30,6 +31,7 @@ import {
 } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
+import { detectProject } from '../utils/project-detector.ts';
 import {
   findExisting,
   type GeneratedFile,
@@ -56,6 +58,7 @@ import {
   readConfigModule,
   readLegacyHttpFiles,
 } from '../utils/legacy-layout.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -75,6 +78,8 @@ export interface GenerateDependencies {
   readonly load?: ModuleLoader;
   /** Checks whether a workspace port can bind before an app is assigned one. */
   readonly portAvailable?: PortProbe;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -144,6 +149,7 @@ export async function runGenerateCommand(
       log: deps.log,
       error: deps.error,
       ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+      ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
     });
   }
 
@@ -156,13 +162,13 @@ export async function runGenerateCommand(
       dir,
       log: deps.log,
       error: deps.error,
+      ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
     });
   }
 
-  const installed = await detectPlugins(deps.fs, dir);
-
   // `--help` is never an error, with or without a schematic named.
   if (args.flags['help'] === true || args.flags['h'] === true) {
+    const installed = await detectPlugins(deps.fs, dir);
     printSchematics(installed, deps.log);
     return EXIT_OK;
   }
@@ -196,36 +202,27 @@ export async function runGenerateCommand(
     // contradicted the guidance it carried. Everything that genuinely fails —
     // an invalid `--runtime` (refused above), a missing name, an unknown
     // schematic, over-arity — still exits 2.
-    printSchematics(installed, deps.log);
+    printSchematics(await detectPlugins(deps.fs, dir), deps.log);
     return EXIT_OK;
   }
-  // Detected from the project rather than defaulted, because the project already
-  // knows: `setu new svc --runtime bun` records the choice once and nobody
-  // repeats it on every `generate`. An explicit flag still wins, so a custom
-  // schematic can be driven for another target deliberately.
-  const runtime: TargetRuntime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
 
-  let schematic: Schematic;
+  let schematic: Schematic | undefined;
   let name: string | undefined;
+  let customName: string | undefined;
+  let requiredPlugin: string | undefined;
 
   if (schematicName === CUSTOM_SCHEMATIC) {
-    const customName = args.positionals[1];
+    customName = args.positionals[1];
     name = args.positionals[2];
     if (customName === undefined || name === undefined) {
       deps.error(`Usage: ${PROGRAM_NAME} generate custom <schematic-name> <name>`);
       return EXIT_USAGE;
     }
-    try {
-      schematic = await loadCustomSchematic(dir, customName, deps.load);
-    } catch (cause) {
-      deps.error(cause instanceof Error ? cause.message : String(cause));
-      return EXIT_ERROR;
-    }
   } else {
     const metadata = getSchematic(schematicName);
     if (metadata === undefined) {
       deps.error(`Unknown schematic: ${escapeName(schematicName)}`);
-      printSchematics(installed, deps.log);
+      printSchematics(await detectPlugins(deps.fs, dir), deps.log);
       return EXIT_USAGE;
     }
 
@@ -235,26 +232,8 @@ export async function runGenerateCommand(
       return EXIT_USAGE;
     }
 
-    if (metadata.requiresPlugin !== undefined && !installed.has(metadata.requiresPlugin)) {
-      deps.error(
-        `The "${schematicName}" schematic requires @setu-ts/${metadata.requiresPlugin}, ` +
-          `which is not installed in ${dir}.`,
-      );
-      deps.error(
-        `Run \`${PROGRAM_NAME} add ${metadata.requiresPlugin.replace(/-plugin$/, '')}\`, ` +
-          `then this command again.`,
-      );
-      // M61 added a third line here naming a decorator-free alternative, because
-      // `controller` and `module` were gated and refusing them with only
-      // "install the decorator plugin" read as though decorators were required
-      // to serve HTTP. Both are ungated now — `module` since M65, `controller`
-      // in this milestone — so no gated schematic has an alternative to name and
-      // the mechanism went with the last producer (M59's precedent: an
-      // unreachable branch is deleted, not left for coverage to excuse).
-      return EXIT_ERROR;
-    }
-
     schematic = metadata.factory;
+    requiredPlugin = metadata.requiresPlugin;
   }
 
   const names = deriveNames(name);
@@ -268,6 +247,58 @@ export async function runGenerateCommand(
     );
     return EXIT_USAGE;
   }
+
+  const project = await detectProject(deps.fs, dir);
+  if (project.kind === 'none') {
+    deps.error(
+      `${dir} holds no deno.json, deno.jsonc or package.json — run this inside a project, or pass --dir.`,
+    );
+    return EXIT_ERROR;
+  }
+  if (project.kind === 'workspace-root') {
+    deps.error(`${dir} is a workspace root (${project.marker}); generate inside a member instead.`);
+    deps.error(`  Pass --dir apps/<member>.`);
+    return EXIT_USAGE;
+  }
+  if (project.kind === 'unreadable') {
+    deps.error(`Cannot read ${project.path}: ${project.reason}`);
+    return EXIT_ERROR;
+  }
+
+  const installed = await detectPlugins(deps.fs, dir);
+
+  // Resolve project-owned code and plugin gates only after the target has been
+  // established as a readable project. Otherwise a missing plugin or custom
+  // module can mask the more fundamental wrong-directory refusal.
+  if (customName !== undefined) {
+    try {
+      schematic = await loadCustomSchematic(dir, customName, deps.load);
+    } catch (cause) {
+      deps.error(cause instanceof Error ? cause.message : String(cause));
+      return EXIT_ERROR;
+    }
+  } else if (requiredPlugin !== undefined && !installed.has(requiredPlugin)) {
+    deps.error(
+      `The "${schematicName}" schematic requires @setu-ts/${requiredPlugin}, ` +
+        `which is not installed in ${dir}.`,
+    );
+    deps.error(
+      `Run \`${PROGRAM_NAME} add ${
+        requiredPlugin.replace(/-plugin$/, '')
+      }\`, then this command again.`,
+    );
+    return EXIT_ERROR;
+  }
+
+  if (schematic === undefined) {
+    deps.error(`Could not resolve schematic: ${escapeName(schematicName)}`);
+    return EXIT_ERROR;
+  }
+  // Detected from the project rather than defaulted, because the project already
+  // knows: `setu new svc --runtime bun` records the choice once and nobody
+  // repeats it on every `generate`. An explicit flag still wins, so a custom
+  // schematic can be driven for another target deliberately.
+  const runtime: TargetRuntime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
 
   // Read unconditionally, like `detectPlugins` above: the `module` schematic
   // needs it to render its aggregate barrel, and branching on the schematic name
@@ -451,12 +482,21 @@ export async function runGenerateCommand(
   }
 
   try {
-    await writeFiles(deps.fs, files);
+    const outcomes = await writeFiles(
+      deps.fs,
+      files,
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
     return EXIT_ERROR;
   }
 
-  for (const file of files) deps.log(`created ${file.path}`);
   return EXIT_OK;
 }

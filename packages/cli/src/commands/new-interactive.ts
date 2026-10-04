@@ -58,11 +58,14 @@ export async function resolveNewChoices(
   args: ParsedArgs,
   prompter: Prompter | undefined,
   log: (message: string) => void,
-): Promise<ParsedArgs> {
+): Promise<
+  | { readonly kind: 'resolved'; readonly args: ParsedArgs }
+  | { readonly kind: 'cancelled' }
+> {
   // The PRIMARY non-interactive guarantee lives at the call site (`ask` is
   // optional and no gate passes it); this guard is the same promise restated
   // for direct callers of this module.
-  if (prompter === undefined) return args;
+  if (prompter === undefined) return { kind: 'resolved', args };
 
   const flags: Record<string, string | boolean | readonly string[]> = { ...args.flags };
   const workspace = args.flags['workspace'] === true;
@@ -80,12 +83,14 @@ export async function resolveNewChoices(
     flag: string,
     question: string,
     choices: readonly PromptChoice[],
-  ): Promise<void> {
-    if (flags[flag] !== undefined) return;
-    const answer = await select.select(question, choices);
-    if (answer === undefined) return;
-    flags[flag] = answer;
-    log(`${question} ${answer}`);
+  ): Promise<boolean> {
+    if (flags[flag] !== undefined) return true;
+    const selection = await select.select(question, choices);
+    if (selection.kind === 'cancelled') return false;
+    if (selection.kind === 'unavailable') return true;
+    flags[flag] = selection.value;
+    log(`${question} ${selection.value}`);
+    return true;
   }
 
   // A workspace cannot be hosted on Cloudflare Workers — each Worker is its own
@@ -94,20 +99,24 @@ export async function resolveNewChoices(
   // what the broker and queue gates below exist to prevent; the same rule has
   // to hold for the FIRST question or a workspace session dead-ends after
   // answering every one of them.
-  await ask(
-    'runtime',
-    'Runtime?',
-    TARGET_RUNTIMES.filter((name) => !workspace || isWorkspaceRuntime(name))
-      .map((name) => ({ value: name, label: `Target ${name}` })),
-  );
+  if (
+    !await ask(
+      'runtime',
+      'Runtime?',
+      TARGET_RUNTIMES.filter((name) => !workspace || isWorkspaceRuntime(name))
+        .map((name) => ({ value: name, label: `Target ${name}` })),
+    )
+  ) return { kind: 'cancelled' };
 
   if (workspace) {
-    await ask(
-      'transport',
-      'How should the workspace members reach each other?',
-      listTransports().map((spec) => ({ value: spec.name, label: spec.description })),
-    );
-    return { positionals: args.positionals, flags };
+    if (
+      !await ask(
+        'transport',
+        'How should the workspace members reach each other?',
+        listTransports().map((spec) => ({ value: spec.name, label: spec.description })),
+      )
+    ) return { kind: 'cancelled' };
+    return { kind: 'resolved', args: { positionals: args.positionals, flags } };
   }
 
   // The template question does not go through `ask`: its default arm is NOT
@@ -117,7 +126,7 @@ export async function resolveNewChoices(
   // one project with nothing telling them apart is exactly what the alias
   // annotation exists to prevent.
   if (flags['template'] === undefined) {
-    const answer = await select.select('Template?', [
+    const selection = await select.select('Template?', [
       {
         value: TEMPLATE_PROMPT_DEFAULT,
         label: 'Runtime plugin alone — the scaffold --yes produces',
@@ -129,11 +138,12 @@ export async function resolveNewChoices(
           label: template.description,
         })),
     ]);
-    if (answer !== undefined) {
+    if (selection.kind === 'cancelled') return { kind: 'cancelled' };
+    if (selection.kind === 'answer') {
       // The default arm records NOTHING: an absent flag is exactly how the
       // pipeline — and `--yes` — reach MINIMAL_HOST.
-      if (answer !== TEMPLATE_PROMPT_DEFAULT) flags['template'] = answer;
-      log(`Template? ${answer}`);
+      if (selection.value !== TEMPLATE_PROMPT_DEFAULT) flags['template'] = selection.value;
+      log(`Template? ${selection.value}`);
     }
   }
 
@@ -145,14 +155,16 @@ export async function resolveNewChoices(
     ? (getTemplate(rawTemplate)?.classBased ?? undefined)
     : undefined;
   if (styleableTemplate !== undefined && flags['style'] === undefined) {
-    await ask(
-      'style',
-      'Code style?',
-      [
-        { value: 'functional', label: 'Functional — plain functions and factories' },
-        { value: 'class-based', label: 'Class-based — decorators and constructor injection' },
-      ],
-    );
+    if (
+      !await ask(
+        'style',
+        'Code style?',
+        [
+          { value: 'functional', label: 'Functional — plain functions and factories' },
+          { value: 'class-based', label: 'Class-based — decorators and constructor injection' },
+        ],
+      )
+    ) return { kind: 'cancelled' };
   }
 
   // The broker and queue questions fire only when the collected answers make
@@ -173,26 +185,30 @@ export async function resolveNewChoices(
 
   if (host !== undefined) {
     if (standaloneOverlayRefusal('broker', runtime, host) === undefined) {
-      await ask(
-        'broker',
-        'Message broker?',
-        listBrokers().map((name) => ({
-          value: name,
-          label: getTransport(name)?.description ?? name,
-        })),
-      );
+      if (
+        !await ask(
+          'broker',
+          'Message broker?',
+          listBrokers().map((name) => ({
+            value: name,
+            label: getTransport(name)?.description ?? name,
+          })),
+        )
+      ) return { kind: 'cancelled' };
     }
     if (standaloneOverlayRefusal('queue', runtime, host) === undefined) {
-      await ask(
-        'queue',
-        'Job queue?',
-        listQueues().map((name) => ({
-          value: name,
-          label: getTransport(name)?.description ?? name,
-        })),
-      );
+      if (
+        !await ask(
+          'queue',
+          'Job queue?',
+          listQueues().map((name) => ({
+            value: name,
+            label: getTransport(name)?.description ?? name,
+          })),
+        )
+      ) return { kind: 'cancelled' };
     }
   }
 
-  return { positionals: args.positionals, flags };
+  return { kind: 'resolved', args: { positionals: args.positionals, flags } };
 }

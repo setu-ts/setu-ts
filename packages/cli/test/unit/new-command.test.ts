@@ -1392,9 +1392,9 @@ describe('the interactive seam on setu new', () => {
         return calls;
       },
       prompter: {
-        select(): Promise<string | undefined> {
+        select() {
           calls++;
-          return Promise.resolve(undefined);
+          return Promise.resolve({ kind: 'unavailable' as const });
         },
       },
     };
@@ -1443,8 +1443,12 @@ describe('the interactive seam on setu new', () => {
 
   it('honors prompted answers by rewriting the flag record', async () => {
     const scripted = {
-      select(question: string): Promise<string | undefined> {
-        return Promise.resolve(question.startsWith('Template?') ? 'microservice' : undefined);
+      select(question: string) {
+        return Promise.resolve(
+          question.startsWith('Template?')
+            ? { kind: 'answer' as const, value: 'microservice' }
+            : { kind: 'unavailable' as const },
+        );
       },
     };
     const fs = createFakeFs();
@@ -1479,5 +1483,20 @@ describe('the interactive seam on setu new', () => {
     const pathsOf = (fs: FakeFs) =>
       fs.writes.map((path) => [path, fs.read(path)] as const).sort(([a], [b]) => a < b ? -1 : 1);
     expect(pathsOf(enter)).toEqual(pathsOf(yes.fs));
+  });
+
+  it('cancels with exit 130 before writing', async () => {
+    const fs = createFakeFs();
+    const errors: string[] = [];
+    const code = await runNewCommand(parseArgs(['svc']), {
+      fs,
+      cwd: '/work',
+      log: () => {},
+      error: (message) => errors.push(message),
+      ask: { select: () => Promise.resolve({ kind: 'cancelled' }) },
+    });
+    expect(code).toBe(130);
+    expect(fs.writes).toEqual([]);
+    expect(errors).toEqual(['Cancelled; nothing was written.']);
   });
 });

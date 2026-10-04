@@ -22,7 +22,7 @@ interface Harness {
 }
 
 function harness(seed: Readonly<Record<string, string>> = {}): Harness {
-  const fs = createFakeFs(seed);
+  const fs = createFakeFs({ '/app/deno.json': '{}', ...seed });
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -42,7 +42,41 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
   };
 }
 
+function bareHarness(seed: Readonly<Record<string, string>> = {}): Harness {
+  const fs = createFakeFs(seed);
+  const out = createRecorder();
+  const err = createRecorder();
+  return {
+    fs,
+    out,
+    err,
+    run: (argv, load) =>
+      runGenerateCommand(parseArgs(argv), {
+        fs,
+        cwd: '/app',
+        now: () => 0,
+        log: out.sink,
+        error: err.sink,
+        ...(load === undefined ? {} : { load }),
+      }),
+  };
+}
+
 describe('runGenerateCommand', () => {
+  it('refuses to write outside a project', async () => {
+    const h = bareHarness({ '/app/notes.txt': 'mine' });
+    expect(await h.run(['service', 'billing'])).toBe(1);
+    expect(h.err.text()).toContain('holds no deno.json, deno.jsonc or package.json');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a workspace root and points at a member', async () => {
+    const h = bareHarness({ '/app/setu.workspace.json': '{}' });
+    expect(await h.run(['service', 'billing'])).toBe(2);
+    expect(h.err.text()).toContain('--dir apps/<member>');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   it('generates an ungated schematic and reads the write back', async () => {
     const h = harness();
     expect(await h.run(['service', 'user-profile'])).toBe(0);
@@ -56,7 +90,7 @@ describe('runGenerateCommand', () => {
   });
 
   it('roots generated paths at --dir', async () => {
-    const h = harness();
+    const h = harness({ '/elsewhere/deno.json': '{}' });
     expect(await h.run(['service', 'billing', '--dir', '/elsewhere'])).toBe(0);
     expect(h.fs.writes).toEqual([
       '/elsewhere/src/services/billing.service.ts',
@@ -67,7 +101,7 @@ describe('runGenerateCommand', () => {
   it('creates the parent directory before writing', async () => {
     const h = harness();
     await h.run(['service', 'billing']);
-    expect(h.fs.mkdirs).toEqual(['/app', '/app/src', '/app/src/services']);
+    expect(h.fs.mkdirs).toEqual(['/app/src', '/app/src/services']);
   });
 
   describe('--dry-run', () => {
@@ -436,14 +470,14 @@ describe('runGenerateCommand', () => {
         seenUrl = url;
         return Promise.resolve({ schematic: () => [{ path: 'x.txt', contents: 'x' }] });
       };
-      const h = harness();
+      const h = harness({ '/app/proj/deno.json': '{}' });
       expect(await h.run(['custom', 'probe', 'thing', '--dir', 'proj'], load)).toBe(0);
       expect(seenUrl).toBe('file:///app/proj/.setu-ts/schematics/probe.ts');
     });
   });
 
   it('returns 1 and reports the cause when the write fails', async () => {
-    const fs = createFakeFs();
+    const fs = createFakeFs({ '/app/deno.json': '{}' });
     const err = createRecorder();
     const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
       fs: { ...fs, writeFile: () => Promise.reject(new Error('read-only fs')) },
@@ -549,7 +583,7 @@ describe('runGenerateCommand', () => {
   });
 
   it('reports a non-Error write failure', async () => {
-    const fs = createFakeFs();
+    const fs = createFakeFs({ '/app/deno.json': '{}' });
     const err = createRecorder();
     const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
       fs: { ...fs, writeFile: () => Promise.reject('EROFS') },

@@ -48,7 +48,7 @@ async function run(
     readonly commands?: readonly string[];
   } = {},
 ): Promise<Run> {
-  const fs = createFakeFs(extra.files ?? {});
+  const fs = createFakeFs({ '/work/deno.json': '{}', ...(extra.files ?? {}) });
   const deps = {
     fs,
     cwd: '/work',

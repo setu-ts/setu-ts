@@ -12,7 +12,7 @@ interface Harness {
 }
 
 function harness(seed: Readonly<Record<string, string>> = {}): Harness {
-  const fs = createFakeFs(seed);
+  const fs = createFakeFs({ '/work/deno.json': '{}', ...seed });
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -111,7 +111,7 @@ describe('runCli', () => {
     });
 
     it('passes --dir through to the command', async () => {
-      const h = harness();
+      const h = harness({ '/other/deno.json': '{}' });
       expect(await h.run(['g', 'service', 'billing', '--dir', '/other'])).toBe(0);
       expect(h.fs.has('/other/src/services/billing.service.ts')).toBe(true);
     });
@@ -125,6 +125,7 @@ describe('runCli', () => {
           transport: 'http',
           members: [{ name: 'orders', port: 3000 }],
         }),
+        '/work/apps/orders/.setu-member': '',
       });
       const out = createRecorder();
       expect(
@@ -191,7 +192,10 @@ describe('runCli', () => {
 
     /** A harness whose project has a config module registering `commands`. */
     function withApp(commands: readonly { name: string; handler: () => void }[]) {
-      const fs = createFakeFs({ '/work/setu.config.ts': 'export function createApp() {}' });
+      const fs = createFakeFs({
+        '/work/deno.json': '{}',
+        '/work/setu.config.ts': 'export function createApp() {}',
+      });
       const out = createRecorder();
       const err = createRecorder();
       let booted = false;
@@ -296,7 +300,7 @@ describe('runCli', () => {
   });
 
   it('forwards an injected custom-schematic loader', async () => {
-    const fs = createFakeFs();
+    const fs = createFakeFs({ '/work/deno.json': '{}' });
     const out = createRecorder();
     const code = await runCli(['g', 'custom', 'my-gen', 'thing'], {
       fs,
@@ -325,7 +329,11 @@ describe('runCli', () => {
       ask: {
         select(question) {
           asked.push(question);
-          return Promise.resolve(question.startsWith('Template?') ? 'rest' : undefined);
+          return Promise.resolve(
+            question.startsWith('Template?')
+              ? { kind: 'answer' as const, value: 'rest' }
+              : { kind: 'unavailable' as const },
+          );
         },
       },
     });

@@ -27,6 +27,7 @@ import { expect } from '@std/expect';
 import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
+import type { Prompter } from '../../src/prompt.ts';
 import {
   bootAndProbe,
   bootWithGeneratedPermissions,
@@ -273,6 +274,31 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
   // one app that mattered would likewise have left CI green.
   it('never quietly drops a template from the boot list', () => {
     expect([...BOOTABLE]).toEqual(['rest', 'microservice', 'class-based', 'full-stack']);
+  });
+
+  it('boots a REST scaffold selected through the programmatic prompt seam', async () => {
+    const ask: Prompter = {
+      select(_question, choices) {
+        const selected = choices.find((choice) => choice.value === 'rest') ?? choices[0];
+        return Promise.resolve({ kind: 'answer', value: selected.value });
+      },
+    };
+    expect(
+      await runCli(['new', 'shop'], {
+        fs,
+        cwd: root,
+        now: () => runtime.now(),
+        log: () => {},
+        error: () => {},
+        ask,
+      }),
+    ).toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+
+    const result = await bootWithGeneratedPermissions(project, ['/health', '/greetings']);
+    expect(result.statuses['/health'], result.output).toBe(200);
+    expect(result.statuses['/greetings'], result.output).toBe(200);
   });
 
   for (const template of BOOTABLE) {

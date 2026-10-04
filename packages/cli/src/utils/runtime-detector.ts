@@ -22,6 +22,7 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { TargetRuntime } from '../constants.ts';
 import { joinPath } from './file-writer.ts';
+import { readJsonManifest } from './manifest-reader.ts';
 
 /**
  * Reads a file, or reports absence.
@@ -62,20 +63,15 @@ export async function detectTargetRuntime(
     return 'cloudflare-workers';
   }
 
-  const packageJson = await readText(fs, joinPath(dir, 'package.json'));
-  if (packageJson === undefined) return 'deno';
+  const packageJson = await readJsonManifest(fs, joinPath(dir, 'package.json'));
+  if (packageJson.kind !== 'ok') return 'deno';
 
   // The `start` script is the marker, because it is what the two targets
   // genuinely differ on: Bun runs TypeScript directly, Node needs a loader.
-  let start = '';
-  try {
-    const parsed = JSON.parse(packageJson) as { scripts?: Record<string, string> };
-    start = parsed.scripts?.['start'] ?? '';
-  } catch {
-    // An unparseable manifest is the plugin detector's problem to report, not
-    // this one's; fall through to the safest reading.
-    return 'deno';
-  }
+  const parsed = typeof packageJson.value === 'object' && packageJson.value !== null
+    ? packageJson.value as { scripts?: Record<string, string> }
+    : {};
+  const start = parsed.scripts?.['start'] ?? '';
 
   if (start.startsWith('bun')) return 'bun';
   if (start !== '') return 'node';
@@ -87,7 +83,10 @@ export async function detectTargetRuntime(
   // harness whose `@std/*` imports that project cannot resolve. A `deno.json`
   // decides it; otherwise the lockfile tells Bun from Node, the rule
   // `detectProjectRuntime` already uses for `setu adopt`.
-  if (await readText(fs, joinPath(dir, 'deno.json')) !== undefined) return 'deno';
+  if (
+    await readText(fs, joinPath(dir, 'deno.json')) !== undefined ||
+    await readText(fs, joinPath(dir, 'deno.jsonc')) !== undefined
+  ) return 'deno';
   for (const lockfile of ['bun.lock', 'bun.lockb']) {
     if (await readText(fs, joinPath(dir, lockfile)) !== undefined) return 'bun';
   }

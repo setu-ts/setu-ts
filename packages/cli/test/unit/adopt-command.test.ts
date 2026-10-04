@@ -235,6 +235,25 @@ describe('runAdoptCommand', () => {
     expect(h.out.text()).toContain('would create /work/svc/setu.workspace.json');
   });
 
+  it('returns 130 without moving anything when already interrupted', async () => {
+    const fs = createFakeFs(PROJECT);
+    const controller = new AbortController();
+    controller.abort();
+    const err = createRecorder();
+    expect(
+      await runAdoptCommand(parseArgs([]), {
+        fs,
+        cwd: '/work/svc',
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+      }),
+    ).toBe(130);
+    expect(fs.read('/work/svc/main.ts')).toContain('createApp');
+    expect(fs.has('/work/svc/apps/svc/main.ts')).toBe(false);
+    expect(err.text()).toContain('Interrupted;');
+  });
+
   it('moves the project under apps/ and writes the workspace above it', async () => {
     const h = harness();
     expect(await h.run(['--port', '4000'])).toBe(0);

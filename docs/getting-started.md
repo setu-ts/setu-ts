@@ -41,6 +41,9 @@ deno install -A -f --min-dep-age 0 jsr:@setu-ts/cli@^0.8.0/main
 setu new my-app --runtime deno
 ```
 
+Prefer the global install. For an ad-hoc `deno run` inside a project, pass `--no-config --no-lock`
+so Deno does not write the CLI's dependency graph into the project's lockfile.
+
 ## Your First Application
 
 ### Minimal Application

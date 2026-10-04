@@ -9,6 +9,7 @@ import {
   WORKSPACE_MANIFEST,
   WORKSPACE_VERSION,
 } from '../../src/workspace/manifest.ts';
+import { reconcileMembers } from '../../src/workspace/reconcile.ts';
 
 describe('runWorkspaceCommand', () => {
   it('reallocates every member to a bindable port and refreshes discovery maps', async () => {
@@ -20,6 +21,8 @@ describe('runWorkspaceCommand', () => {
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }],
       }),
+      '/ws/apps/orders/.setu-member': '',
+      '/ws/apps/billing/.setu-member': '',
     });
     const out = createRecorder();
     const err = createRecorder();
@@ -63,6 +66,7 @@ describe('runWorkspaceCommand', () => {
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
       }),
+      '/ws/apps/orders/.setu-member': '',
     });
     const err = createRecorder();
 
@@ -115,6 +119,7 @@ describe('runWorkspaceCommand', () => {
         transport: 'http',
         members: [{ name: 'orders', port: 65535 }],
       }),
+      '/ws/apps/orders/.setu-member': '',
     });
     const err = createRecorder();
     expect(
@@ -139,6 +144,7 @@ describe('runWorkspaceCommand', () => {
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
       }),
+      '/ws/apps/orders/.setu-member': '',
     });
     const out = createRecorder();
     expect(
@@ -163,6 +169,7 @@ describe('runWorkspaceCommand', () => {
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
       }),
+      '/ws/apps/orders/.setu-member': '',
     });
     const fs = { ...base, writeFile: () => Promise.reject(new Error('disk full')) };
     const err = createRecorder();
@@ -176,5 +183,82 @@ describe('runWorkspaceCommand', () => {
       }),
     ).toBe(1);
     expect(err.text()).toContain('disk full');
+  });
+
+  it('refuses a stale member before reallocating or writing', async () => {
+    const fs = createFakeFs({
+      [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
+        version: WORKSPACE_VERSION,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'http',
+        members: [{ name: 'orders', port: 3000 }],
+      }),
+    });
+    const err = createRecorder();
+    expect(
+      await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+        fs,
+        cwd: '/ws',
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(1);
+    expect(err.text()).toContain('apps/orders does not exist');
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('returns 130 when interrupted before its write batch', async () => {
+    const fs = createFakeFs({
+      [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
+        version: WORKSPACE_VERSION,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'http',
+        members: [{ name: 'orders', port: 3000 }],
+      }),
+      '/ws/apps/orders/.setu-member': '',
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const err = createRecorder();
+    expect(
+      await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+        fs,
+        cwd: '/ws',
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+      }),
+    ).toBe(130);
+    expect(err.text()).toContain('Interrupted;');
+  });
+
+  it('distinguishes unreadable and non-directory workspace members', async () => {
+    const manifest = {
+      version: WORKSPACE_VERSION,
+      runtime: 'deno' as const,
+      basePort: 3000,
+      transport: 'http' as const,
+      members: [{ name: 'orders', port: 3000 }],
+    };
+    const base = createFakeFs();
+    expect(
+      await reconcileMembers(
+        {
+          ...base,
+          stat: () => Promise.reject(new Error('permission denied')),
+        },
+        '/ws',
+        manifest,
+      ),
+    ).toEqual({ ok: false, member: 'orders', reason: 'unreadable' });
+    expect(
+      await reconcileMembers(
+        createFakeFs({ '/ws/apps/orders': 'not a directory' }),
+        '/ws',
+        manifest,
+      ),
+    ).toEqual({ ok: false, member: 'orders', reason: 'missing' });
   });
 });

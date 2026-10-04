@@ -5,6 +5,7 @@ import {
   dirName,
   findExisting,
   firstDuplicatePath,
+  interruptedRunRetryHint,
   joinPath,
   resolveDir,
   writeFiles,
@@ -176,7 +177,35 @@ describe('findExisting', () => {
   });
 });
 
+describe('interruptedRunRetryHint', () => {
+  it('offers cleanup only when every collision is inside the directory the run would create', () => {
+    expect(interruptedRunRetryHint(
+      ['/work/app/deno.json', '/work/app/src/main.ts'],
+      '/work/app',
+    )).toContain('delete /work/app');
+    expect(interruptedRunRetryHint(
+      ['/work/app/deno.json', '/work/keep.txt'],
+      '/work/app',
+    )).toBeUndefined();
+    expect(interruptedRunRetryHint([], '/work/app')).toBeUndefined();
+  });
+});
+
 describe('writeFiles', () => {
+  it('classifies created, updated, and unchanged files', async () => {
+    const fs = createFakeFs({ 'updated.ts': 'before', 'same.ts': 'same' });
+    expect(
+      await writeFiles(fs, [
+        { path: 'created.ts', contents: 'new' },
+        { path: 'updated.ts', contents: 'after' },
+        { path: 'same.ts', contents: 'same' },
+      ]),
+    ).toEqual([
+      { path: 'created.ts', outcome: 'created' },
+      { path: 'updated.ts', outcome: 'updated' },
+      { path: 'same.ts', outcome: 'unchanged' },
+    ]);
+  });
   it('writes every file in order', async () => {
     const fs = createFakeFs();
     await writeFiles(fs, [

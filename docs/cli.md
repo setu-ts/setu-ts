@@ -13,6 +13,9 @@ them.
 deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
 ```
 
+Use the global install. For an ad-hoc run inside a project, pass `--no-config --no-lock` so Deno
+does not add the CLI's dependency graph to that project's lockfile.
+
 Install it with an explicit binary name (`-n setu`): Deno's default inference would name the
 executable after the package, so you would be typing `cli new my-app`.
 
@@ -407,11 +410,12 @@ refused rather than resolved by load order.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                                                                                             |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success, including `--help` and `--version`.                                                                                                                                                                        |
-| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, or a handler threw.                                                             |
-| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| Code  | Meaning                                                                                                                                                                                                             |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`   | Success, including `--help` and `--version`.                                                                                                                                                                        |
+| `1`   | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, or a handler threw.                                                             |
+| `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| `130` | Interrupted or cancelled; nothing written by the run remains.                                                                                                                                                       |
 
 ## Next Steps
 

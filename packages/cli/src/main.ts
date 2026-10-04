@@ -1,44 +1,77 @@
 /**
  * The `setu` executable entry point.
  *
- * This is the one module that owns the process boundary: `Deno.args`,
- * `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`.
- * Everything else takes those as injected dependencies and is therefore
- * testable without terminating the test runner.
+ * This module owns the process boundary, while {@linkcode runMain} keeps that
+ * boundary import-safe and directly testable.
  *
  * @module
  */
 
+import type { IFileSystem } from '@setu-ts/common';
 import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from './cli.ts';
 import { EXIT_ERROR } from './constants.ts';
 import { createTerminalPrompter } from './prompt.ts';
 
-const runtime = createDenoRuntimeServices();
-
-if (runtime.fs === undefined) {
-  console.error('setu requires filesystem access. Re-run with --allow-read --allow-write.');
-  Deno.exit(EXIT_ERROR);
+/** @ignore Runtime capabilities used by the executable boundary. */
+export interface MainRuntime {
+  readonly fs?: IFileSystem;
+  readonly now: () => number;
+  readonly onSignal?: (signal: 'SIGINT', handler: () => void) => void;
 }
 
-// Prompting is supplied ONLY behind isTerminal(): a human's non-interactive
-// shell, CI, and every script fall through to the documented defaults rather
-// than being asked anything. This is the SECOND line of defense — the primary
-// guarantee is that `ask` is optional and no programmatic caller passes it, and
-// the third is `prompt()`'s own measured null return on a non-terminal.
-const prompter = Deno.stdin.isTerminal()
-  ? createTerminalPrompter(() => Deno.stdin.isTerminal(), prompt, console.log)
-  : undefined;
+/** @ignore Host process operations used by the executable boundary. */
+export interface MainProcess {
+  readonly args: readonly string[];
+  readonly cwd: () => string;
+  readonly isTerminal: () => boolean;
+  readonly prompt: (message: string) => string | null;
+  readonly log: (message: string) => void;
+  readonly error: (message: string) => void;
+  readonly portAvailable: (port: number) => Promise<boolean>;
+}
 
-Deno.exit(
-  await runCli(Deno.args, {
+/** @ignore Runs the CLI boundary and returns the code the host should exit with. */
+export async function runMain(runtime: MainRuntime, process: MainProcess): Promise<number> {
+  const interruption = new AbortController();
+  runtime.onSignal?.('SIGINT', () => interruption.abort());
+
+  if (runtime.fs === undefined) {
+    process.error('setu requires filesystem access. Re-run with --allow-read --allow-write.');
+    return EXIT_ERROR;
+  }
+
+  const prompter = process.isTerminal()
+    ? createTerminalPrompter(
+      process.isTerminal,
+      process.prompt,
+      process.log,
+      interruption.signal,
+    )
+    : undefined;
+
+  return await runCli(process.args, {
     fs: runtime.fs,
-    cwd: Deno.cwd(),
-    now: () => runtime.now(),
+    cwd: process.cwd(),
+    now: runtime.now,
+    log: process.log,
+    error: process.error,
+    interrupt: interruption.signal,
+    ...(prompter === undefined ? {} : { ask: prompter }),
+    portAvailable: process.portAvailable,
+  });
+}
+
+/** @ignore Builds the real Deno process adapter used by the executable invocation. */
+export function denoProcess(): MainProcess {
+  return {
+    args: Deno.args,
+    cwd: Deno.cwd,
+    isTerminal: () => Deno.stdin.isTerminal(),
+    prompt: (message) => prompt(message),
     log: (message) => console.log(message),
     error: (message) => console.error(message),
-    ...(prompter === undefined ? {} : { ask: prompter }),
-    portAvailable: (port: number): Promise<boolean> => {
+    portAvailable: (port) => {
       try {
         const listener = Deno.listen({ hostname: '127.0.0.1', port });
         listener.close();
@@ -47,5 +80,9 @@ Deno.exit(
         return Promise.resolve(false);
       }
     },
-  }),
-);
+  };
+}
+
+if (import.meta.main) {
+  Deno.exit(await runMain(createDenoRuntimeServices(), denoProcess()));
+}

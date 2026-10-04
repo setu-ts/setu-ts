@@ -12,6 +12,12 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Update programmatic CLI `Prompter` implementations
+
+`Prompter.select` now returns `PromptSelection`. Replace a string result with
+`{ kind: 'answer', value }`, inability to prompt with `{ kind: 'unavailable' }`, and user
+cancellation with `{ kind: 'cancelled' }`. Cancellation stops scaffolding and exits `130`.
+
 The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, the `database` and
 `queue` health data, `commandTimeoutMs`) do not fail to compile; each is a default that now applies
 to a running application. The three M102 mail entries can. The three M101b messaging entries do not

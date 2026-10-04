@@ -30,6 +30,7 @@ import {
 import {
   APP_VERB,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   isTargetRuntime,
@@ -66,10 +67,12 @@ import {
   findExisting,
   firstDuplicatePath,
   type GeneratedFile,
+  interruptedRunRetryHint,
   joinPath,
   resolveDir,
   writeFiles,
 } from '../utils/file-writer.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 
 /**
  * Everything `runNewCommand` reaches the outside world through.
@@ -95,6 +98,8 @@ export interface NewDependencies {
    * is supplied by `src/main.ts` only behind `Deno.stdin.isTerminal()`.
    */
   readonly ask?: Prompter;
+  /** Cooperative interruption signal checked at prompts and writes. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -632,9 +637,14 @@ export async function runNewCommand(
   // It is a no-op when no prompter is present (nothing would be asked anyway),
   // never an error.
   const yes = args.flags['yes'] === true || args.flags['y'] === true;
-  const chosen = yes || deps.ask === undefined
-    ? args
+  const selection = yes || deps.ask === undefined
+    ? { kind: 'resolved' as const, args }
     : await resolveNewChoices(args, deps.ask, deps.log);
+  if (selection.kind === 'cancelled') {
+    deps.error('Cancelled; nothing was written.');
+    return EXIT_INTERRUPTED;
+  }
+  const chosen = selection.args;
 
   const runtimeFlag = stringFlag(chosen.flags, 'runtime');
   if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
@@ -727,17 +737,27 @@ export async function runNewCommand(
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
     for (const path of existing) deps.error(`  ${path}`);
+    const retryHint = interruptedRunRetryHint(existing, root);
+    if (retryHint !== undefined) deps.error(retryHint);
     return EXIT_ERROR;
   }
 
   try {
-    await writeFiles(deps.fs, files);
+    const outcomes = await writeFiles(
+      deps.fs,
+      files,
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
     return EXIT_ERROR;
   }
-
-  for (const file of files) deps.log(`created ${file.path}`);
   deps.log('');
 
   if (workspace) {

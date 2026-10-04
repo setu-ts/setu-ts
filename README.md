@@ -226,6 +226,9 @@ setu new my-app
 cd my-app && setu generate service billing
 ```
 
+Use the global install, or pass `--no-config --no-lock` to an ad-hoc `deno run` inside a project so
+Deno does not write the CLI's dependency graph into the project's lockfile.
+
 The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
 All 49 workspace members are published on JSR, in `v0.8.0`: the core (`common`, `kernel`, `runtime`,

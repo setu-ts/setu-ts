@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **CLI write safety (M101e).** Writing commands now cooperate with SIGINT and roll back partial
+  batches, interactive cancellation exits `130`, generation refuses non-project directories and
+  workspace roots, JSONC manifests are read safely, and `setu add` refuses runtime-incompatible
+  plugins. `Prompter.select` now returns the discriminated `PromptSelection` type.
+
 - **Service-call agreement (M101d).** The SDK adds `createTraceContextInterceptor` and
   `ClientRetryPolicy`; the full-stack starter adds `fullStackConfigOf` and
   `FullStackConfigUnavailableError` for the exact composition snapshot; and `contextToTraceparent`

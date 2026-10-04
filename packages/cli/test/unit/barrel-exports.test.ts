@@ -45,7 +45,7 @@ describe('@setu-ts/cli barrel', () => {
   it('names Prompter and PromptChoice from the barrel', () => {
     const prompter: barrel.Prompter = {
       select: (_question: string, _choices: readonly barrel.PromptChoice[]) =>
-        Promise.resolve(undefined),
+        Promise.resolve({ kind: 'unavailable' }),
     };
     const choice: barrel.PromptChoice = { value: 'rest', label: 'REST set' };
     expect(prompter).toBeDefined();

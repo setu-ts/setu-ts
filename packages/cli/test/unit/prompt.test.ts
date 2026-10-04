@@ -12,7 +12,7 @@ const CHOICES: readonly PromptChoice[] = [
 ];
 
 describe('createTerminalPrompter', () => {
-  it('never reaches the prompt function on a non-terminal and resolves undefined', async () => {
+  it('never reaches the prompt function on a non-terminal and reports unavailable', async () => {
     let asked = false;
     const prompter = createTerminalPrompter(
       () => false,
@@ -22,23 +22,26 @@ describe('createTerminalPrompter', () => {
       },
       () => {},
     );
-    expect(await prompter.select('Template?', CHOICES)).toBeUndefined();
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'unavailable' });
     expect(asked).toBe(false);
   });
 
-  it('treats a null answer as "cannot ask" and resolves undefined', async () => {
+  it('treats a null answer as cancellation', async () => {
     const prompter = createTerminalPrompter(() => true, () => null, () => {});
-    expect(await prompter.select('Template?', CHOICES)).toBeUndefined();
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
   });
 
   it('resolves the fallback for a bare Enter', async () => {
     const prompter = createTerminalPrompter(() => true, () => '', () => {});
-    expect(await prompter.select('Template?', CHOICES)).toBe('rest');
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'answer', value: 'rest' });
   });
 
   it('resolves an exact answer to itself', async () => {
     const prompter = createTerminalPrompter(() => true, () => 'microservice', () => {});
-    expect(await prompter.select('Template?', CHOICES)).toBe('microservice');
+    expect(await prompter.select('Template?', CHOICES)).toEqual({
+      kind: 'answer',
+      value: 'microservice',
+    });
   });
 
   it('re-asks after an unrecognized answer and resolves the next valid one', async () => {
@@ -48,7 +51,10 @@ describe('createTerminalPrompter', () => {
       () => answers.shift() ?? null,
       () => {},
     );
-    expect(await prompter.select('Template?', CHOICES)).toBe('microservice');
+    expect(await prompter.select('Template?', CHOICES)).toEqual({
+      kind: 'answer',
+      value: 'microservice',
+    });
   });
 
   it('stops asking when EOF follows an unrecognized answer', async () => {
@@ -60,7 +66,7 @@ describe('createTerminalPrompter', () => {
       () => answers.shift() ?? null,
       () => {},
     );
-    expect(await prompter.select('Template?', CHOICES)).toBeUndefined();
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
   });
 
   it('prints the choice list through log and asks the question through the prompt', async () => {
@@ -99,7 +105,7 @@ describe('createTerminalPrompter', () => {
       () => answers.shift() ?? null,
       (message) => printed.push(message),
     );
-    expect(await prompter.select('Template?', CHOICES)).toBe('rest');
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'answer', value: 'rest' });
     const retries = printed.filter((line) => line.includes('is not one of'));
     expect(retries).toEqual([
       '"x\\u001b[31m\\u0007\\u0008y" is not one of: rest, microservice.',

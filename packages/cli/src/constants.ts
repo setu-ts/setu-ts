@@ -32,6 +32,8 @@ export const EXIT_ERROR = 1;
 
 /** Exit code for a usage error (unknown command, missing argument). */
 export const EXIT_USAGE = 2;
+/** Conventional exit status for a cooperatively interrupted CLI run. */
+export const EXIT_INTERRUPTED = 130;
 
 /**
  * The runtime targets `setu new --runtime` accepts.

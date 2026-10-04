@@ -3,8 +3,37 @@ import { expect } from '@std/expect';
 import type { IFileSystem } from '@setu-ts/common';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { findExisting, writeFiles } from '../../src/utils/file-writer.ts';
+import { InterruptedError } from '../../src/utils/interruption.ts';
 
 describe('writeFiles rollback', () => {
+  it('writes nothing when already interrupted', async () => {
+    const fs = createFakeFs();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(writeFiles(fs, [{ path: 'a.ts', contents: 'A' }], {
+      signal: controller.signal,
+    })).rejects.toBeInstanceOf(InterruptedError);
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('rolls back when interruption arrives during the final write', async () => {
+    const fs = createFakeFs({ 'project/existing.ts': 'before' });
+    const controller = new AbortController();
+    const wrapped: IFileSystem = {
+      ...fs,
+      async writeFile(path, data) {
+        await fs.writeFile(path, data);
+        if (path.endsWith('last.ts')) controller.abort();
+      },
+    };
+    await expect(writeFiles(wrapped, [
+      { path: 'project/existing.ts', contents: 'after', managed: true },
+      { path: 'project/last.ts', contents: 'last' },
+    ], { signal: controller.signal })).rejects.toBeInstanceOf(InterruptedError);
+    expect(fs.read('project/existing.ts')).toBe('before');
+    expect(fs.has('project/last.ts')).toBe(false);
+  });
+
   it('removes new files and nested directories after a partially written file rejects', async () => {
     const fs = createFakeFs();
     await fs.mkdir('project');

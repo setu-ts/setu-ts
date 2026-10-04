@@ -1272,6 +1272,9 @@ RuntimePlugin)
 deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
 ```
 
+Use the global install, or pass `--no-config --no-lock` to an ad-hoc `deno run` inside a project so
+Deno does not write the CLI's dependency graph into the project's lockfile.
+
 **Links:**
 
 - [CLI Guide](./cli.md)

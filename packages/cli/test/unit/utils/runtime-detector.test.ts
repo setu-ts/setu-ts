@@ -21,6 +21,12 @@ function pkg(start: string): string {
 }
 
 describe('detectTargetRuntime', () => {
+  it('reads a commented package manifest', async () => {
+    const fs = createFakeFs({
+      '/app/package.json': '{ "scripts": { // runtime\n "start": "bun run main.ts", }, }',
+    });
+    expect(await detectTargetRuntime(fs, '/app')).toBe('bun');
+  });
   it('reads bun from the start script the scaffold wrote', async () => {
     const fs = createFakeFs({ '/app/package.json': pkg('bun run main.ts') });
     expect(await detectTargetRuntime(fs, '/app')).toBe('bun');
