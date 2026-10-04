@@ -145,6 +145,23 @@ describe('createClient', () => {
     }
   });
 
+  it('accepts the maximum portable timer delay', () => {
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      retry: { limit: 2, delay: 2_147_483_647, backoff: 'fixed' },
+    });
+    expect(typeof client.request).toEqual('function');
+  });
+
+  it('rejects a retry delay above the portable timer maximum', () => {
+    expect(() =>
+      createClient({
+        baseUrl: 'https://api.example.com',
+        retry: { limit: 2, delay: 2_147_483_648, backoff: 'fixed' },
+      })
+    ).toThrow('retry.delay exceeds the maximum timer delay');
+  });
+
   it('rejects an exponential policy whose derived maximum overflows', () => {
     expect(() =>
       createClient({
@@ -152,6 +169,15 @@ describe('createClient', () => {
         retry: { limit: 1024, delay: 2, backoff: 'exponential' },
       })
     ).toThrow('retry exponential backoff must remain finite');
+  });
+
+  it('rejects a finite exponential maximum above the portable timer maximum', () => {
+    expect(() =>
+      createClient({
+        baseUrl: 'https://api.example.com',
+        retry: { limit: 3, delay: 1_000_000_000, backoff: 'exponential' },
+      })
+    ).toThrow('retry exponential backoff exceeds the maximum timer delay');
   });
 
   it('throws when circuitBreaker.threshold < 1', () => {

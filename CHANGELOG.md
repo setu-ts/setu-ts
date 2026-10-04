@@ -20,7 +20,8 @@ All notable changes to this project are documented here. The format follows
   may follow a redirect return `unknown`. Retry policies now cap honoured `Retry-After` delays and
   surface the original response error immediately when the hint exceeds the cap. Client construction
   rejects invalid/non-finite retry counts, delays, and derived exponential backoffs so malformed
-  configuration cannot disable that cap.
+  configuration cannot disable that cap; delays above the portable JavaScript timer maximum are also
+  rejected so runtimes cannot clamp a long wait into an immediate retry.
 
 ## [0.8.0] — 2026-10-03
 

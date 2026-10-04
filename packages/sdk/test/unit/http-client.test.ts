@@ -63,6 +63,20 @@ describe('HttpClient', () => {
     }
   });
 
+  it('rejects a Retry-After cap above the portable timer maximum', () => {
+    expect(() =>
+      createClient({
+        baseUrl: 'https://api.example.com',
+        retry: {
+          limit: 2,
+          delay: 10,
+          backoff: 'fixed',
+          maxRetryAfterMs: 2_147_483_648,
+        },
+      })
+    ).toThrow('retry.maxRetryAfterMs exceeds the maximum timer delay');
+  });
+
   it('wires a valid Retry-After cap into the retry strategy', async () => {
     const sleeps: number[] = [];
     let attempts = 0;

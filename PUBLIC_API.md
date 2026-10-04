@@ -11761,23 +11761,24 @@ type ClientRetryPolicy = RetryPolicy & {
 };
 ```
 
-| Option                 | Consumer                     | Behavior                                                                                                                                                  |
-| ---------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`                                                                                                     |
-| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win                                                                                                     |
-| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`                                                                                                     |
-| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`                                                                                                       |
-| `retry`                | retry strategy               | `limit` must be a positive safe integer; `delay` must be finite and non-negative; the largest derived exponential delay must remain finite                |
-| `maxRetryAfterMs`      | retry strategy               | `ClientRetryPolicy` member; must be finite and non-negative. A larger `Retry-After` surfaces the response error immediately, without sleeping or retrying |
-| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                                                                                                                    |
-| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                                                                                                              |
-| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution                                                                                                        |
-| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure                                                                                             |
+| Option                 | Consumer                     | Behavior                                                                                                                                        |
+| ---------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`                                                                                           |
+| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win                                                                                           |
+| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`                                                                                           |
+| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`                                                                                             |
+| `retry`                | retry strategy               | `limit` must be a positive safe integer; every configured or derived delay must be finite, non-negative, and at most `2_147_483_647` ms         |
+| `maxRetryAfterMs`      | retry strategy               | `ClientRetryPolicy` member; same timer-safe bound. A larger `Retry-After` surfaces the response error immediately, without sleeping or retrying |
+| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                                                                                                          |
+| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                                                                                                    |
+| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution                                                                                              |
+| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure                                                                                   |
 
 When `maxRetryAfterMs` is absent, the cap is the policy's largest computed backoff: `delay` for
 fixed backoff, or `delay * 2 ** (limit - 1)` for exponential backoff. A `Retry-After` at or below
 the effective cap replaces the computed delay. Policy validation rejects runtime strings and
-non-finite values so the derived cap cannot fail open.
+non-finite or timer-overflowing values so the derived cap cannot fail open or be clamped into an
+immediate retry by the runtime.
 
 ### ClientRequest
 

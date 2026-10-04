@@ -24,8 +24,9 @@ export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy };
  */
 export type ClientRetryPolicy = RetryPolicy & {
   /**
-   * Largest `Retry-After` delta the client will honor. A larger server hint
-   * surfaces the response error immediately instead of sleeping or retrying.
+   * Largest `Retry-After` delta the client will honor, up to the portable
+   * JavaScript timer maximum of 2,147,483,647 ms. A larger server hint surfaces
+   * the response error immediately instead of sleeping or retrying.
    */
   readonly maxRetryAfterMs?: number;
 };

@@ -219,8 +219,9 @@ delta-seconds, that delay replaces the computed backoff only when it is within t
 larger hint surfaces the original `HttpClientError` immediately, with its headers intact.
 
 At construction, `limit` must be a positive safe integer, `delay` must be finite and non-negative,
-and the largest derived exponential delay must remain finite. Runtime strings and non-finite values
-are rejected so they cannot disable the default server-hint cap.
+and every explicit or derived delay must be at most `2_147_483_647` ms, the portable JavaScript
+timer maximum. Runtime strings, non-finite values, and timer-overflowing delays are rejected so they
+cannot disable the cap or be clamped into an immediate retry.
 
 ### Circuit Breaker
 
