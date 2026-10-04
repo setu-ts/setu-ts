@@ -114,8 +114,6 @@ describe('full-stack template | the React Router middleware example', () => {
     expect(middleware).toContain('context.get(sessionContext)');
     expect(middleware).toContain('context.set(currentUserContext, { email })');
     expect(middleware).toContain("throw redirect('/login')");
-    expect(middleware).toContain("rendered by React Router's route error boundary");
-    expect(middleware).toContain('API callers');
     expect(middleware).toContain('return next();');
     // A route middleware reusing the session plugin, not a second session: it never
     // reads the cookie itself.

@@ -1,6 +1,6 @@
 # Milestone 101d — two sides of a service call that disagree
 
-> **Status:** Implementation. Branch: `feat/m101d-call-sides-agree`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m101d-call-sides-agree`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope

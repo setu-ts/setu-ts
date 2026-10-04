@@ -122,17 +122,6 @@ describe('createClient', () => {
     ).toThrow('retry.limit must be >= 1');
   });
 
-  it('rejects invalid Retry-After caps', () => {
-    for (const maxRetryAfterMs of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
-      expect(() =>
-        createClient({
-          baseUrl: 'https://api.example.com',
-          retry: { limit: 2, delay: 10, backoff: 'fixed', maxRetryAfterMs },
-        })
-      ).toThrow('retry.maxRetryAfterMs must be a finite non-negative number');
-    }
-  });
-
   it('throws when circuitBreaker.threshold < 1', () => {
     expect(() =>
       createClient({

@@ -5572,13 +5572,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   branch. Verified beyond the gates: the client on Node, Bun and Deno against a Deno server, process
   freeze/resume, and a live 364 s machine suspend showing the cap counts awake time — complete (PR
   #392).
+- **Milestone 101d** (`packages/sdk` + `packages/telemetry-plugin` +
+  `packages/react-router-plugin` + `packages/starters/full-stack-starter`): aligned both sides of
+  five first-party call contracts. The SDK propagates an active trace and caps `Retry-After`;
+  generated clients no longer claim observable `3xx` error arms; React Router refusal ownership is
+  explicit; and post-factory code can read the exact full-stack configuration snapshot — complete.
 - **Release `v0.8.0`** — on `release/v0.8.0`, 2026-10-03 (PR #394). **49 packages**; first publish
   of `diagnostics-plugin`, so `release:create-packages` and `release:link-repos` run before the tag.
   Scope was M98a–M98o, M99a–M99e and M100a–M100f. The sdk manifest's pinned mapping value
   (`jsr:@setu-ts/common@<version>`) is a bump site a `^`-only sweep misses (see
   `docs/releasing.md`), and an in-place edit to the published `[0.7.0]` CHANGELOG section (the M99c
   Blob default) was reverted to its tag text, since 0.7.0 did not have that behaviour.
-- **Next milestone** — none open; see ROADMAP.md.
+- **Next milestone** — M101a: bounded dependency health and calls.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
