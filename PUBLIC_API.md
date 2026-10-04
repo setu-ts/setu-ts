@@ -5089,12 +5089,13 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
    * from `initialRetryTime`, growing by `multiplier` up to `maxRetryTime`
    * (kafkajs's defaults: 5 / 300 ms / 2 / 30 000 ms). Still unknown after the
    * budget → `KafkaTopicUnavailableError`. Every field is validated at
-   * construction.
+   * construction, `factor` (kafkajs's jitter) included, held to [0, 1].
    * @since 0.9.0
    */
   retry?: {
     maxRetryTime?: number;
     initialRetryTime?: number;
+    /** kafkajs's jitter, between 0 and 1. */
     factor?: number;
     multiplier?: number;
     retries?: number;

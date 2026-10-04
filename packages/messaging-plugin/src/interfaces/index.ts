@@ -729,7 +729,8 @@ export interface KafkaOptions {
    * `multiplier` up to `maxRetryTime` — kafkajs's defaults, 5 / 300 ms / 2 /
    * 30 s, about 9 s in all. A topic still unknown after that rejects with
    * `KafkaTopicUnavailableError`; `retries: 0` names it at once. Every field
-   * is validated at construction. The forwarding to kafkajs is skipped when
+   * is validated at construction, `factor` (kafkajs's jitter) included, held
+   * to [0, 1]. The forwarding to kafkajs is skipped when
    * {@link client} is injected (the application built that `Kafka`); the
    * subscribe retry applies either way.
    */
@@ -738,7 +739,7 @@ export interface KafkaOptions {
     maxRetryTime?: number;
     /** Initial wait, in ms (kafkajs default 300). */
     initialRetryTime?: number;
-    /** Randomization factor (kafkajs default 0.2). */
+    /** Randomization factor, between 0 and 1 (kafkajs default 0.2). */
     factor?: number;
     /** Exponential growth factor (kafkajs default 2). */
     multiplier?: number;

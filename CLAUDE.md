@@ -5661,7 +5661,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   pre-existing leak, folded in at the maintainer's direction (the M58 precedent): `KafkaBroker`
   `stop()`ped consumers on `disconnect()` and `unsubscribe()` but never `disconnect()`ed them, so
   every Kafka app hung after `app.stop()` on `develop` too, and every RPC reply-inbox close leaked a
-  connection; both now `disconnect()` — complete (PR pending).
+  connection; both now `disconnect()` . The independent security audit (round 1, on `0d3da3da`)
+  failed on a missing design security review — now recorded as plan §10 after the fact (the M101a
+  precedent) — and a doc claim that every `retry` field was validated while `factor` was forwarded
+  unchecked (now held to [0, 1]); its pre-existing observation that a `disconnect()` racing
+  `subscribe()`'s connect or first attempt left a consumer running was folded in and fixed —
+  complete (PR pending).
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

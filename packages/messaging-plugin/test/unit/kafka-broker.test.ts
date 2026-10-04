@@ -948,6 +948,13 @@ describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () =>
       [{ multiplier: Number.POSITIVE_INFINITY }, 'multiplier'],
       [{ maxRetryTime: Number.POSITIVE_INFINITY }, 'maxRetryTime'],
       [{ maxRetryTime: -5 }, 'maxRetryTime'],
+      // `factor` is forwarded to kafkajs as its jitter: a NaN, non-finite or
+      // negative factor, or one above 1 (which draws negative delays), made
+      // kafkajs's own retries run back to back (security audit F2).
+      [{ factor: Number.NaN }, 'factor'],
+      [{ factor: Number.POSITIVE_INFINITY }, 'factor'],
+      [{ factor: -0.1 }, 'factor'],
+      [{ factor: 1.5 }, 'factor'],
     ];
     for (const [retry, field] of cases) {
       expect(() =>
@@ -1035,4 +1042,44 @@ describe('KafkaBroker releases consumer connections (M101b review)', () => {
     );
     await broker.disconnect();
   });
+});
+
+describe('KafkaBroker disconnect during a subscribe (M101b security audit O1)', () => {
+  // A disconnect() that lands while subscribe() is still connecting or making
+  // its first attempt used to let the subscription complete — a consumer then
+  // ran after shutdown, holding the process open and consuming messages.
+  async function race(gate: 'connect' | 'subscribe') {
+    const factory = new FakeKafkaFactory();
+    const consumer = factory.consumer({ groupId: 'messaging-consumers:orders' });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const original = consumer[gate].bind(consumer) as (o?: unknown) => Promise<void>;
+    (consumer as unknown as Record<string, unknown>)[gate] = async (o?: unknown) => {
+      await held;
+      return await original(o);
+    };
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+
+    const pending = broker.subscribe('orders', () => {}).then(
+      () => 'resolved',
+      (e: Error) => e.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await broker.disconnect();
+    release();
+
+    const outcome = await pending;
+    const methods = consumer.calls.map((c) => c.method);
+    return { outcome, methods };
+  }
+
+  for (const gate of ['connect', 'subscribe'] as const) {
+    it(`refuses and releases the consumer when disconnect() lands during ${gate}`, async () => {
+      const { outcome, methods } = await race(gate);
+      expect(outcome).toBe('KafkaBroker was disconnected while subscribing');
+      expect(methods).toContain('disconnect');
+      expect(methods).not.toContain('run');
+    });
+  }
 });

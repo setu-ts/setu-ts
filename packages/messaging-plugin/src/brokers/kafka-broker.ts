@@ -164,6 +164,15 @@ function resolveSubscribeRetry(retry: KafkaOptions['retry']): SubscribeRetryBudg
   if (!Number.isFinite(budget.maxRetryTime) || budget.maxRetryTime < 0) {
     refuse('maxRetryTime', 'a finite, non-negative number of ms');
   }
+  // `factor` is not read by the subscribe loop; it is forwarded to kafkajs as
+  // the jitter of ITS retries, which draw each delay from
+  // `[t - factor·t, t + factor·t]`. A NaN, non-finite or negative factor — or
+  // one above 1, which draws negative delays — made those retries run back to
+  // back (security audit F2), so it is held to [0, 1].
+  const factor = retry?.factor;
+  if (factor !== undefined && (!Number.isFinite(factor) || factor < 0 || factor > 1)) {
+    refuse('factor', 'a finite number between 0 and 1');
+  }
   return budget;
 }
 
@@ -560,6 +569,12 @@ export class KafkaBroker implements MessageBrokerAdapter {
     try {
       await consumerTyped.connect();
       await this.#subscribeWithRetry(consumerTyped, topic, generation);
+      // A disconnect() that landed while the consumer was connecting, or during
+      // a first attempt that then succeeded, must not leave a consumer running
+      // after shutdown (security audit O1). The catch below releases it.
+      if (generation !== this.#generation) {
+        throw new Error('KafkaBroker was disconnected while subscribing');
+      }
     } catch (err) {
       // M101b (V8-26): a consumer that failed to join is released rather than
       // leaked, and an unknown topic is named instead of escaping as a raw

@@ -46,7 +46,7 @@ All notable changes to this project are documented here. The format follows
   `start()`) for a naming or startup rule the real broker imposes and a permissive fake accepted.
 - **`KafkaOptions.retry` / the `kafka` arm's `retry` (M101b).** Forwarded to `new Kafka({ retry })`
   unless a `client` is injected, and read by `subscribe()` as its unknown-topic retry budget. Every
-  field is validated at construction.
+  field is validated at construction, `factor` (kafkajs's jitter) included, held to [0, 1].
 
 ### Changed
 
@@ -146,6 +146,13 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **A Kafka `subscribe()` racing `disconnect()` no longer leaves a consumer running.** When
+  `disconnect()` landed while `subscribe()` was still connecting its consumer, or during a first
+  attempt that then succeeded, the subscription completed anyway — a consumer ran after shutdown,
+  holding the process open and consuming messages. It now rejects with
+  `KafkaBroker was disconnected while subscribing` and releases the consumer. Found by the M101b
+  security audit; it predates M101b.
 
 - **A Kafka application exits after `app.stop()`.** `KafkaBroker.disconnect()` and a subscription's
   `unsubscribe()` called the kafkajs consumer's `stop()`, which halts fetching but leaves the

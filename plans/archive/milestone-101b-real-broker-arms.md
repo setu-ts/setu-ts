@@ -341,3 +341,70 @@ suite is run twice against one instance to prove C1's advice is no longer needed
   (rejected in §3.2).
 - The Service Bus arm (RPC refused by name on the emulator — a documented limitation, not a row).
 - Every health and bounded-call row: M101a.
+
+## 10. Design security review (recorded after implementation, at the maintainer's direction)
+
+The committed-tree security audit of `0d3da3da` failed because this plan had no design review while
+the diff crosses a trust boundary (F1 below). This section is recorded after implementation — the
+M101a §11 precedent — and is not presented as having guided the design.
+
+**Flows reviewed.** A subscribe call carrying a caller-supplied topic and `SubscribeOptions.queue`;
+the broker's answer about resources it already holds — a Pub/Sub subscription's bound topic
+(`getMetadata`), a NATS consumer's `setu.queue` metadata, `durable_name` and `filter_subject`
+(`consumers.info`), a kafkajs error's `type` and `cause` chain — which decides whether a handler
+attaches to that resource; those values, and operator configuration, quoted into error messages and
+the Kafka consumer-crash log line; `KafkaOptions.retry`, commonly fed from environment variables;
+and startup failure and shutdown of every broker connection and consumer.
+
+**Assets.** Delivery isolation — a topic's messages reach only that topic's handler, and two
+independent queues never split one consumer's deliveries; availability, meaning a failed boot fails
+and exits and a clean stop exits; and the integrity of log records and error messages.
+
+**Attackers.** Another service, tenant or deployment sharing the GCP project, NATS account or Kafka
+cluster, or a misconfiguration, that has already created a colliding resource: a subscription bound
+to another topic or another project's same-named topic, a consumer under a name a dotted queue
+encodes to, a consumer for another topic. A hostile or buggy broker or SDK answer: a missing or
+non-string topic, CR/LF in a name, an error whose getter throws or whose `cause` chain cycles. An
+operator value that is not a finite number. A reader of logs and error bodies.
+
+**Approved budgets.** None on the delivery path. The Pub/Sub binding check costs one `getMetadata`
+RPC only when `createSubscription` answers `ALREADY_EXISTS`; the NATS check one `consumers.info`
+only on `10148`.
+
+**Obligations.**
+
+1. A subscription attaches only to a broker resource proven to belong to exactly this topic: Pub/Sub
+   compares the service's fully-qualified topic for equality with `projects/<projectId>/topics/<id>`
+   (or the caller's fully-qualified name); NATS requires the recorded `setu.queue` to equal the raw
+   queue AND the filter to equal the topic, accepting a consumer with no record only when its
+   durable name equals the raw queue. An unproven binding — absent, `null`, non-string, empty — is
+   refused (fail closed), never attached.
+2. Two distinct queues never share one NATS consumer: an encoding collision is refused in process
+   (before any server call) and across processes.
+3. Every broker-supplied or configuration-supplied string quoted in an error message or log line is
+   JSON-escaped, so CR/LF cannot forge a record; a refused numeric option is never echoed.
+4. Every numeric bound is refused at construction when it is not finite or is out of range —
+   `retries`, `initialRetryTime`, `multiplier`, `maxRetryTime`, and `factor` (kafkajs's jitter, held
+   to [0, 1]) — so a `NaN` from an unset variable can never disable or invert a bound.
+5. Every failure path releases what it connected: a consumer whose subscribe failed, the broker when
+   a declared subscription rejects `start()`, every consumer on `disconnect()` and `unsubscribe()`
+   (`disconnect()`, not `stop()`), every pending retry wait; and a `disconnect()` that races a
+   `subscribe()` at any point leaves no consumer running.
+6. A hostile error value from the transport settles as a rejection — never a crash, an unhandled
+   rejection or a hang — with the `cause` walk bounded (5 links).
+7. A subscription name is bounded (255 characters) before any service call.
+
+**Findings.**
+
+| #  | Finding                                                                                                                     | Disposition                                                                                              |
+| -- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| V1 | Verification: a declared subscription rejecting `start()` left the broker connected; the process never exited               | Fixed: obligation 5 (close hook registered after `connect()`)                                            |
+| V2 | Verification: a fully-qualified Pub/Sub topic derived a default name containing `/`                                         | Fixed: the topic ID is used                                                                              |
+| V3 | Code review: the Pub/Sub binding check accepted another project's same-named topic                                          | Fixed: obligation 1 (exact comparison)                                                                   |
+| V4 | Code review: a retry wait held its timer through `disconnect()`                                                             | Fixed: obligation 5                                                                                      |
+| V5 | Pre-existing: `KafkaBroker` `stop()`ped consumers without `disconnect()`; every Kafka app hung after `app.stop()`           | Fixed at the maintainer's direction: obligation 5                                                        |
+| F1 | Audit round 1: no design review in this plan                                                                                | Closed by this section                                                                                   |
+| F2 | Audit round 1: "every field is validated" was false for `retry.factor`, which was forwarded unvalidated                     | Fixed: obligation 4                                                                                      |
+| O1 | Audit round 1, pre-existing: a `disconnect()` during `subscribe()`'s connect or first attempt let the subscription complete | Fixed at the maintainer's direction: obligation 5                                                        |
+| O2 | Audit round 1: the in-process NATS name map is not pruned on `unsubscribe()`                                                | Not changed (an audit observation, not a finding): it fails closed — refuses, never misroutes            |
+| O3 | Audit round 1: the Pub/Sub `getMetadata` call inherits the SDK default timeout                                              | Not changed (an audit observation, not a finding): same bound as the `createSubscription` call before it |
