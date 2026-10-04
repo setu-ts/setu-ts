@@ -44,6 +44,14 @@ All notable changes to this project are documented here. The format follows
   committed `IMailer` contract is unchanged, so every holder calling `sendTemplate` gets the arm
   with no code change.
 
+- **Three named real-broker errors in `@setu-ts/messaging-plugin` (M101b).**
+  `PubSubSubscriptionBoundElsewhereError`, `NatsConsumerNameCollisionError` and
+  `KafkaTopicUnavailableError`, each thrown by `subscribe()` (so a declared subscription rejects
+  `start()`) for a naming or startup rule the real broker imposes and a permissive fake accepted.
+- **`KafkaOptions.retry` / the `kafka` arm's `retry` (M101b).** Forwarded to `new Kafka({ retry })`
+  unless a `client` is injected, and read by `subscribe()` as its unknown-topic retry budget. Every
+  field is validated at construction, `factor` (kafkajs's jitter) included, held to [0, 1].
+
 ### Changed
 
 - SDK-generated clients keep an error arm for every declared `3xx`, the auto-follow statuses (`301`,
@@ -127,7 +135,79 @@ All notable changes to this project are documented here. The format follows
   `MailStringTemplate` instead, which has the released `{ html?, text? }` shape. A value typed
   `MailTemplate`, and every object literal assigned to one, compiles unchanged.
 
+- **BREAKING: a Pub/Sub subscription with no `queue` is named per topic (M101b, V8-2).** The default
+  is `<defaultQueue>.<topic ID>` (`messaging-consumers.<topic>`; a fully-qualified topic name
+  contributes only its ID, since `/` is illegal in a subscription ID) instead of one shared
+  `messaging-consumers`. Subscription names are project-global, so the shared default attached a
+  second topic to the first topic's subscription — its handler consumed the other topic's messages
+  with no log — and the RPC channel of one run to the previous run's. An existing subscription bound
+  to another topic is now refused with `PubSubSubscriptionBoundElsewhereError` rather than attached
+  to, and a name over 255 characters is refused at `subscribe()`. Migration: an existing
+  `messaging-consumers` subscription keeps its backlog with no consumer after upgrade; pass
+  `SubscribeOptions.queue: 'messaging-consumers'` on the ONE topic that owns it until it is drained,
+  then delete it.
+- **A Kafka subscription to a topic that does not exist yet retries, then is named (M101b, V8-26).**
+  A KRaft broker with auto-creation answers `UNKNOWN_TOPIC_OR_PARTITION` to the request that creates
+  the topic — measured on Kafka 4.0 — and kafkajs does not retry that, so such a subscription died
+  at boot with a raw `KafkaJSProtocolError` naming no topic. `subscribe()` now retries that one
+  error within `retry` (kafkajs's defaults, about 9 s) and the topic is found; a broker that does
+  not auto-create rejects after the budget with `KafkaTopicUnavailableError`. A consumer that failed
+  to join is disconnected rather than leaked, and a rejected `run()` (kafkajs's crash handler
+  rethrows a disconnect that fails) is reported through `KafkaOptions.logger` (its first reader)
+  instead of escaping as an unhandled rejection.
+- **A NATS consumer records its raw queue as `setu.queue` metadata (M101b).** Consumer metadata
+  needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
+
 ### Fixed
+
+- **A Kafka `subscribe()` racing `disconnect()` no longer leaves a consumer running.** When
+  `disconnect()` landed while `subscribe()` was still connecting its consumer, or during a first
+  attempt that then succeeded, the subscription completed anyway — a consumer ran after shutdown,
+  holding the process open and consuming messages. It now rejects with
+  `KafkaBroker was disconnected while subscribing` and releases the consumer. The same held for a
+  consumer whose group JOIN was still in flight (about 3 s on a broker with Kafka's default
+  `group.initial.rebalance.delay.ms`): kafkajs's `stop()` is a no-op until the join completes, so
+  disconnecting closed the connections under it, which kafkajs treats as a retriable crash and
+  restarts — the consumer rejoined after `app.stop()`. Releasing a consumer now waits up to 10 s for
+  its join to settle and then disconnects it; a join still pending at 10 s is disconnected the
+  moment it settles, after `app.stop()` has returned, because disconnecting under it neither stops a
+  join that later succeeds nor returns before kafkajs's pending JoinGroup is answered. A record
+  delivered to a released consumer is left uncommitted for the group to redeliver. Found by the
+  M101b security audit; both predate M101b.
+
+- **A Kafka consumer stopped while kafkajs was restarting it no longer rejoins after `app.stop()`.**
+  After a broker restart or a connection reset, kafkajs restarts a crashed consumer behind its own
+  timer. A stop that landed once that restart had begun found nothing to stop — kafkajs's `stop()`
+  drops a runner that is still joining — so the restarted consumer joined the group after shutdown,
+  consumed and committed messages with the stopped application's handler, and held the process open
+  (measured on Kafka 4.0). The broker now declines kafkajs's restart and restarts the consumer
+  itself — after the crash's `retryTime`, else `KafkaOptions.retry.initialRetryTime`, else 300 ms,
+  as kafkajs reads them — so a stop cancels a pending restart and waits for one in progress. Found
+  by the M101b security audit; predates M101b.
+
+- **A Kafka application exits after `app.stop()`.** `KafkaBroker.disconnect()` and a subscription's
+  `unsubscribe()` called the kafkajs consumer's `stop()`, which halts fetching but leaves the
+  consumer's cluster connection open — so every Kafka application with a subscription hung after a
+  clean `app.stop()` until it was killed, and each RPC request's reply inbox leaked a connection
+  when it closed. Both now call `disconnect()`, which stops the consumer and closes its connection.
+  Found while verifying M101b; it predates M101b.
+
+- **A `MessagingPlugin` whose declared subscription rejects no longer leaks its broker (M101b).**
+  `register()` connected the broker, subscribed the declared entries, and only then registered the
+  close hook — so when a declared subscription rejected `start()`, the kernel's failed-start cleanup
+  had no hook to run, the connected broker was never closed, and the process could not exit
+  (measured against a real Kafka broker). M101b makes that rejection a documented outcome, so the
+  hook is now registered directly after `connect()`. A Kafka subscribe retry waiting out its backoff
+  is likewise cancelled by `disconnect()` instead of holding a timer for up to `maxRetryTime`.
+
+- **NATS request-reply works against a real server (M101b, V8-6).** The reply inbox subscribes with
+  the dotted queue `rr.inbox.<uuid>`, which was used verbatim as the JetStream consumer name, and
+  the nats client refuses `.` in one before anything reaches the server — so every `request()`
+  failed with `invalid durable name - durable name cannot contain '.'`, as did any dotted user
+  queue. A queue is now encoded (`.` → `_2e`, and likewise `*`, `>`, `/`, `\` and whitespace); a
+  queue with none of those characters is unchanged, so no existing consumer is renamed. A queue
+  whose encoding collides with another's, or that is reused across two topics, rejects with
+  `NatsConsumerNameCollisionError` instead of silently sharing one consumer's deliveries.
 
 - **62 `@since` tags named a release that does not ship their symbol.** The MongoDB, DynamoDB and
   cursor-paging surfaces of `@setu-ts/database-plugin` (61 tags) carried `@since 0.1.0` while first

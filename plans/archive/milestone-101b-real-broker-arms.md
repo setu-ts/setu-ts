@@ -1,6 +1,7 @@
 # Milestone 101b — message transports that fail against the real broker
 
-> **Status:** Planning. Branch: `feat/m101b-real-broker-arms`. `main` is protected — all work
+> **Status:** Implemented — §1, §3.3, §4.1 and §8 carry measured corrections (marked
+> **Correction**). Branch: `feat/m101b-real-broker-arms`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR. **Sequence:**
 > lands AFTER M101a (same package; this branch is cut from `main` once M101a has merged and reuses
 > the kernel-app outage-suite shape M101a §3.8 establishes). It does not depend on M101c–M101h.
@@ -55,6 +56,20 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 | Package test net grant                         | `packages/messaging-plugin/deno.json:9-21`                                                                                                    | `127.0.0.1:8085`, `127.0.0.1:4222`, `127.0.0.1:9092` already granted; no manifest change                                                                                                                                                                                                                                                     |
 | CI backend inventory                           | `.github/workflows/ci.yml:78-82,264-300`; `test/apps-gate.test.ts:498-534`; `docs/messaging-emulators.md:162-170`                             | NATS and Kafka run in CI (pinned); the Pub/Sub emulator is local-only by decision ("Why not CI")                                                                                                                                                                                                                                             |
 | M101a dependency                               | `plans/milestone-101a-bounded-health.md` §3.2, §3.8                                                                                           | the kernel-app `/health`+`/ready` outage-suite shape and the `service-bus-broker.ts` change this branch rebases over; nothing in this plan touches that file                                                                                                                                                                                 |
+
+**Correction (measured during implementation).** Two §1 rows did not survive the source and a real
+broker. Row "kafkajs already retries metadata": `brokerPool.refreshMetadata`
+(`brokerPool.js:208-213`) rethrows only `LEADER_NOT_AVAILABLE` into the retrier and `bail()`s every
+other error, so an `UNKNOWN_TOPIC_OR_PARTITION` rejects at once, unwrapped (measured: 5 ms on a
+non-auto-creating `apache/kafka:4.0.0`, whatever `retry` says). Row "CI broker auto-creates, so a
+fresh topic resolves": on Kafka 4.0 (KRaft) with `auto.create.topics.enable=true` the metadata
+request that creates the topic answers `UNKNOWN_TOPIC_OR_PARTITION` itself — the topic exists, the
+subscribe failed, and a second subscribe on the same consumer succeeds (measured 3/3 on 4.0.0; 6/6
+topics created by failed subscribes on 4.3.1). V8-26 is therefore the ordinary auto-creating broker
+with nothing retrying. Also measured: the NATS server answers ANY config difference under an
+existing consumer name with `err_code 10148 "consumer already exists"` and an identical one
+idempotently, and adds its own `_nats.*` metadata keys, so "no metadata" in §3.2 reads as "no
+`setu.queue` key".
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -166,6 +181,14 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 
 ### 3.3 V8-26 — a Kafka topic that cannot be subscribed is named, and the consumer never crashes the process
 
+- **Correction:** the "no broker-owned retry loop" half below rests on the falsified §1 row. As
+  built, `subscribe` retries `UNKNOWN_TOPIC_OR_PARTITION` (found anywhere on a bounded `cause`
+  chain) with exponential backoff read from `KafkaOptions.retry` — kafkajs's own defaults, 5 / 300
+  ms / 2 / 30 s — then throws `KafkaTopicUnavailableError`. The budget is validated at construction
+  (`NaN` would loop forever), applies to an injected client too, and a disconnect during the wait
+  ends it. The real-Kafka named-error case uses a real kafkajs consumer with
+  `allowAutoTopicCreation: false` rather than a fabricated error, so the refusal comes from the
+  broker.
 - **Decision:** in `KafkaBroker.subscribe`, the `await consumer.subscribe(...)` is wrapped: an error
   whose `type === 'UNKNOWN_TOPIC_OR_PARTITION'` disconnects that consumer and throws a new exported
   `KafkaTopicUnavailableError(topic, groupId, cause)` whose message names the topic, the group, and
@@ -223,13 +246,13 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                       | Consumer                    | Behavior (per implementation)                                                                                             |
-| -------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `PubSubOptions.defaultQueue` (existing)      | `GcpPubSubBroker.subscribe` | now the PREFIX of `<defaultQueue>.<topic>`; default `'messaging-consumers'` unchanged                                     |
-| `SubscribeOptions.queue` (existing, Pub/Sub) | the real adapter's `open()` | used verbatim, and ALSO binding-checked on `ALREADY_EXISTS`                                                               |
-| `SubscribeOptions.queue` (existing, NATS)    | `NatsBroker.subscribe`      | encoded through `toJetStreamConsumerName` before reaching `jsm.consumers.add`                                             |
-| `KafkaOptions.retry` (new)                   | `resolveClient`             | forwarded to kafkajs; absent → kafkajs defaults; ignored for an injected `client`, documented                             |
-| `KafkaOptions.logger` (existing)             | the `run()` `.catch`        | first reader; absent → the rejection is swallowed after marking the consumer stopped (no console fallback — `no-console`) |
+| Option                                       | Consumer                     | Behavior (per implementation)                                                                                             |
+| -------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `PubSubOptions.defaultQueue` (existing)      | `GcpPubSubBroker.subscribe`  | now the PREFIX of `<defaultQueue>.<topic>`; default `'messaging-consumers'` unchanged                                     |
+| `SubscribeOptions.queue` (existing, Pub/Sub) | the real adapter's `open()`  | used verbatim, and ALSO binding-checked on `ALREADY_EXISTS`                                                               |
+| `SubscribeOptions.queue` (existing, NATS)    | `NatsBroker.subscribe`       | encoded through `toJetStreamConsumerName` before reaching `jsm.consumers.add`                                             |
+| `KafkaOptions.retry` (new)                   | `resolveClient`, `subscribe` | forwarded to kafkajs unless a `client` is injected; also the subscribe unknown-topic retry budget (**Correction**)        |
+| `KafkaOptions.logger` (existing)             | the `run()` `.catch`         | first reader; absent → the rejection is swallowed after marking the consumer stopped (no console fallback — `no-console`) |
 
 ## 5. Implementation files
 
@@ -287,6 +310,9 @@ suite is run twice against one instance to prove C1's advice is no longer needed
 - **Sequence.** Cut from `main` after M101a merges; the only shared file is none — M101a touches
   `service-bus-broker.ts` and `messaging-plugin.ts`, this plan does not — so the rebase is trivial,
   but the branch still waits so the CHANGELOG `Unreleased` section is edited in one order.
+- **Correction:** the probe below was run. On a non-auto-creating `apache/kafka:4.0.0` the error is
+  the bare `KafkaJSProtocolError` with `type: 'UNKNOWN_TOPIC_OR_PARTITION'` (no retry wrapper), so
+  the match needed no widening; the CI broker DOES produce the error, on the creating request.
 - **The real Kafka path cannot exhaust the budget.** The CI broker auto-creates, so the named error
   is proven with an injected factory; the raw escape the run saw came from a broker that did not
   auto-create (its image is not recorded in `smoke/ENVIRONMENT.md`). Before merging, the error path
@@ -315,3 +341,88 @@ suite is run twice against one instance to prove C1's advice is no longer needed
   (rejected in §3.2).
 - The Service Bus arm (RPC refused by name on the emulator — a documented limitation, not a row).
 - Every health and bounded-call row: M101a.
+
+## 10. Design security review (recorded after implementation, at the maintainer's direction)
+
+The committed-tree security audit of `0d3da3da` failed because this plan had no design review while
+the diff crosses a trust boundary (F1 below). This section is recorded after implementation — the
+M101a §11 precedent — and is not presented as having guided the design.
+
+**Flows reviewed.** A subscribe call carrying a caller-supplied topic and `SubscribeOptions.queue`;
+the broker's answer about resources it already holds — a Pub/Sub subscription's bound topic
+(`getMetadata`), a NATS consumer's `setu.queue` metadata, `durable_name` and `filter_subject`
+(`consumers.info`), a kafkajs error's `type` and `cause` chain — which decides whether a handler
+attaches to that resource; those values, and operator configuration, quoted into error messages and
+the Kafka consumer-crash log line; `KafkaOptions.retry`, commonly fed from environment variables;
+and startup failure and shutdown of every broker connection and consumer.
+
+**Assets.** Delivery isolation — a topic's messages reach only that topic's handler, and two
+independent queues never split one consumer's deliveries; availability, meaning a failed boot fails
+and exits and a clean stop exits; and the integrity of log records and error messages.
+
+**Attackers.** Another service, tenant or deployment sharing the GCP project, NATS account or Kafka
+cluster, or a misconfiguration, that has already created a colliding resource: a subscription bound
+to another topic or another project's same-named topic, a consumer under a name a dotted queue
+encodes to, a consumer for another topic. A hostile or buggy broker or SDK answer: a missing or
+non-string topic, CR/LF in a name, an error whose getter throws or whose `cause` chain cycles. An
+operator value that is not a finite number. A reader of logs and error bodies.
+
+**Approved budgets.** None on the delivery path. The Pub/Sub binding check costs one `getMetadata`
+RPC only when `createSubscription` answers `ALREADY_EXISTS`; the NATS check one `consumers.info`
+only on `10148`.
+
+**Obligations.**
+
+1. A subscription attaches only to a broker resource proven to belong to exactly this topic: Pub/Sub
+   compares the service's fully-qualified topic for equality with `projects/<projectId>/topics/<id>`
+   (or the caller's fully-qualified name); NATS requires the recorded `setu.queue` to equal the raw
+   queue AND the filter to equal the topic, accepting a consumer with no record only when its
+   durable name equals the raw queue. An unproven binding — absent, `null`, non-string, empty — is
+   refused (fail closed), never attached.
+2. Two distinct queues never share one NATS consumer: an encoding collision is refused in process
+   (before any server call) and across processes.
+3. Every broker-supplied or configuration-supplied string quoted in an error message or log line is
+   JSON-escaped, so CR/LF cannot forge a record; a refused numeric option is never echoed.
+4. Every numeric bound is refused at construction when it is not finite or is out of range —
+   `retries`, `initialRetryTime`, `multiplier`, `maxRetryTime`, and `factor` (kafkajs's jitter, held
+   to [0, 1]) — so a `NaN` from an unset variable can never disable or invert a bound.
+5. Every failure path releases what it connected: a consumer whose subscribe failed, the broker when
+   a declared subscription rejects `start()`, every consumer on `disconnect()` and `unsubscribe()`
+   (`disconnect()`, not `stop()`), every pending retry wait; and a `disconnect()` that races a
+   `subscribe()` at any point leaves no consumer running. A Kafka consumer is disconnected only once
+   its latest `run()` has settled — never under a group join, which kafkajs can no longer stop
+   afterwards — and the broker, not kafkajs, restarts a crashed consumer, so every restart is one a
+   release can cancel (its timer) or wait for (its `run()`). A released consumer handles no record.
+6. A hostile error value from the transport settles as a rejection — never a crash, an unhandled
+   rejection or a hang — with the `cause` walk bounded (5 links).
+7. A subscription name is bounded (255 characters) before any service call.
+
+**Findings.**
+
+| #   | Finding                                                                                                                                                                                            | Disposition                                                                                                                                                                                                                                                                        |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| V1  | Verification: a declared subscription rejecting `start()` left the broker connected; the process never exited                                                                                      | Fixed: obligation 5 (close hook registered after `connect()`)                                                                                                                                                                                                                      |
+| V2  | Verification: a fully-qualified Pub/Sub topic derived a default name containing `/`                                                                                                                | Fixed: the topic ID is used                                                                                                                                                                                                                                                        |
+| V3  | Code review: the Pub/Sub binding check accepted another project's same-named topic                                                                                                                 | Fixed: obligation 1 (exact comparison)                                                                                                                                                                                                                                             |
+| V4  | Code review: a retry wait held its timer through `disconnect()`                                                                                                                                    | Fixed: obligation 5                                                                                                                                                                                                                                                                |
+| V5  | Pre-existing: `KafkaBroker` `stop()`ped consumers without `disconnect()`; every Kafka app hung after `app.stop()`                                                                                  | Fixed at the maintainer's direction: obligation 5                                                                                                                                                                                                                                  |
+| F1  | Audit round 1: no design review in this plan                                                                                                                                                       | Closed by this section                                                                                                                                                                                                                                                             |
+| F2  | Audit round 1: "every field is validated" was false for `retry.factor`, which was forwarded unvalidated                                                                                            | Fixed: obligation 4                                                                                                                                                                                                                                                                |
+| O1  | Audit round 1, pre-existing: a `disconnect()` during `subscribe()`'s connect or first attempt let the subscription complete                                                                        | Fixed at the maintainer's direction: obligation 5                                                                                                                                                                                                                                  |
+| O2  | Audit round 1: the in-process NATS name map is not pruned on `unsubscribe()`                                                                                                                       | Not changed (an audit observation, not a finding): it fails closed — refuses, never misroutes                                                                                                                                                                                      |
+| O3  | Audit round 1: the Pub/Sub `getMetadata` call inherits the SDK default timeout                                                                                                                     | Not changed (an audit observation, not a finding): same bound as the `createSubscription` call before it                                                                                                                                                                           |
+| F3  | Audit round 2, pre-existing: a consumer whose group join was in flight survived `disconnect()`/`app.stop()` — kafkajs restarted it after the closed connections crashed the join                   | Fixed at the maintainer's direction: obligation 5 — release waits for the join (bounded 10 s); the restart refusal is superseded by N2's fix                                                                                                                                       |
+| N1  | Audit round 3: "bounded at 10 s" overstated — `consumer.disconnect()` after the bound waited on kafkajs's pending JoinGroup (45 s, 64 s)                                                           | Fixed: obligation 5 — a join outlasting the bound is no longer disconnected under; the release returns at 10 s and disconnects when the join settles. Measured: paused broker 64.2 → 10.0 s, 45 s join 45.3 → 10.0 s (exit 0 at 50.6 s); without the deferral the stop took 35.2 s |
+| N2  | Audit round 3, pre-existing: a stop after kafkajs's restart timer fired left the restarted consumer joining; it rejoined after `app.stop()`, consumed, and held the process                        | Fixed: obligation 5 — the broker owns restarts; on Kafka 4.0 at stop offsets 350/600/1500 ms: stop 10 s, join at ~49.5 s then disconnected, `Empty/0`, 0 delivered, exit 0                                                                                                         |
+| O5  | Audit round 3: the consumer-level `retry` replaced kafkajs's consumer default `retries: 5`                                                                                                         | Fixed: `retries: 5` is passed beside the hook, so the released behaviour is unchanged                                                                                                                                                                                              |
+| O6  | Audit round 3: one probe run waited forever for a crash                                                                                                                                            | Explained: kafkajs does not always crash on a broker restart; the probe's crash wait is now bounded and reports a non-informative run                                                                                                                                              |
+| O7  | Audit round 3: a member stayed `CompletingRebalance/1` after the bound path                                                                                                                        | Fixed with N1: the consumer leaves the group once its join settles. A member that CRASHED before a stop stays until its session timeout — it cannot leave a broker that is down                                                                                                    |
+| S1  | Self-review of the N2 fix: a second `restartOnFailure` replaced the tracked timer and left the first live, which would start an untracked consumer; a throwing `retryTime` getter escaped the hook | Fixed: obligations 5 and 6 — one pending restart at most, and the delay read falls back on a throw                                                                                                                                                                                 |
+| N3  | Audit round 4: the broker's restart took `initialRetryTime: 0` literally where kafkajs's `\|\| 300` does not — 1393 restarts in a 20 s outage                                                      | Fixed: the delay is read as kafkajs reads it (positive `retryTime`, else positive `initialRetryTime`, else 300 ms); the same outage now restarts 64 times (63 before this range)                                                                                                   |
+| O8  | Audit round 4: a client whose `run()` throws synchronously would throw inside the restart timer                                                                                                    | Not changed: kafkajs's `run()` is async; only a non-conforming injected client can do it                                                                                                                                                                                           |
+| O9  | Audit round 4: after a broker stop/start the process stays alive ~42 s past `app.stop()`                                                                                                           | Not changed: identical before this range                                                                                                                                                                                                                                           |
+| O10 | Audit round 4: a `run()` that never settles is never disconnected                                                                                                                                  | By design (obligation 5); documented in the README                                                                                                                                                                                                                                 |
+| O11 | Audit round 4: the released-consumer refusal never fired on real kafkajs on the deferred path                                                                                                      | Kept: it is load-bearing once restart ownership is lost (reverting both delivered 4 records after stop)                                                                                                                                                                            |
+| O12 | Round 4 fix pass, pre-existing: a first join against a just-started broker crashed with `KafkaJSGroupCoordinatorNotFound`, which kafkajs marks non-retriable, so no restart was consulted          | Not changed: kafkajs never restarts a non-retriable crash, before or after this range; the consumer stays down unreported                                                                                                                                                          |
+
+The N3 fix (`d015a9b4`) was not re-audited: the maintainer waived a fifth audit round.

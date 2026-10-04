@@ -12336,15 +12336,41 @@ fails the same way. Encode the durable name, and add a real-NATS RPC case — `n
 drives no `request()`.
 
 **V8-26 — a Kafka subscription to a not-yet-existing topic kills boot** with a raw
-`KafkaJSProtocolError` naming no topic. kafkajs already retries `UNKNOWN_TOPIC_OR_PARTITION` (five
-retries, about nine seconds, the error is marked retriable) — what escaped was budget exhaustion on
-a broker with auto-create off, so no second retry loop: throw a named error naming the topic (the
-`JetStreamStreamError` precedent), forward the existing `retry` option, and document pre-creation.
+`KafkaJSProtocolError` naming no topic. ~~kafkajs already retries `UNKNOWN_TOPIC_OR_PARTITION`~~ —
+**corrected by measurement in M101b**: kafkajs 2.2.4's `brokerPool.refreshMetadata` retries ONLY
+`LEADER_NOT_AVAILABLE` and `bail()`s every other error, so an unknown topic rejects in milliseconds,
+unwrapped, whatever its `retriable` flag says. And on Kafka 4.0 (KRaft) with
+`auto.create.topics.enable=true` the metadata request that CREATES the topic answers exactly
+`UNKNOWN_TOPIC_OR_PARTITION` — the topic exists a moment later. So the run's failure was not budget
+exhaustion on a non-auto broker; it was the ordinary auto-creating broker, with nothing retrying.
+The fix is therefore a bounded broker-owned retry of that one error within the forwarded `retry`
+budget, then a named error naming the topic (the `JetStreamStreamError` precedent), and documented
+pre-creation for a broker that does not auto-create.
 
 **Why they are one letter.** Each is a broker-specific naming or startup rule — a subscription's
 topic binding, a durable-name grammar, topic leadership at subscribe — that a permissive fake
 accepts. All three need the same deliverable: a real-backend case per arm that exercises RPC and a
 second topic, not one topic at a time. None is a regression; V8-2's arm was never run on `0.7.0`.
+
+**Shipped.** Pub/Sub derives `<defaultQueue>.<topic ID>` and, on `ALREADY_EXISTS`, reads the
+existing subscription's topic through a new `getMetadata` facade member and refuses one bound
+elsewhere with `PubSubSubscriptionBoundElsewhereError`. NATS encodes each character the client
+refuses as `_` + two hex digits, records the raw queue as `setu.queue` consumer metadata, and
+refuses a collision — in process, and across processes on the server's
+`10148 consumer already exists` (the code the old `'consumer name already exists'`/`'duplicate'`
+match never saw) — with `NatsConsumerNameCollisionError`. Kafka retries an unknown topic within
+`KafkaOptions.retry` (now validated and forwarded), then throws `KafkaTopicUnavailableError`, and a
+`run()` rejection reaches the logger. Each arm's real suite drives two topics and RPC in one
+application: real NATS, Kafka 4.0 (CI's image), and the Pub/Sub emulator run twice against one
+instance. Every negative control reproduced the run's own signature —
+`invalid durable name - durable name cannot contain '.'`, a fresh-topic boot dying with the topic
+named, and with both Pub/Sub halves reverted a cross-topic misdelivery on run 1 and the second run's
+`RequestTimeoutError`. Two deployment facts surfaced and are documented rather than fixed: a NATS
+account admits only ONE stream owning `rr.inbox.>`, and the consumer metadata needs NATS 2.10+.
+Verification then found a failed-start leak (the close hook registered after the declared
+subscriptions), a fully-qualified Pub/Sub topic deriving an illegal default name, a cross-project
+binding the suffix match accepted, and a pre-existing Kafka shutdown leak (`stop()` without
+`disconnect()`, which hung every Kafka app after `app.stop()`) — all fixed on this branch.
 
 ---
 
@@ -12980,7 +13006,7 @@ parameter are all network input reaching `Intl`.
 | 100e      | ✅     | auth-plugin — passkeys (WebAuthn) ([#391](https://github.com/setu-ts/setu-ts/pull/391))                                                                                                                                                       |
 | 100f      | ✅     | auth-plugin — SAML 2.0 service provider (PR #393)                                                                                                                                                                                             |
 | 101a      | ✅     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
-| 101b      | ⬜     | messaging-plugin — message transports that fail against the real broker                                                                                                                                                                       |
+| 101b      | ✅     | messaging-plugin — message transports that fail against the real broker (PR #404)                                                                                                                                                             |
 | 101c      | ⬜     | session + multi-tenancy + database + auth + http-security — tenancy and identity features that do not compose                                                                                                                                 |
 | 101d      | ✅     | sdk + telemetry + react-router + full-stack-starter — two sides of a service call that disagree ([#403](https://github.com/setu-ts/setu-ts/pull/403))                                                                                         |
 | 101e      | ⬜     | cli — CLI commands that write where or when they should not                                                                                                                                                                                   |

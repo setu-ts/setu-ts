@@ -180,6 +180,46 @@ MessagingPlugin({
 
 An existing stream is never touched, with or without `streamSubjects`.
 
+**Request-reply needs its subjects in the stream too.** A responder consumes the derived
+`rr.req.<topic>` subject and the requester's reply inbox is `rr.inbox.<uuid>`, so an RPC-capable
+stream must cover both — for example
+`streamSubjects: ['orders.>', 'rr.req.orders.>', 'rr.inbox.>']`. NATS refuses two streams whose
+subjects overlap, so only **one** stream per account can own `rr.inbox.>`: applications that use RPC
+on one server must share that stream.
+
+**Queue names become consumer names.** A `SubscribeOptions.queue` is the JetStream durable consumer
+name, and the nats client refuses `.`, `*`, `>`, `/`, `\`, space, tab, CR and LF in one before
+anything reaches the server — which is why the reply inbox's dotted `rr.inbox.<uuid>` queue made
+every `request()` fail. Each refused character is now escaped as `_` plus two hex digits
+(`orders.eu` → `orders_2eeu`), so the name stays readable in `nats consumer ls`; a queue with none
+of them is used unchanged, so no existing consumer is renamed. The consumer records its raw queue as
+`setu.queue` metadata, which needs **NATS 2.10 or later**.
+
+The escape is not injective: the legal queue `orders_2eeu` encodes like `orders.eu`. Rather than let
+two independent queues split one consumer's deliveries, `subscribe()` rejects with
+`NatsConsumerNameCollisionError` naming both queues — in one process, and across processes by
+reading the existing consumer's recorded queue. The same error refuses a queue reused across two
+topics, which used to attach silently to the first topic's consumer. A consumer created before this
+release carries no `setu.queue`; it is accepted when its durable name equals the requested queue and
+its filter matches the topic.
+
+### Pub/Sub subscriptions
+
+When `queue` is not supplied, each subscription is derived per topic — `<defaultQueue>.<topic ID>`
+(default prefix `messaging-consumers`; a fully-qualified `projects/<p>/topics/<id>` name contributes
+only its ID, because `/` is illegal in a subscription ID) — because a Pub/Sub subscription name is
+**project-global**: the old single shared default attached a second topic to the first topic's
+subscription, so one topic's handler consumed the other's messages with no log, and the RPC channel
+of one run attached to the previous run's. A caller-supplied `queue` is used verbatim, so competing
+consumers of one topic keep sharing a subscription.
+
+The broker creates a subscription when it is absent. When it already exists, the broker reads which
+topic it is bound to and refuses one bound elsewhere with `PubSubSubscriptionBoundElsewhereError`
+naming the subscription, its topic and the requested topic — pass a distinct `queue`, or delete the
+subscription. Pub/Sub reserves no character in a name, so unlike Kafka's colon the `.` separator is
+not recoverable by splitting. A derived or supplied name over 255 characters is refused at
+`subscribe()`. Topics must already exist; the broker creates none.
+
 ### Kafka consumer groups
 
 When `queue` is not supplied, each subscription's consumer group is derived per topic —
@@ -193,6 +233,38 @@ may not contain `:` (the broker refuses one at creation), while a group id may, 
 `defaultQueue: 'orders-eu'` + topic `created` and `defaultQueue: 'orders'` + topic `eu-created` both
 produce `orders-eu-created`, putting two differently-subscribed consumers into one group and
 restoring the empty-assignment failure this derivation exists to prevent.
+
+### Kafka topics
+
+The broker creates no topic. On a broker with `auto.create.topics.enable` (Kafka's default), the
+metadata request that creates a topic answers `UNKNOWN_TOPIC_OR_PARTITION` — measured on Kafka 4.0
+in KRaft mode — and kafkajs does not retry that answer, so a subscription to a topic that did not
+exist yet used to die at boot with a raw `KafkaJSProtocolError` naming no topic. `subscribe()` now
+retries that one error with exponential backoff within `retry` (kafkajs's defaults: 5 retries from
+300 ms, about 9 s in all), and the next attempt finds the new topic. When the topic is still unknown
+after the budget — a broker that does not auto-create — it rejects with `KafkaTopicUnavailableError`
+naming the topic and the consumer group; `retry: { retries: 0 }` names it at once. Pre-create the
+topic, or enable auto-creation.
+
+`retry` is also forwarded to `new Kafka({ retry })` for kafkajs's own retries, unless a `client` is
+injected. A consumer's `run()` can reject — kafkajs's crash handler rethrows a disconnect that fails
+— and the broker reports that through the logger instead of letting it become an unhandled
+rejection.
+
+A consumer that crashes with an error kafkajs would retry is restarted by the broker, after the
+crash's own `retryTime`, else `retry.initialRetryTime`, else 300 ms — read the way kafkajs's own
+restart reads them, so `initialRetryTime: 0` waits 300 ms rather than restarting at once. The
+`retry` read is `KafkaOptions.retry`, not an injected client's own. The broker declines kafkajs's
+restart in favour of its own so that stopping can always reach the restarted consumer.
+
+Stopping releases every consumer: `disconnect()` and `unsubscribe()` cancel a scheduled restart,
+wait up to 10 s for an in-flight group join to settle, then disconnect the consumer. A join still
+pending at 10 s is not disconnected under — that neither stops a join that later succeeds nor
+returns before kafkajs's pending JoinGroup is answered — so the release returns and the consumer is
+disconnected the moment its join settles or fails. Until then the process stays alive, and a record
+delivered in that window is left uncommitted for the group to redeliver. On a broker with Kafka's
+default `group.initial.rebalance.delay.ms` (3 s), stopping an application moments after it started
+takes a few seconds.
 
 ## Request-reply
 
@@ -638,80 +710,83 @@ publish — an operator who needs the signal can publish synthetically.
 
 ## Exports
 
-| Export                            | Kind      |
-| --------------------------------- | --------- |
-| `adaptPubSubModule`               | function  |
-| `adaptServiceBusModule`           | function  |
-| `causedBy`                        | function  |
-| `defineIntegrationEvent`          | function  |
-| `EventsMessagingBridge`           | function  |
-| `loadPubSubModule`                | function  |
-| `loadServiceBusModule`            | function  |
-| `MessagingPlugin`                 | function  |
-| `onIntegrationEvent`              | function  |
-| `publishIntegrationEvent`         | function  |
-| `ChainGateTimeoutError`           | class     |
-| `CloudBrokerUnavailableError`     | class     |
-| `GcpPubSubBroker`                 | class     |
-| `InMemoryBroker`                  | class     |
-| `IntegrationEventRejectedError`   | class     |
-| `JetStreamStreamError`            | class     |
-| `JetStreamUnavailableError`       | class     |
-| `JsonSerializer`                  | class     |
-| `KafkaBroker`                     | class     |
-| `MessagingNotSupportedError`      | class     |
-| `NatsBroker`                      | class     |
-| `RabbitMqBroker`                  | class     |
-| `RedisStreamsBroker`              | class     |
-| `RemoteHandlerError`              | class     |
-| `ReplyInboxUnavailableError`      | class     |
-| `RequestTimeoutError`             | class     |
-| `ServiceBusBroker`                | class     |
-| `CustomMessagingOptions`          | interface |
-| `EventsMessagingBridgeOptions`    | interface |
-| `IMessageBroker`                  | interface |
-| `INatsHeaders`                    | interface |
-| `InMemoryBrokerOptions`           | interface |
-| `IntegrationEventDefinition`      | interface |
-| `IntegrationEventEnvelope`        | interface |
-| `IntegrationEventMetadata`        | interface |
-| `IPubSubSubscription`             | interface |
-| `IPubSubTransport`                | interface |
-| `ISerializer`                     | interface |
-| `IServiceBusProcessErrorArgs`     | interface |
-| `IServiceBusReceiver`             | interface |
-| `IServiceBusSubscribeOptions`     | interface |
-| `IServiceBusSubscription`         | interface |
-| `IServiceBusTransport`            | interface |
-| `ISubscription`                   | interface |
-| `KafkaMessagingOptions`           | interface |
-| `KafkaOptions`                    | interface |
-| `MemoryMessagingOptions`          | interface |
-| `MessageMetadata`                 | interface |
-| `MessagingCommonOptions`          | interface |
-| `NatsMessagingOptions`            | interface |
-| `NatsOptions`                     | interface |
-| `PubSubOptions`                   | interface |
-| `PubSubSdkModule`                 | interface |
-| `RabbitMqMessagingOptions`        | interface |
-| `RabbitMqOptions`                 | interface |
-| `RedisStreamsMessagingOptions`    | interface |
-| `RedisStreamsOptions`             | interface |
-| `RequestOptions`                  | interface |
-| `ServiceBusOptions`               | interface |
-| `ServiceBusRetryOptions`          | interface |
-| `ServiceBusSdkModule`             | interface |
-| `SubscribeOptions`                | interface |
-| `SubscriptionDefinition`          | interface |
-| `IntegrationEventHandler`         | type      |
-| `IntegrationEventRejectionReason` | type      |
-| `MessageHandler`                  | type      |
-| `MessagingBrokerType`             | type      |
-| `MessagingPluginOptions`          | type      |
-| `PubSubMessagingOptions`          | type      |
-| `RequestHandler`                  | type      |
-| `ServiceBusMessagingOptions`      | type      |
-| `SubscriptionEntry`               | type      |
+| Export                                  | Kind      |
+| --------------------------------------- | --------- |
+| `adaptPubSubModule`                     | function  |
+| `adaptServiceBusModule`                 | function  |
+| `causedBy`                              | function  |
+| `defineIntegrationEvent`                | function  |
+| `EventsMessagingBridge`                 | function  |
+| `loadPubSubModule`                      | function  |
+| `loadServiceBusModule`                  | function  |
+| `MessagingPlugin`                       | function  |
+| `onIntegrationEvent`                    | function  |
+| `publishIntegrationEvent`               | function  |
+| `ChainGateTimeoutError`                 | class     |
+| `CloudBrokerUnavailableError`           | class     |
+| `GcpPubSubBroker`                       | class     |
+| `InMemoryBroker`                        | class     |
+| `IntegrationEventRejectedError`         | class     |
+| `JetStreamStreamError`                  | class     |
+| `JetStreamUnavailableError`             | class     |
+| `JsonSerializer`                        | class     |
+| `KafkaBroker`                           | class     |
+| `KafkaTopicUnavailableError`            | class     |
+| `MessagingNotSupportedError`            | class     |
+| `NatsBroker`                            | class     |
+| `NatsConsumerNameCollisionError`        | class     |
+| `PubSubSubscriptionBoundElsewhereError` | class     |
+| `RabbitMqBroker`                        | class     |
+| `RedisStreamsBroker`                    | class     |
+| `RemoteHandlerError`                    | class     |
+| `ReplyInboxUnavailableError`            | class     |
+| `RequestTimeoutError`                   | class     |
+| `ServiceBusBroker`                      | class     |
+| `CustomMessagingOptions`                | interface |
+| `EventsMessagingBridgeOptions`          | interface |
+| `IMessageBroker`                        | interface |
+| `INatsHeaders`                          | interface |
+| `InMemoryBrokerOptions`                 | interface |
+| `IntegrationEventDefinition`            | interface |
+| `IntegrationEventEnvelope`              | interface |
+| `IntegrationEventMetadata`              | interface |
+| `IPubSubSubscription`                   | interface |
+| `IPubSubTransport`                      | interface |
+| `ISerializer`                           | interface |
+| `IServiceBusProcessErrorArgs`           | interface |
+| `IServiceBusReceiver`                   | interface |
+| `IServiceBusSubscribeOptions`           | interface |
+| `IServiceBusSubscription`               | interface |
+| `IServiceBusTransport`                  | interface |
+| `ISubscription`                         | interface |
+| `KafkaMessagingOptions`                 | interface |
+| `KafkaOptions`                          | interface |
+| `MemoryMessagingOptions`                | interface |
+| `MessageMetadata`                       | interface |
+| `MessagingCommonOptions`                | interface |
+| `NatsMessagingOptions`                  | interface |
+| `NatsOptions`                           | interface |
+| `PubSubOptions`                         | interface |
+| `PubSubSdkModule`                       | interface |
+| `RabbitMqMessagingOptions`              | interface |
+| `RabbitMqOptions`                       | interface |
+| `RedisStreamsMessagingOptions`          | interface |
+| `RedisStreamsOptions`                   | interface |
+| `RequestOptions`                        | interface |
+| `ServiceBusOptions`                     | interface |
+| `ServiceBusRetryOptions`                | interface |
+| `ServiceBusSdkModule`                   | interface |
+| `SubscribeOptions`                      | interface |
+| `SubscriptionDefinition`                | interface |
+| `IntegrationEventHandler`               | type      |
+| `IntegrationEventRejectionReason`       | type      |
+| `MessageHandler`                        | type      |
+| `MessagingBrokerType`                   | type      |
+| `MessagingPluginOptions`                | type      |
+| `PubSubMessagingOptions`                | type      |
+| `RequestHandler`                        | type      |
+| `ServiceBusMessagingOptions`            | type      |
+| `SubscriptionEntry`                     | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

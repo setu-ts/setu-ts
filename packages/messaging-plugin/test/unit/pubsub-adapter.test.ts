@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { adaptPubSubModule } from '../../src/brokers/pubsub-broker.ts';
 import type { PubSubSdkModule } from '../../src/brokers/pubsub-broker.ts';
+import { PubSubSubscriptionBoundElsewhereError } from '../../src/errors.ts';
 
 describe('adaptPubSubModule', () => {
   function createFakeSdkModule(): PubSubSdkModule & {
@@ -44,10 +45,14 @@ describe('adaptPubSubModule', () => {
       >;
     };
     mod.topics = new Map();
+    let fakeProjectId = '';
     mod.subscriptions = new Map();
 
     mod.PubSub = class {
-      constructor(_options: { projectId: string; credentials?: unknown }) {}
+      constructor(options: { projectId: string; credentials?: unknown }) {
+        // The real SDK reports topics under the project it was built for.
+        fakeProjectId = options.projectId;
+      }
       topic(name: string) {
         if (!mod.topics.has(name)) {
           mod.topics.set(name, { messages: [], subscriptions: new Map() });
@@ -59,7 +64,26 @@ describe('adaptPubSubModule', () => {
             return Promise.resolve('msg-id');
           },
           createSubscription(subName: string) {
+            // M101b: names are project-global, as on the real service — an
+            // existing subscription answers ALREADY_EXISTS whichever topic it
+            // is bound to. The pre-M101b fake accepted every create.
+            const known = mod.subscriptions.get(subName);
+            if (known !== undefined && known.topic !== '') {
+              return Promise.reject({ code: 6, message: 'ALREADY_EXISTS' });
+            }
             topicData.subscriptions.set(subName, { onMessage: null });
+            // Bind the entry a `subscription()` handle may already hold, so
+            // that handle's `getMetadata` reads the binding.
+            if (known !== undefined) {
+              known.topic = name;
+            } else {
+              mod.subscriptions.set(subName, {
+                topic: name,
+                name: subName,
+                closed: false,
+                deleted: false,
+              });
+            }
             return Promise.resolve([]);
           },
         };
@@ -93,6 +117,10 @@ describe('adaptPubSubModule', () => {
           delete() {
             entry.deleted = true;
             return Promise.resolve();
+          },
+          getMetadata(): Promise<[{ topic?: string | null }]> {
+            // The service reports the fully-qualified topic name.
+            return Promise.resolve([{ topic: `projects/${fakeProjectId}/topics/${entry.topic}` }]);
           },
         };
       }
@@ -406,5 +434,144 @@ describe('adaptPubSubModule', () => {
 
     const entry = sdk.subscriptions.get('sub-close');
     expect(entry!.closed).toBe(true);
+  });
+  describe('binding check on ALREADY_EXISTS (M101b, V8-2)', () => {
+    it('attaches to an existing subscription bound to the requested topic', async () => {
+      const sdk = createFakeSdkModule();
+      const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+      await transport.createSubscription('orders', 'orders-sub');
+
+      // The second create answers ALREADY_EXISTS; the metadata names `orders`.
+      await expect(transport.open('orders', 'orders-sub', () => {})).resolves.toBeDefined();
+    });
+
+    it('accepts a fully-qualified requested topic', async () => {
+      const sdk = createFakeSdkModule();
+      const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+      await transport.createSubscription('orders', 'orders-sub');
+
+      await expect(
+        transport.open('projects/demo/topics/orders', 'orders-sub', () => {}),
+      ).resolves.toBeDefined();
+    });
+
+    it('refuses an existing subscription bound to ANOTHER topic, naming all three', async () => {
+      const sdk = createFakeSdkModule();
+      const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+      // Topic A owns the name, as `messaging-consumers` did before M101b.
+      await transport.createSubscription('orders', 'shared');
+
+      const err = await transport.open('payments', 'shared', () => {}).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
+      const named = err as PubSubSubscriptionBoundElsewhereError;
+      expect(named.subscription).toBe('shared');
+      expect(named.boundTopic).toBe('projects/demo/topics/orders');
+      expect(named.requestedTopic).toBe('payments');
+      expect(named.message).toContain('"shared"');
+      expect(named.message).toContain('"projects/demo/topics/orders"');
+      expect(named.message).toContain('"payments"');
+      expect(named.message).toContain('SubscribeOptions.queue');
+      expect(named.message).toContain('delete the existing subscription');
+    });
+
+    it('does not treat a topic whose name merely ends the same as a match', async () => {
+      const sdk = createFakeSdkModule();
+      const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+      await transport.createSubscription('eu-orders', 'shared');
+
+      // `/topics/orders` is not a suffix of `/topics/eu-orders` — the slash
+      // anchors the comparison to a whole topic ID.
+      await expect(transport.open('orders', 'shared', () => {})).rejects.toBeInstanceOf(
+        PubSubSubscriptionBoundElsewhereError,
+      );
+    });
+
+    it('refuses a subscription bound to a same-named topic in ANOTHER project', async () => {
+      // Pub/Sub allows cross-project subscriptions, so `/topics/orders` alone
+      // does not identify the topic: a short `orders` means THIS project's.
+      const mod = {
+        PubSub: class {
+          topic() {
+            return { createSubscription: () => Promise.reject({ code: 6 }) };
+          }
+          subscription() {
+            return {
+              on: () => {},
+              close: () => Promise.resolve(),
+              delete: () => Promise.resolve(),
+              getMetadata: () => Promise.resolve([{ topic: 'projects/other/topics/orders' }]),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      } as unknown as PubSubSdkModule;
+      const transport = adaptPubSubModule(mod, { projectId: 'demo' });
+
+      const err = await transport.open('orders', 'sub', () => {}).then(
+        () => null,
+        (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
+      );
+      expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
+      expect(err?.boundTopic).toBe('projects/other/topics/orders');
+    });
+
+    it('refuses when the service reports no topic, since the binding is unproven', async () => {
+      const mod = {
+        PubSub: class {
+          topic() {
+            return { createSubscription: () => Promise.reject({ code: 6 }) };
+          }
+          subscription() {
+            return {
+              on: () => {},
+              close: () => Promise.resolve(),
+              delete: () => Promise.resolve(),
+              getMetadata: () => Promise.resolve([{ topic: null }]),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      } as unknown as PubSubSdkModule;
+      const transport = adaptPubSubModule(mod, { projectId: 'demo' });
+
+      const err = await transport.open('orders', 'sub', () => {}).then(
+        () => null,
+        (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
+      );
+      expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
+      expect(err?.boundTopic).toBe('(unknown)');
+    });
+
+    it('propagates a failing metadata read rather than attaching blindly', async () => {
+      const failure = new Error('permission denied reading subscription');
+      const mod = {
+        PubSub: class {
+          topic() {
+            return { createSubscription: () => Promise.reject({ code: 6 }) };
+          }
+          subscription() {
+            return {
+              on: () => {},
+              close: () => Promise.resolve(),
+              delete: () => Promise.resolve(),
+              getMetadata: () => Promise.reject(failure),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      } as unknown as PubSubSdkModule;
+      const transport = adaptPubSubModule(mod, { projectId: 'demo' });
+
+      await expect(transport.open('orders', 'sub', () => {})).rejects.toBe(failure);
+    });
   });
 });

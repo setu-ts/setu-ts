@@ -8,6 +8,7 @@ import type { FakeNatsOptions } from '../fixtures/fake-nats-client.ts';
 import {
   JetStreamStreamError,
   JetStreamUnavailableError,
+  NatsConsumerNameCollisionError,
   RequestTimeoutError,
 } from '../../src/errors.ts';
 
@@ -993,6 +994,179 @@ describe('NatsBroker request-reply delegation', () => {
       caught = err;
     }
     expect(caught).toBeInstanceOf(RequestTimeoutError);
+    await broker.disconnect();
+  });
+});
+
+describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
+  type AddConfig = {
+    name: string;
+    durable_name: string;
+    filter_subject: string;
+    metadata: Record<string, string>;
+  };
+
+  async function connected(options: FakeNatsOptions = {}) {
+    const connection = new FakeNatsConnection(options);
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: connection,
+    });
+    await broker.connect();
+    const jsm = await connection.jetstreamManager();
+    const adds = () =>
+      jsm.calls.filter((c) => c.method === 'consumers.add').map((c) => c.args[1] as AddConfig);
+    return { broker, jsm, adds };
+  }
+
+  async function rejection(promise: Promise<unknown>): Promise<unknown> {
+    return await promise.then(() => null, (e: unknown) => e);
+  }
+
+  it('encodes a dotted queue into name AND durable_name, keeping the dotted subject', async () => {
+    const { broker, adds } = await connected();
+
+    await broker.subscribe('orders.created', () => {}, { queue: 'rr.inbox.abc' });
+
+    expect(adds()).toEqual([{
+      name: 'rr_2einbox_2eabc',
+      durable_name: 'rr_2einbox_2eabc',
+      filter_subject: 'orders.created',
+      ack_policy: 'explicit',
+      metadata: { 'setu.queue': 'rr.inbox.abc' },
+    }]);
+    await broker.disconnect();
+  });
+
+  it('subscribes the same queue twice without refusing it (idempotent create)', async () => {
+    const { broker, adds } = await connected();
+
+    await broker.subscribe('orders', () => {}, { queue: 'orders.eu' });
+    await broker.subscribe('orders', () => {}, { queue: 'orders.eu' });
+
+    expect(adds()).toHaveLength(2);
+    await broker.disconnect();
+  });
+
+  it('refuses a second queue that encodes to the same name, before any add', async () => {
+    const { broker, adds } = await connected();
+    await broker.subscribe('orders', () => {}, { queue: 'orders.eu' });
+
+    const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'orders_2eeu' }));
+
+    expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    const named = err as NatsConsumerNameCollisionError;
+    expect(named.queue).toBe('orders_2eeu');
+    expect(named.existingQueue).toBe('orders.eu');
+    expect(named.consumerName).toBe('orders_2eeu');
+    expect(named.message).toContain('"orders_2eeu"');
+    expect(named.message).toContain('"orders.eu"');
+    expect(adds()).toHaveLength(1);
+    await broker.disconnect();
+  });
+
+  it('refuses a consumer another process created for a different queue', async () => {
+    const { broker, jsm, adds } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: {
+          name: 'orders_2eeu',
+          durable_name: 'orders_2eeu',
+          filter_subject: 'orders',
+          metadata: { 'setu.queue': 'orders.eu' },
+        },
+      }],
+    });
+
+    const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'orders_2eeu' }));
+
+    expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    expect((err as NatsConsumerNameCollisionError).existingQueue).toBe('orders.eu');
+    expect(adds()).toHaveLength(1);
+    expect(jsm.calls.some((c) => c.method === 'consumers.info')).toBe(true);
+    await broker.disconnect();
+  });
+
+  it('refuses a queue reused across topics instead of attaching to the first topic', async () => {
+    const { broker } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: {
+          name: 'workers',
+          durable_name: 'workers',
+          filter_subject: 'orders',
+          metadata: { 'setu.queue': 'workers' },
+        },
+      }],
+    });
+
+    const err = await rejection(broker.subscribe('payments', () => {}, { queue: 'workers' }));
+
+    expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    await broker.disconnect();
+  });
+
+  it('attaches to a pre-M101b consumer whose durable name IS the raw queue', async () => {
+    const { broker, adds } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: { name: 'my-consumer', durable_name: 'my-consumer', filter_subject: 'orders' },
+      }],
+    });
+
+    await broker.subscribe('orders', () => {}, { queue: 'my-consumer' });
+
+    // The create differs only by the new metadata, so the server answers
+    // "already exists"; the legacy consumer is accepted, with no second add.
+    expect(adds()).toHaveLength(1);
+    await broker.disconnect();
+  });
+
+  it('refuses a pre-M101b consumer whose durable name is a DIFFERENT raw queue', async () => {
+    const { broker, jsm, adds } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: { name: 'orders_2eeu', durable_name: 'orders_2eeu', filter_subject: 'orders' },
+      }],
+    });
+
+    const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'orders.eu' }));
+
+    expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    expect((err as NatsConsumerNameCollisionError).existingQueue).toBe('orders_2eeu');
+    expect(adds()).toHaveLength(1);
+    expect(jsm.calls.filter((c) => c.method === 'consumers.info')).toHaveLength(1);
+    await broker.disconnect();
+  });
+
+  it('recognises "already exists" by message when no api_error code is attached', async () => {
+    const { broker, jsm } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: {
+          name: 'q',
+          durable_name: 'q',
+          filter_subject: 'orders',
+          metadata: { 'setu.queue': 'other' },
+        },
+      }],
+    });
+    for (const message of ['consumer already exists', 'duplicate consumer']) {
+      jsm.consumers.add = () => Promise.reject(new Error(message));
+      const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'q' }));
+      expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    }
+    await broker.disconnect();
+  });
+
+  it('rethrows any other consumer-create failure unchanged', async () => {
+    const { broker, jsm } = await connected();
+    const failure = new Error('stream not found');
+    jsm.consumers.add = () => Promise.reject(failure);
+    expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'q' }))).toBe(failure);
+
+    const thrown = 'a bare string rejection';
+    jsm.consumers.add = () => Promise.reject(thrown);
+    expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'q' }))).toBe(thrown);
     await broker.disconnect();
   });
 });

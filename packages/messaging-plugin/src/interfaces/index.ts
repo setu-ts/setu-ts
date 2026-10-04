@@ -448,6 +448,8 @@ export interface KafkaMessagingOptions extends MessagingCommonOptions {
   clientId?: string;
   defaultQueue?: string;
   replyTopic?: string;
+  /** kafkajs retry policy; see {@linkcode KafkaOptions.retry}. */
+  retry?: KafkaOptions['retry'];
 }
 
 /**
@@ -714,10 +716,46 @@ export interface KafkaOptions {
   /** Default consumer group name. */
   defaultQueue?: string;
   /**
+   * Retry budget (M101b). Forwarded verbatim to `new Kafka({ retry })`, where
+   * kafkajs uses it for its own retries; and read by the broker to retry a
+   * subscription whose topic the Kafka broker reports unknown.
+   *
+   * kafkajs does not retry `UNKNOWN_TOPIC_OR_PARTITION` (its metadata retrier
+   * gives up on every error but `LEADER_NOT_AVAILABLE`), and a KRaft broker
+   * with `auto.create.topics.enable` answers exactly that to the request that
+   * creates the topic — measured on Kafka 4.0, the next attempt succeeds. So
+   * `subscribe()` retries that one error with exponential backoff: `retries`
+   * attempts after the first, waiting `initialRetryTime` and growing by
+   * `multiplier` up to `maxRetryTime` — kafkajs's defaults, 5 / 300 ms / 2 /
+   * 30 s, about 9 s in all. A topic still unknown after that rejects with
+   * `KafkaTopicUnavailableError`; `retries: 0` names it at once. Every field
+   * is validated at construction, `factor` (kafkajs's jitter) included, held
+   * to [0, 1]. The forwarding to kafkajs is skipped when
+   * {@link client} is injected (the application built that `Kafka`); the
+   * subscribe retry applies either way.
+   */
+  retry?: {
+    /** Maximum wait between retries, in ms (kafkajs default 30000). */
+    maxRetryTime?: number;
+    /** Initial wait, in ms (kafkajs default 300). */
+    initialRetryTime?: number;
+    /** Randomization factor, between 0 and 1 (kafkajs default 0.2). */
+    factor?: number;
+    /** Exponential growth factor (kafkajs default 2). */
+    multiplier?: number;
+    /** Maximum number of retries (kafkajs default 5). */
+    retries?: number;
+  };
+  /**
    * Topic every request-reply response is published to and read back from.
    *
    * Kafka topics are durable cluster resources and this broker creates none, so
    * the topic must already exist (or `auto.create.topics.enable` must be on).
+   * The same holds for every SUBSCRIBED topic: on a broker that does not
+   * auto-create, subscribing a topic that does not exist makes `subscribe()`
+   * (and so `start()` for a declared subscription) reject, once the
+   * {@link retry} budget is spent, with `KafkaTopicUnavailableError` naming
+   * the topic and the consumer group.
    * Each broker instance reads it under its own consumer group, so every
    * instance sees every reply and discards those it did not originate — give a
    * high-traffic service its own reply topic to bound that fan-out.
@@ -725,7 +763,11 @@ export interface KafkaOptions {
    * @defaultValue `'messaging.replies'`
    */
   replyTopic?: string;
-  /** Optional logger for error reporting. */
+  /**
+   * Optional logger. Reads a consumer whose `consumer.run()` rejects —
+   * kafkajs's crash handler rethrows a disconnect that fails — which would
+   * otherwise be an unhandled rejection.
+   */
   logger?: { error: (msg: string) => void };
 }
 

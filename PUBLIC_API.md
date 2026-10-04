@@ -5045,11 +5045,22 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
    * (M90d / X28-2). Supplied and the stream is absent → the broker creates it
    * with exactly these subjects. Absent and the stream is absent → startup
    * rejects with `JetStreamStreamError`, naming the stream and both remedies.
-   * An existing stream is never touched either way.
+   * An existing stream is never touched either way. An RPC-capable stream must
+   * also cover `rr.req.<topic>` and `rr.inbox.>` (M101b); NATS refuses two
+   * streams with overlapping subjects, so one stream per account owns
+   * `rr.inbox.>`.
    * @since 0.5.0
    */
   streamSubjects?: readonly string[];
-  /** Default consumer group / queue name. */
+  /**
+   * Default consumer group / queue name. A queue becomes the JetStream durable
+   * consumer name with each character the nats client refuses (`.`, `*`, `>`,
+   * `/`, `\`, whitespace) escaped as `_` + two hex digits — `orders.eu` →
+   * `orders_2eeu` (M101b). A queue whose encoding collides with another queue's,
+   * or that is reused across topics, rejects `subscribe()` with
+   * `NatsConsumerNameCollisionError`. The raw queue is recorded as consumer
+   * metadata, which needs NATS 2.10+.
+   */
   defaultQueue?: string;
 }
 
@@ -5074,6 +5085,25 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
   defaultQueue?: string;
   /** Request-reply topic; must already exist on the broker. @defaultValue 'messaging.replies' */
   replyTopic?: string;
+  /**
+   * Retry budget (M101b). Forwarded to `new Kafka({ retry })` unless `client` is
+   * injected, and read by `subscribe()` to retry `UNKNOWN_TOPIC_OR_PARTITION` —
+   * which a KRaft broker answers to the request that auto-creates a topic, and
+   * which kafkajs does not retry. Exponential: `retries` after the first attempt,
+   * from `initialRetryTime`, growing by `multiplier` up to `maxRetryTime`
+   * (kafkajs's defaults: 5 / 300 ms / 2 / 30 000 ms). Still unknown after the
+   * budget → `KafkaTopicUnavailableError`. Every field is validated at
+   * construction, `factor` (kafkajs's jitter) included, held to [0, 1].
+   * @since 0.9.0
+   */
+  retry?: {
+    maxRetryTime?: number;
+    initialRetryTime?: number;
+    /** kafkajs's jitter, between 0 and 1. */
+    factor?: number;
+    multiplier?: number;
+    retries?: number;
+  };
 }
 
 // ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
@@ -5085,6 +5115,16 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   projectId?: string;
   /** Service-account credentials. Optional when client is injected. */
   credentials?: unknown;
+  /**
+   * Prefix of the per-topic default subscription. Since M101b a subscription with
+   * no `queue` uses `<defaultQueue>.<topic ID>` (a fully-qualified topic name
+   * contributes only its ID): Pub/Sub subscription names are
+   * project-global, so the previously shared name attached a second topic to the
+   * first topic's subscription. An existing subscription bound to another topic is
+   * refused with `PubSubSubscriptionBoundElsewhereError`; a name over 255
+   * characters is refused at `subscribe()`.
+   * @defaultValue 'messaging-consumers'
+   */
   defaultQueue?: string;
   replyTopic?: string;
 }
@@ -5098,6 +5138,7 @@ interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
   credentials?: unknown;
   /** Mutually exclusive with the injected arm — client?: never. */
   client?: never;
+  /** Per-topic default subscription prefix — see the injected arm. @defaultValue 'messaging-consumers' */
   defaultQueue?: string;
   replyTopic?: string;
 }
@@ -5346,15 +5387,26 @@ configuration verdict this broker reaches on its own, so that one arm has no `ca
 | `JetStreamUnavailableError` | `connect()` finds no JetStream on the server — start it with the `-js` flag. The raw `503` the server answered is the `cause`.                                   |
 | `JetStreamStreamError`      | The stream is absent and `streamSubjects` was not supplied (the message names both remedies), or the server refused the stream read/create (`cause` carries it). |
 
+Three more name failures the real brokers impose and a permissive fake accepts (M101b). Each is
+thrown by `subscribe()`, so a declared subscription rejects `start()` with it:
+
+| Error                                   | Thrown when                                                                                                                                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PubSubSubscriptionBoundElsewhereError` | The Pub/Sub subscription already exists and is bound to another topic. Carries `subscription`, `boundTopic` (fully qualified, or `'(unknown)'` when the service reported none) and `requestedTopic`.                     |
+| `NatsConsumerNameCollisionError`        | The queue's JetStream consumer name already belongs to a different queue (an encoding collision such as `orders.eu` / `orders_2eeu`) or a different topic. Carries `queue`, `existingQueue` and `consumerName`.          |
+| `KafkaTopicUnavailableError`            | The Kafka broker still reports the topic unknown after the `retry` budget — it does not auto-create. Carries `topic` and `groupId`; the kafkajs `UNKNOWN_TOPIC_OR_PARTITION` error is the `cause`. Pre-create the topic. |
+
 > **Broker support.** Request-reply is available on **all supported broker types** — in-memory,
 > Redis Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which
 > delegates to the injected `IMessageBroker`).
 >
 > **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
 > default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
-> either pre-create it or enable `auto.create.topics.enable`. Each broker instance reads that topic
-> under its own consumer group, so every instance receives every reply and discards those it did not
-> originate; give a high-traffic service its own `replyTopic` to bound that fan-out.
+> either pre-create it or enable `auto.create.topics.enable`; the same holds for every subscribed
+> topic, whose absence on a non-auto-creating broker rejects with `KafkaTopicUnavailableError`. Each
+> broker instance reads that topic under its own consumer group, so every instance receives every
+> reply and discards those it did not originate; give a high-traffic service its own `replyTopic` to
+> bound that fan-out.
 
 > **RPC and pub/sub are separate channels.** `request`/`respond` travel on a channel derived from
 > the topic, not on the topic itself. A plain `subscribe('orders', …)` therefore never observes an
@@ -5434,7 +5486,10 @@ export {
   CloudBrokerUnavailableError,
   JetStreamStreamError,
   JetStreamUnavailableError,
+  KafkaTopicUnavailableError,
   MessagingNotSupportedError,
+  NatsConsumerNameCollisionError,
+  PubSubSubscriptionBoundElsewhereError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
