@@ -5633,6 +5633,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   MongoDB, DynamoDB and cursor-paging surfaces of `database-plugin` tagged `0.1.0` while shipping in
   `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
   registry rather than guessed) — complete (PR #400)
+- **Milestone 101b** (`packages/messaging-plugin` — message transports that fail against the real
+  broker): three arms that passed every fake-backed test and failed on first contact with the real
+  server. **V8-2:** a Pub/Sub subscription with no `queue` is named per topic,
+  `<defaultQueue>.<topic>` (breaking), and an existing subscription bound to another topic — read
+  through a new `getMetadata` facade member — is refused with
+  `PubSubSubscriptionBoundElsewhereError` rather than attached to. **V8-6:** a NATS queue is encoded
+  into a legal JetStream consumer name (`.` → `_2e`, the nine characters the client refuses held as
+  data; a legal queue is unchanged), the raw queue is recorded as `setu.queue` consumer metadata
+  (NATS 2.10+), and an encoding collision or a queue reused across topics rejects with
+  `NatsConsumerNameCollisionError` — in process, and across processes on the server's
+  `10148 consumer already exists`, which the old `'consumer name already exists'`/`'duplicate'`
+  match never saw. **V8-26:** **the plan's premise was falsified by measurement** — kafkajs retries
+  only `LEADER_NOT_AVAILABLE`, and a KRaft broker WITH auto-creation answers
+  `UNKNOWN_TOPIC_OR_PARTITION` to the request that creates the topic, so `subscribe()` now retries
+  that one error within a validated, forwarded `KafkaOptions.retry` (kafkajs's defaults), then
+  throws `KafkaTopicUnavailableError`; a `run()` rejection reaches the logger. Real suites drive two
+  topics and RPC in one app on real NATS, Kafka 4.0.0 and the Pub/Sub emulator (run twice on one
+  instance, striking the doc's restart advice that masked V8-2); every negative control reproduced
+  the run's own signature — complete (PR pending).
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
