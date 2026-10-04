@@ -80,9 +80,11 @@ All notable changes to this project are documented here. The format follows
 - **`cloudflare-plugin`'s `cacheApiMiddleware` keys a localized request on its locale (M103).** Its
   key is a URL string, which the Cache API matches with no request headers, so `Vary` could never
   separate locales there and one locale's page was served to everyone for the TTL. When
-  `ctx.request.locale` is set, the default key is the URL with a `setu-cache-locale` parameter (on
-  the key only; a client-supplied one is overwritten). Without a locale the key is unchanged. A
-  custom `key` is untouched and must include the locale itself.
+  `ctx.request.locale` is set, the default key is the URL with a `setu-cache-locale` parameter
+  appended last (on the key only; a client-supplied copy stays in the key, so it can neither reach
+  another locale's entry nor poison the canonical one). Without a locale the key is unchanged. As
+  for `cache-plugin`, a global registration must sit above priority 45 and a handler-time
+  `replaceLocale` is not reflected. A custom `key` is untouched and must include the locale itself.
 - **`cache-plugin` keys on the resolved locale (M103).** The cache key gains a length-prefixed
   locale segment from `ctx.request.locale`, between the tenant and `vary` segments, so one locale's
   cached body is never served to another. An application without the localization plugin has no

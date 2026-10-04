@@ -72,6 +72,10 @@ describe('LocalizationPlugin — construction refusals', () => {
         '/i18n?x',
         '/a//b',
         '/i18n\r\n',
+        '/.',
+        '/..',
+        '/i18n/..',
+        '/./i18n',
         7 as unknown as string,
       ]
     ) {

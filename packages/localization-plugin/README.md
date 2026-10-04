@@ -154,8 +154,9 @@ locale is final:
 
 `@setu-ts/cloudflare-plugin`'s `cacheApiMiddleware` keys on a URL, which the platform matches with
 no request headers — `Vary` cannot separate its entries — so its default key carries the resolved
-locale as a `setu-cache-locale` parameter (on the key, never the request). A custom `key` replaces
-that and must include `ctx.request.locale` itself.
+locale as a `setu-cache-locale` parameter (on the key, never the request), under the same two
+conditions as above — registered above 45 when global, and not reflecting a handler-time
+`replaceLocale`. A custom `key` replaces that and must include `ctx.request.locale` itself.
 
 `Vary` protects the caches you do not configure: browsers, proxies and CDNs that honour it.
 

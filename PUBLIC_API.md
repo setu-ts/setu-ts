@@ -12656,9 +12656,13 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
 - **The default key carries the resolved locale (M103).** The key is a URL string, which the
   platform matches with no request headers, so `Vary` cannot separate entries in this cache. When
   `ctx.request.locale` is set, the default key is the request URL with a `setu-cache-locale`
-  parameter naming it (`set`, so a client-supplied one cannot address another locale's entry);
-  without a locale the key is the URL unchanged. A custom `key` replaces this and must include the
-  locale itself on a localized route.
+  parameter naming it APPENDED last — never `set`, which would strip a client-supplied copy from the
+  key while the handler still saw it and let one client fill the canonical entry (cache poisoning);
+  without a locale the key is the URL unchanged. The locale is the one present when the middleware
+  runs, so the same two conditions as `cache-plugin` apply: a global registration must sit above
+  priority 45, and a `replaceLocale` made inside the handler is not reflected — such a route must
+  not be cached here. A custom `key` replaces this and must include the locale itself on a localized
+  route.
 - **The platform's cache refusals are checked before the write, not discovered by it.**
   `caches.default.put` throws for a non-GET request, status 206, `Vary: *`, and an uncleared
   `Set-Cookie`; `assessCacheability` reports each as a `CacheRefusal` and the middleware skips the

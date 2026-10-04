@@ -5659,8 +5659,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   URL-string key is matched with no request headers, so `Vary` could not help — its default key now
   carries the locale), the catalogue route marking a session `Set-Cookie` response `public` (default
   now `private`), an overstated no-echo claim, blanket test permissions, and base paths that
-  registered dead or root routes; all fixed. All `src` files at 100% branch/function/line; thirteen
-  negative controls observed failing — complete (PR pending)
+  registered dead or root routes; all fixed. The re-audit found the Cloudflare fix had itself
+  introduced web cache poisoning — `searchParams.set` stripped a client's copy of the key parameter
+  from the key while the handler still saw it — so the parameter is appended instead; two Low
+  findings were fixed with it. All `src` files at 100% branch/function/line; fifteen negative
+  controls observed failing — complete (PR pending)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

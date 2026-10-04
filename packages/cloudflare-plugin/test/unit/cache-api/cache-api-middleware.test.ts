@@ -120,14 +120,21 @@ describe('cacheApiMiddleware — miss', () => {
     ]);
   });
 
-  it('cannot be steered into another locale entry by a client-supplied parameter', async () => {
+  it('keeps a client-supplied locale parameter IN the key, so it cannot poison or steer', async () => {
+    // `set` would strip the client's copy from the key while the handler still
+    // sees it, so `/cart?setu-cache-locale=x` would fill the canonical `/cart`
+    // entry with a response reflecting the attacker's input.
     const cache = new FakeCacheApi();
-    const ctx = contextFor('https://example.test/cart?setu-cache-locale=en', { locale: 'de' });
-    await cacheApiMiddleware({ cache })(ctx, () => {
-      ctx.response.json({});
+    const attacker = contextFor('https://example.test/cart?setu-cache-locale=en', { locale: 'de' });
+    await cacheApiMiddleware({ cache })(attacker, () => {
+      attacker.response.json({ link: attacker.request.url });
       return Promise.resolve();
     });
-    expect(cache.matches).toEqual(['https://example.test/cart?setu-cache-locale=de']);
+    const key = 'https://example.test/cart?setu-cache-locale=en&setu-cache-locale=de';
+    expect(cache.matches).toEqual([key]);
+    // Neither the canonical German entry nor the English one.
+    expect(key).not.toBe('https://example.test/cart?setu-cache-locale=de');
+    expect(key).not.toBe('https://example.test/cart?setu-cache-locale=en');
   });
 
   it('honours a custom key function on BOTH the read and the write', async () => {

@@ -12801,8 +12801,7 @@ found the Cloudflare Cache API middleware keyed on a bare URL — which the plat
 request headers, so `Vary` could not separate locales — and its default key now carries the locale.
 The catalogue route serves each locale overlaid on the default, so a browser falls back exactly as
 `t()` does. The third sealed `IRequest` field costs about 170 ns per request (measured against
-`develop`), inside the 1 µs threshold. Thirteen negative controls were observed failing and
-reverted.
+`develop`), inside the 1 µs threshold. Fifteen negative controls were observed failing and reverted.
 
 ## Progress Tracking
 

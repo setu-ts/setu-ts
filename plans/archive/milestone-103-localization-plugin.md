@@ -643,10 +643,25 @@ text is left as written; this section is authoritative where they disagree.
   control characters (each a dead route) and the root (which claims every unrouted single-segment
   `GET`); it now accepts only plain path segments.
 
-Thirteen negative controls were each observed failing and reverted: the locale segment dropped from
+**Found by the Step 7 re-audit (fresh agent, `23a670df`), fixed on this branch:**
+
+- **N1 (Medium) — the F1 fix made `setu-cache-locale` an unkeyed input.** It used
+  `searchParams.set`, which deleted a client-supplied copy from the KEY while the handler still saw
+  it, so `/article?setu-cache-locale=x` and `/article` shared one entry and any client could fill
+  the canonical entry with a response reflecting its own input — web cache poisoning, introduced by
+  the review fix itself. The parameter is now APPENDED: the client's copy stays in the key and the
+  resolved locale is always last. The test that had pinned `set` as intended now pins the opposite.
+- **N2 (Low)** — the Cloudflare key guarantee was documented without the two ordering conditions
+  `cache-plugin`'s carries (global above 45; a handler-time `replaceLocale` is not reflected); all
+  five sites now state them.
+- **N3 (Low)** — `basePath` accepted `.`/`..` segments, which URL parsing removes from every
+  request, so the route was unreachable; they are refused.
+
+Fifteen negative controls were each observed failing and reverted: the locale segment dropped from
 the cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
 ignoring `q=0`, the header split before slicing, `Content-Language` written from the initial locale,
 a prototype lookup in the formatter, the warned-key cap removed, `Cookie` dropped from `Vary`, and
 the catalogue route's default overlay dropped, the `cacheControl` probe removed, and the candidate
-length cap removed; and, after the audit, the Cloudflare locale key reverted to the bare URL. The
-planted `@setu-ts/common` value import is a permanent negative control inside the e2e suite.
+length cap removed; and, after the audits, the Cloudflare locale key reverted to the bare URL,
+`append` reverted to `set`, and the dot-segment guard removed. The planted `@setu-ts/common` value
+import is a permanent negative control inside the e2e suite.

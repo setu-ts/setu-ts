@@ -52,8 +52,12 @@ export function validateBasePath(basePath: unknown): string {
   return basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
 }
 
-/** One or more plain segments, an optional trailing slash, never the root. */
-const BASE_PATH = /^(?:\/[A-Za-z0-9._~-]+)+\/?$/;
+/**
+ * One or more plain segments, an optional trailing slash, never the root and
+ * never a `.` or `..` segment — URL parsing removes dot segments from every
+ * request, so a route registered with one could never be reached.
+ */
+const BASE_PATH = /^(?:\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._~-]+)+\/?$/;
 
 /**
  * Validates `exposeCatalogues.cacheControl` at construction.
@@ -93,7 +97,9 @@ export function validateCacheControl(cacheControl: unknown): string {
  * A supported tag (exact canonical spelling) answers `{ locale, messages }`
  * with `Cache-Control` and `Content-Language`. Anything else answers `404`
  * through the error responder with a FIXED detail: the parameter is never
- * looked up beyond the supported set and never echoed. The refusal runs as
+ * looked up beyond the supported set and never placed in the detail (the
+ * responder's standard `instance` member reflects the request path, as it
+ * does for every Problem Details response). The refusal runs as
  * route middleware because `respondWithError` writes the response without the
  * `HandlerResult` a handler must return (the M100c sign-in precedent).
  *

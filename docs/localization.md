@@ -78,12 +78,12 @@ kinds of cache:
 - **`cache-plugin`'s own store** keys on `ctx.request.locale` automatically, as it keys on the
   tenant.
 - **`cloudflare-plugin`'s Cache API middleware** keys on a URL, which the platform matches with no
-  request headers, so it carries the locale in its default key instead; a custom `key` must include
-  `ctx.request.locale` itself.
+  request headers, so it carries the locale in its default key instead, under the same ordering
+  conditions below; a custom `key` must include `ctx.request.locale` itself.
 
-The second holds only when the cache runs after the locale is final. A route-level `cacheMiddleware`
-always does. A global one must be registered above priority 45. A locale changed inside a handler
-happens after the cache lookup, so such a route must not be response-cached.
+Both hold only when the cache runs after the locale is final. A route-level `cacheMiddleware` always
+does. A global one must be registered above priority 45. A locale changed inside a handler happens
+after the cache lookup, so such a route must not be response-cached.
 
 ## Operations
 
