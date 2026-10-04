@@ -203,26 +203,32 @@ the way it keys on the tenant since M70b.
   VERBATIM (`{name}`), never thrown. A `PluralForms` record requires `values.count` to be a finite
   number — absent or non-finite throws `MissingPluralCountError` naming the key — selects the form
   with `new Intl.PluralRules(locale).select(count)` falling back to `other`, then formats the chosen
-  string as above. `Intl` instances are cached per locale in a module-level `Map` capped at the
-  supported set's size (the formatter is handed only configured tags). The formatter escapes
-  nothing. **Output parity is not promised across runtimes**: the same code runs on both sides, but
-  `Intl` output depends on each implementation's ICU data, and a `Date` formats in the runtime's
-  time zone unless `timeZone` is passed. The plugin's `timeZone` option is handed to `format` by
-  `t()`, and the README tells a browser caller to pass the same value; without it, a server in UTC
-  and a browser in `Asia/Kolkata` legitimately print different dates. The docs state this rather
-  than the stronger claim. A `zero` form is selected only where the locale's CLDR rules produce
-  `zero` (`ar`, `lv`, …); `en` with `count: 0` selects `other`, which the docs state because it is
-  the commonest surprise. The message and value types are imported from `@setu-ts/common` with
-  `import type`, so there is ONE declaration of each and the runtime graph stays empty (§3.13).
+  string as above. `Intl` instances are cached in module-level maps keyed by EVERY argument that
+  shapes them: `PluralRules` and `NumberFormat` by locale, `DateTimeFormat` by locale AND time zone
+  (a per-locale key would hand back a formatter built for a different zone). Each map is bounded at
+  64 entries with the oldest evicted, because the server hands `format` only configured tags but a
+  browser or SDK caller may pass anything. The formatter escapes nothing. **Output parity is not
+  promised across runtimes**: the same code runs on both sides, but `Intl` output depends on each
+  implementation's ICU data, and a `Date` formats in the runtime's time zone unless `timeZone` is
+  passed. The plugin's `timeZone` option is handed to `format` by `t()`, and the README tells a
+  browser caller to pass the same value; without it, a server in UTC and a browser in `Asia/Kolkata`
+  legitimately print different dates. The docs state this rather than the stronger claim. A `zero`
+  form is selected only where the locale's CLDR rules produce `zero` (`ar`, `lv`, …); `en` with
+  `count: 0` selects `other`, which the docs state because it is the commonest surprise. The message
+  and value types are imported from `@setu-ts/common` with `import type`, so there is ONE
+  declaration of each and the runtime graph stays empty (§3.13).
 - **Why:** this is the smallest grammar that handles "3 items" correctly in every CLDR language
   without a parser; ICU's `select`/nested/offset grammar is the named follow-on. Escaping is the
   rendering runtime's job — the M92/M102 rule — and the docs say so in three sites.
 - **Test home:** `test/unit/format.test.ts` (placeholders; verbatim unknown placeholder; number and
   Date per locale with literal expected strings from §1's probes, every Date case passing
   `timeZone: 'UTC'` so the expectation does not depend on the test host's zone (and one case proving
-  `timeZone` is honoured: epoch zero in `America/New_York` is `31/12/1969` under `en-GB`); plural
-  selection for `en` and `ar`; `en` with `count: 0` selects `other`; missing count throws; the
-  escaping NON-guarantee pinned: `format('{x}', { x: '<b>' })` is `<b>`).
+  `timeZone` is honoured: epoch zero in `America/New_York` is `31/12/1969` under `en-GB`; the same
+  date formatted under one locale in `UTC` then `America/New_York` then `UTC` again yields both
+  strings in that order, which a per-locale cache would fail; 65 distinct `(locale, timeZone)` pairs
+  leave the date cache at 64); plural selection for `en` and `ar`; `en` with `count: 0` selects
+  `other`; missing count throws; the escaping NON-guarantee pinned: `format('{x}', { x: '<b>' })` is
+  `<b>`).
 
 ### 3.7 `Vary: Accept-Language` and `Content-Language`
 
