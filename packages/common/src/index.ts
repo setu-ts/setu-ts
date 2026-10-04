@@ -43,6 +43,9 @@ export type { HttpStatusHint } from './errors/status-hint.ts';
 // Health probe
 export { createCachedProbe, resolveProbeTiming } from './health/probe.ts';
 export type { CachedProbeOptions, ProbeTiming } from './health/probe.ts';
+// Bounded backend call (M101a) — a deadline whose expiry is a recorded failure
+export { deadlineRangeError, withDeadline } from './health/deadline.ts';
+export type { DeadlineOptions } from './health/deadline.ts';
 // Connection-error reporting — routes a built client's 'error' events to the
 // logger, de-duplicated, instead of the driver's own console fallback
 export {

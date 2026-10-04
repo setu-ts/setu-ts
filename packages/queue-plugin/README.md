@@ -133,20 +133,21 @@ await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midn
 
 ## Options
 
-| Option               | Type                                                                 | Default                    | Description                                                                                                                            |
-| -------------------- | -------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `adapter`            | `'memory' \| 'redis' \| 'rabbitmq' \| 'sqs'`                         | `'memory'`                 | Queue adapter type                                                                                                                     |
-| `name`               | `string`                                                             | —                          | Instance name for multi-instance support                                                                                               |
-| `url`                | `string`                                                             | `'redis://localhost:6379'` | Redis / RabbitMQ connection URL                                                                                                        |
-| `client`             | `IRedisQueueClient \| IAmqpQueueConnection`                          | —                          | Injected client, bypassing the lazy import                                                                                             |
-| `prefix`             | `string`                                                             | `'he.queue'`               | Queue-name prefix (RabbitMQ)                                                                                                           |
-| `sqs`                | `SqsQueueOptions`                                                    | —                          | SQS configuration; required when `adapter: 'sqs'`                                                                                      |
-| `defaultMaxAttempts` | `number`                                                             | `3`                        | Default retry attempts                                                                                                                 |
-| `pollIntervalMs`     | `number`                                                             | `1000`                     | Worker poll interval                                                                                                                   |
-| `deadLetterTtlMs`    | `number`                                                             | — (retained forever)       | Retention for a dead-lettered payload (Redis only)                                                                                     |
-| `processors`         | `readonly QueueProcessorEntry[]`                                     | —                          | Declarative `process()` registrations. A `QueueProcessorDefinition` is `{ name, processor, options? }`; factories resolve at `onInit`. |
-| `behaviors`          | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                          | Chain around every processor. It sees `kind: 'queue'`, job name, the delivered job, and its attempt count.                             |
-| `diagnostics`        | `QueueDiagnosticsOptions`                                            | — (disabled)               | Opt-in minimized attempt and depth observations for the diagnostics connector (M98f) — see below.                                      |
+| Option               | Type                                                                 | Default                    | Description                                                                                                                                                                                                                                                                                                                           |
+| -------------------- | -------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `adapter`            | `'memory' \| 'redis' \| 'rabbitmq' \| 'sqs'`                         | `'memory'`                 | Queue adapter type                                                                                                                                                                                                                                                                                                                    |
+| `name`               | `string`                                                             | —                          | Instance name for multi-instance support                                                                                                                                                                                                                                                                                              |
+| `url`                | `string`                                                             | `'redis://localhost:6379'` | Redis / RabbitMQ connection URL                                                                                                                                                                                                                                                                                                       |
+| `client`             | `IRedisQueueClient \| IAmqpQueueConnection`                          | —                          | Injected client, bypassing the lazy import                                                                                                                                                                                                                                                                                            |
+| `prefix`             | `string`                                                             | `'he.queue'`               | Queue-name prefix (RabbitMQ)                                                                                                                                                                                                                                                                                                          |
+| `sqs`                | `SqsQueueOptions`                                                    | —                          | SQS configuration; required when `adapter: 'sqs'`                                                                                                                                                                                                                                                                                     |
+| `defaultMaxAttempts` | `number`                                                             | `3`                        | Default retry attempts                                                                                                                                                                                                                                                                                                                |
+| `pollIntervalMs`     | `number`                                                             | `1000`                     | Worker poll interval                                                                                                                                                                                                                                                                                                                  |
+| `deadLetterTtlMs`    | `number`                                                             | — (retained forever)       | Retention for a dead-lettered payload (Redis only)                                                                                                                                                                                                                                                                                    |
+| `commandTimeoutMs`   | `number`                                                             | `15000`                    | Bound on one Redis command (Redis only; `0` disables). A paused server makes `add()` reject and a poll record the failure instead of waiting forever. The server may still apply a timed-out command, so a rejected `add()` can still have enqueued the job — retrying it can run the job twice. Not applied to an injected `client`. |
+| `processors`         | `readonly QueueProcessorEntry[]`                                     | —                          | Declarative `process()` registrations. A `QueueProcessorDefinition` is `{ name, processor, options? }`; factories resolve at `onInit`.                                                                                                                                                                                                |
+| `behaviors`          | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                          | Chain around every processor. It sees `kind: 'queue'`, job name, the delivered job, and its attempt count.                                                                                                                                                                                                                            |
+| `diagnostics`        | `QueueDiagnosticsOptions`                                            | — (disabled)               | Opt-in minimized attempt and depth observations for the diagnostics connector (M98f) — see below.                                                                                                                                                                                                                                     |
 
 Two options this table used to list do not exist and never did: `region` (SQS configuration lives
 under `sqs`) and `queues` (RabbitMQ derives its queue names from `prefix`).
@@ -201,6 +202,11 @@ job names this instance has a processor for; a count still pending after `timeou
 timed out but keeps its slot until it settles. `shared-backend` counts from several instances or
 replicas are the same inventory — never sum them.
 
+A depth row describes the latest cycle only. A name that cycle did not read (timed out, failed, or
+not reached because every slot was still held) has no row at all; the source's `failure` and
+`depthCoverage: 'partial'` say why. A depth that cannot be read is never reported as a retained
+zero.
+
 ## Seeing a job that failed for the last time
 
 A job that exhausts its attempts is dead-lettered by every adapter, and used to be reachable only by
@@ -239,12 +245,15 @@ elapsed. It errs late by construction: dropping a payload early would discard ex
 data the option exists to keep. Exact per-payload expiry is not expressible here — Redis has no
 per-member TTL on a sorted set, and the payloads share one hash.
 
-The payload move is issued **before** the dead-set insert, and that order is load-bearing: no two of
-these commands are atomic, and a sweep starts from the dead set, so a member that became visible
-before its payload was written can be swept by a concurrent `deadLetter` — deleting the member and
-stranding the payload where no later sweep can reach it. Writing first means a sweep either misses
-the id, and a later one collects it, or finds both together. Ordering closes that window; it does
-not make the sequence atomic, so a process that dies mid-sequence can still leave a payload behind.
+With a client exposing `eval` — always true of the client the adapter builds — the payload move and
+the dead-set insert run as one Lua script and are atomic (M101a). The rest of this paragraph
+describes an injected client without `eval`, which keeps separate commands. The payload move is
+issued **before** the dead-set insert, and that order is load-bearing: no two of these commands are
+atomic, and a sweep starts from the dead set, so a member that became visible before its payload was
+written can be swept by a concurrent `deadLetter` — deleting the member and stranding the payload
+where no later sweep can reach it. Writing first means a sweep either misses the id, and a later one
+collects it, or finds both together. Ordering closes that window; it does not make the sequence
+atomic, so a process that dies mid-sequence can still leave a payload behind.
 
 Setting it MOVES a dead job's payload from `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and
 the expiry is applied to that key and the dead set. It is never applied to the live jobs hash: that
@@ -262,6 +271,14 @@ In-memory queue for testing and local development. Jobs are lost on restart.
 
 Redis-backed queue using sorted sets for delayed job storage. Supports persistence and distributed
 processing.
+
+Since M101a each transition (`enqueue`, `reserve`, `ack`, `requeue`, dead-lettering) runs as one Lua
+script through the client's `eval`, so a command that times out locally cannot leave a job half
+moved. An injected client without `eval` keeps the separate commands. The scripts touch several
+`queue:<name>:*` keys with no hash tag, so a Redis Cluster client is not supported: it would refuse
+them with `CROSSSLOT`. A `reserve` the server applies after its local timeout leaves the job in
+`queue:<name>:processing`, and nothing reclaims that set, so such a job has to be moved back by
+hand.
 
 ### RabbitMqQueue
 

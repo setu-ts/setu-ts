@@ -64,7 +64,7 @@ export type {
  * The per-operation options the data source passes to the driver — the session
  * a transaction-scoped data source binds to.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 interface MongoCollectionOptions {
   /** The session a transaction-scoped data source runs under, or none. */
@@ -74,7 +74,7 @@ interface MongoCollectionOptions {
 /**
  * The entity-mapping bag a transaction-scoped data source resolves from.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 type MongoEntityMapping = import('./mongo-mapping.ts').MongoEntityMapping;
 
@@ -95,7 +95,7 @@ type MongoEntityMapping = import('./mongo-mapping.ts').MongoEntityMapping;
  * @param objectIdCtor - The driver `ObjectId` constructor
  * @param session - The session a transaction-scoped data source runs under
  * @returns A data source bound to the entity's collection
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function createMongoDataSource(
   client: IMongoClient,

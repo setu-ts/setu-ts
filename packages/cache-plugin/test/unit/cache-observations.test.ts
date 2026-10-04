@@ -224,6 +224,30 @@ describe('observeCacheCall — outcome counters', () => {
     expect(record).toMatchObject({ succeeded: 2, failed: 1, hits: 2 });
   });
 
+  // M101a V8-5: a bounded Redis command REJECTS rather than parking the call,
+  // and that rejection is the recorded failure — no new collector code. The
+  // reason is ioredis's own `commandTimeout` error text.
+  it('counts a command-timeout rejection as failed, never as a miss', async () => {
+    const clock = new Clock();
+    const timedOut = new Error('Command timed out');
+    const backend = {
+      ...scriptedBackend('resolve', null),
+      get: () => {
+        clock.now += 1000;
+        return Promise.reject(timedOut);
+      },
+    } as unknown as CacheStore;
+    const { service, collector } = observed(backend, clock);
+    await expect(service.get('k')).rejects.toBe(timedOut);
+    expect(recordOf(collector.snapshot(), 'get')).toMatchObject({
+      count: 1,
+      succeeded: 0,
+      failed: 1,
+      hits: 0,
+      misses: 0,
+    });
+  });
+
   it('measures integer durations on the monotonic clock and clamps a negative delta', async () => {
     const clock = new Clock();
     let release: () => void = () => {};
@@ -343,7 +367,12 @@ describe('observeCacheCall — transparency', () => {
       globalThis.addEventListener('unhandledrejection', onUnhandled);
       try {
         void service.get('k');
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        // The runtime reports an unhandled rejection on a later turn of the
+        // event loop, and how many turns later depends on load (one turn
+        // flaked on CI), so wait turn by turn up to a bound rather than once.
+        for (let turn = 0; turn < 200 && unhandled === 0; turn++) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
       } finally {
         globalThis.removeEventListener('unhandledrejection', onUnhandled);
       }

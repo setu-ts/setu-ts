@@ -453,3 +453,19 @@ describe('@setu-ts/common barrel — M100c auth-session contract', () => {
     expect(signInOutcomePinned).toBe(true);
   });
 });
+
+describe('@setu-ts/common barrel — bounded backend call (M101a)', () => {
+  it('exports withDeadline and deadlineRangeError as functions', () => {
+    expect(typeof common.withDeadline).toBe('function');
+    expect(typeof common.deadlineRangeError).toBe('function');
+  });
+
+  it('exports the DeadlineOptions type (declared against the barrel)', async () => {
+    const options: common.DeadlineOptions = {
+      timeoutMs: 0,
+      onTimeout: () => new Error('never'),
+    };
+
+    await expect(common.withDeadline(() => Promise.resolve(7), options)).resolves.toBe(7);
+  });
+});

@@ -108,7 +108,7 @@ export type { MongoWriteOptions };
 /**
  * The native `mongodb` module shape the lazy loader adapts.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoSdkModule {
   /** The driver `MongoClient` constructor. */
@@ -121,7 +121,7 @@ export interface MongoSdkModule {
  * The client loader seam — either an injected client (no import) or a lazy
  * loader that performs the real `npm:mongodb@^6.21.0` import.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoClientLoader {
   /**
@@ -143,7 +143,7 @@ export interface MongoClientLoader {
  * @param client - The constructed client
  * @param objectIdCtor - The driver `ObjectId` constructor
  * @returns A loader that hands the client back without importing anything
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function createInjectedClientLoader(
   client: IMongoClient,
@@ -168,7 +168,7 @@ export function createInjectedClientLoader(
  *
  * @param url - The connection string
  * @returns A loader that performs the real import on first use
- * @since 0.1.0
+ * @since 0.2.0
  */
 export async function createLazyClientLoader(url: string): Promise<MongoClientLoader> {
   const mod = await import('npm:mongodb@^6.21.0') as unknown as MongoSdkModule;

@@ -272,6 +272,37 @@ export interface DistributedLockOptions {
    * @default 30000
    */
   ttlMs?: number;
+
+  /**
+   * How long one lock acquire may run before the fire it serves is skipped
+   * and counted `lock-failed` (M101a V8-24). Bounds every acquire the
+   * scheduler makes — the fire slot, the handler mutex and the `delay` slot
+   * claimed at registration — for EVERY lock, including an injected `lock`,
+   * so a lock backend that stops answering skips fires instead of stopping
+   * them. Keep it below the job's interval. An acquire abandoned at the bound
+   * that later returns a token has that token released.
+   *
+   * `0` disables the bound. Must be a number from `0` to `2147483647`.
+   *
+   * @default 5000
+   * @since 0.9.0
+   */
+  acquireTimeoutMs?: number;
+
+  /**
+   * ioredis `commandTimeout` for the Redis client the lock BUILDS
+   * (`storage: 'redis'` with no `client`), so a parked `SET NX` rejects on
+   * the client rather than waiting for the TCP connection. Never applied to an
+   * injected `client` or `lock`.
+   *
+   * Defaults to the resolved `acquireTimeoutMs` (and to `15000` when that is
+   * `0`); a value greater than a non-zero `acquireTimeoutMs` is refused,
+   * because the command must not outlast the call it bounds. `0` disables the
+   * bound.
+   *
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
 }
 
 /**
@@ -332,15 +363,18 @@ export interface DelayRegistryEntry<T = unknown> extends RegistryEntryBase<T> {
   /** Original delay in milliseconds. Always present for `delay` entries. */
   delayMs: number;
   /**
-   * Whether this entry holds the fire slot (M70l F2).
+   * Outcome of this entry's fire-slot claim (M70l F2; tri-state since M101a).
    *
    * Claimed at REGISTRATION time, keyed on the job name — never on
    * `nextRunAtMs`, which for a delay is `now + delayMs` and therefore
    * carries per-replica startup skew that a fire-time key would turn into
    * non-colliding slots. Set by `SchedulerService` in `delay()`; read by
-   * `#fire` to decide whether this replica runs the handler.
+   * `#fire` to decide whether this replica runs the handler. `'contended'`
+   * means another replica holds the slot and will run it; `'failed'` means
+   * the lock backend could not answer, which `#fire` counts `lock-failed` —
+   * a failed lock is evidence of nothing about other replicas.
    */
-  slotClaimed: boolean;
+  slotClaim: 'claimed' | 'contended' | 'failed';
   /**
    * The token of the held fire slot, or `null` when this entry does not
    * hold it. Released when the entry leaves the registry (fire, `remove`),
@@ -392,4 +426,12 @@ export interface RedisLockOptions {
    * @since 0.8.0
    */
   connectionErrorReporter?: ConnectionErrorReporter;
+  /**
+   * ioredis `commandTimeout` for the client the lock BUILDS; never applied to
+   * an injected `client`. `0` disables it.
+   *
+   * @default 15000
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
 }

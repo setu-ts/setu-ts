@@ -376,7 +376,10 @@ cannot confirm it: RabbitMQ, SQS). An outcome is never presented as settlement p
 only from a separately opted-in, bounded, non-overlapping count cycle — a diagnostic read never
 counts, reserves or settles a job; `scope` is `process-local` (memory) or `shared-backend` (redis,
 never to be summed across sources or replicas), and a source whose adapter cannot count reports
-`depthCoverage: 'unavailable'`, never zero.
+`depthCoverage: 'unavailable'`, never zero. A depth row describes the latest cycle only (since
+M101a): a name that cycle did not read — timed out, failed, or not reached because every slot was
+still held — has no row, and the source's `failure` plus `depthCoverage: 'partial'` say why. A depth
+that cannot be read is never reported as a retained zero.
 
 **Minimization.** The queue source receives only a job name (allowlist lookup), a raw job id (alias
 lookup) and the attempt number at dispatch, and fixed outcome and settlement primitives afterwards.

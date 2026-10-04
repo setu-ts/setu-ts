@@ -34,7 +34,13 @@ import { DynamoAdapter } from '../adapters/dynamo/dynamo-adapter.ts';
 import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
 import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
-import { readPoolCapacity } from '../health/database-capacity.ts';
+import {
+  isSaturated,
+  QUERY_PROGRESS_UNOBSERVABLE,
+  QueryProgressTracker,
+  readPoolCapacity,
+  readQueryProgress,
+} from '../health/database-capacity.ts';
 import type { DataSource } from '../repositories/base-repository.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -180,7 +186,13 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         clearTimer: (handle) => ctx.runtime.clearTimeout(handle),
       });
 
+      // M101a review fix: a saturated pool reads `up` only while queries are
+      // still completing, so a hung database behind a full pool — which shows
+      // the same `idle === 0 && waiting > 0` — reads `degraded`.
+      const progress = new QueryProgressTracker();
+
       ctx.health.register(`${token}`, async () => {
+        progress.observe(readQueryProgress(adapter), ctx.runtime.hrtime());
         const capacity = readPoolCapacity(adapter);
         const data = {
           adapter: adapterType,
@@ -229,6 +241,29 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           return { status: 'down', data: { ...data, reachable: false } };
         }
         if (reachable === undefined) {
+          // M101a V8-3: a probe that did not answer while the pool reports
+          // every connection busy with callers waiting, AND queries are still
+          // completing, is SATURATION — data, not an outage. Failing `/ready`
+          // there would pull every saturated replica at once. `'unknown'`
+          // rather than `true`, because the database did not answer; the
+          // capacity rides beside it. A full pool whose queries have stopped
+          // completing is a hung database and falls through to `degraded`.
+          // Both are re-read here: the probe above awaited, and the snapshot
+          // taken before it may be stale.
+          // An adapter that cannot see all traffic reports progress as
+          // unobservable: a count that does not move then proves nothing, so
+          // a saturated pool keeps the pre-M101a-review reading (`up`) rather
+          // than pulling every busy replica at once.
+          const now = ctx.runtime.hrtime();
+          const completed = readQueryProgress(adapter);
+          progress.observe(completed, now);
+          const current = readPoolCapacity(adapter);
+          if (
+            current !== undefined && isSaturated(current) &&
+            (completed === QUERY_PROGRESS_UNOBSERVABLE || progress.progressedWithin(now))
+          ) {
+            return { status: 'up', data: { ...data, reachable: 'unknown' } };
+          }
           // A probe that EXISTS and did not answer is evidence of trouble:
           // `degraded`, and `/ready` fails with it (`degraded` is not 'up').
           return { status: 'degraded', data: { ...data, reachable: 'unknown' } };

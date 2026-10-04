@@ -123,6 +123,7 @@ package fits the plugin architecture.
 | `createPathMatcher`                  | function  |
 | `createRealtimeObservationCollector` | function  |
 | `createRedactionService`             | function  |
+| `deadlineRangeError`                 | function  |
 | `decodeCursor`                       | function  |
 | `decodeFrameData`                    | function  |
 | `encodeCursor`                       | function  |
@@ -173,6 +174,7 @@ package fits the plugin architecture.
 | `upgradeIntentOf`                    | function  |
 | `validatedStateKey`                  | function  |
 | `validationMetadataOf`               | function  |
+| `withDeadline`                       | function  |
 | `withHttpStatusHint`                 | function  |
 | `withResponseMetadata`               | function  |
 | `withSecurityMetadata`               | function  |
@@ -216,6 +218,7 @@ package fits the plugin architecture.
 | `CqrsQuery`                          | interface |
 | `CqrsRequest`                        | interface |
 | `CursorPayload`                      | interface |
+| `DeadlineOptions`                    | interface |
 | `DiagnosticsBatch`                   | interface |
 | `DiagnosticsEdge`                    | interface |
 | `DiagnosticsEvent`                   | interface |

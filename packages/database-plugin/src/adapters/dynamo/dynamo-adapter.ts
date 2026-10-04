@@ -69,7 +69,7 @@ const CLIENT_MEMBERS = [
  *   options: { region: 'us-east-1' },
  * }));
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export class DynamoAdapter implements IDatabaseAdapter {
   /** DynamoDB exposes no portable transaction-isolation selector. */

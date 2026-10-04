@@ -453,6 +453,13 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
   readonly #jobAliases = new Map<string, string>();
   /** Approved queue alias → latest counts. */
   readonly #depths = new Map<string, RetainedDepth>();
+  /**
+   * Whether a depth cycle has ever retained a row (M101a V8-23). Rows are now
+   * REPLACED per cycle, so an empty map no longer means "nothing retained
+   * yet": a later wholly failed cycle leaves the source `ready`, with the
+   * `failure` saying why its rows are absent.
+   */
+  #depthsRetained = false;
   /** Job names whose RAW count promise has not settled. */
   readonly #countsInFlight = new Set<string>();
   readonly #deadlineTimers = new Set<TimerHandle>();
@@ -653,7 +660,7 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
     }
     return deepFreeze({
       ...common,
-      state: this.#sequence === 0 && this.#depths.size === 0 ? 'no-data' : 'ready',
+      state: this.#sequence === 0 && !this.#depthsRetained ? 'no-data' : 'ready',
       attempts,
       depths,
       next: attempts.length > 0 ? attempts[attempts.length - 1].sequence : after,
@@ -706,6 +713,7 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
     this.#attempts.length = 0;
     this.#jobAliases.clear();
     this.#depths.clear();
+    this.#depthsRetained = false;
     this.#countsInFlight.clear();
     this.#attemptsInFlight = 0;
   }
@@ -715,9 +723,9 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
    * processes, starting at the rotation cursor, with at most `concurrency`
    * count calls in flight — counting raw calls left over from an earlier
    * cycle. Skipped when closed or when a predecessor cycle is still
-   * reporting, so cycles never overlap. Fresh counts are committed together
-   * once the cycle's reporting races finish, each tagged with the cycle's
-   * coverage.
+   * reporting, so cycles never overlap. Fresh counts REPLACE the retained
+   * rows once the cycle's reporting races finish, each tagged with the
+   * cycle's coverage; a name the cycle did not read keeps no row.
    */
   async #runCycle(reader: QueueDepthReader, policy: CompiledQueueDepthPolicy): Promise<void> {
     if (this.#closed || this.#cycleInFlight) {
@@ -729,6 +737,7 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
         this.#depthCoverage = 'unavailable';
         this.#failure = 'none';
         this.#depths.clear();
+        this.#depthsRetained = false;
         return;
       }
       const registered = new Set(reader.names());
@@ -780,6 +789,15 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
       const coverage: QueueDepthCycleCoverage = fresh.size === names.length
         ? 'complete'
         : 'partial';
+      // M101a V8-23: the cycle REPLACES the retained rows. A name this cycle
+      // did not read (timed out, failed, never reached) has NO row, rather
+      // than keeping its last count — a retained `ready: 0` under a climbing
+      // `ageMs` is a zero presented as current. The source-level `failure` and
+      // `depthCoverage: 'partial'` say why it is absent.
+      this.#depths.clear();
+      if (fresh.size > 0) {
+        this.#depthsRetained = true;
+      }
       for (const [name, result] of fresh) {
         this.#depths.set(this.#policy.aliasByName.get(name)!, {
           ...result.depths,

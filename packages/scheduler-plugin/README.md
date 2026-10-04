@@ -103,6 +103,18 @@ Without `distributedLock`, a process-local `MemoryLock` is used — fine for a s
 **every replica will run every job**. Set `{ enabled: true, storage: 'redis' }` to use `RedisLock`
 (over `npm:ioredis`, lazily imported or injected) so only one replica executes each firing.
 
+Every lock acquire is bounded, whichever lock is in use. An acquire still unsettled after
+`acquireTimeoutMs` is a skipped fire: it is logged, counted as `lockFailed` in the execution
+observations, and the job is re-armed for its next slot, so a paused or unreachable lock backend
+skips fires instead of stopping the schedule. Keep the bound below the job's interval. An acquire
+that returns a token after the bound has its lock released, so the abandoned token does not block
+the next fire until its TTL expires.
+
+| `DistributedLockOptions` | Default            | Meaning                                                                                                                                                                                                                                                                                                                |
+| ------------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acquireTimeoutMs`       | `5000`             | Bound on each lock acquire. `0` waits indefinitely. A value outside `0`–`2147483647` is refused with a `RangeError` when `SchedulerPlugin(...)` is called.                                                                                                                                                             |
+| `commandTimeoutMs`       | `acquireTimeoutMs` | ioredis `commandTimeout` on the client `RedisLock` builds; `15000` when `acquireTimeoutMs` is `0`. Refused when it exceeds a non-zero `acquireTimeoutMs`. Not applied to an injected client or lock. A timed-out `SET` can still apply once Redis answers, so `RedisLock` releases that exact token before rethrowing. |
+
 Connection errors of the `ioredis` client the lock builds go to the application logger — the first
 error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead of
 `ioredis` printing every reconnect failure to `console.error`. An injected client gets no listener:

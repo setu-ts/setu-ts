@@ -615,22 +615,26 @@ records the outcome of every real publish — the **data plane** — as evidence
 consults it FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs`
 (default `5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected
 topic or a quota error is an application-level fact, never an outage) resolves `false` until a
-successful publish or positive management probe contradicts it. The plane distinction is the
-substance: the management round trip proves the **management** plane is reachable — evidence about
-the data plane, never proof of it — and that gap is what let a stopped namespace report `up` while
-every publish threw. Two further changes, and the first has **two layers** because the health
-indicator is not the only caller. The indicator wraps every arm's `reachability()` in its own
-`createCachedProbe` (5-second TTL, 2-second bound), which is the universal outer bound: a probe that
-cannot answer — a **hung** broker, the condition a stopped one never produces — settles
-`reachable: 'unknown'` instead of holding `/health` open. `RabbitMqBroker` and `ServiceBusBroker`
-additionally build their own cached, bounded probes, which is what `isHealthy()` reads; that inner
-layer is what protects a **direct** caller, such as `realtime-backplane-plugin`'s `'messaging'`
-transport, which resolves the broker itself and never passes through this indicator. Second, the
-RabbitMQ probe is a real round trip (a throwaway channel open/close), replacing the connection-fault
-flag read that a hung broker never trips. Residual exposure, stated rather than implied: a
-deployment whose Service Bus management plane is unreachable and that publishes nothing keeps
-reporting `reachable: 'unknown'` with status `up` until its first publish — an operator who needs
-the signal can publish synthetically.
+successful publish or positive management probe contradicts it. **Since M101a** that retained
+failure is answered at once: the management probe runs in the background, and only a `true` answer
+clears the outcome, for the NEXT read — before, `reachability()` awaited the probe, whose own 2 s
+bound tied the indicator's, so the indicator's bound fired first and a recorded outage was reported
+`up`. A failure inside a window the indicator has already cached as `up` is reported at the first
+poll after that 5 s cache expires. The plane distinction is the substance: the management round trip
+proves the **management** plane is reachable — evidence about the data plane, never proof of it —
+and that gap is what let a stopped namespace report `up` while every publish threw. Two further
+changes, and the first has **two layers** because the health indicator is not the only caller. The
+indicator wraps every arm's `reachability()` in its own `createCachedProbe` (5-second TTL, 2-second
+bound), which is the universal outer bound: a probe that cannot answer — a **hung** broker, the
+condition a stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health`
+open. `RabbitMqBroker` and `ServiceBusBroker` additionally build their own cached, bounded probes,
+which is what `isHealthy()` reads; that inner layer is what protects a **direct** caller, such as
+`realtime-backplane-plugin`'s `'messaging'` transport, which resolves the broker itself and never
+passes through this indicator. Second, the RabbitMQ probe is a real round trip (a throwaway channel
+open/close), replacing the connection-fault flag read that a hung broker never trips. Residual
+exposure, stated rather than implied: a deployment whose Service Bus management plane is unreachable
+and that publishes nothing keeps reporting `reachable: 'unknown'` with status `up` until its first
+publish — an operator who needs the signal can publish synthetically.
 
 ## Exports
 

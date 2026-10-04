@@ -6,6 +6,7 @@
  * @module
  */
 import type { ISecretManager } from '@setu-ts/common';
+import { printableSecretName } from './secret-name.ts';
 import type { SecretProvider } from '../interfaces/index.ts';
 
 /** Default read-cache TTL in seconds. */
@@ -74,7 +75,7 @@ export class SecretsService implements ISecretManager {
     }
     const value = await this.#provider.get(name);
     if (value === null) {
-      throw new Error(`Secret not found: ${name}`);
+      throw new Error(`Secret not found: ${printableSecretName(name)}`);
     }
     this.#writeCache(name, value);
     return value;

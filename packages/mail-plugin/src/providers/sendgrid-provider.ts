@@ -120,9 +120,13 @@ export class SendGridProvider implements MailProvider {
    * Sends a message via the SendGrid v3 API.
    *
    * @param message - The outgoing mail
-   * @throws {Error} On any non-2xx HTTP response
+   * @throws {Error} If the provider is not connected, or on any non-2xx HTTP response
    */
   async send(message: OutgoingMail): Promise<void> {
+    // Without this a send after `app.stop()` still POSTed a real email.
+    if (!this.#ready) {
+      throw new Error('SendGridProvider is not connected');
+    }
     const res = await this.#http(this.#endpoint, {
       method: 'POST',
       headers: {

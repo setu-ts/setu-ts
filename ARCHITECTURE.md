@@ -1491,10 +1491,10 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | Aspect               | Detail                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Email sending                                                                                     |
-| **Responsibilities** | SMTP, SES, SendGrid providers; template engine                                                    |
-| **Dependencies**     | `common`, `kernel`                                                                                |
+| **Responsibilities** | SMTP, SES, SendGrid providers; template engine (`{{ variable }}` strings and view components)     |
+| **Dependencies**     | `common`, `kernel`; optionally the `view` capability (component templates, M102)                  |
 | **Public API**       | `MailPlugin()`; `IMailer`                                                                         |
-| **Extension Points** | Custom mail provider; custom template engine                                                      |
+| **Extension Points** | Custom mail provider; component templates through `CAPABILITIES.VIEW`                            |
 | **Rules**            | Email SDKs are optional (injected or lazy-loaded via `npm:` specifiers); log provider for testing |
 
 #### @setu-ts/notification-plugin

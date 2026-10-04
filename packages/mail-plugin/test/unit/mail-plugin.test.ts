@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
-import type { IMailer } from '@setu-ts/common';
+import type { Component, IMailer, IViewEngine } from '@setu-ts/common';
 
 import { createProvider, MailPlugin } from '../../src/plugin/mail-plugin.ts';
 import { LogProvider } from '../../src/providers/log-provider.ts';
@@ -19,7 +19,9 @@ describe('MailPlugin metadata', () => {
     expect(plugin.name).toBe('mail-plugin');
     expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toContain(CAPABILITIES.MAIL);
-    expect(plugin.optionalDependencies).toEqual(['logger']);
+    // The VIEW edge is load-bearing: it orders a `CAPABILITIES.VIEW` provider
+    // before this plugin so the register()-time engine lookup is a contract.
+    expect(plugin.optionalDependencies).toEqual([CAPABILITIES.LOGGER, CAPABILITIES.VIEW]);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
   });
 });
@@ -121,5 +123,73 @@ describe('MailPlugin health indicator (M70c)', () => {
     const health = await fake.healthIndicators.get(CAPABILITIES.MAIL)?.();
     expect(health?.status).toBe('down');
     expect(health?.data).toEqual({ provider: 'sendgrid', reachable: false });
+  });
+});
+
+describe('MailPlugin.register — component templates (M102)', () => {
+  const Body: Component<{ name: string }> = (p) => `<p>${p.name}</p>`;
+
+  it('refuses at register() a component template with no CAPABILITIES.VIEW provider', async () => {
+    const fake = createFakeContext();
+    const plugin = MailPlugin({
+      provider: 'log',
+      templates: { plain: { text: 'x' }, welcome: { view: Body } },
+    });
+    let caught: unknown;
+    await Promise.resolve(plugin.register(fake.ctx)).catch((e: unknown) => {
+      caught = e;
+    });
+    const message = (caught as Error).message;
+    expect(message).toContain('Mail template "welcome" is a view component');
+    expect(message).toContain('Register ViewPlugin from @setu-ts/view-plugin');
+    expect(message).toContain('CAPABILITIES.VIEW');
+    expect(message).toContain('or remove the component templates');
+    // Nothing was registered: the refusal happened before the service existed.
+    expect(fake.registered.has(CAPABILITIES.MAIL)).toBe(false);
+  });
+
+  it('refuses a template misconfiguration BEFORE the provider connects', async () => {
+    // The refusal is configuration validation, so it must not depend on the
+    // provider loading its SDK first. An injected transport missing `sendMail`
+    // makes `connect()` throw; the developer must still see the template error.
+    const fake = createFakeContext();
+    const plugin = MailPlugin({
+      provider: 'smtp',
+      options: {
+        transport: {} as unknown as import('../../src/interfaces/index.ts').ISmtpTransport,
+      },
+      templates: { welcome: { view: Body } },
+    });
+    let caught: unknown;
+    await Promise.resolve(plugin.register(fake.ctx)).catch((e: unknown) => {
+      caught = e;
+    });
+    expect((caught as Error).message).toContain('Mail template "welcome" is a view component');
+  });
+
+  it('resolves the registered view engine and renders component templates through it', async () => {
+    const sunk: OutgoingMail[] = [];
+    const fake = createFakeContext();
+    const view: IViewEngine = {
+      render: <P>(component: Component<P>, props: P) => `rendered:${String(component(props))}`,
+    };
+    fake.ctx.services.register(CAPABILITIES.VIEW, view);
+    await MailPlugin({
+      provider: 'log',
+      defaults: { from: 'noreply@x.com' },
+      templates: { welcome: { view: Body } },
+      options: { sink: (m) => sunk.push(m) },
+    }).register(fake.ctx);
+
+    const mailer = fake.registered.get(CAPABILITIES.MAIL) as IMailer;
+    await mailer.sendTemplate('welcome', { to: 'u@x.com', subject: 'Hi' }, { name: 'Ada' });
+    expect(sunk[0]?.html).toBe('rendered:<p>Ada</p>');
+  });
+
+  it('performs no lookup and needs no view plugin when every template is a string', async () => {
+    const fake = createFakeContext();
+    expect(fake.ctx.services.has(CAPABILITIES.VIEW)).toBe(false);
+    await MailPlugin({ provider: 'log', templates: { plain: { text: 'x' } } }).register(fake.ctx);
+    expect(fake.registered.has(CAPABILITIES.MAIL)).toBe(true);
   });
 });

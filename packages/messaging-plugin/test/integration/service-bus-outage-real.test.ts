@@ -18,6 +18,15 @@
  * publish rejects inside the test budget instead of consuming the SDK's
  * default retry schedule.
  *
+ * M101a (V8-1) rewrote it to run through a kernel application: the
+ * original constructed the BROKER and asserted `broker.reachability()`, one
+ * layer below the race that shipped in `0.8.0` — the `messaging` indicator
+ * bounded that call with the same 2 s the management probe used, so the
+ * probe's timeout lost to the indicator's and `/ready` answered 200 through a
+ * stopped emulator. The stopped cell now samples `/health` and `/ready` at
+ * +0 s, +3 s and +7 s, the last past the indicator's 5 s cache, which is the
+ * window `0.8.0` answered `up` in.
+ *
  * Guarded on `SERVICEBUS_CONNECTION_STRING` (no underscore between SERVICE
  * and BUS — the TEST guard variable the documented emulator command sets;
  * `SERVICE_BUS_CONNECTION_STRING` is the DEPLOYMENT variable and using it
@@ -31,8 +40,12 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
-import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMessageBroker } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { HealthPlugin } from '@setu-ts/health-plugin';
+import { MessagingPlugin } from '../../src/index.ts';
 
 const connectionString = Deno.env.get('SERVICEBUS_CONNECTION_STRING');
 const skipReal = connectionString === undefined;
@@ -49,52 +62,57 @@ async function docker(args: string[]): Promise<string> {
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-describe('REAL Service Bus outage (M95b §3.3)', {
+interface HealthBody {
+  readonly checks: Record<string, { status: string; data?: Record<string, unknown> }>;
+}
+
+describe('REAL Service Bus outage through /health and /ready (M95b §3.3, M101a §3.2)', {
   ignore: skipReal,
 }, () => {
-  it('the 2×2: publish → up, stop → publish rejects → down, restart → publish → up — and the answers differ', async () => {
-    const cs = connectionString ?? '';
-
+  it('publish → 200; stop → publish rejects → 503 at +0/+3/+7 s; restart → publish → 200', async () => {
     // he-sb is the emulator container the documented run command names; its
     // AMQP port is published on 5673 (5672 is RabbitMQ's).
     const containerId = (await docker(['ps', '-q', '--filter', 'name=he-sb'])).trim();
     expect(containerId).not.toBe('');
 
-    const broker = new ServiceBusBroker(
-      {
-        platform: () => 'deno' as const,
-        version: () => 'test',
-        hrtime: () => performance.now(),
-        now: () => Date.now(),
-        uuid: () => crypto.randomUUID(),
-        setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
-        clearTimeout: (h: unknown) => clearTimeout(h as number),
-        setInterval: (fn: () => void, ms: number) => setInterval(fn, ms),
-        clearInterval: (h: unknown) => clearInterval(h as number),
-      } as ConstructorParameters<typeof ServiceBusBroker>[0],
-      new JsonSerializer(),
-      {
-        connectionString: cs,
-        retryOptions: { maxRetries: 0 },
-      },
-    );
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HealthPlugin(),
+        MessagingPlugin({
+          broker: 'service-bus',
+          connectionString: connectionString ?? '',
+          retryOptions: { maxRetries: 0 },
+        }),
+      ],
+    });
+    const statusOf = async (path: string): Promise<number> => {
+      const response = await app.fetch(new Request(`http://localhost${path}`));
+      await response.body?.cancel();
+      return response.status;
+    };
+    const messagingCheck = async (): Promise<{ status: string; reachable: unknown }> => {
+      const response = await app.fetch(new Request('http://localhost/health'));
+      const body = (await response.json()) as HealthBody;
+      const check = body.checks['messaging'];
+      return { status: check?.status ?? 'absent', reachable: check?.data?.['reachable'] };
+    };
 
+    await app.start();
     try {
-      await broker.connect();
+      const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
       // (running) a successful publish IS the data-plane evidence: with the
       // management probe resolving `undefined` against this emulator in
       // every state, only the recorded success can answer `up`.
       await broker.publish('orders-roundtrip', { phase: 'running' });
-      const runningAnswer = await broker.reachability();
-      expect(runningAnswer).toBe(true);
+      expect(await statusOf('/ready')).toBe(200);
 
       // (stopped) a real stop. The publish against the dead namespace is
       // awaited to its rejection — a status-less network failure, exactly
-      // the shape the evidence predicate records — and THAT rejection is
-      // what makes the indicator say `down`.
+      // the shape the evidence predicate records.
       await docker(['stop', containerId]);
-      await wait(1_000); // let the stop settle
+      await wait(1_000);
       let stoppedError: unknown = undefined;
       try {
         await broker.publish('orders-roundtrip', { phase: 'stopped' });
@@ -102,12 +120,12 @@ describe('REAL Service Bus outage (M95b §3.3)', {
         stoppedError = error;
       }
       expect(stoppedError).toBeDefined();
-      const stoppedAnswer = await broker.reachability();
-      expect(stoppedAnswer).toBe(false);
 
-      // The discriminator neither 0.5.0 nor 0.6.0 had: the two states get
-      // DIFFERENT answers through the same indicator path.
-      expect(runningAnswer).not.toBe(stoppedAnswer);
+      for (const delayMs of [0, 3_000, 4_000]) {
+        await wait(delayMs);
+        expect(await messagingCheck()).toEqual({ status: 'down', reachable: false });
+        expect(await statusOf('/ready')).toBe(503);
+      }
 
       // (restart) the container returns; a successful publish re-records
       // evidence and the answer returns to `up`.
@@ -123,13 +141,15 @@ describe('REAL Service Bus outage (M95b §3.3)', {
         }
       }
       expect(reconnected).toBe(true);
-      expect(await broker.reachability()).toBe(true);
+      // The indicator caches for 5 s, so the recovery is observed after it.
+      await wait(5_500);
+      expect(await statusOf('/ready')).toBe(200);
     } finally {
       // Leave the container RUNNING: R11 records that a second consecutive
       // run against a stopped or dirty emulator fails for reasons unrelated
       // to the change.
       await new Deno.Command('docker', { args: ['start', containerId] }).output();
-      await broker.disconnect().catch(() => {});
+      await app.stop().catch(() => {});
     }
   });
 });

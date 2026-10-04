@@ -189,7 +189,7 @@ describe('JobRegistry', () => {
       paused: false,
       nextRunAtMs: 10000,
       timerHandle: null,
-      slotClaimed: true,
+      slotClaim: 'claimed',
       slotToken: 'test-token',
     };
     registry.add(entry);
