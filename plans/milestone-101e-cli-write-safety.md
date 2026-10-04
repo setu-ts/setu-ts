@@ -311,6 +311,9 @@ output.
 
 ## 4. Exported surface — every symbol names its consumer
 
+**Breaking for implementors:** `Prompter.select`'s return type changes (§3.2), which breaks a
+programmatic `Prompter` implementation — ships in minor `0.9.0`, with the adapter named in §8.
+
 `packages/cli/src/index.ts` changes in exactly one way: the `Prompter` interface's `select` return
 type (§3.2). Every other addition is internal to `src/`.
 

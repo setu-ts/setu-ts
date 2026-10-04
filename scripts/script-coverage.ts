@@ -88,6 +88,9 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // `rewriteReferences` are the decidable core, and a wrong edit here is a
   // published package depending on the previous release.
   'scripts/bump-version.ts',
+  // Check 10's pure core: the bump kind against the section's BREAKING count.
+  // Its failure mode is a patch that breaks a caret pin's reader.
+  'scripts/release-shape.ts',
   // The suite partition's classifier. Its runner (`test-partition.ts`) is
   // deliberately NOT a target — it is the process seam the decidable logic was
   // extracted out of, and a test cannot drive it without spawning the whole

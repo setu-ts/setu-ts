@@ -66,6 +66,10 @@
 
 ## 4. Exported surface — every symbol names its consumer
 
+**Breaking for implementors:** <FILL: `none`, or what breaks (a required member added to a published
+interface, a changed return type) and the minor that carries it — `ships in minor X.Y.0`. A patch
+may not carry a BREAKING entry; verify-release check 10 refuses one.>
+
 <!--
   List EVERY symbol exported from src/index.ts. A symbol whose only reader is its own test,
   or a field/marker no code branches on, is dead surface: wire it into a real path or cut it

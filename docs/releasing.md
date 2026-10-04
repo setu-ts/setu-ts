@@ -88,6 +88,14 @@ git fetch origin
 git switch -c release/v0.3.0 origin/develop
 ```
 
+- **Choose the number from the shipping section, not from habit.** From `0.9.0` a patch is the
+  normal release and a minor is the exception (ROADMAP "Versioning policy from 0.9.0"). Read the
+  `Unreleased` section once: a `BREAKING` entry means a minor, none means a patch. `release:verify`
+  check 10 (`scripts/release-shape.ts`) refuses a patch whose section carries a `BREAKING` entry,
+  and refuses a minor whose section carries none unless you pass `--allow-quiet-minor` — say so
+  deliberately rather than spending a minor by accident, since every caret pin then needs a manual
+  bump for nothing.
+
 - **Run the bump, then read what it did:**
 
   ```fish

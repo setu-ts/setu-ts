@@ -250,6 +250,12 @@ Setu-TS is pre-1.0, and the version number says exactly what that means:
 Under semver a `^0.8.0` range means `>=0.8.0 <0.9.0`, so a caret pin absorbs patches and stops at
 the next breaking release. That is the intended way to depend on this project today.
 
+From `0.9.0` the **patch is the normal release** and breaking changes are batched into an occasional
+minor: a change that would break a caller or an implementor ships behind its old behaviour first (a
+flag, an optional member, a deprecation) and the removal waits for the next minor. Two gates hold
+the line — a milestone plan must state what it breaks and which minor carries it, and
+`release:verify` refuses a patch whose changelog carries a `BREAKING` entry.
+
 <!-- version:history -->
 
 Releases up to `v0.1.0-alpha.10` used a prerelease suffix instead. Dropping it is a change of label,

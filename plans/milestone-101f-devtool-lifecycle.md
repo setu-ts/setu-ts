@@ -296,6 +296,8 @@ option families and served in `/v1/cache` with a valid MAC.
 
 ## 4. Exported surface — every symbol names its consumer
 
+**Breaking for implementors:** none — `common` gains one function and no contract member changes.
+
 `packages/cli/src/index.ts` is unchanged (pinned by `barrel-exports.test.ts`). `common` gains one
 export; no capability token and no contract member changes.
 

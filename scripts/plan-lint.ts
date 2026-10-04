@@ -73,12 +73,28 @@ const UNRESOLVED_MARKERS: readonly { readonly label: string; readonly match: Reg
 /** Unfilled template blanks (error). */
 const PLACEHOLDER = /<FILL[:>]|TODO\(plan\)/;
 
+/**
+ * The compatibility statement every plan's "Exported surface" section must
+ * carry, decided at PLAN time rather than discovered at cut time.
+ *
+ * From `0.9.0` a patch release is the norm and breaking changes are batched
+ * into an occasional minor (ROADMAP "Versioning policy from 0.9.0"). Most of
+ * the breaks the minors before it carried were REQUIRED members added to a
+ * published interface — "breaking for implementors" — decided inside a
+ * milestone with no release in view. So a plan states it: either `none`, or
+ * what breaks AND the minor that will carry it, so the release that ships the
+ * milestone is chosen when the break is designed. `verify-release` check 10
+ * is the other half, at cut time.
+ */
+const BREAKING_MARKER = /^\*\*Breaking for implementors:\*\*\s*(.*)$/i;
+const TARGET_MINOR = /\b\d+\.\d+\.0\b|\bnext minor\b|\ba minor\b/i;
+
 /** Remove `inline code spans` so a signature like `A | B` never trips a marker. */
 function stripInlineCode(line: string): string {
   return line.replace(/`[^`]*`/g, '');
 }
 
-function lintText(file: string, text: string): { errors: Finding[]; warnings: Finding[] } {
+export function lintText(file: string, text: string): { errors: Finding[]; warnings: Finding[] } {
   const errors: Finding[] = [];
   const warnings: Finding[] = [];
   const headings: string[] = [];
@@ -117,6 +133,40 @@ function lintText(file: string, text: string): { errors: Finding[]; warnings: Fi
     }
   }
 
+  // The statement is a PARAGRAPH: `deno fmt` reflows prose, so the minor it
+  // names may sit on the line after the marker. Read to the next blank line.
+  const breakingStatement = (() => {
+    const lines = text.split('\n');
+    const start = lines.findIndex((line) => BREAKING_MARKER.test(line.trim()));
+    if (start === -1) return null;
+    const paragraph: string[] = [BREAKING_MARKER.exec(lines[start].trim())?.[1] ?? ''];
+    for (let i = start + 1; i < lines.length && lines[i].trim() !== ''; i += 1) {
+      paragraph.push(lines[i].trim());
+    }
+    return { line: start + 1, value: paragraph.join(' ').trim() };
+  })();
+
+  if (breakingStatement === null) {
+    errors.push({
+      file,
+      line: null,
+      message:
+        'missing compatibility statement: the "Exported surface" section must carry a line ' +
+        '`**Breaking for implementors:** none` or `**Breaking for implementors:** <what>, ships in ' +
+        'minor <X.Y.0>` — the release that carries a break is chosen when the break is designed.',
+    });
+  } else if (
+    !/^none\b/i.test(breakingStatement.value) && !TARGET_MINOR.test(breakingStatement.value)
+  ) {
+    errors.push({
+      file,
+      line: breakingStatement.line,
+      message: 'the compatibility statement names a break but no minor release to carry it — add ' +
+        '"ships in minor <X.Y.0>" (a patch may not carry a BREAKING entry; verify-release check 10 ' +
+        'refuses one).',
+    });
+  }
+
   return { errors, warnings };
 }
 
@@ -151,48 +201,52 @@ function format(f: Finding): string {
   return `  ${loc}  ${f.message}`;
 }
 
-const args = Deno.args;
-const scanningDefault = args.length === 0;
-const targets = scanningDefault ? await defaultTargets() : args;
+if (import.meta.main) await main(Deno.args);
 
-const errors: Finding[] = [];
-const warnings: Finding[] = [];
+/** The command: lint the given files, or every plan at `plans/` root. */
+async function main(args: readonly string[]): Promise<void> {
+  const scanningDefault = args.length === 0;
+  const targets = scanningDefault ? await defaultTargets() : args;
 
-// Directory-level invariant: run only when scanning the default root set.
-if (scanningDefault) errors.push(...await rootHygiene());
+  const errors: Finding[] = [];
+  const warnings: Finding[] = [];
 
-let planCount = 0;
-for (const file of targets) {
-  const base = file.split('/').pop() ?? file;
-  if (NON_PLAN.test(base)) continue; // TEMPLATE.md / README.md are not plans
-  planCount++;
-  let content: string;
-  try {
-    content = await Deno.readTextFile(file);
-  } catch (err) {
-    errors.push({
-      file,
-      line: null,
-      message: `cannot read: ${err instanceof Error ? err.message : String(err)}`,
-    });
-    continue;
+  // Directory-level invariant: run only when scanning the default root set.
+  if (scanningDefault) errors.push(...await rootHygiene());
+
+  let planCount = 0;
+  for (const file of targets) {
+    const base = file.split('/').pop() ?? file;
+    if (NON_PLAN.test(base)) continue; // TEMPLATE.md / README.md are not plans
+    planCount++;
+    let content: string;
+    try {
+      content = await Deno.readTextFile(file);
+    } catch (err) {
+      errors.push({
+        file,
+        line: null,
+        message: `cannot read: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      continue;
+    }
+    const result = lintText(file, content);
+    errors.push(...result.errors);
+    warnings.push(...result.warnings);
   }
-  const result = lintText(file, content);
-  errors.push(...result.errors);
-  warnings.push(...result.warnings);
-}
 
-if (warnings.length > 0) {
-  console.warn(`\n⚠  ${warnings.length} warning(s):`);
-  for (const w of warnings) console.warn(format(w));
-}
+  if (warnings.length > 0) {
+    console.warn(`\n⚠  ${warnings.length} warning(s):`);
+    for (const w of warnings) console.warn(format(w));
+  }
 
-if (errors.length > 0) {
-  console.error(`\n✖  ${errors.length} error(s):`);
-  for (const e of errors) console.error(format(e));
-  console.error('\nplan-lint failed. Fix the errors above before implementing.');
-  Deno.exit(1);
-}
+  if (errors.length > 0) {
+    console.error(`\n✖  ${errors.length} error(s):`);
+    for (const e of errors) console.error(format(e));
+    console.error('\nplan-lint failed. Fix the errors above before implementing.');
+    Deno.exit(1);
+  }
 
-const suffix = warnings.length > 0 ? ` (${warnings.length} warning(s))` : '';
-console.log(`✓ plan-lint: ${planCount} plan(s) OK${suffix}`);
+  const suffix = warnings.length > 0 ? ` (${warnings.length} warning(s))` : '';
+  console.log(`✓ plan-lint: ${planCount} plan(s) OK${suffix}`);
+}
