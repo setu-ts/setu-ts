@@ -12926,6 +12926,43 @@ re-filed.
 
 ---
 
+## Versioning Policy From `0.9.0`
+
+**Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
+…) and a **minor** is the exception that carries batched breaking changes. README's Versioning table
+has promised since `v0.2.0` that a `0.x` patch is safe to take unread and a minor carries the
+breaks; nothing enforced the first half, and every release after the label drop (`0.2.0` through
+`0.8.0`, and `0.9.0` itself) was a minor carrying them. The adopter-facing cost is that a caret pin
+stopped at every release.
+
+**What it demands of a milestone.** Reading how the previous minors' breaks arose, three habits
+change:
+
+- **A required member added to a published interface** ("breaking for implementors" — M73, M74, M91,
+  M95b each added one) ships as an OPTIONAL member, and the required form is deferred to a named
+  minor. The ambiguity an optional member introduces ("absent" versus "not offered", the M70k
+  `reportsExit?` reasoning) is weighed against the release cost, and the plan says which won.
+- **A behaviour correction that changes a default** (a refusal moving from a masked `500` to `501`,
+  a default redaction turning on) ships behind its previous behaviour for one release — a flag, or
+  AI_GUIDELINES §9.2's deprecate-then-remove — and flips in a minor.
+- **Breaking changes are batched.** Patches as the norm; a minor when enough deferred breaks have
+  accumulated to be worth every caret pin moving at once. The deferred list lives in the CHANGELOG's
+  `Unreleased` section as entries marked for the next minor, so it is read at every cut.
+
+**Two gates, so the rule does not live in a runbook.** `deno task check:plan` requires every plan's
+"Exported surface" section to carry `**Breaking for implementors:** none` or a statement naming the
+break AND the minor that carries it — the release is chosen when the break is designed.
+`release:verify` check 10 (`scripts/release-shape.ts`) classifies the bump from the previous `v*`
+tag and refuses a PATCH whose shipping section carries a `BREAKING` entry, and a MINOR whose section
+carries none unless `--allow-quiet-minor` says the quiet minor is deliberate. Both landed before
+`0.9.0` so the first patch release has them.
+
+**What this does not change.** `0.x` stays pre-1.0: the GitHub Release keeps its `prerelease` flag
+(the `0.*` arm — drop it at 1.0), and 1.0 stays gated on M40. A `hotfix/…` branch from `main` is a
+patch by construction and gains nothing new here.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                       |

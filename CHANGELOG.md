@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Versioning policy from `0.9.0`, with two gates.** A patch is the normal release and breaking
+  changes are batched into an occasional minor (README "Versioning", ROADMAP "Versioning Policy From
+  `0.9.0`"). `release:verify` gains check 10 (`scripts/release-shape.ts`): it classifies the bump
+  from the previous tag and refuses a patch whose shipping changelog section carries a `BREAKING`
+  entry, and a minor whose section carries none unless `--allow-quiet-minor` is passed.
+  `deno task check:plan` requires every plan's "Exported surface" section to carry a
+  `**Breaking for implementors:**` statement — `none`, or the break and the minor that carries it.
+  No package source changed.
 - **Release tooling: `release:bump` and `release:verify` check 9.**
   `deno task release:bump <version>` moves every site a version bump has to touch — discovered by
   package name wherever a reference carries one, enumerated with its reason where it does not — and

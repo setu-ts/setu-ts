@@ -48,16 +48,27 @@
  * 9. Every pull request merged since the previous `v*` tag is represented in the
  *    shipping changelog section, and no milestone PR's entry sits under an
  *    already-published heading (`scripts/changelog-prs.ts`).
+ * 10. The version number agrees with the shipping section: a patch carries no
+ *    `BREAKING` entry, and a minor carries at least one unless
+ *    `--allow-quiet-minor` says the quiet minor is deliberate
+ *    (`scripts/release-shape.ts`).
  */
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
 import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
 import { extractReleaseNotes } from './release-notes.ts';
-import { checkChangelogPrs, describeFindings, mergedPullRequests } from './changelog-prs.ts';
+import {
+  checkChangelogPrs,
+  describeFindings,
+  mergedPullRequests,
+  shippingSection,
+} from './changelog-prs.ts';
+import { bumpKind, countBreaking, shapeProblems } from './release-shape.ts';
 
-const expected = Deno.args[0];
+const expected = Deno.args.find((arg) => !arg.startsWith('--'));
+const allowQuietMinor = Deno.args.includes('--allow-quiet-minor');
 if (!expected) {
-  console.error('usage: verify-release.ts <version>   (e.g. 0.2.0)');
+  console.error('usage: verify-release.ts <version> [--allow-quiet-minor]   (e.g. 0.2.0)');
   Deno.exit(2);
 }
 
@@ -265,6 +276,23 @@ if (changelog !== null) {
     console.log(
       `changelog PR coverage: ${merged.length} pull request(s) merged since ${previousTag}, ` +
         `${prs.represented} represented in ${prs.shippingSection}, ${prs.exempt} exempt.`,
+    );
+
+    // ── 10: the version number agrees with what the section carries ─────────
+    //
+    // README's Versioning table: a 0.x PATCH carries no breaking change, a
+    // MINOR carries them. From 0.9.0 a patch is the norm and breaks are
+    // batched (ROADMAP "Versioning policy from 0.9.0"); this refuses the two
+    // mistakes that policy depends on — see scripts/release-shape.ts.
+    const bump = bumpKind(previousTag.replace(/^v/, ''), expected);
+    const breaking = countBreaking(shippingSection(changelog, expected).body);
+    for (const line of shapeProblems({ bump, breaking, allowQuietMinor, version: expected })) {
+      problems.push(line);
+    }
+    console.log(
+      `release shape: ${bump} from ${previousTag}, ${breaking} BREAKING entr${
+        breaking === 1 ? 'y' : 'ies'
+      } in the shipping section.`,
     );
   } catch (error: unknown) {
     problems.push(

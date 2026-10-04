@@ -379,6 +379,8 @@ Every entry is `enabled: true`; the gate is the `devtool` parameter, not the opt
 
 ## 4. Exported surface — every symbol names its consumer
 
+**Breaking for implementors:** none — `SchematicMetadata.requiresPluginWhen?` is optional.
+
 `packages/cli/src/index.ts` changes in one way: `SchematicMetadata.requiresPluginWhen?` (§3.6), an
 OPTIONAL addition on a published interface (the M58 `SchematicOptions.modules` precedent). No
 `common` change, no capability token, no `testing` change.

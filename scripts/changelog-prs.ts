@@ -135,6 +135,34 @@ export function splitSections(changelog: string): readonly Section[] {
 }
 
 /**
+ * The section a release built from this tree would ship: a non-empty
+ * `[Unreleased]` (on `develop`, and on a release branch before the rename),
+ * else the version's own section (after the bump has renamed the heading).
+ *
+ * @param changelog - `CHANGELOG.md` contents
+ * @param version - The version being verified
+ * @returns The shipping section
+ * @throws {Error} When neither exists — there is nothing to check against
+ */
+export function shippingSection(
+  changelog: string,
+  version: string,
+): { readonly heading: string; readonly version: string; readonly body: string } {
+  const sections = splitSections(changelog);
+  const unreleased = sections.find((section) => section.version === 'Unreleased');
+  const shipping = unreleased !== undefined && unreleased.body.trim() !== ''
+    ? unreleased
+    : sections.find((section) => section.version === version);
+  if (shipping === undefined) {
+    throw new Error(
+      `CHANGELOG.md has neither a non-empty '## [Unreleased]' section nor a '## [${version}]' ` +
+        'section to check merged pull requests against.',
+    );
+  }
+  return shipping;
+}
+
+/**
  * The identifier the shipping section must carry for a PR, or `null` when the
  * PR needs no entry.
  *
@@ -173,18 +201,10 @@ export function checkChangelogPrs(
   merged: readonly MergedPullRequest[],
 ): ChangelogPrResult {
   const sections = splitSections(changelog);
-  const unreleased = sections.find((section) => section.version === 'Unreleased');
-  const shipping = unreleased !== undefined && unreleased.body.trim() !== ''
-    ? unreleased
-    : sections.find((section) => section.version === version);
-  if (shipping === undefined) {
-    throw new Error(
-      `CHANGELOG.md has neither a non-empty '## [Unreleased]' section nor a '## [${version}]' ` +
-        'section to check merged pull requests against.',
-    );
-  }
+  const shipping = shippingSection(changelog, version);
+  // By version, not identity: `shippingSection` parses its own copy.
   const published = sections.filter((section) =>
-    section !== shipping && section.version !== 'Unreleased'
+    section.version !== shipping.version && section.version !== 'Unreleased'
   );
 
   const findings: ChangelogPrFinding[] = [];
