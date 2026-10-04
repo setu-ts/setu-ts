@@ -88,6 +88,43 @@ isolation through the database service; an omitted declaration is refused rather
 the adapter default. Prisma needs a resolved `provider` for an isolation request: when its client
 provider cannot be detected, set `options.provider` explicitly.
 
+## Tenant data-store bridge
+
+`createDatabaseTenantDataStore` is the one shipped `ITenantDataStore` over `IDatabaseService`. Pass
+it to the multi-tenancy plugin's `dataStore` option and tenant-scoped repositories read and write
+through this backend:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createDatabaseTenantDataStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DatabasePlugin({ type: 'memory' }),
+    MultiTenancyPlugin({
+      resolver: 'header',
+      database: 'column-per-tenant',
+      dataStore: createDatabaseTenantDataStore(),
+    }),
+  ],
+});
+await app.start({ port: 3000 });
+```
+
+The factory is resolved in `onInit`, so `DatabasePlugin` may be registered before OR after the
+tenancy plugin — every `register()` phase completes before any `onInit`.
+
+The bridge supports the **`'column-per-tenant'`** strategy only: it conjoins the tenant column to
+every read and stamps it on every write (the column is spread LAST, so a caller's filter cannot
+override it, and stripped from every `update` payload, so no write can move a row between tenants).
+`'schema-per-tenant'` and `'database-per-tenant'` throw `TenantStoreStrategyUnsupportedError` at
+startup, because `IRepository` offers no schema or database switch. `DatabaseTenantDataStore` is
+also exported for an application that holds its own `IDatabaseService` and constructs the store
+directly.
+
 ## Options
 
 | Option    | Type                                                                                                 | Default     | Description                              |
@@ -803,6 +840,7 @@ imperative begin/commit.
 
 | Export                                    | Kind      |
 | ----------------------------------------- | --------- |
+| `createDatabaseTenantDataStore`           | function  |
 | `createDrizzleDatabase`                   | function  |
 | `createDrizzleDataSource`                 | function  |
 | `createInjectedBigtableLoader`            | function  |
@@ -824,6 +862,7 @@ imperative begin/commit.
 | `CosmosConcurrentModificationError`       | class     |
 | `CosmosTransactionScopeError`             | class     |
 | `DatabaseService`                         | class     |
+| `DatabaseTenantDataStore`                 | class     |
 | `DatabaseUnavailableError`                | class     |
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
@@ -834,6 +873,7 @@ imperative begin/commit.
 | `PrismaAdapter`                           | class     |
 | `PrismaRepository`                        | class     |
 | `SerializationConflictError`              | class     |
+| `TenantStoreStrategyUnsupportedError`     | class     |
 | `UnitOfWork`                              | class     |
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedIsolationLevelError`          | class     |
@@ -874,6 +914,7 @@ imperative begin/commit.
 | `DatabaseAdapterOptions`                  | interface |
 | `DatabaseConnectionOptions`               | interface |
 | `DatabasePoolCapacity`                    | interface |
+| `DatabaseTenantDataStoreOptions`          | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
 | `DrizzleDatabase`                         | interface |

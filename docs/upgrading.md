@@ -10,6 +10,31 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Change the SAML CSRF recipe to exclude the ACS instead of trusting the IdP origin (M101c)
+
+If you run a SAML provider behind both CSRF defences, the documented recipe now exempts the ACS path
+on **both** plugins rather than trusting the IdP's origin on `http-security-plugin`:
+
+```diff
+  SessionPlugin({
+    secret: '…',
+    csrf: { exclude: ['/auth/corp/acs'] },
+  });
+- HttpSecurityPlugin({ csrf: { trustedOrigins: ['https://sts.example.com'] } });
++ HttpSecurityPlugin({ csrf: { exclude: ['/auth/corp/acs'] } });
+```
+
+Why the change: an IdP that serves `Referrer-Policy: no-referrer` (Keycloak does) makes the browser
+post the ACS with `Origin: null`. The old recipe's `trustedOrigins` admits only a REAL origin, so
+under `Origin: null` the ACS answers `403` and sign-in is broken. The one allowlist answer —
+`trustedOrigins: ['null']` — is worse than the exemption, because it admits every opaque-origin
+`POST` on every route. `exclude` is path-scoped: it exempts the ACS, whose signed assertion,
+single-use request and binding cookie are the defences the CSRF check would otherwise add. Nothing
+to do if you do not run both CSRF defences in front of a SAML ACS, or if your IdP sends a real
+origin and you keep `trustedOrigins` for it.
+
 ## 0.8.0
 
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at

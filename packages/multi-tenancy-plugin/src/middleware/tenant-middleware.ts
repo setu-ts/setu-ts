@@ -7,13 +7,20 @@ import type {
   ILogger,
   IMultiTenancyService,
   IRequestContext,
+  ISession,
   ITenant,
   ITenantResolver,
   MiddlewareFunction,
   NextFunction,
   PathPattern,
 } from '@setu-ts/common';
-import { createPathMatcher, replaceTenant, respondWithError } from '@setu-ts/common';
+import {
+  createPathMatcher,
+  replaceTenant,
+  respondWithError,
+  SESSION_STATE_KEY,
+  tenantBindingMismatch,
+} from '@setu-ts/common';
 
 /**
  * State key for the cache prefix — consumers should use `getTenantCachePrefix`
@@ -135,6 +142,31 @@ export function tenantMiddleware({
 
     if (resolved) {
       replaceTenant(ctx.request, resolved);
+
+      // Tenant-binding compare on the tenant side (M101c, V8-7): the session
+      // middleware compares at load time, which covers a tenant resolved
+      // BEFORE it; this site covers a tenant resolved AFTER it (a custom
+      // resolver at a higher priority, application code). It reads the
+      // session the session middleware parked in `ctx.state` — present only
+      // when the session loaded first — and runs the SAME shared compare
+      // (`tenantBindingMismatch` in `common`). `ISessionService.from` is not a
+      // probe here: it throws when the session has not loaded, and a
+      // throw-and-catch per request at priority 40 is not a probe. A
+      // mismatch short-circuits with the identical `403 Tenant Mismatch` the
+      // session middleware answers, without calling `next()`, so the handler
+      // never runs under the mismatched session.
+      const parked = ctx.state.get(SESSION_STATE_KEY);
+      if (
+        typeof parked === 'object' && parked !== null &&
+        tenantBindingMismatch(parked as ISession, resolved.id)
+      ) {
+        respondWithError(ctx, {
+          status: 403,
+          title: 'Tenant Mismatch',
+          detail: 'This session was created for a different tenant',
+        });
+        return;
+      }
 
       // Stamp cache prefix into ctx.state when configured.
       if (cacheConfig?.prefix) {

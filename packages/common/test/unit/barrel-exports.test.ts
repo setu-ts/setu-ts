@@ -443,3 +443,61 @@ describe('@setu-ts/common barrel — M100c auth-session contract', () => {
     expect(signInOutcomePinned).toBe(true);
   });
 });
+
+describe('@setu-ts/common barrel — M101c identity composition', () => {
+  it('exports the session tenant-binding key and the pure compare helper', () => {
+    expect(common.SESSION_TENANT_BINDING_KEY).toBe('__setu_tenant');
+    expect(typeof common.tenantBindingMismatch).toBe('function');
+  });
+
+  it("exports SESSION_STATE_KEY byte-identical to the session plugin's", () => {
+    expect(common.SESSION_STATE_KEY).toBe('session-plugin:session');
+  });
+
+  it('tenantBindingMismatch is inert for an unbound session or a tenant-less request', () => {
+    // A minimal ISession double: the helper only calls `get`.
+    const session: common.ISession = {
+      id: 's1',
+      isNew: false,
+      get: <T = unknown>(key: string): T | undefined =>
+        (key === common.SESSION_TENANT_BINDING_KEY ? 'a' : undefined) as unknown as T | undefined,
+      set: () => {},
+      has: () => false,
+      delete: () => false,
+      clear: () => {},
+      regenerate: () => {},
+      destroy: () => {},
+      toJSON: () => ({}),
+    };
+    expect(common.tenantBindingMismatch(session, 'a')).toBe(false);
+    expect(common.tenantBindingMismatch(session, 'b')).toBe(true);
+    expect(common.tenantBindingMismatch(session, undefined)).toBe(false);
+  });
+
+  it('exports the promoted tenancy ports (declared against the barrel)', () => {
+    // Compile-time: the two ports resolve from the barrel. A fixture assigned
+    // against them proves the re-export carries the full member set.
+    const strategy: common.ITenantIsolationStrategy = {
+      kind: 'column',
+      getTenantColumn: () => 'tenant_id',
+    };
+    const store: common.ITenantDataStore = {
+      useIsolation: (s: common.ITenantIsolationStrategy) => {
+        expect(s.kind).toBe(strategy.kind);
+      },
+      // deno-lint-ignore require-await
+      findAll: async () => [],
+      // deno-lint-ignore require-await
+      findById: async () => null,
+      // deno-lint-ignore require-await
+      find: async () => [],
+      // deno-lint-ignore require-await
+      create: async <E>(): Promise<E> => ({} as unknown as E),
+      // deno-lint-ignore require-await
+      update: async () => null,
+      // deno-lint-ignore require-await
+      delete: async () => false,
+    };
+    expect(store.findAll('a', 'User')).resolves.toEqual([]);
+  });
+});

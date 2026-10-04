@@ -254,8 +254,28 @@ describe('SAML ACS (real node-saml)', () => {
     // …and makes the victim's browser post it.
     await expectRefused(await postAcs(harness, victim, response), 'state-invalid');
     expect(await signedInUser(victim)).toBeNull();
-    // The request is consumed: the attacker cannot use it afterwards either.
-    await expectRefused(await postAcs(harness, attackerJar, response), 'assertion-invalid');
+    // V8-25 (M101c): the victim's post did NOT consume the request — the
+    // binding is refused before consumption. The attacker, who holds the
+    // binding cookie, can still sign in with the same response. (Before the
+    // fix this answered `assertion-invalid`, because the library's
+    // failure-path `removeAsync` had consumed the record.)
+    const originPost = await postAcs(harness, attackerJar, response);
+    expect(originPost.status).toBe(302);
+    expect(await signedInUser(attackerJar)).toMatchObject({ id: 'corp:mallory' });
+  });
+
+  it("a foreign browser's post leaves the originator's request intact for a second login", async () => {
+    harness = await buildSamlApp(key);
+    const originator = new MultiCookieJar();
+    const foreign = new MultiCookieJar();
+    const requestId = await startLogin(harness, originator);
+    const response = signedResponse(key, requestId);
+    // A foreign browser (no binding cookie) posts the response first.
+    await expectRefused(await postAcs(harness, foreign, response), 'state-invalid');
+    // The originator, who holds the binding cookie, signs in with the same
+    // response — the foreign post did not burn it.
+    expect((await postAcs(harness, originator, response)).status).toBe(302);
+    expect(await signedInUser(originator)).toMatchObject({ id: 'corp:alice' });
   });
 
   it("refuses a response whose InResponseTo names another browser's login", async () => {

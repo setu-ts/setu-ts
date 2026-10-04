@@ -46,3 +46,21 @@
  * @since 0.1.0
  */
 export const CLIENT_IP_STATE_KEY = 'http-security-plugin:client-ip';
+
+/**
+ * The `ctx.state` key under which `session-plugin`'s middleware parks the
+ * live {@linkcode ISession} for the request, and from which
+ * `multi-tenancy-plugin`'s tenant middleware reads it back for the
+ * tenant-binding compare that runs on whichever side sees the tenant second
+ * (M101c, V8-7).
+ *
+ * Exported from `common` so the two packages agree on the value byte-for-byte
+ * instead of each hardcoding the literal — the `validatedStateKey` precedent.
+ *
+ * @example
+ * ```typescript
+ * const session = ctx.state.get(SESSION_STATE_KEY) as ISession | undefined;
+ * ```
+ * @since 0.9.0
+ */
+export const SESSION_STATE_KEY = 'session-plugin:session';

@@ -163,6 +163,7 @@ package fits the plugin architecture.
 | `responseMetadataOf`                 | function  |
 | `sealRequestIdentity`                | function  |
 | `securityMetadataOf`                 | function  |
+| `tenantBindingMismatch`              | function  |
 | `serializeCookie`                    | function  |
 | `serializeError`                     | function  |
 | `setUpgradeIntent`                   | function  |
@@ -188,6 +189,8 @@ package fits the plugin architecture.
 | `HTTP_STATUS_HINT`                   | const     |
 | `PLUGIN_PRIORITY`                    | const     |
 | `RESPONSE_METADATA`                  | const     |
+| `SESSION_STATE_KEY`                  | const     |
+| `SESSION_TENANT_BINDING_KEY`         | const     |
 | `SECURITY_METADATA`                  | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`           | const     |
 | `TRACEPARENT_HEADER`                 | const     |
@@ -343,6 +346,7 @@ package fits the plugin architecture.
 | `ISummary`                           | interface |
 | `ITelemetryService`                  | interface |
 | `ITenant`                            | interface |
+| `ITenantDataStore`                   | interface |
 | `ITenantRepository`                  | interface |
 | `ITenantResolver`                    | interface |
 | `ITraceDiagnosticsSource`            | interface |
@@ -499,6 +503,7 @@ package fits the plugin architecture.
 | `HealthStatus`                       | type      |
 | `HttpMethod`                         | type      |
 | `IngressKind`                        | type      |
+| `ITenantIsolationStrategy`           | type      |
 | `JobProcessor`                       | type      |
 | `JsonValue`                          | type      |
 | `LifecyclePhase`                     | type      |

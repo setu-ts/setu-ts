@@ -595,12 +595,14 @@ bounded. A shared store needs its own bound (a TTL and a size limit). Rate-limit
 well, and set `RuntimePlugin({ maxBodyBytes })` — the ACS reads a form body, and a SAML response is
 a few kilobytes, so a cap of tens of kilobytes is ample.
 
-**CSRF composition.** The IdP's `POST` carries no form token and an `Origin` naming the IdP, so with
-the session plugin's form CSRF the ACS path must be in `csrf.exclude`, and with
-`http-security-plugin`'s Origin check the IdP origin must be in `csrf.trustedOrigins` — otherwise
-the ACS answers `403`. Exempting it is sound because the signed assertion, the single-use request
-and the binding cookie are the ACS's own defences. `trustedOrigins` admits the IdP origin on every
-route, which is acceptable: the IdP is already trusted to assert identity.
+**CSRF composition.** The IdP's `POST` carries no form token, so with the session plugin's form CSRF
+the ACS path must be in `csrf.exclude`. The `Origin` is the subtler half: an IdP that serves
+`Referrer-Policy: no-referrer` (Keycloak does) makes the browser post the ACS with `Origin: null`,
+which no origin allowlist can admit safely — `trustedOrigins: ['null']` would admit every
+opaque-origin `POST` on every route. The documented recipe therefore puts the ACS path in
+`http-security-plugin`'s `csrf.exclude` too, so BOTH checks exempt the path rather than trusting an
+origin. Exempting it is sound because the signed assertion, the single-use request and the binding
+cookie are the ACS's own defences. Keep `trustedOrigins` only for an IdP that sends a real origin.
 
 ```typescript
 import { SessionPlugin } from '@setu-ts/session-plugin';
@@ -610,7 +612,7 @@ SessionPlugin({
   secret: 'replace-with-at-least-32-characters!!',
   csrf: { exclude: ['/auth/corp/acs'] },
 });
-HttpSecurityPlugin({ csrf: { trustedOrigins: ['https://sts.example.com'] } });
+HttpSecurityPlugin({ csrf: { exclude: ['/auth/corp/acs'] } });
 ```
 
 **The library.** `@node-saml/node-saml@^5` is imported lazily when a `saml` provider is configured,

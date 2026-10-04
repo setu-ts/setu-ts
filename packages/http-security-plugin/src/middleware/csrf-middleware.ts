@@ -6,8 +6,8 @@
  *
  * @module
  */
-import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { respondWithError } from '@setu-ts/common';
+import type { IRequestContext, MiddlewareFunction, PathPattern } from '@setu-ts/common';
+import { createPathMatcher, respondWithError } from '@setu-ts/common';
 
 /** HTTP methods considered unsafe (mutable) for CSRF purposes. */
 const UNSAFE_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -20,6 +20,12 @@ export interface CsrfOptions {
    * Additional trusted origins (scheme+host) beyond the request's own origin.
    * The request's own origin (derived from `request.url`) is always implicitly
    * trusted. Default: `[]`.
+   *
+   * An origin allowlist cannot admit an IdP that serves
+   * `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS
+   * with `Origin: null`, and `trustedOrigins: ['null']` admits every
+   * opaque-origin `POST` on every route. For such an endpoint use
+   * {@linkcode CsrfOptions.exclude} instead (M101c, V8-9).
    */
   readonly trustedOrigins?: readonly string[];
   /**
@@ -28,6 +34,21 @@ export interface CsrfOptions {
    * without a preflight, making this a CSRF defense.
    */
   readonly customHeader?: string;
+  /**
+   * Request paths exempt from CSRF validation, matched against
+   * `ctx.request.path` by exact string equality or `RegExp.test`. An
+   * excluded path is checked FIRST — before the method test — and is never
+   * inspected. Default: `[]` (no path is exempt).
+   *
+   * Use this only for a protocol endpoint whose own defences make the CSRF
+   * check redundant — the SAML ACS, whose signed assertion, single-use
+   * request and browser-binding cookie are the check this middleware would
+   * otherwise add (M101c, V8-9). Do not use it to bypass CSRF for
+   * application form routes.
+   *
+   * @since 0.9.0
+   */
+  readonly exclude?: readonly PathPattern[];
 }
 
 /**
@@ -46,10 +67,23 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
   const trustedOrigins = options.trustedOrigins ?? [];
   const customHeader = options.customHeader;
 
+  // The exclusion list is PARTITIONED once at registration (M90a's
+  // `createPathMatcher` owns the `lastIndex` reset a `g`/`y`-flagged pattern
+  // needs). Checked FIRST, before the method test, so an excluded path is
+  // never inspected (M101c, V8-9).
+  const isExcluded = createPathMatcher(options.exclude ?? []);
+
   return async (
     ctx: IRequestContext,
     next: () => Promise<void>,
   ): Promise<void> => {
+    // Excluded paths skip the CSRF check entirely — no method test, no
+    // origin inspection.
+    if (isExcluded(ctx.request.path)) {
+      await next();
+      return;
+    }
+
     // Safe methods always pass through
     if (!UNSAFE_METHODS.has(ctx.request.method.toUpperCase())) {
       await next();

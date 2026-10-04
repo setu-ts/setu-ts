@@ -5,13 +5,14 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ISession } from '@setu-ts/common';
+import type { ISession, ITenant } from '@setu-ts/common';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
 import { sessionMiddleware } from '../../../src/middleware/session-middleware.ts';
 import { resolveSessionConfig } from '../../../src/options.ts';
 import type { SessionPluginOptions } from '../../../src/options.ts';
 import { SESSION_STATE_KEY, SessionService } from '../../../src/services/session-service.ts';
+import { readTenantBinding } from '../../../src/services/session-tenant-binding.ts';
 import { makeClock, makeContext } from '../../fixtures/context.ts';
 
 const SECRET = 'm'.repeat(32);
@@ -163,5 +164,62 @@ describe('sessionMiddleware', () => {
     });
 
     expect(session?.isNew).toBe(true);
+  });
+
+  describe('tenant binding — the seal runs only for an unbound session (M101c, V8-7)', () => {
+    function withTenant(ctx: ReturnType<typeof makeContext>['ctx'], id: string): void {
+      ctx.request.tenant = { id } satisfies ITenant;
+    }
+
+    it('seals a tenant resolved for an unbound session at commit', async () => {
+      const { middleware } = await makeMiddleware();
+      const { ctx, response } = makeContext();
+      withTenant(ctx, 'acme');
+
+      await middleware(ctx, () => Promise.resolve());
+
+      // The seal marks the session dirty, so a cookie is emitted even on a
+      // read-only request, and the binding round-trips.
+      expect(response.setCookies().length).toBe(1);
+      expect(readTenantBinding(ctx.state.get(SESSION_STATE_KEY) as ISession)).toBe('acme');
+    });
+
+    it('does NOT rebind a session already bound to a different tenant', async () => {
+      const { middleware } = await makeMiddleware();
+
+      // 1. Mint a session bound to `acme`.
+      const first = makeContext();
+      withTenant(first.ctx, 'acme');
+      await middleware(first.ctx, () => Promise.resolve());
+      const cookie = first.response.setCookies()[0].split(';')[0];
+
+      // 2. Replay under `acme` (the load compare passes), but a downstream
+      //    writer stamps the request's tenant to `globex` before commit. The
+      //    session is already bound, so the seal must NOT re-seal it to
+      //    `globex` — a bound session is never rebound.
+      const replay = makeContext({ headers: { cookie } });
+      withTenant(replay.ctx, 'acme');
+      await middleware(replay.ctx, () => {
+        replay.ctx.request.tenant = { id: 'globex' } satisfies ITenant;
+        return Promise.resolve();
+      });
+      const session = replay.ctx.state.get(SESSION_STATE_KEY) as ISession;
+      expect(readTenantBinding(session)).toBe('acme'); // still `acme`, not re-sealed
+
+      // 3. Proof the refusal path stays closed: a follow-up under `acme` still
+      //    passes (the binding is intact). If the seal had re-bound to
+      //    `globex`, this would 403. The replay committed no cookie (the
+      //    session was clean and not re-sealed), so the original binding
+      //    cookie is still the one in force.
+      const followUp = makeContext({ headers: { cookie } });
+      withTenant(followUp.ctx, 'acme');
+      let handlerRan = false;
+      await middleware(followUp.ctx, () => {
+        handlerRan = true;
+        return Promise.resolve();
+      });
+      expect(handlerRan).toBe(true);
+      expect(followUp.response.statusCode).toBe(200);
+    });
   });
 });

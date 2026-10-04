@@ -6,6 +6,51 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Tenant data-store bridge (M101c, V8-8).** `@setu-ts/database-plugin` now ships the one
+  `ITenantDataStore` over a real backend: `createDatabaseTenantDataStore(options?)` returns a
+  `RegistryFactory` the multi-tenancy plugin resolves in `onInit`, so `DatabasePlugin` may be
+  registered before or after the tenancy plugin. It returns a `DatabaseTenantDataStore` over
+  `service.getRepository(entity)`, supporting the `'column-per-tenant'` strategy only — the tenant
+  column is conjoined to every read (spread last, so a caller's filter cannot override it) and
+  stamped on every write, and stripped from every `update` payload so no write can move a row
+  between tenants. `DatabaseTenantDataStoreOptions.tenantColumn` names the column; a `'column'`
+  strategy naming a different column throws at `useIsolation`, and `'schema'`/`'database'` throw
+  `TenantStoreStrategyUnsupportedError` because `IRepository` offers no schema or database switch.
+  `MultiTenancyPluginOptions.dataStore` widens to
+  `ITenantDataStore | RegistryFactory<ITenantDataStore>`; a factory is resolved once at `onInit`,
+  validated, and handed the strategy, and the service's late-binding slot throws
+  `TenantDataStoreNotReadyError` for a repository call made before `onInit`. The port types
+  `ITenantDataStore` and `ITenantIsolationStrategy` move to `@setu-ts/common` (the multi-tenancy
+  plugin re-exports both), so the two plugins can type the bridge across the §2.2 boundary.
+
+- **Session tenant binding, two-sided (M101c, V8-7).** The binding compare now runs on whichever
+  side sees the tenant second: the session middleware keeps its load-time compare, and the tenant
+  middleware compares the session it finds in `ctx.state` right after it resolves a tenant. Both
+  sites share the pure `tenantBindingMismatch(session, tenantId)` in `@setu-ts/common`, which also
+  owns the two state keys — `SESSION_STATE_KEY` and `SESSION_TENANT_BINDING_KEY` — that the two
+  packages must agree on byte-for-byte. The seal narrows to an unbound session only, so a bound
+  session is never re-bound by a later, mismatched tenant.
+
+- **CSRF path exclusion (M101c, V8-9).** `CsrfOptions.exclude` (http-security) and
+  `CsrfFormOptions.exclude` (session) list paths — exact string or `RegExp` — that skip the CSRF
+  check entirely, checked before the method test so an excluded path is never inspected. The
+  documented SAML recipe becomes `exclude: ['/auth/<provider>/acs']` on BOTH plugins, because an
+  origin allowlist cannot admit an IdP that serves `Referrer-Policy: no-referrer` (Keycloak does):
+  the browser posts the ACS with `Origin: null`, and `trustedOrigins: ['null']` would admit every
+  opaque-origin `POST` on every route.
+
+### Changed
+
+- **SAML ACS binding checked before the request is consumed (M101c, V8-25).** The binding compare
+  moves into the per-request request-cache adapter's `getAsync`, the first point at which the
+  library has parsed the response's `InResponseTo` and before any consumption. A refused peek sets a
+  per-request flag that makes `removeAsync` return without consuming — load-bearing, because
+  node-saml calls `removeAsync` on its failure path and on an unmatched `InResponseTo`, which is how
+  a foreign post consumed the victim's request. A refused peek now answers `state-invalid` (the code
+  the case already uses) instead of `assertion-invalid`.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added

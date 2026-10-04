@@ -37,8 +37,8 @@ export { DatabasePerTenant } from './strategies/database-strategy.ts';
 // Store.
 export { MemoryTenantDataStore } from './stores/memory-tenant-store.ts';
 
-// Error.
-export { TenantNotResolvedError } from './errors.ts';
+// Errors.
+export { TenantDataStoreNotReadyError, TenantNotResolvedError } from './errors.ts';
 
 // Internal interfaces (types only — exported for injection).
 export type {

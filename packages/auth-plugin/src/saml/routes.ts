@@ -374,12 +374,34 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         }
         return captured;
       };
+
+      // V8-25 (M101c): the binding is checked BEFORE the request is consumed.
+      // `getAsync` peeks the record and, when the presented binding cookie is
+      // absent or does not match the record's `binding`, sets `bindingRefused`
+      // and returns `null` WITHOUT consuming. The library then throws, and
+      // `removeAsync` — which node-saml 5.1.0 calls on its failure path
+      // (`lib/saml.js:628` catch, `:803`/`:814` before throwing on an
+      // unmatched `InResponseTo`) — returns `null` without consuming while the
+      // flag is set. This is load-bearing: without it, a foreign browser's
+      // post of a SAML response burns the victim's pending login, because the
+      // library's failure-path `removeAsync` consumes the record.
+      let bindingRefused = false;
+
       const cache: SamlCacheProvider = {
         saveAsync: nothing,
-        getAsync: async (requestId) =>
-          (await provider.store.peekRequest(requestId, deps.runtime.now()))?.issuedAt ?? null,
-        removeAsync: async (requestId) =>
-          requestId === null ? null : (await consume(requestId))?.issuedAt ?? null,
+        getAsync: async (requestId) => {
+          const record = await provider.store.peekRequest(requestId, deps.runtime.now());
+          if (record === null) return null;
+          if (presented === null || !bindingMatches(presented, record.binding)) {
+            bindingRefused = true;
+            return null;
+          }
+          return record.issuedAt;
+        },
+        removeAsync: async (requestId) => {
+          if (bindingRefused) return null;
+          return requestId === null ? null : (await consume(requestId))?.issuedAt ?? null;
+        },
       };
 
       let profile: SamlLibraryProfile | null;
@@ -388,7 +410,16 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         profile = (await saml.validatePostResponseAsync({ SAMLResponse: encoded })).profile;
       } catch (error) {
         // The library has already consumed the request on its failure path, so a
-        // response that fails validation cannot be retried against its request.
+        // response that fails validation cannot be retried against its request —
+        // UNLESS the binding was refused: in that case `getAsync` returned
+        // `null` without consuming and `removeAsync` was guarded by the flag,
+        // so the victim's pending request is still intact.
+        if (bindingRefused) {
+          deps.debug?.(
+            `auth-plugin: signIn['${provider.name}'] response refused (binding, pre-consume)`,
+          );
+          return fail(provider, ctx, 'state-invalid');
+        }
         deps.debug?.(
           `auth-plugin: signIn['${provider.name}'] response refused (${describeError(error)})`,
         );

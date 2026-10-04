@@ -149,11 +149,24 @@ origin echoes nothing.
 
 ### CsrfOptions
 
-| Option            | Type       | Default | Description                                   |
-| ----------------- | ---------- | ------- | --------------------------------------------- |
-| `enabled?`        | `boolean`  | `true`  | Toggle CSRF                                   |
-| `trustedOrigins?` | `string[]` | `[]`    | Additional trusted origins beyond self-origin |
-| `customHeader?`   | `string`   | —       | Required custom header for unsafe methods     |
+| Option            | Type            | Default | Description                                                      |
+| ----------------- | --------------- | ------- | ---------------------------------------------------------------- |
+| `enabled?`        | `boolean`       | `true`  | Toggle CSRF                                                      |
+| `trustedOrigins?` | `string[]`      | `[]`    | Additional trusted origins beyond self-origin                    |
+| `customHeader?`   | `string`        | —       | Required custom header for unsafe methods                        |
+| `exclude?`        | `PathPattern[]` | `[]`    | Paths exempt from the CSRF check, checked before the method test |
+
+**`exclude` is for a protocol endpoint, not an application route.** An excluded path is checked
+FIRST — before the method test — and is never inspected. Use it only where the endpoint's own
+defences make the CSRF check redundant: the SAML ACS, whose signed assertion, single-use request and
+browser-binding cookie are the check this middleware would otherwise add. Do not use it to bypass
+CSRF for a form route.
+
+`exclude` exists because an origin allowlist cannot admit an IdP that serves
+`Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS with `Origin: null`, and
+`trustedOrigins: ['null']` admits every opaque-origin `POST` on every route. The documented SAML
+recipe is `exclude: ['/auth/<provider>/acs']` here AND in the session plugin's form CSRF
+(`CsrfFormOptions.exclude`); keep `trustedOrigins` for an IdP that sends a real origin.
 
 ### RequestSizeOptions
 

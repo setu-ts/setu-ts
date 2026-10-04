@@ -490,3 +490,26 @@ describe('database-plugin barrel exports', () => {
     }
   });
 });
+
+describe('database-plugin barrel exports — M101c tenant store bridge', () => {
+  it('exports createDatabaseTenantDataStore, DatabaseTenantDataStore and the named refusal', () => {
+    // Pinned against the BARREL: an application reaches these from
+    // `@setu-ts/database-plugin` and the multi-tenancy plugin's `dataStore`
+    // option resolves the factory in `onInit` (the M56 defect class).
+    expect(typeof database.createDatabaseTenantDataStore).toBe('function');
+    expect(typeof database.DatabaseTenantDataStore).toBe('function');
+    expect(typeof database.TenantStoreStrategyUnsupportedError).toBe('function');
+
+    const error = new database.TenantStoreStrategyUnsupportedError('x');
+    expect(error.name).toBe('TenantStoreStrategyUnsupportedError');
+
+    // The factory returns an ITenantDataStore (declared against the common
+    // barrel, which the bridge implements by name).
+    const services = {
+      get: () => ({}),
+    } as unknown as common.IServiceRegistry;
+    const store = database.createDatabaseTenantDataStore()(services);
+    expect(typeof store.findAll).toBe('function');
+    expect(typeof store.useIsolation).toBe('function');
+  });
+});

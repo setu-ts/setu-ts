@@ -84,7 +84,8 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/auth-plugin/README.md': 16,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
-  'packages/session-plugin/README.md': 11,
+  // M101c: +1 for the Tenant binding opt-out example.
+  'packages/session-plugin/README.md': 12,
   'packages/audit-plugin/README.md': 3,
   'packages/common/README.md': 2,
   // M92: +1 for the @Render example.
