@@ -23,6 +23,7 @@
  * | validated value     | `validation-plugin`    | `validation-plugin:validated-<target>` |
  * | telemetry span      | `telemetry-plugin`     | `telemetry-plugin:span`               |
  * | session             | `session-plugin`       | `session-plugin:session`              |
+ * | tenant binding on   | `session-plugin`       | `session-plugin:tenant-binding`       |
  * | uploads             | `storage-plugin`       | `storage-plugin:uploads`              |
  * | tenant cache prefix | `multi-tenancy-plugin` | `multi-tenancy-plugin:cache-prefix`   |
  *
@@ -64,3 +65,25 @@ export const CLIENT_IP_STATE_KEY = 'http-security-plugin:client-ip';
  * @since 0.9.0
  */
 export const SESSION_STATE_KEY = 'session-plugin:session';
+
+/**
+ * The `ctx.state` key under which `session-plugin`'s middleware publishes
+ * whether tenant binding is ON for this request (`true`) — set beside
+ * {@linkcode SESSION_STATE_KEY} only when `SessionPlugin({ tenantBinding })`
+ * is enabled, which is the default.
+ *
+ * `multi-tenancy-plugin`'s tenant-side compare reads it and compares only when
+ * it is `true`, so `tenantBinding: false` means "no compare" on BOTH compare
+ * sites and in every middleware order (M101c, V8-7). Without it the tenant side
+ * could not see the session plugin's option, and a session sealed before the
+ * option was turned off would still be refused when the tenant is resolved
+ * after the session loads — while the same request passed at the default
+ * resolver priority.
+ *
+ * @example
+ * ```typescript
+ * const bindingOn = ctx.state.get(SESSION_TENANT_BINDING_STATE_KEY) === true;
+ * ```
+ * @since 0.9.0
+ */
+export const SESSION_TENANT_BINDING_STATE_KEY = 'session-plugin:tenant-binding';

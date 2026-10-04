@@ -89,7 +89,11 @@ export type {
 
 // Request identity and cross-package state keys
 export { replacePrincipal, replaceTenant, sealRequestIdentity } from './request-identity.ts';
-export { CLIENT_IP_STATE_KEY, SESSION_STATE_KEY } from './state-keys.ts';
+export {
+  CLIENT_IP_STATE_KEY,
+  SESSION_STATE_KEY,
+  SESSION_TENANT_BINDING_STATE_KEY,
+} from './state-keys.ts';
 
 // Path-exclusion matcher (M90a) — the one matcher four middlewares share
 export { createPathMatcher } from './path-matcher.ts';

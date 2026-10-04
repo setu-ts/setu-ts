@@ -11,6 +11,7 @@ import {
   sealRequestIdentity,
   SESSION_STATE_KEY,
   SESSION_TENANT_BINDING_KEY,
+  SESSION_TENANT_BINDING_STATE_KEY,
 } from '@setu-ts/common';
 
 // Fake ITenantResolver for tests that need a custom one.
@@ -526,6 +527,7 @@ describe('tenant middleware', () => {
       let nextCalled = false;
       const state = new Map<string, unknown>();
       state.set(SESSION_STATE_KEY, parkedSession('a'));
+      state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
       const { ctx } = makeContext({ state });
       (ctx as { response: unknown }).response = response;
       const mw = tenantMiddleware({
@@ -549,6 +551,7 @@ describe('tenant middleware', () => {
     it('proceeds when the parked session is bound to the SAME tenant', async () => {
       const state = new Map<string, unknown>();
       state.set(SESSION_STATE_KEY, parkedSession('a'));
+      state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
       const { ctx, next, getNextCalled } = makeContext({ state });
       const mw = tenantMiddleware({
         service: makeService(),
@@ -558,6 +561,23 @@ describe('tenant middleware', () => {
       await mw(ctx as never, next);
       expect(getNextCalled()).toBe(true);
       expect((ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('a');
+    });
+
+    it('does not compare when the session middleware did not publish binding ON', async () => {
+      // `SessionPlugin({ tenantBinding: false })` parks the session but never
+      // sets the binding-on key: a session sealed before the opt-out must not
+      // be refused here, exactly as the session side would not refuse it.
+      const state = new Map<string, unknown>();
+      state.set(SESSION_STATE_KEY, parkedSession('a'));
+      const { ctx, next, getNextCalled } = makeContext({ state });
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [resolvingResolver('b')],
+        options: {},
+      });
+      await mw(ctx as never, next);
+      expect(getNextCalled()).toBe(true);
+      expect((ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('b');
     });
 
     it('is unchanged when no session is parked in ctx.state', async () => {

@@ -4,7 +4,12 @@
  * @module
  */
 import type { IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
-import { respondWithError, SESSION_STATE_KEY, tenantBindingMismatch } from '@setu-ts/common';
+import {
+  respondWithError,
+  SESSION_STATE_KEY,
+  SESSION_TENANT_BINDING_STATE_KEY,
+  tenantBindingMismatch,
+} from '@setu-ts/common';
 
 import type { SessionService } from '../services/session-service.ts';
 import { readTenantBinding, sealTenantBinding } from '../services/session-tenant-binding.ts';
@@ -72,6 +77,11 @@ export function sessionMiddleware(
     }
 
     ctx.state.set(SESSION_STATE_KEY, session);
+    // Tell the tenant-side compare whether binding is on, so `tenantBinding:
+    // false` disables BOTH compare sites in every middleware order.
+    if (tenantBinding) {
+      ctx.state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
+    }
 
     await next();
 

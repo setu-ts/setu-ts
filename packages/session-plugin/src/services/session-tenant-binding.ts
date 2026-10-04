@@ -5,15 +5,13 @@
  * gains no member. The key and the compare live in `common`
  * (`SESSION_TENANT_BINDING_KEY`, `tenantBindingMismatch`) because a second
  * compare site in `multi-tenancy-plugin` must agree with this one byte-for-
- * byte (M101c, V8-7); this module re-exports the key and keeps the seal so
+ * byte (M101c, V8-7); this module aliases the key and keeps the seal so
  * the commit path and the load path cannot disagree about the key.
  *
  * @module
  */
 import type { ISession } from '@setu-ts/common';
 import { SESSION_TENANT_BINDING_KEY } from '@setu-ts/common';
-
-export { SESSION_TENANT_BINDING_KEY };
 
 /**
  * The reserved session key holding the tenant id a session was minted under.

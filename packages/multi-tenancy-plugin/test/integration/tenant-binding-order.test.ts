@@ -96,11 +96,12 @@ let handlerRan = false;
 async function bootApp(
   resolver: ITenantResolver,
   middlewarePriority: number,
+  tenantBinding = true,
 ): Promise<IKernelApplication> {
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
-      SessionPlugin({ secret: SECRET }),
+      SessionPlugin({ secret: SECRET, tenantBinding }),
       MultiTenancyPlugin({ resolver, middlewarePriority }),
     ],
   });
@@ -193,6 +194,31 @@ describe('tenant binding — the compare runs on whichever side sees the tenant 
       expect(handlerRan).toBe(true);
     } finally {
       await app.stop();
+    }
+  });
+
+  it('tenantBinding: false disables the tenant-side compare too, in every middleware order', async () => {
+    // A session sealed to `a` while binding was on, then presented to an app
+    // that turned binding OFF. The opt-out documents "no seal, no compare";
+    // with the tenant resolved after the session loads, the tenant side must
+    // honor it exactly as the session side does at the default priority.
+    const sealing = await bootApp(userResolver, 310);
+    let cookie: string | undefined;
+    try {
+      cookie = sessionCookie((await hit(sealing, { 'x-user-tenant': 'a' })).headers);
+      expect(cookie).toBeDefined();
+    } finally {
+      await sealing.stop();
+    }
+
+    const optedOut = await bootApp(userResolver, 310, false);
+    try {
+      handlerRan = false;
+      const response = await hit(optedOut, { 'x-user-tenant': 'b', cookie: cookie! });
+      expect(response.statusCode).toBe(200);
+      expect(handlerRan).toBe(true);
+    } finally {
+      await optedOut.stop();
     }
   });
 });

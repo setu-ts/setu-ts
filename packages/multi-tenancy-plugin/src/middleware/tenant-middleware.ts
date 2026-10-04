@@ -19,6 +19,7 @@ import {
   replaceTenant,
   respondWithError,
   SESSION_STATE_KEY,
+  SESSION_TENANT_BINDING_STATE_KEY,
   tenantBindingMismatch,
 } from '@setu-ts/common';
 
@@ -154,9 +155,12 @@ export function tenantMiddleware({
       // throw-and-catch per request at priority 40 is not a probe. A
       // mismatch short-circuits with the identical `403 Tenant Mismatch` the
       // session middleware answers, without calling `next()`, so the handler
-      // never runs under the mismatched session.
+      // never runs under the mismatched session. It compares only when the
+      // session middleware published that binding is ON, so
+      // `SessionPlugin({ tenantBinding: false })` disables this site too.
       const parked = ctx.state.get(SESSION_STATE_KEY);
       if (
+        ctx.state.get(SESSION_TENANT_BINDING_STATE_KEY) === true &&
         typeof parked === 'object' && parked !== null &&
         tenantBindingMismatch(parked as ISession, resolved.id)
       ) {

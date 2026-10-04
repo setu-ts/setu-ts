@@ -454,6 +454,10 @@ describe('@setu-ts/common barrel — M101c identity composition', () => {
     expect(common.SESSION_STATE_KEY).toBe('session-plugin:session');
   });
 
+  it('exports SESSION_TENANT_BINDING_STATE_KEY following the state-key convention', () => {
+    expect(common.SESSION_TENANT_BINDING_STATE_KEY).toBe('session-plugin:tenant-binding');
+  });
+
   it('tenantBindingMismatch is inert for an unbound session or a tenant-less request', () => {
     // A minimal ISession double: the helper only calls `get`.
     const session: common.ISession = {

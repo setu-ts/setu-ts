@@ -191,6 +191,7 @@ package fits the plugin architecture.
 | `RESPONSE_METADATA`                  | const     |
 | `SESSION_STATE_KEY`                  | const     |
 | `SESSION_TENANT_BINDING_KEY`         | const     |
+| `SESSION_TENANT_BINDING_STATE_KEY`   | const     |
 | `SECURITY_METADATA`                  | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`           | const     |
 | `TRACEPARENT_HEADER`                 | const     |

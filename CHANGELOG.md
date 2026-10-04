@@ -31,8 +31,10 @@ All notable changes to this project are documented here. The format follows
   side sees the tenant second: the session middleware keeps its load-time compare, and the tenant
   middleware compares the session it finds in `ctx.state` right after it resolves a tenant. Both
   sites share the pure `tenantBindingMismatch(session, tenantId)` in `@setu-ts/common`, which also
-  owns the two state keys — `SESSION_STATE_KEY` and `SESSION_TENANT_BINDING_KEY` — that the two
-  packages must agree on byte-for-byte.
+  owns the keys the two packages must agree on byte-for-byte: `SESSION_STATE_KEY`,
+  `SESSION_TENANT_BINDING_KEY`, and `SESSION_TENANT_BINDING_STATE_KEY`, which the session middleware
+  sets to `true` when `tenantBinding` is on. The tenant side compares only then, so
+  `SessionPlugin({ tenantBinding: false })` disables both compare sites in every middleware order.
 
 - **CSRF path exclusion (M101c, V8-9).** `CsrfOptions.exclude` (http-security) lists paths — exact
   string or `RegExp` — that skip the CSRF check entirely, checked before the method test so an

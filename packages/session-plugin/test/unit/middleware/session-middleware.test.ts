@@ -6,6 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { ISession, ITenant } from '@setu-ts/common';
+import { SESSION_TENANT_BINDING_STATE_KEY } from '@setu-ts/common';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
 import { sessionMiddleware } from '../../../src/middleware/session-middleware.ts';
@@ -164,6 +165,19 @@ describe('sessionMiddleware', () => {
     });
 
     expect(session?.isNew).toBe(true);
+  });
+
+  it('publishes binding ON for the tenant-side compare only when tenantBinding is enabled', async () => {
+    const service = (await makeMiddleware()).service;
+    for (const [tenantBinding, expected] of [[true, true], [false, undefined]] as const) {
+      const { ctx } = makeContext();
+      let seen: unknown = 'unset';
+      await sessionMiddleware(service, tenantBinding)(ctx, () => {
+        seen = ctx.state.get(SESSION_TENANT_BINDING_STATE_KEY);
+        return Promise.resolve();
+      });
+      expect(seen).toBe(expected);
+    }
   });
 
   describe('tenant binding — the seal runs only for an unbound session (M101c, V8-7)', () => {
