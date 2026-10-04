@@ -11946,7 +11946,7 @@ interface OpenApiCodegenOptions {
 | Component type           | PascalCase from the component name (`User` → `export type User`)                                                                                                                                                                                                                                                                                                                               |
 | Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                                                                                                                                                                                                                                                                      |
 | Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                                                                                                                                                                                                                                                                     |
-| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx, non-3xx response                                                                                                                                                                                                                                                            |
+| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared observable non-2xx response; auto-follow redirects (`301`, `302`, `303`, `307`, `308`) are omitted                                                                                                                                                                                   |
 | Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                                                                                                                                                                                                                                                                        |
 | Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                                                                                                                                                                                                                                                                         |
 | Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                                                                                                                                                                                                                                                                                |
@@ -11969,8 +11969,8 @@ _slow type_: it blocks automatic `.d.ts` generation, so a consumer could not pub
 containing the generated file — while the file's own header tells them not to edit it. Naming the
 interface is also the only way a consumer can name the client's type.
 
-**Declared error responses are typed.** For each operation declaring a non-2xx, non-3xx response the
-generator emits a union discriminated on the literal `status`, plus a narrowing guard:
+**Declared error responses are typed.** For each operation declaring an observable non-2xx response
+the generator emits a union discriminated on the literal `status`, plus a narrowing guard:
 
 ```typescript
 export type GetUserByIdError =
@@ -11984,9 +11984,11 @@ keeps meaning exactly what it did. The union must be discriminated on `status` t
 `HttpClientError<A> | HttpClientError<B>` is not, because `status` is `number` on both arms. A
 `default` response and range codes such as `4XX` are skipped: they name no single status.
 
-Declared `3xx` responses are also skipped because the web transport follows redirects before the
-client observes a response. An operation with only declared redirects returns `unknown`, the honest
-type for the follow target body that the source document does not describe.
+Exact redirect statuses followed by the web transport (`301`, `302`, `303`, `307`, and `308`) are
+skipped. Other `3xx` responses, including `304`, remain observable and therefore retain typed error
+arms. An operation declaring an auto-follow redirect or the OpenAPI `3XX` range returns `unknown`,
+even when it also declares a `2xx` schema: the runtime `Location` selects a follow target body the
+source operation does not describe.
 
 **Generated output is `deno fmt`- and `deno lint`-clean.** Two-space indentation, nested inline
 object types indented, no lint pragma (`{}` is emitted as `Record<PropertyKey, never>`, which is

@@ -69,7 +69,7 @@ the React Router boundary.
 | C1 | `ROADMAP.md` M101d says "add the interceptor to the SDK and accept the type both producers emit" as if one change; the SDK cannot import the codec at runtime (type-only pin, §1), so the two halves are separate: a `common` type widening for server-side callers, and an SDK interceptor that formats the header itself            | Both ship; the duplication of the W3C format inside the SDK is deliberate and recorded in the interceptor's JSDoc (the M98n precedent), not a §11.1 miss | Reported in the hand-back (no `ROADMAP.md` edit here); sdk README "Interceptors" gains the trace section; `PUBLIC_API.md` SDK section gains `createTraceContextInterceptor` |
 | C2 | `ROADMAP.md` M101d for V8-11 offers "route the refusal through `respondWithError`, or document the boundary"; the responder writes through a full `IResponse` (§1), and React Router renders a thrown non-redirect `Response` into its error boundary for a document request, so the first arm is not reachable from route middleware | Document the boundary, and pin it by test so a later bridge change is deliberate (§3.2)                                                                  | react-router README `## Refusals and the error responder`; `PUBLIC_API.md:3915` section note; the scaffold's `require-user.server.ts` header comment                        |
 | C3 | `PUBLIC_API.md` SDK section documents `retry` without stating what a `Retry-After` longer than the policy tolerates does; the code sleeps for it (`retry-strategy.ts:111-113`)                                                                                                                                                        | The cap rule in §3.4 becomes the documented behaviour                                                                                                    | `PUBLIC_API.md` SDK `retry` row + a `maxRetryAfterMs` row; sdk README "Retry"                                                                                               |
-| C4 | sdk README "Generated names and shapes" and `PUBLIC_API.md` codegen text describe every non-`2xx` response as an error arm; a `3xx` can never be observed through the client (`fetch` follows it)                                                                                                                                     | `3xx` is neither an error arm nor a success arm (§3.3)                                                                                                   | sdk README codegen section + `PUBLIC_API.md` codegen paragraph                                                                                                              |
+| C4 | sdk README "Generated names and shapes" and `PUBLIC_API.md` codegen text describe every non-`2xx` response as an error arm; Fetch follows only `301`, `302`, `303`, `307`, and `308`, while responses such as `304` remain observable                                                                                                 | auto-follow redirects are not error arms; observable `3xx` responses remain error arms (§3.3)                                                            | sdk README codegen section + `PUBLIC_API.md` codegen paragraph                                                                                                              |
 | C5 | full-stack-starter README "Composing from configuration" and `PUBLIC_API.md:8808-8814` show `createFullStackAppFromConfig` returning the app alone, with no way to read the snapshot afterwards                                                                                                                                       | The snapshot is exposed through an additive accessor (§3.5); the return type is unchanged                                                                | both sections gain the accessor and a post-factory example                                                                                                                  |
 
 ## 3. Design decisions
@@ -145,26 +145,27 @@ the React Router boundary.
   The CLI comment is asserted by the existing template content test
   (`packages/cli/test/unit/templates/full-stack-app-files.test.ts`, extended with the sentence).
 
-### 3.3 V8-27 — `3xx` is neither an error arm nor a success arm
+### 3.3 V8-27 — auto-follow redirects are neither error arms nor typed successes
 
-- **Decision:** `getErrorArms` skips `300–399` alongside `2xx`; `getSuccessTypes` is unchanged for
-  `2xx`; an operation whose documented responses are ONLY `3xx` (no `2xx` schema at all) renders its
-  success type as `unknown`, not `void` — `fetch` follows the redirect and the body the client
-  receives is the follow target's, which the document does not describe. A generated-file header
-  comment states that redirects are followed by the transport and are not observable through the
-  client.
+- **Decision:** `getErrorArms` skips the exact statuses Fetch auto-follows (`301`, `302`, `303`,
+  `307`, and `308`) alongside `2xx`; other concrete `3xx` responses, including `304`, remain error
+  arms. An operation declaring an auto-follow status or the OpenAPI `3XX` range renders its success
+  type as `unknown`, even beside a declared `2xx` schema — the body the client receives may be the
+  follow target's, which the document does not describe. A generated-file header comment states that
+  followed target bodies are not described and are typed as `unknown`.
 - **Why:** an arm that can never fire is a lie the type system tells; `void` for a body that is the
   follow target's data is a second lie. `unknown` is the honest type for "something, not described
   here". Typing the follow TARGET was rejected: the document does not name it (a `Location` header
   is a runtime value) and the SDK has no redirect-tracking hook.
 - **Test home:** `packages/sdk/test/unit/openapi-codegen.test.ts` (a `303`-only operation emits no
-  `Error` union, no guard, and `unknown`; a `200`+`303` operation emits the `200` type and no `303`
-  arm) and `packages/sdk/test/e2e/generated-client.test.ts` (a real kernel route answering `303`
-  with `Location` to a `200` JSON route: the generated call resolves `200` with the target's body
-  and the guard symbol does not exist). A third committed codegen fixture carrying a `303` operation
-  joins the two existing ones so `deno task check` type-checks the emitted shape permanently (the
-  M70m X11-9 precedent). **Negative control:** with the skip reverted the fixture gains an
-  `Error303` arm and the e2e's absence assertion fails.
+  `Error` union, no guard, and `unknown`; a `200`+`303` operation emits `unknown` and no `303` arm;
+  a `304` remains an error arm; a `3XX` range emits `unknown`) and
+  `packages/sdk/test/e2e/generated-client.test.ts` (a real kernel route answering `303` with
+  `Location` to a `200` JSON route: the generated call resolves `200` with the target's body and the
+  guard symbol does not exist). A third committed codegen fixture carrying a `303` operation joins
+  the two existing ones so `deno task check` type-checks the emitted shape permanently (the M70m
+  X11-9 precedent). **Negative control:** with the skip reverted the fixture gains an `Error303` arm
+  and the e2e's absence assertion fails.
 
 ### 3.4 V8-28 — `Retry-After` is capped by the retry policy, and past the cap the error surfaces at once
 
@@ -245,7 +246,7 @@ must stay green with the new interceptor module in the graph.
 | `packages/sdk/src/http/contracts.ts`                                                                                                                        | `ClientRetryPolicy`; `ClientOptions.retry` retyped                                                                                                                                                                                                                                                                                                                      |
 | `packages/sdk/src/http/http-client.ts`                                                                                                                      | validates `maxRetryAfterMs` at construction; passes the cap to `runWithRetry`                                                                                                                                                                                                                                                                                           |
 | `packages/sdk/src/retry/retry-strategy.ts`                                                                                                                  | cap computation; past-cap throw                                                                                                                                                                                                                                                                                                                                         |
-| `packages/sdk/src/codegen/openapi-codegen.ts`                                                                                                               | `3xx` skipped in `getErrorArms`; `unknown` for a `3xx`-only operation; header comment                                                                                                                                                                                                                                                                                   |
+| `packages/sdk/src/codegen/openapi-codegen.ts`                                                                                                               | auto-follow `3xx` statuses skipped in `getErrorArms`; observable `3xx` retained; `unknown` for any redirect-capable operation; header comment                                                                                                                                                                                                                           |
 | `packages/sdk/src/index.ts`                                                                                                                                 | barrel: interceptor + `ClientRetryPolicy`                                                                                                                                                                                                                                                                                                                               |
 | `packages/sdk/test/fixtures/redirect-client.ts` (committed generated output)                                                                                | the third codegen fixture, type-checked by `deno task check`                                                                                                                                                                                                                                                                                                            |
 | `packages/starters/full-stack-starter/src/from-config.ts`                                                                                                   | `WeakMap` registration; `fullStackConfigOf`; `FullStackConfigUnavailableError`                                                                                                                                                                                                                                                                                          |
@@ -309,10 +310,10 @@ load in place of the snapshot → identity fails).
   recorded as `Changed` not `Breaking`.
 - The SDK duplicates the W3C format → the interceptor's unit test shares its vectors with `common`'s
   `trace-context.test.ts` so the two cannot drift silently.
-- Changing codegen output for `3xx` operations changes already-published generated clients → a
-  behaviour change to generated output, CHANGELOG + `docs/upgrading.md` ("regenerate") per the M58
-  precedent; a client that never documented a `3xx` is byte-identical (pinned by the two existing
-  fixtures).
+- Changing codegen output for redirect-capable and observable `3xx` operations changes
+  already-published generated clients → a behaviour change to generated output, CHANGELOG +
+  `docs/upgrading.md` ("regenerate") per the M58 precedent; a client that never documented a `3xx`
+  is byte-identical (pinned by the two existing fixtures).
 - Surfacing a past-cap `429` immediately changes retry timing for callers relying on the sleep →
   named in CHANGELOG as a behaviour change; `maxRetryAfterMs: Infinity` is refused (non-finite), so
   there is no "restore the uncapped sleep" switch — the ROADMAP asked for the cap and the surfaced

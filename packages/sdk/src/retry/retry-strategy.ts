@@ -37,12 +37,12 @@ function isRetryableStatus(status: number): boolean {
  */
 function parseRetryAfterDelta(headers: Headers): number | null {
   const value = headers.get('Retry-After');
-  if (value === null || value.trim() === '') return null;
-  const n = Number(value);
-  // Gate on a non-negative integer: rejects fractional values and
-  // non-numeric parses. Empty strings are rejected above.
-  if (Number.isInteger(n) && n >= 0) return n * 1000;
-  return null;
+  if (value === null) return null;
+  const deltaSeconds = value.trim();
+  // RFC delta-seconds is one or more decimal digits. `Number()` alone also
+  // accepts JavaScript spellings such as `1e3`, `+3`, and `0x10`.
+  if (!/^[0-9]+$/.test(deltaSeconds)) return null;
+  return Number(deltaSeconds) * 1000;
 }
 
 /**

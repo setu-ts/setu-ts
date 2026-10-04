@@ -15,9 +15,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- SDK-generated clients no longer expose unreachable `3xx` error arms; redirect-only operations
-  return `unknown`. Retry policies now cap honoured `Retry-After` delays and surface the original
-  response error immediately when the hint exceeds the cap.
+- SDK-generated clients omit the auto-follow redirect statuses (`301`, `302`, `303`, `307`, and
+  `308`) from error unions while retaining observable `3xx` statuses such as `304`. Operations that
+  may follow a redirect return `unknown`. Retry policies now cap honoured `Retry-After` delays and
+  surface the original response error immediately when the hint exceeds the cap.
 
 ## [0.8.0] — 2026-10-03
 

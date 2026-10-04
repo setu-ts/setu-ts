@@ -89,7 +89,7 @@ console.log(res.data); // User
 | `headers`              | `HeadersInit`                 | —                                       | Headers merged into every request.                |
 | `fetch`                | `typeof fetch`                | global `fetch`                          | Injected transport.                               |
 | `timing`               | `IClientTiming`               | `performance.now()` + abort-aware sleep | Clock and sleep seam, so tests need no real time. |
-| `retry`                | `RetryPolicy`                 | off                                     | Retry with fixed or exponential backoff.          |
+| `retry`                | `ClientRetryPolicy`           | off                                     | Retry with fixed or exponential backoff.          |
 | `circuitBreaker`       | `CircuitBreakerPolicy`        | off                                     | Rolling-window breaker.                           |
 | `rateLimit`            | `ClientRateLimitPolicy`       | off                                     | Sliding-window limiter.                           |
 | `requestInterceptors`  | `ClientRequestInterceptor[]`  | `[]`                                    | Run in order before the request.                  |
@@ -116,7 +116,7 @@ injected `fetch` is always used as-is, which is what tests rely on.)
 | `headers`              | `Record<string, string>`      | Default headers cloned into each request                                    |
 | `fetch`                | `Function`                    | Injectable fetch seam (default bound to the global realm)                   |
 | `timing`               | `IClientTiming`               | Injectable timing seam (defaults to `createDefaultClientTiming()`)          |
-| `retry`                | `RetryPolicy`                 | Retry policy (retries transport failures + 408/425/429/5xx on safe methods) |
+| `retry`                | `ClientRetryPolicy`           | Retry policy (retries transport failures + 408/425/429/5xx on safe methods) |
 | `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy                                           |
 | `rateLimit`            | `ClientRateLimitPolicy`       | Per-origin sliding-window rate limiter                                      |
 | `requestInterceptors`  | `ClientRequestInterceptor[]`  | Run once before resilient execution                                         |
@@ -370,7 +370,7 @@ publish or format it has nowhere to go.
   suffixed name too. This matters because `@setu-ts/openapi-plugin` names a reused response schema
   `${operationId}Response${status}` — exactly the derivation used here — so a schema that is both
   reused and enclosed in an inline body used to abort generation outright.
-- **Declared error responses are typed.** An operation declaring a non-2xx, non-3xx response also
+- **Declared error responses are typed.** An operation declaring an observable non-2xx response also
   emits a union discriminated on the literal `status` and a narrowing guard:
 
   ```typescript
@@ -382,6 +382,11 @@ publish or format it has nowhere to go.
     }
   }
   ```
+
+  Exact redirect statuses followed by the transport (`301`, `302`, `303`, `307`, and `308`) are
+  omitted from error unions. Other `3xx` responses, including `304`, remain observable error arms.
+  Any operation declaring an auto-follow redirect or a `3XX` range returns `unknown`, because the
+  follow target body is selected at runtime and is not described by the source operation.
 
   `HttpClientError` is generic in its body (`HttpClientError<TBody = unknown>`), so the bare name
   means what it always did. The union is discriminated on `status` because

@@ -238,6 +238,23 @@ describe('runWithRetry', () => {
     expect(sleepCalls[0].ms).toEqual(42);
   });
 
+  for (const malformed of ['1e3', '+3', '0x10']) {
+    it(`rejects non-decimal Retry-After ${malformed} (falls back to computed backoff)`, async () => {
+      const { timing, sleepCalls } = createTiming();
+      let attempts = 0;
+      const fn = () => {
+        attempts++;
+        if (attempts < 2) {
+          return Promise.reject(httpError(429, { 'Retry-After': malformed }));
+        }
+        return Promise.resolve('ok');
+      };
+      await runWithRetry(fn, { limit: 2, delay: 42, backoff: 'fixed' }, 'GET', timing);
+      expect(attempts).toEqual(2);
+      expect(sleepCalls[0].ms).toEqual(42);
+    });
+  }
+
   it('rejects empty Retry-After (falls back to computed backoff)', async () => {
     const { timing, sleepCalls } = createTiming();
     let attempts = 0;

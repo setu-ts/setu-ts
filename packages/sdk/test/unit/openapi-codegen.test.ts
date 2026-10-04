@@ -1521,11 +1521,11 @@ describe('typed error responses (X11-7)', () => {
     expect(out).not.toContain('GetUserByIdError');
     expect(out).toContain('Promise<ClientResponse<unknown>>');
     expect(out).toContain(
-      'Redirects are followed by the transport and are not observable as response arms.',
+      'Followed redirect target bodies are not described here and are typed as unknown.',
     );
   });
 
-  it('keeps the 2xx type and omits a companion redirect arm', () => {
+  it('uses unknown when an operation has both a 2xx response and a redirect', () => {
     const out = generateOpenApiClient(errDoc({
       '200': {
         description: 'OK',
@@ -1534,8 +1534,32 @@ describe('typed error responses (X11-7)', () => {
       '303': { description: 'See other' },
     }));
 
-    expect(out).toContain('Promise<ClientResponse<string>>');
+    expect(out).toContain('Promise<ClientResponse<unknown>>');
     expect(out).not.toContain('GetUserByIdError');
+  });
+
+  it('retains an observable 304 response as an error arm', () => {
+    const out = generateOpenApiClient(errDoc({
+      '304': { description: 'Not modified' },
+    }));
+
+    expect(out).toContain(
+      'export type GetUserByIdError = HttpClientError<unknown> & { readonly status: 304 };',
+    );
+    expect(out).toContain('export function isGetUserByIdError(');
+    expect(out).not.toContain('Followed redirect target bodies');
+  });
+
+  it('uses unknown for an OpenAPI 3XX range response', () => {
+    const out = generateOpenApiClient(errDoc({
+      '3XX': { description: 'Redirect' },
+    }));
+
+    expect(out).toContain('Promise<ClientResponse<unknown>>');
+    expect(out).not.toContain('GetUserByIdError');
+    expect(out).toContain(
+      'Followed redirect target bodies are not described here and are typed as unknown.',
+    );
   });
 
   it('emits the committed redirect fixture byte-for-byte', () => {

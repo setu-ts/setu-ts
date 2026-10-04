@@ -1,6 +1,6 @@
 /**
  * Auto-generated SDK client. Do not edit manually.
- * Redirects are followed by the transport and are not observable as response arms.
+ * Followed redirect target bodies are not described here and are typed as unknown.
  */
 
 import type { ClientResponse, IHttpClient } from '../../src/index.ts';

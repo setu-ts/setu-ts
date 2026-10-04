@@ -14,9 +14,11 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ### Regenerate clients whose OpenAPI document declares `3xx` responses
 
-Generated SDK clients no longer emit error unions for `3xx` responses because `fetch` follows the
-redirect before the client can observe that status. Regenerate affected clients; redirect-only
-operations now return `unknown`, representing the follow target body the document does not name.
+Generated SDK clients omit exact redirect statuses that `fetch` follows automatically (`301`, `302`,
+`303`, `307`, and `308`) from error unions, while observable `3xx` statuses such as `304` remain
+error arms. Regenerate affected clients; any operation declaring an auto-follow redirect or the
+OpenAPI `3XX` range now returns `unknown`, representing the follow target body the document does not
+name. This also applies when the operation declares a `2xx` response alongside the redirect.
 
 ## 0.8.0
 
