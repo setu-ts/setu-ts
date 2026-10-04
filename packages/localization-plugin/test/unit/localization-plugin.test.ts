@@ -54,6 +54,14 @@ describe('LocalizationPlugin — construction refusals', () => {
     }
   });
 
+  it('refuses a Cache-Control value no response could carry', () => {
+    for (const cacheControl of ['no-store\r\nX-Injected: 1', 7 as unknown as string]) {
+      expect(() =>
+        LocalizationPlugin({ ...BASE, exposeCatalogues: { basePath: '/i18n', cacheControl } })
+      ).toThrow('exposeCatalogues.cacheControl is not a valid header value');
+    }
+  });
+
   it('refuses a bad catalogue basePath', () => {
     for (const basePath of ['i18n', '/i18n/:x', '/i18n/*', 7 as unknown as string]) {
       expect(() => LocalizationPlugin({ ...BASE, exposeCatalogues: { basePath } })).toThrow(

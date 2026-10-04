@@ -10,6 +10,8 @@
  */
 import type { LocalizationMessage, MessageCatalogue, PluralForms } from '@setu-ts/common';
 
+import { MAX_RANGE_LENGTH } from '../format/negotiate.ts';
+
 /** Prefix on every refusal, so the plugin is named in a startup failure. */
 const PREFIX = 'localization-plugin:';
 
@@ -51,6 +53,15 @@ function canonicalConfiguredTag(tag: unknown): string {
   }
   if (canonical === undefined) {
     throw new RangeError(`${PREFIX} supportedLocales entry "${tag}" is not a valid BCP 47 tag.`);
+  }
+  // Negotiation drops any candidate over this length, so a longer configured
+  // tag could never be selected by a client — refused rather than silently
+  // unreachable.
+  if (canonical.length > MAX_RANGE_LENGTH) {
+    throw new RangeError(
+      `${PREFIX} supportedLocales entry "${tag}" is longer than ${MAX_RANGE_LENGTH} characters, ` +
+        'so no client could select it.',
+    );
   }
   // An unknown tag makes `Intl` silently fall back to the runtime default, so
   // every message would format in the server's own locale with no error.

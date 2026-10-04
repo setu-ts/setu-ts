@@ -607,9 +607,24 @@ text is left as written; this section is authoritative where they disagree.
   platform refuses it before any middleware runs — so the hostile-input test drives those through
   the query parameter and drives header-legal hostile values through `Accept-Language`.
 
-Ten negative controls were each observed failing and reverted: the locale segment dropped from the
-cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
+**Found by verification and code review, fixed before the PR:**
+
+- `exposeCatalogues.cacheControl` was unvalidated, and `Headers.set` throws for a value carrying a
+  control character — so a bad value would have answered `500` on every catalogue request. It is
+  refused at construction by probing the platform's own `Headers` (the M97b precedent).
+- The 35-character cap bounded only the header. A query value or cookie of any size reached
+  `Intl.getCanonicalLocales`; every candidate is now capped before canonicalization, and a
+  configured tag over the cap is refused at startup because no client could select it. The first
+  regression test for this passed with the cap removed — its long candidate was not a valid tag, so
+  canonicalization rejected it anyway; it now uses a valid 36-character tag that strips to `de`.
+- A fallback message for a partial locale is formatted in the REQUEST's locale, matching a browser
+  formatting the served catalogue; the behavioural probe surfaced it, and it is now documented and
+  pinned rather than left implicit.
+
+Twelve negative controls were each observed failing and reverted: the locale segment dropped from
+the cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
 ignoring `q=0`, the header split before slicing, `Content-Language` written from the initial locale,
 a prototype lookup in the formatter, the warned-key cap removed, `Cookie` dropped from `Vary`, and
-the catalogue route's default overlay dropped. The planted `@setu-ts/common` value import is a
-permanent negative control inside the e2e suite.
+the catalogue route's default overlay dropped, the `cacheControl` probe removed, and the candidate
+length cap removed. The planted `@setu-ts/common` value import is a permanent negative control
+inside the e2e suite.

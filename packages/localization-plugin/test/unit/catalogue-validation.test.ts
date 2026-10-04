@@ -28,6 +28,12 @@ describe('validateSupportedLocales', () => {
     expect(() => validateSupportedLocales(['tlh'])).toThrow('has no locale data');
   });
 
+  it('refuses a configured tag no client could select (over 35 characters)', () => {
+    const long = 'en-US-x-abcdefgh-abcdefgh-abcdefgh-ab'; // valid BCP 47, 37 characters
+    expect(long.length).toBeGreaterThan(35);
+    expect(() => validateSupportedLocales(['en', long])).toThrow('longer than 35 characters');
+  });
+
   it('accepts a private-use tag the runtime resolves', () => {
     expect(validateSupportedLocales(['en-GB-x-acme'])).toEqual(['en-GB-x-acme']);
   });

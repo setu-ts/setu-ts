@@ -51,12 +51,15 @@ All notable changes to this project are documented here. The format follows
   `Content-Language` written after the handler from the final locale. `localizerFor(ctx)` binds the
   localizer to the request; `localeMiddleware` registers the resolution per route group;
   `exposeCatalogues` serves `GET <basePath>/:locale` for browsers; `MissingMessageError`,
-  `MissingPluralCountError` and `UnsupportedLocaleError` are exported. The formatter and locale
-  negotiation ship as the import-free subpath `@setu-ts/localization-plugin/format` (`format`,
-  `negotiateLocale`, `parseAcceptLanguage`), whose runtime graph a test confines to its own modules.
-  It escapes nothing — escaping is the renderer's — and promises one implementation, not identical
-  output across runtimes: `Intl` data differs, so dates take an explicit `timeZone`. Zero npm
-  dependencies.
+  `MissingPluralCountError` and `UnsupportedLocaleError` are exported, with the option types
+  `LocalizationPluginOptions` (exactly one of `catalogues` and `source`, a compile error otherwise),
+  `LocaleMiddlewareOptions` and `IMessageSource` (catalogues loaded once at `register()`). The
+  formatter and locale negotiation ship as the import-free subpath
+  `@setu-ts/localization-plugin/format` (`format`, `negotiateLocale`, `parseAcceptLanguage`, and the
+  types `FormatValues`, `FormatOptions` and `AcceptLanguage`), whose runtime graph a test confines
+  to its own modules. It escapes nothing — escaping is the renderer's — and promises one
+  implementation, not identical output across runtimes: `Intl` data differs, so dates take an
+  explicit `timeZone`. Zero npm dependencies.
 - **Localization contracts in `common` (M103).** `CAPABILITIES.LOCALIZATION`, `ILocalizer`,
   `LocalizationMessage`, `PluralForms` and `MessageCatalogue`, so a plugin formatting text for a
   person resolves the localizer without importing the localization plugin.

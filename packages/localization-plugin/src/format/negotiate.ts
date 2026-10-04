@@ -24,8 +24,12 @@ const MAX_HEADER_LENGTH = 1024;
 /** At most this many ranges are considered; any real browser sends fewer. */
 const MAX_RANGES = 16;
 
-/** BCP 47's practical maximum for a well-formed tag; longer ranges are dropped. */
-const MAX_RANGE_LENGTH = 35;
+/**
+ * BCP 47's practical maximum for a well-formed tag; a longer range or
+ * candidate is dropped. Exported so configuration validation refuses a
+ * supported tag no client could ever select.
+ */
+export const MAX_RANGE_LENGTH = 35;
 
 /** RFC 9110 §12.4.2 qvalue: `0`–`1` with at most three decimals. */
 const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/;
@@ -167,6 +171,11 @@ export function negotiateLocale(
       if (index >= 0) {
         return supported[index];
       }
+      continue;
+    }
+    // The same cap the header parse applies, so a query value or cookie of any
+    // size costs one length check, never a canonicalization.
+    if (candidate.length > MAX_RANGE_LENGTH) {
       continue;
     }
     let tag = canonical(candidate);

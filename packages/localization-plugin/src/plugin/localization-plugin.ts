@@ -17,7 +17,11 @@ import { CAPABILITIES } from '@setu-ts/common';
 import { validateCatalogues, validateSupportedLocales } from '../catalogue/validate.ts';
 import type { LocalizationPluginOptions } from '../interfaces/index.ts';
 import { localeMiddleware } from '../middleware/locale-middleware.ts';
-import { registerCatalogueRoute, validateBasePath } from '../routes/catalogue-route.ts';
+import {
+  registerCatalogueRoute,
+  validateBasePath,
+  validateCacheControl,
+} from '../routes/catalogue-route.ts';
 import { createLocalizer } from '../service/localizer.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -96,6 +100,7 @@ export function LocalizationPlugin(options: LocalizationPluginOptions): IPlugin 
   const basePath = options.exposeCatalogues === undefined
     ? undefined
     : validateBasePath(options.exposeCatalogues.basePath);
+  const cacheControl = validateCacheControl(options.exposeCatalogues?.cacheControl);
 
   return {
     name: PLUGIN_NAME,
@@ -136,7 +141,7 @@ export function LocalizationPlugin(options: LocalizationPluginOptions): IPlugin 
         );
       }
       if (basePath !== undefined) {
-        registerCatalogueRoute(ctx.router, basePath, store, options.exposeCatalogues?.cacheControl);
+        registerCatalogueRoute(ctx.router, basePath, store, cacheControl);
       }
       const source = options.source === undefined
         ? 'static'

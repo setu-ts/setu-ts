@@ -13151,21 +13151,21 @@ app.router.get('/', (ctx) => ctx.response.text(localizerFor(ctx).t('greeting', {
 `LocalizationPluginOptions` requires exactly one of `catalogues` and `source` — supplying both or
 neither is a compile error, and a JavaScript caller is refused at construction.
 
-| Option                   | Type                                       | Default         | Behavior                                                                                                                                         |
-| ------------------------ | ------------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `supportedLocales`       | `readonly string[]`                        | —               | BCP 47 tags, canonicalized; the first is the default. Refused when empty, malformed, duplicated, or unknown to the runtime's `Intl`.             |
-| `catalogues`             | `Record<string, MessageCatalogue>`         | —               | Static catalogues keyed by tag, validated at `register()`.                                                                                       |
-| `source`                 | `IMessageSource`                           | —               | Loaded once at `register()` (a rejection fails startup), validated identically; the health indicator reports `injected[:name]`.                  |
-| `allowPartialCatalogues` | `boolean`                                  | `false`         | Accept a locale missing keys the default defines: one warning per locale at `register()`, the default's message served for the gap.              |
-| `onMissing`              | `'key' \| 'throw'`                         | `'key'`         | A key no catalogue defines answers the key (warned once per key, at most 256 tracked), or throws `MissingMessageError`.                          |
-| `timeZone`               | `string`                                   | runtime zone    | IANA zone `Date` values are formatted in; refused at construction when `Intl` does not recognize it.                                             |
-| `tenantLocale`           | `(tenant: ITenant) => string \| undefined` | —               | The tenant's default, consulted after `Accept-Language`; matched like any candidate. A throw propagates (application code, not client input).    |
-| `middleware.enabled`     | `boolean`                                  | `true`          | `false` registers no global middleware; attach `localeMiddleware(...)` yourself.                                                                 |
-| `middleware.priority`    | `number`                                   | `45`            | After tenant resolution (40), before logging (50). Must be an integer.                                                                           |
-| `middleware.query`       | `string \| false`                          | `'locale'`      | The query parameter source; `false` disables it.                                                                                                 |
-| `middleware.cookie`      | `string \| false`                          | `'setu_locale'` | The cookie source; `false` disables it and drops `Cookie` from `Vary`.                                                                           |
-| `middleware.exclude`     | `readonly PathPattern[]`                   | six probe paths | Skipped entirely — no resolution, no headers. Default `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`; `[]` disables.         |
-| `exposeCatalogues`       | `{ basePath; cacheControl? }`              | off             | Registers `GET <basePath>/:locale`. `basePath` must start with `/` and contain no `:` or `*`; `cacheControl` defaults to `public, max-age=3600`. |
+| Option                   | Type                                       | Default         | Behavior                                                                                                                                                                                                                      |
+| ------------------------ | ------------------------------------------ | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `supportedLocales`       | `readonly string[]`                        | —               | BCP 47 tags, canonicalized; the first is the default. Refused when empty, malformed, duplicated, longer than 35 characters (no client could select it), or unknown to the runtime's `Intl`.                                   |
+| `catalogues`             | `Record<string, MessageCatalogue>`         | —               | Static catalogues keyed by tag, validated at `register()`.                                                                                                                                                                    |
+| `source`                 | `IMessageSource`                           | —               | Loaded once at `register()` (a rejection fails startup), validated identically; the health indicator reports `injected[:name]`.                                                                                               |
+| `allowPartialCatalogues` | `boolean`                                  | `false`         | Accept a locale missing keys the default defines: one warning per locale at `register()`, the default's message served for the gap.                                                                                           |
+| `onMissing`              | `'key' \| 'throw'`                         | `'key'`         | A key no catalogue defines answers the key (warned once per key, at most 256 tracked), or throws `MissingMessageError`.                                                                                                       |
+| `timeZone`               | `string`                                   | runtime zone    | IANA zone `Date` values are formatted in; refused at construction when `Intl` does not recognize it.                                                                                                                          |
+| `tenantLocale`           | `(tenant: ITenant) => string \| undefined` | —               | The tenant's default, consulted after `Accept-Language`; matched like any candidate. A throw propagates (application code, not client input).                                                                                 |
+| `middleware.enabled`     | `boolean`                                  | `true`          | `false` registers no global middleware; attach `localeMiddleware(...)` yourself.                                                                                                                                              |
+| `middleware.priority`    | `number`                                   | `45`            | After tenant resolution (40), before logging (50). Must be an integer.                                                                                                                                                        |
+| `middleware.query`       | `string \| false`                          | `'locale'`      | The query parameter source; `false` disables it.                                                                                                                                                                              |
+| `middleware.cookie`      | `string \| false`                          | `'setu_locale'` | The cookie source; `false` disables it and drops `Cookie` from `Vary`.                                                                                                                                                        |
+| `middleware.exclude`     | `readonly PathPattern[]`                   | six probe paths | Skipped entirely — no resolution, no headers. Default `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`; `[]` disables.                                                                                      |
+| `exposeCatalogues`       | `{ basePath; cacheControl? }`              | off             | Registers `GET <basePath>/:locale`. `basePath` must start with `/` and contain no `:` or `*`; `cacheControl` defaults to `public, max-age=3600` and is refused at construction when the platform's `Headers` would reject it. |
 
 ### Exports
 
@@ -13195,16 +13195,18 @@ is safe in a browser bundle.
   matched against `supportedLocales` only, exactly, then with subtags stripped right to left
   (`de-Latn-AT` → `de-Latn` → `de`). A `*` range selects the first supported locale no `q=0` range
   excludes; exclusion applies to `*` only, and the plugin never answers `406`.
-- **Bounded header parse:** `Accept-Language` is cut to 1024 characters before splitting, at most 16
-  ranges are read, and a range over 35 characters is dropped.
+- **Bounded input:** `Accept-Language` is cut to 1024 characters before splitting, at most 16 ranges
+  are read, and a range over 35 characters is dropped; a query or cookie candidate over 35
+  characters is ignored before any canonicalization.
 - **Headers:** `Vary: Accept-Language` (plus `Cookie` while the cookie source is on) is appended
   before the handler on every governed response. `Content-Language` is written after the handler
   from the FINAL `ctx.request.locale`, only when that is a supported tag and the response has none;
   a rejected `next()` writes none. `Vary: Cookie` makes most CDN caching ineffective — the
   documented cost of the cookie source.
 - **Missing keys never fail a request** by default; a partial locale falls back to the default
-  locale. The catalogue route serves each locale overlaid on the default, so a browser falls back
-  the same way.
+  locale's message, formatted in the REQUEST's locale (numbers, dates and plural rules follow the
+  reader), which is also what a browser formatting the served catalogue does. The catalogue route
+  serves each locale overlaid on the default, so a browser falls back the same way.
 - **The formatter escapes nothing**; escaping belongs to the renderer, as for `IViewEngine.render`.
   In English `count: 0` selects the `other` plural form.
 - **Shared code, not identical output across runtimes:** `Intl` data differs between runtimes, and a

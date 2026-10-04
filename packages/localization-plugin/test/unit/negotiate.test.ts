@@ -29,6 +29,16 @@ describe('negotiateLocale', () => {
     }
   });
 
+  it('skips a candidate longer than 35 characters before canonicalizing it', () => {
+    // A VALID tag of 36 characters that strips down to `de` if it is read —
+    // so only the length cap keeps it from matching.
+    const long = 'de-x-abcdefgh-abcdefgh-abcdefgh-abcd';
+    expect(long).toHaveLength(36);
+    expect(Intl.getCanonicalLocales(long)).toEqual([long]);
+    expect(negotiateLocale([long], SUPPORTED)).toBeUndefined();
+    expect(negotiateLocale(['de-x-abcdefgh'], SUPPORTED)).toBe('de');
+  });
+
   it('answers undefined when nothing matches', () => {
     expect(negotiateLocale(['tlh', 'es'], SUPPORTED)).toBeUndefined();
   });

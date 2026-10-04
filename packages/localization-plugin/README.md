@@ -76,7 +76,9 @@ Validation at `register()` refuses, by name: a malformed or unknown locale tag (
 otherwise silently format it in the runtime's default locale), a catalogue for a locale you did not
 list, a default locale with no catalogue, a malformed message, and a supported locale missing keys
 the default locale defines. Set `allowPartialCatalogues: true` to accept the last one with a single
-warning per locale; the default locale's message is then served for the missing keys.
+warning per locale; the default locale's message is then served for the missing keys — formatted in
+the REQUEST's locale, so its numbers and dates follow the reader's conventions, exactly as a browser
+formatting the served catalogue does.
 
 Catalogues kept outside the code load once through a source, still validated the same way:
 
@@ -112,9 +114,11 @@ A signed-in user's saved preference is not a source here, because session (260) 
 `Content-Language` follows, because it is written after the handler returns.
 
 The `Accept-Language` parse is bounded before any work: the value is cut to 1024 characters before
-it is split, at most 16 ranges are read, and a range longer than 35 characters is dropped. A
-malformed tag is "no match", never an error. Client text never selects a locale you did not
-configure, and it never reaches a response header.
+it is split, at most 16 ranges are read, and a range longer than 35 characters is dropped. The same
+35-character cap applies to the query parameter and the cookie, and a configured locale longer than
+that is refused at startup, since no client could select it. A malformed tag is "no match", never an
+error. Client text never selects a locale you did not configure, and it never reaches a response
+header.
 
 The operational paths `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json` and `/docs` are
 skipped (`middleware.exclude`, `[]` disables). A reader running before priority 45 — or on an

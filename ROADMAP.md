@@ -12799,7 +12799,7 @@ parameter are all network input reaching `Intl`.
 static table of plugin health-indicator names, which a root gate keeps complete. The catalogue route
 serves each locale overlaid on the default, so a browser falls back exactly as `t()` does. The third
 sealed `IRequest` field costs about 170 ns per request (measured against `develop`), inside the 1 µs
-threshold. Ten negative controls were observed failing and reverted.
+threshold. Twelve negative controls were observed failing and reverted.
 
 ## Progress Tracking
 

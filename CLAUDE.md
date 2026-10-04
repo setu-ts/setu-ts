@@ -5655,7 +5655,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `timeZone`). PR review of the plan caught four defects before any code: `*` ignoring `q=0`, `Vary`
   missing `Cookie`, a cross-runtime parity claim no test could make, and a date cache keyed by
   locale alone. Implementation found `@setu-ts/testing` dropping a seeded locale. All `src` files at
-  100% branch/function/line; ten negative controls observed failing — complete (PR pending)
+  100% branch/function/line; twelve negative controls observed failing — complete (PR pending)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

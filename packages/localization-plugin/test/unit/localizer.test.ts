@@ -169,6 +169,21 @@ describe('missing keys', () => {
     expect(warnings).toHaveLength(0);
   });
 
+  it('formats a fallback message in the REQUEST locale, as a browser does', () => {
+    const service = createLocalizer({
+      store: validateCatalogues(
+        ['en', 'de'],
+        { en: { n: '{n}' }, de: {} },
+        true,
+        () => {},
+      ),
+      onMissing: 'key',
+      timeZone: undefined,
+      logger: () => undefined,
+    });
+    expect(service.forLocale('de').t('n', { n: 1234.5 })).toBe('1.234,5');
+  });
+
   it('reports no count for a localizer it did not create', () => {
     const foreign: ILocalizer = localizer().forLocale('de');
     expect(warnedKeyCount(foreign)).toBeUndefined();

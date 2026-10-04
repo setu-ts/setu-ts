@@ -43,6 +43,38 @@ export function validateBasePath(basePath: unknown): string {
 }
 
 /**
+ * Validates `exposeCatalogues.cacheControl` at construction.
+ *
+ * The value becomes a response header on every catalogue request, and
+ * `Headers.set` throws for a value carrying a control character — so an
+ * unvalidated value would answer `500` on every request to the route. The
+ * check probes the platform's own `Headers` rather than restating its rules,
+ * and quotes its message (the M97b `@ResponseHeader` precedent).
+ *
+ * @param cacheControl - The configured value, or `undefined` for the default
+ * @returns The value to send
+ * @throws {TypeError} If the value is not a string the platform accepts as a header value
+ */
+export function validateCacheControl(cacheControl: unknown): string {
+  if (cacheControl === undefined) {
+    return DEFAULT_CACHE_CONTROL;
+  }
+  try {
+    if (typeof cacheControl !== 'string') {
+      throw new TypeError('not a string');
+    }
+    new Headers().set('cache-control', cacheControl);
+    return cacheControl;
+  } catch (error) {
+    throw new TypeError(
+      `localization-plugin: exposeCatalogues.cacheControl is not a valid header value (${
+        (error as Error).message
+      }).`,
+    );
+  }
+}
+
+/**
  * Registers `GET <basePath>/:locale`.
  *
  * A supported tag (exact canonical spelling) answers `{ locale, messages }`
@@ -55,13 +87,13 @@ export function validateBasePath(basePath: unknown): string {
  * @param router - The plugin's router
  * @param basePath - The validated prefix
  * @param store - The validated catalogues
- * @param cacheControl - The `Cache-Control` value, or the default
+ * @param cacheControl - The validated `Cache-Control` value
  */
 export function registerCatalogueRoute(
   router: IRouterApi,
   basePath: string,
   store: CatalogueStore,
-  cacheControl: string | undefined,
+  cacheControl: string,
 ): void {
   // Built once: the catalogues are fixed after `register()`.
   const bodies = new Map<string, CatalogueBody>();
@@ -78,7 +110,6 @@ export function registerCatalogueRoute(
     const merged = Object.fromEntries([...defaults, ...messages]);
     bodies.set(tag, Object.freeze({ locale: tag, messages: merged }));
   }
-  const cache = cacheControl ?? DEFAULT_CACHE_CONTROL;
   const route: RouteDefinition = {
     middleware: [async (ctx, next) => {
       const tag = ctx.params.locale;
@@ -92,7 +123,7 @@ export function registerCatalogueRoute(
     handler: (ctx) => {
       const tag = ctx.state.get(LOCALE_STATE_KEY) as string;
       return ctx.response
-        .header('Cache-Control', cache)
+        .header('Cache-Control', cacheControl)
         .header('Content-Language', tag)
         .json(bodies.get(tag));
     },
