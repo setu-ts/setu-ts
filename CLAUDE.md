@@ -5597,7 +5597,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   pre-existing Vault defects — an unencoded secret name reached any Vault endpoint with the token,
   and bodies were unbounded — both fixed; round 2 found 16-byte chunks pinning 64 KiB buffers (a
   read peaked at 2.4 GiB under the 1 MiB cap, now 131 MiB); rounds 2–3 found unbounded and partly
-  escaped names in messages. Round 4 passed on `0caf9f9` — complete (PR pending).
+  escaped names in messages. Round 4 passed on `0caf9f9` — complete (PR #401).
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
