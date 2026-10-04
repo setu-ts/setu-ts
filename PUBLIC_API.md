@@ -12025,7 +12025,7 @@ interface OpenApiCodegenOptions {
 | Component type           | PascalCase from the component name (`User` → `export type User`)                                                                                                                                                                                                                                                                                                                               |
 | Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                                                                                                                                                                                                                                                                      |
 | Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                                                                                                                                                                                                                                                                     |
-| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared observable non-2xx response; auto-follow redirects (`301`, `302`, `303`, `307`, `308`) are omitted                                                                                                                                                                                   |
+| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted for every declared non-2xx response, auto-follow redirects (`301`, `302`, `303`, `307`, `308`) included — Fetch returns one unfollowed when it carries no `Location`                                                                                                                                     |
 | Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                                                                                                                                                                                                                                                                        |
 | Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                                                                                                                                                                                                                                                                         |
 | Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                                                                                                                                                                                                                                                                                |
@@ -12063,11 +12063,12 @@ keeps meaning exactly what it did. The union must be discriminated on `status` t
 `HttpClientError<A> | HttpClientError<B>` is not, because `status` is `number` on both arms. A
 `default` response and range codes such as `4XX` are skipped: they name no single status.
 
-Exact redirect statuses followed by the web transport (`301`, `302`, `303`, `307`, and `308`) are
-skipped. Other `3xx` responses, including `304`, remain observable and therefore retain typed error
-arms. An operation declaring an auto-follow redirect or the OpenAPI `3XX` range returns `unknown`,
-even when it also declares a `2xx` schema: the runtime `Location` selects a follow target body the
-source operation does not describe.
+Every declared `3xx` keeps a typed error arm, including the statuses the web transport follows
+(`301`, `302`, `303`, `307`, and `308`): Fetch returns such a response unfollowed when it carries no
+`Location`, and the client throws `HttpClientError` with that status. An operation declaring an
+auto-follow redirect or the OpenAPI `3XX` range returns `unknown`, even when it also declares a
+`2xx` schema: the runtime `Location` selects a follow target body the source operation does not
+describe.
 
 **Generated output is `deno fmt`- and `deno lint`-clean.** Two-space indentation, nested inline
 object types indented, no lint pragma (`{}` is emitted as `Record<PropertyKey, never>`, which is

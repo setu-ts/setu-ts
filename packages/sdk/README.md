@@ -388,10 +388,11 @@ publish or format it has nowhere to go.
   }
   ```
 
-  Exact redirect statuses followed by the transport (`301`, `302`, `303`, `307`, and `308`) are
-  omitted from error unions. Other `3xx` responses, including `304`, remain observable error arms.
-  Any operation declaring an auto-follow redirect or a `3XX` range returns `unknown`, because the
-  follow target body is selected at runtime and is not described by the source operation.
+  Every declared `3xx` keeps its error arm, the auto-follow statuses (`301`, `302`, `303`, `307`,
+  and `308`) included: Fetch returns such a response itself when it carries no `Location`, and the
+  client then throws `HttpClientError` with that status. Any operation declaring an auto-follow
+  redirect or a `3XX` range returns `unknown`, because the follow target body is selected at runtime
+  and is not described by the source operation.
 
   `HttpClientError` is generic in its body (`HttpClientError<TBody = unknown>`), so the bare name
   means what it always did. The union is discriminated on `status` because

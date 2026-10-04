@@ -11,16 +11,16 @@ import type { ClientOptions, IHttpClient } from './http/contracts.ts';
 import { HttpClient } from './http/http-client.ts';
 import { createDefaultClientTiming } from './http/timing.ts';
 
-// JavaScript runtimes clamp larger setTimeout delays, commonly to 1 ms.
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
-
 /**
  * Create a configured HTTP client.
  *
- * Validates policy values at construction:
+ * Validates policy values at construction (the retry checks are owned by
+ * `validateRetryPolicy`, which `HttpClient` itself runs, so they hold however
+ * the client is built):
  * - `retry.limit` is a positive safe integer
- * - `retry.delay` is finite and non-negative
- * - the largest exponential retry delay remains finite
+ * - `retry.delay` and `retry.maxRetryAfterMs` are finite, non-negative, and
+ *   within the maximum timer delay
+ * - the largest exponential retry delay remains finite and timer-safe
  * - `circuitBreaker.threshold >= 1`
  * - `rateLimit.maxRequests >= 1` and `rateLimit.windowMs > 0`
  *
@@ -33,44 +33,6 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 export function createClient(options: ClientOptions): IHttpClient {
   // Default timing.
   const timing = options.timing ?? createDefaultClientTiming();
-
-  // Validate retry policy.
-  if (options.retry) {
-    if (!Number.isSafeInteger(options.retry.limit) || options.retry.limit < 1) {
-      throw new Error('retry.limit must be a positive safe integer');
-    }
-    if (!Number.isFinite(options.retry.delay) || options.retry.delay < 0) {
-      throw new Error('retry.delay must be a finite non-negative number');
-    }
-    if (options.retry.delay > MAX_TIMER_DELAY_MS) {
-      throw new Error('retry.delay exceeds the maximum timer delay');
-    }
-    const largestPolicyDelay = options.retry.delay * 2 ** (options.retry.limit - 1);
-    if (
-      options.retry.backoff === 'exponential' &&
-      !Number.isFinite(largestPolicyDelay)
-    ) {
-      throw new Error('retry exponential backoff must remain finite');
-    }
-    if (
-      options.retry.backoff === 'exponential' &&
-      largestPolicyDelay > MAX_TIMER_DELAY_MS
-    ) {
-      throw new Error('retry exponential backoff exceeds the maximum timer delay');
-    }
-    if (
-      options.retry.maxRetryAfterMs !== undefined &&
-      (!Number.isFinite(options.retry.maxRetryAfterMs) || options.retry.maxRetryAfterMs < 0)
-    ) {
-      throw new Error('retry.maxRetryAfterMs must be a finite non-negative number');
-    }
-    if (
-      options.retry.maxRetryAfterMs !== undefined &&
-      options.retry.maxRetryAfterMs > MAX_TIMER_DELAY_MS
-    ) {
-      throw new Error('retry.maxRetryAfterMs exceeds the maximum timer delay');
-    }
-  }
 
   // Validate circuit breaker policy.
   if (options.circuitBreaker) {

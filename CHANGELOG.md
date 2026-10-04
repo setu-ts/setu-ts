@@ -46,13 +46,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- SDK-generated clients omit the auto-follow redirect statuses (`301`, `302`, `303`, `307`, and
-  `308`) from error unions while retaining observable `3xx` statuses such as `304`. Operations that
-  may follow a redirect return `unknown`. Retry policies now cap honoured `Retry-After` delays and
-  surface the original response error immediately when the hint exceeds the cap. Client construction
-  rejects invalid/non-finite retry counts, delays, and derived exponential backoffs so malformed
-  configuration cannot disable that cap; delays above the portable JavaScript timer maximum are also
-  rejected so runtimes cannot clamp a long wait into an immediate retry.
+- SDK-generated clients keep an error arm for every declared `3xx`, the auto-follow statuses (`301`,
+  `302`, `303`, `307`, and `308`) included, since Fetch returns one unfollowed when it carries no
+  `Location`. Operations that may follow a redirect return `unknown`. Retry policies now cap
+  honoured `Retry-After` delays and surface the original response error immediately when the hint
+  exceeds the cap. Client construction rejects invalid/non-finite retry counts, delays, and derived
+  exponential backoffs so malformed configuration cannot disable that cap; delays above the portable
+  JavaScript timer maximum are also rejected so runtimes cannot clamp a long wait into an immediate
+  retry. The client keeps a frozen copy of the validated policy, so mutating the caller's `retry`
+  object afterwards no longer changes the cap.
 - **Every backend call M101a covers is now bounded by default, and an expired bound is a recorded
   failure.** A paused or partitioned Redis keeps its socket open, so a cache, queue or
   scheduler-lock command used to wait forever. It now rejects inside the bound: a cache call is

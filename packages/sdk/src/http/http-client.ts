@@ -21,7 +21,7 @@ import type { CircuitBreakerPolicy } from 'jsr:@setu-ts/common@^0.8.0';
 
 import { HttpClientError } from '../errors.ts';
 import { createCircuitBreaker } from '../circuit-breaker/circuit-breaker.ts';
-import { runWithRetry } from '../retry/retry-strategy.ts';
+import { runWithRetry, validateRetryPolicy } from '../retry/retry-strategy.ts';
 import { createRateLimiter } from './rate-limiter.ts';
 import { createDefaultFetch } from './default-fetch.ts';
 
@@ -109,7 +109,7 @@ export class HttpClient implements IHttpClient {
    */
   #fetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
   #timing: IClientTiming;
-  #retry: ClientRetryPolicy | undefined;
+  #retry: Readonly<ClientRetryPolicy> | undefined;
   #circuitBreaker: CircuitBreakerPolicy | undefined;
   #maxRequests: number | undefined;
   #windowMs: number | undefined;
@@ -127,7 +127,7 @@ export class HttpClient implements IHttpClient {
     this.#defaultHeaders = options.headers;
     this.#fetch = options.fetch ?? createDefaultFetch();
     this.#timing = options.timing;
-    this.#retry = options.retry;
+    if (options.retry !== undefined) this.#retry = validateRetryPolicy(options.retry);
     this.#circuitBreaker = options.circuitBreaker;
     this.#maxRequests = options.rateLimit?.maxRequests;
     this.#windowMs = options.rateLimit?.windowMs;

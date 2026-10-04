@@ -42,7 +42,27 @@ describe('generated-client e2e', () => {
       const response = await redirectClient.createApi(client).followRedirect();
       expect(response.status).toBe(200);
       expect(response.data).toEqual({ followed: true });
-      expect(Object.keys(redirectClient)).not.toContain('isFollowRedirectError');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('narrows an unfollowed 303 (no Location) through the generated guard', async () => {
+    const probe = Deno.listen({ hostname: '127.0.0.1', port: 0 });
+    const port = (probe.addr as Deno.NetAddr).port;
+    probe.close();
+
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.router.get('/redirect', (ctx) => ctx.response.status(303).text('no location'));
+    await app.start({ hostname: '127.0.0.1', port });
+    try {
+      const client = createClient({ baseUrl: `http://127.0.0.1:${port}` });
+      const error = await redirectClient.createApi(client).followRedirect().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(redirectClient.isFollowRedirectError(error)).toBe(true);
+      if (redirectClient.isFollowRedirectError(error)) expect(error.status).toBe(303);
     } finally {
       await app.stop();
     }

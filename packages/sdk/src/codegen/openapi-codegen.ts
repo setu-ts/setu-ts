@@ -739,7 +739,7 @@ function hoistMultiline(
 }
 
 /**
- * Collects an operation's declared, observable non-2xx responses.
+ * Collects an operation's declared non-2xx responses, redirects included.
  *
  * `getSuccessTypes` reads only 2xx, so a document's 4xx schemas — the part a
  * client most needs help with — typed nothing at all: a non-2xx throws
@@ -748,7 +748,7 @@ function hoistMultiline(
  * @param op - The operation
  * @param path - Path, for diagnostics
  * @param method - Method, for diagnostics
- * @returns One arm per declared observable non-2xx status, in ascending order
+ * @returns One arm per declared non-2xx status, in ascending order
  */
 function getErrorArms(
   op: SdkOpenApiOperation,
@@ -763,12 +763,12 @@ function getErrorArms(
   for (const [code, resp] of Object.entries(op.responses)) {
     // `default` and a range code such as `4XX` name no single status, so neither
     // can become a discriminated arm.
+    // An auto-follow redirect status keeps its arm: Fetch returns the 3xx
+    // itself when `Location` is absent, and `HttpClient` then throws
+    // `HttpClientError` with that status. Only a FOLLOWED redirect is the
+    // `unknown` success type.
     const status = parseStatusCode(code);
-    if (
-      status === undefined ||
-      (status >= 200 && status < 300) ||
-      isAutoFollowRedirectStatus(status)
-    ) continue;
+    if (status === undefined || (status >= 200 && status < 300)) continue;
     const media = resp.content?.['application/json'];
     const rendered = media?.schema
       ? renderSchema(media.schema, new Set(), path, method)

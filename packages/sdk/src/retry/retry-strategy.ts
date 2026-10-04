@@ -15,6 +15,52 @@ import type { ClientRetryPolicy, IClientTiming } from '../http/contracts.ts';
 
 import { HttpClientError } from '../errors.ts';
 
+// JavaScript runtimes clamp larger setTimeout delays, commonly to 1 ms.
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * Validate a retry policy and return a frozen shallow copy of it.
+ *
+ * The one owner of the retry bounds, run by the `HttpClient` constructor so a
+ * client built directly enforces what `createClient()` documents. Copying is
+ * load-bearing: the client keeps the copy rather than the caller's object, so
+ * raising `maxRetryAfterMs`, `delay` or `limit` after construction cannot move
+ * the validated cap or reach `timing.sleep` with an unchecked delay.
+ *
+ * @param policy - The caller-supplied retry policy
+ * @returns A frozen copy of the validated policy
+ * @throws {Error} When any bound is violated
+ * @internal
+ */
+export function validateRetryPolicy(policy: ClientRetryPolicy): Readonly<ClientRetryPolicy> {
+  if (!Number.isSafeInteger(policy.limit) || policy.limit < 1) {
+    throw new Error('retry.limit must be a positive safe integer');
+  }
+  if (!Number.isFinite(policy.delay) || policy.delay < 0) {
+    throw new Error('retry.delay must be a finite non-negative number');
+  }
+  if (policy.delay > MAX_TIMER_DELAY_MS) {
+    throw new Error('retry.delay exceeds the maximum timer delay');
+  }
+  const largestPolicyDelay = policy.delay * 2 ** (policy.limit - 1);
+  if (policy.backoff === 'exponential' && !Number.isFinite(largestPolicyDelay)) {
+    throw new Error('retry exponential backoff must remain finite');
+  }
+  if (policy.backoff === 'exponential' && largestPolicyDelay > MAX_TIMER_DELAY_MS) {
+    throw new Error('retry exponential backoff exceeds the maximum timer delay');
+  }
+  if (
+    policy.maxRetryAfterMs !== undefined &&
+    (!Number.isFinite(policy.maxRetryAfterMs) || policy.maxRetryAfterMs < 0)
+  ) {
+    throw new Error('retry.maxRetryAfterMs must be a finite non-negative number');
+  }
+  if (policy.maxRetryAfterMs !== undefined && policy.maxRetryAfterMs > MAX_TIMER_DELAY_MS) {
+    throw new Error('retry.maxRetryAfterMs exceeds the maximum timer delay');
+  }
+  return Object.freeze({ ...policy });
+}
+
 // Idempotent/safe methods that may be automatically retried.
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
 

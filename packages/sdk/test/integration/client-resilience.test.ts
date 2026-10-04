@@ -9,7 +9,8 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { HttpClient } from '../../src/http/http-client.ts';
 import { ClientCircuitOpenError, HttpClientError } from '../../src/errors.ts';
-import type { IClientTiming } from '../../src/http/contracts.ts';
+import type { ClientRetryPolicy, IClientTiming } from '../../src/http/contracts.ts';
+import { createClient } from '../../src/sdk.ts';
 
 function createTiming(): { timing: IClientTiming; timeNow: number; sleepDelays: number[] } {
   let timeNow = 0;
@@ -274,6 +275,46 @@ describe('client resilience composition', () => {
       expect((error as HttpClientError).status).toBe(429);
       expect((error as HttpClientError).headers.get('retry-after')).toBe('60');
     }
+    expect(attempts).toBe(1);
+    expect(sleepDelays).toEqual([]);
+  });
+
+  it('refuses an invalid retry policy on direct construction', () => {
+    const { timing } = createTiming();
+    const build = (retry: ClientRetryPolicy) => () =>
+      new HttpClient({ baseUrl: 'https://api.example.com', timing, fetch, retry });
+
+    expect(build({ limit: 0, delay: 10, backoff: 'fixed' })).toThrow(
+      'retry.limit must be a positive safe integer',
+    );
+    expect(build({ limit: 1, delay: 2_147_483_648, backoff: 'fixed' })).toThrow(
+      'retry.delay exceeds the maximum timer delay',
+    );
+    expect(build({ limit: 1, delay: 10, backoff: 'fixed', maxRetryAfterMs: Infinity })).toThrow(
+      'retry.maxRetryAfterMs must be a finite non-negative number',
+    );
+  });
+
+  it('keeps the validated cap when the caller mutates its retry object later', async () => {
+    const { timing, sleepDelays } = createTiming();
+    let attempts = 0;
+    const retry = { limit: 2, delay: 10, backoff: 'fixed' as const, maxRetryAfterMs: 1_000 };
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      timing,
+      fetch: () => {
+        attempts++;
+        return Promise.resolve(
+          new Response('', { status: 429, headers: { 'Retry-After': '60' } }),
+        );
+      },
+      retry,
+    });
+
+    // Raising the cap after construction must not let the 60 s hint through.
+    retry.maxRetryAfterMs = 120_000;
+
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(HttpClientError);
     expect(attempts).toBe(1);
     expect(sleepDelays).toEqual([]);
   });
