@@ -253,6 +253,32 @@ describe('cacheApiMiddleware — miss', () => {
     ]);
   });
 
+  it('serves a locale-less request carrying the reserved parameter uncached', async () => {
+    // Its key would be the URL itself — exactly `/page`'s key in `de` — so an
+    // app that sets the locale only sometimes would let it fill that entry.
+    const cache = new FakeCacheApi();
+    const anonymous = contextFor('https://example.test/page?setu-cache-locale=de');
+    await cacheApiMiddleware({ cache })(anonymous, () => {
+      anonymous.response.json({ link: anonymous.request.url });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([]);
+    expect(cache.puts).toEqual([]);
+    expect(anonymous.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
+
+    // Control: the same request with the locale resolved is keyed and cached.
+    const localized = contextFor('https://example.test/page?setu-cache-locale=de', {
+      locale: 'de',
+    });
+    await cacheApiMiddleware({ cache })(localized, () => {
+      localized.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([
+      'https://example.test/page?setu-cache-locale=de&setu-cache-locale=de',
+    ]);
+  });
+
   it('serves a request whose locale is not well-formed uncached, never a 500', async () => {
     // A lone surrogate, as `replaceLocale` may restore from stored data:
     // `encodeURIComponent` throws `URIError` on it.

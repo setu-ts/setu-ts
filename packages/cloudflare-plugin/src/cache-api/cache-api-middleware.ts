@@ -124,6 +124,13 @@ const LOCALE_KEY_PARAM = 'setu-cache-locale';
  *   `encodeURIComponent` cannot encode. The localization plugin only ever
  *   resolves supported tags; this guards a value an application restores
  *   with `replaceLocale`.
+ * - **the request has no locale, but its URL already contains
+ *   `setu-cache-locale=`.** Its key would be the URL itself, which is exactly
+ *   a localized request's key (`/page?setu-cache-locale=de` is `/page` in
+ *   `de`). Every localized key contains that text, so a locale-less key that
+ *   does not cannot match one. This arises only where an application sets the
+ *   locale on some requests and not others; the plugin's own middleware
+ *   always sets one.
  *
  * With those excluded, a key is the parsed URL's own text plus at most the
  * encoded locale, so two keys match only when the URL and locale both do.
@@ -135,7 +142,7 @@ function defaultKey(ctx: IRequestContext): string | undefined {
   }
   const locale = ctx.request.locale;
   if (locale === undefined) {
-    return url;
+    return url.includes(`${LOCALE_KEY_PARAM}=`) ? undefined : url;
   }
   if (!locale.isWellFormed()) {
     return undefined;
