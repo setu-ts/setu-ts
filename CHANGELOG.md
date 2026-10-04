@@ -80,18 +80,20 @@ All notable changes to this project are documented here. The format follows
 - **`cloudflare-plugin`'s `cacheApiMiddleware` keys a localized request on its locale (M103).** Its
   key is a URL string, which the Cache API matches with no request headers, so `Vary` could never
   separate locales there and one locale's page was served to everyone for the TTL. When
-  `ctx.request.locale` is set, the default key is the URL with a `setu-cache-locale` parameter
-  appended last (on the key only; a client-supplied copy stays in the key, so it can neither reach
-  another locale's entry nor poison the canonical one). Without a locale the key is unchanged. As
-  for `cache-plugin`, a global registration must sit above priority 45 and a handler-time
+  `ctx.request.locale` is set, the default key is the URL text as sent with a `setu-cache-locale`
+  parameter naming the locale concatenated after it (on the key only; a client-supplied copy and
+  every encoding variant stay distinct in the key, so a client can reach neither another locale's
+  entry nor an entry another URL is served from). Without a locale the key is unchanged. As for
+  `cache-plugin`, the middleware must run after the locale middleware, and a handler-time
   `replaceLocale` is not reflected. A custom `key` is untouched and must include the locale itself.
 - **`cache-plugin` keys on the resolved locale (M103).** The cache key gains a length-prefixed
   locale segment from `ctx.request.locale`, between the tenant and `vary` segments, so one locale's
   cached body is never served to another. An application without the localization plugin has no
   locale on its requests and keeps byte-identical keys. The segment is read when `cacheMiddleware`
-  runs, so a GLOBAL `cacheMiddleware` must be registered above priority 45 (as it must already sit
-  above 40 for the tenant), and a `replaceLocale` override is reflected only when it runs before the
-  lookup.
+  runs, so it must run after the locale middleware: a GLOBAL `cacheMiddleware` needs a higher
+  priority number than that middleware's (45 by default, or the configured `middleware.priority`),
+  and where the locale middleware is applied per route, the cache must be on that route after it. A
+  `replaceLocale` override is reflected only when it runs before the lookup.
 
 - **Every backend call M101a covers is now bounded by default, and an expired bound is a recorded
   failure.** A paused or partitioned Redis keeps its socket open, so a cache, queue or

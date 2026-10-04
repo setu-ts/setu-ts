@@ -12794,14 +12794,19 @@ header and a malformed tag, each observed refused without a throw escaping the m
 records a design security review (its §10), since `Accept-Language`, the cookie and the query
 parameter are all network input reaching `Intl`.
 
-## **Shipped.** As planned, with four corrections recorded in the plan's §11: `@setu-ts/testing` joined the package list (its mock request dropped a seeded `locale`); the plugin declares `optionalDependencies: [CAPABILITIES.LOGGER]`, because a partial-catalogue warning is raised during `register()`; `localizerFor` negotiates an unsupported `request.locale` instead of throwing; and the React Router recipe hands the loader the request's localizer through `populateLoadContext` rather than a catalogue. One `packages/cli` data line was required despite the scope rule: the CLI's
-
-static table of plugin health-indicator names, which a root gate keeps complete. The security audit
-found the Cloudflare Cache API middleware keyed on a bare URL — which the platform matches with no
-request headers, so `Vary` could not separate locales — and its default key now carries the locale.
-The catalogue route serves each locale overlaid on the default, so a browser falls back exactly as
-`t()` does. The third sealed `IRequest` field costs about 170 ns per request (measured against
-`develop`), inside the 1 µs threshold. Fifteen negative controls were observed failing and reverted.
+**Shipped.** As planned, with four corrections recorded in the plan's §11: `@setu-ts/testing` joined
+the package list (its mock request dropped a seeded `locale`); the plugin declares
+`optionalDependencies: [CAPABILITIES.LOGGER]`, because a partial-catalogue warning is raised during
+`register()`; `localizerFor` negotiates an unsupported `request.locale` instead of throwing; and the
+React Router recipe hands the loader the request's localizer through `populateLoadContext` rather
+than a catalogue. One `packages/cli` data line was required despite the scope rule: the CLI's static
+table of plugin health-indicator names, which a root gate keeps complete. The security audit found
+the Cloudflare Cache API middleware keyed on a bare URL — which the platform matches with no request
+headers, so `Vary` could not separate locales — and its default key now carries the locale; two
+re-audit rounds then tightened that key until no two URL-and-locale pairs can share an entry. The
+catalogue route serves each locale overlaid on the default, so a browser falls back exactly as `t()`
+does. The third sealed `IRequest` field costs about 170 ns per request (measured against `develop`),
+inside the 1 µs threshold. Sixteen negative controls were observed failing and reverted.
 
 ## Progress Tracking
 

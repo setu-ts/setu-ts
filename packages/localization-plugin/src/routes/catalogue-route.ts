@@ -36,7 +36,9 @@ interface CatalogueBody {
  * `#`, `//` and control characters — each of which would register a pattern,
  * a dead route, or nothing at all — are refused. The root (`/`) is refused
  * too: it would register `/:locale`, claiming every unrouted single-segment
- * `GET` in the application.
+ * `GET` in the application. A segment of only `.` or `..` is refused as well,
+ * because URL parsing removes it from every request, so the route could never
+ * be reached.
  *
  * @param basePath - The configured prefix
  * @returns The prefix without a trailing slash
@@ -46,7 +48,8 @@ export function validateBasePath(basePath: unknown): string {
   if (typeof basePath !== 'string' || !BASE_PATH.test(basePath)) {
     throw new TypeError(
       'localization-plugin: exposeCatalogues.basePath must be one or more path segments ' +
-        '(letters, digits, ".", "_", "~", "-"), such as "/i18n" — not the root.',
+        '(letters, digits, ".", "_", "~", "-"), such as "/i18n" — not the root, and no ' +
+        'segment that is only "." or "..".',
     );
   }
   return basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;

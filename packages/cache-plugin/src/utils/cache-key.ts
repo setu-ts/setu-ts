@@ -58,7 +58,9 @@ export function tenantSegment(ctx: IRequestContext): string {
  *
  * The segment reflects the locale present WHEN THE CACHE MIDDLEWARE RUNS: a
  * route-level `cacheMiddleware` runs after every global middleware, but a
- * global one must sit above priority 45, and a `replaceLocale` override is
+ * global one must have a higher priority number than the locale middleware
+ * (45 by default, or its configured priority) and, where that middleware is
+ * applied per route, must not be used at all; a `replaceLocale` override is
  * reflected only when it runs before the lookup.
  *
  * @param ctx - The request context

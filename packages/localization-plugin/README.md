@@ -146,17 +146,20 @@ one locale's cached body is never served to another. That holds wherever the cac
 locale is final:
 
 - a route-level `cacheMiddleware` always does — route middleware runs after every global one;
-- a global `cacheMiddleware` must be registered above priority 45 (as it must already sit above 40
-  for the tenant);
+- a global `cacheMiddleware` must have a higher priority number than the locale middleware — 45 by
+  default, or whatever `middleware.priority` is set to (as it must already sit above 40 for the
+  tenant);
+- when the locale middleware runs per route instead (`middleware.enabled: false`), a global cache
+  runs before it, so put the cache on that route, listed after `localeMiddleware`;
 - a `replaceLocale` override is reflected only when it runs before the cache lookup — in global
   middleware, not inside the handler. A route that changes the locale in its handler must not be
   response-cached.
 
 `@setu-ts/cloudflare-plugin`'s `cacheApiMiddleware` keys on a URL, which the platform matches with
 no request headers — `Vary` cannot separate its entries — so its default key carries the resolved
-locale as a `setu-cache-locale` parameter (on the key, never the request), under the same two
-conditions as above — registered above 45 when global, and not reflecting a handler-time
-`replaceLocale`. A custom `key` replaces that and must include `ctx.request.locale` itself.
+locale as a `setu-cache-locale` parameter (on the key, never the request), under the same conditions
+as above — running after the locale middleware, and not reflecting a handler-time `replaceLocale`. A
+custom `key` replaces that and must include `ctx.request.locale` itself.
 
 `Vary` protects the caches you do not configure: browsers, proxies and CDNs that honour it.
 

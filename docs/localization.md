@@ -81,9 +81,12 @@ kinds of cache:
   request headers, so it carries the locale in its default key instead, under the same ordering
   conditions below; a custom `key` must include `ctx.request.locale` itself.
 
-Both hold only when the cache runs after the locale is final. A route-level `cacheMiddleware` always
-does. A global one must be registered above priority 45. A locale changed inside a handler happens
-after the cache lookup, so such a route must not be response-cached.
+Both hold only when the cache runs after the locale is final, which means after the locale
+middleware. A global cache needs a higher priority number than that middleware's: 45 by default, or
+whatever `middleware.priority` is set to. Where the locale middleware is applied per route instead
+(`middleware.enabled: false`), a global cache runs before it, so the cache belongs on the same
+route, listed after `localeMiddleware`. A locale changed inside a handler happens after the cache
+lookup, so such a route must not be response-cached.
 
 ## Operations
 

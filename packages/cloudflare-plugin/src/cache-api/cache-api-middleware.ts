@@ -58,10 +58,13 @@ export interface CacheApiMiddlewareOptions {
    * `setu-cache-locale` query parameter naming it, appended last. The key is a
    * URL STRING, so the platform matches it with no request headers and `Vary`
    * cannot separate entries here. The locale in the key is the one present
-   * when this middleware runs: a GLOBAL registration must sit above priority
-   * 45, and a `replaceLocale` made inside the handler is not reflected — such
-   * a route must not be cached here. A custom `key` replaces all of this and
-   * must include the locale itself on a localized route.
+   * when this middleware runs, so it must run AFTER the locale middleware: a
+   * GLOBAL registration needs a higher priority number than that middleware's
+   * (45 by default, or the configured `middleware.priority`); where the locale
+   * middleware is applied per route instead, this one must be too, listed
+   * after it; and a `replaceLocale` made inside the handler is not reflected —
+   * such a route must not be cached here. A custom `key` replaces all of this
+   * and must include the locale itself on a localized route.
    */
   readonly key?: (ctx: IRequestContext) => string;
   /** Returning `true` skips the cache entirely for this request. */
@@ -83,13 +86,17 @@ export interface CacheApiMiddlewareOptions {
 /**
  * The query parameter the default key adds for a localized request.
  *
- * APPENDED, never `set`: `set` would delete a client-supplied copy from the
- * key while the handler still sees it in `ctx.query` and `ctx.request.url`, so
- * `/article?setu-cache-locale=x` and `/article` would share one entry and any
- * client could fill the canonical entry with a response reflecting its own
- * input (web cache poisoning). Appending keeps the client's parameter IN the
- * key, and the resolved locale is always the LAST one, so a client can neither
- * reach another locale's entry nor the canonical entry of its own.
+ * The key is the request URL's own TEXT with `setu-cache-locale=<locale>`
+ * concatenated after it — never a re-serialized query, and never a `set`.
+ * `set` would delete a client-supplied copy from the key while the handler
+ * still sees it, letting any client fill the canonical entry with a response
+ * reflecting its own input (web cache poisoning); re-serializing the query
+ * would fold encoding variants together (`?p=%32` with `?p=2`, `/page?&&` with
+ * `/page`), letting a client choose the exact text a cached reflection of
+ * `ctx.request.url` carries. Concatenation keeps every byte the client sent,
+ * and since the encoded locale can contain neither `&` nor `=`, the LAST
+ * occurrence of the parameter in a key always names the request's own
+ * resolved locale: two different URL-and-locale pairs never share a key.
  */
 const LOCALE_KEY_PARAM = 'setu-cache-locale';
 
@@ -103,9 +110,14 @@ function defaultKey(ctx: IRequestContext): string {
   if (locale === undefined) {
     return ctx.request.url;
   }
+  // The fragment is dropped (a server never receives one, but a synthetic
+  // request may carry it, and the key must not end inside it). Serializing an
+  // already-parsed URL is idempotent, so the query text is kept as it arrived.
   const url = new URL(ctx.request.url);
-  url.searchParams.append(LOCALE_KEY_PARAM, locale);
-  return url.href;
+  url.hash = '';
+  const base = url.href;
+  const separator = base.includes('?') ? '&' : '?';
+  return `${base}${separator}${LOCALE_KEY_PARAM}=${encodeURIComponent(locale)}`;
 }
 
 /**

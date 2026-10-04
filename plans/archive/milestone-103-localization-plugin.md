@@ -657,11 +657,29 @@ text is left as written; this section is authoritative where they disagree.
 - **N3 (Low)** — `basePath` accepted `.`/`..` segments, which URL parsing removes from every
   request, so the route was unreachable; they are refused.
 
-Fifteen negative controls were each observed failing and reverted: the locale segment dropped from
+**Found by the round-3 re-audit (fresh agent, `c10dedd5`), fixed on this branch:**
+
+- **N4 (Low) — the key still folded encoding variants together.** `searchParams.append`
+  re-serialized the parsed query, so `/page?&&`, `?p=%32` and `?q=a+b` shared the keys of `/page`,
+  `?p=2` and `?q=a%20b`; a client could choose the exact text a cached reflection of
+  `ctx.request.url` carried. The key is now the URL text as sent with
+  `setu-cache-locale=<encoded locale>` concatenated after it. The encoded locale contains neither
+  `&` nor `=`, so the last occurrence of the parameter always names the request's own locale and two
+  different URL-and-locale pairs never share a key.
+- **N5 (Low) — the ordering condition hard-coded priority 45.** The real condition is that the cache
+  runs after the locale middleware: a configured `middleware.priority`, or a per-route
+  `localeMiddleware` with the global one disabled, both satisfied "above 45" and still served one
+  locale to another. Every site now states the general rule, including `cache-plugin`'s, which had
+  the same gap. N2's wording above is superseded by this.
+- The `basePath` refusal message, option JSDoc and `PUBLIC_API.md` row now name the dot-segment
+  refusal N3 added.
+
+Sixteen negative controls were each observed failing and reverted: the locale segment dropped from
 the cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
 ignoring `q=0`, the header split before slicing, `Content-Language` written from the initial locale,
 a prototype lookup in the formatter, the warned-key cap removed, `Cookie` dropped from `Vary`, and
 the catalogue route's default overlay dropped, the `cacheControl` probe removed, and the candidate
 length cap removed; and, after the audits, the Cloudflare locale key reverted to the bare URL,
-`append` reverted to `set`, and the dot-segment guard removed. The planted `@setu-ts/common` value
-import is a permanent negative control inside the e2e suite.
+`append` reverted to `set`, the dot-segment guard removed, and the key re-serialized from the parsed
+query. The planted `@setu-ts/common` value import is a permanent negative control inside the e2e
+suite.

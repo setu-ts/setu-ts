@@ -5647,23 +5647,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `Vary: Accept-Language` (plus `Cookie` while the cookie source is on, a stated CDN cost) is
   written before the handler and `Content-Language` after it, from the final locale. `cache-plugin`
   keys on the locale by default; the plan's review found the ordering condition that governs it — a
-  global `cacheMiddleware` must sit above 45 and an override must precede the lookup — and both
-  limitations are pinned by tests rather than claimed. The formatter and negotiation ship as the
-  import-free subpath `/format`, whose runtime graph a `deno info --json` walk confines to its own
-  modules, with a planted `common` value import as a permanent negative control; it promises one
-  implementation, not identical output (`Intl` data and time zones differ, so dates take an explicit
-  `timeZone`). PR review of the plan caught four defects before any code: `*` ignoring `q=0`, `Vary`
-  missing `Cookie`, a cross-runtime parity claim no test could make, and a date cache keyed by
-  locale alone. Implementation found `@setu-ts/testing` dropping a seeded locale. The fresh-context
-  security audit then found the Cloudflare Cache API serving one locale's page to everyone (a
-  URL-string key is matched with no request headers, so `Vary` could not help — its default key now
-  carries the locale), the catalogue route marking a session `Set-Cookie` response `public` (default
-  now `private`), an overstated no-echo claim, blanket test permissions, and base paths that
-  registered dead or root routes; all fixed. The re-audit found the Cloudflare fix had itself
-  introduced web cache poisoning — `searchParams.set` stripped a client's copy of the key parameter
-  from the key while the handler still saw it — so the parameter is appended instead; two Low
-  findings were fixed with it. All `src` files at 100% branch/function/line; fifteen negative
-  controls observed failing — complete (PR pending)
+  global `cacheMiddleware` must run after the locale middleware and an override must precede the
+  lookup — and both limitations are pinned by tests rather than claimed. The formatter and
+  negotiation ship as the import-free subpath `/format`, whose runtime graph a `deno info --json`
+  walk confines to its own modules, with a planted `common` value import as a permanent negative
+  control; it promises one implementation, not identical output (`Intl` data and time zones differ,
+  so dates take an explicit `timeZone`). PR review of the plan caught four defects before any code:
+  `*` ignoring `q=0`, `Vary` missing `Cookie`, a cross-runtime parity claim no test could make, and
+  a date cache keyed by locale alone. Implementation found `@setu-ts/testing` dropping a seeded
+  locale. The fresh-context security audit then found the Cloudflare Cache API serving one locale's
+  page to everyone (a URL-string key is matched with no request headers, so `Vary` could not help —
+  its default key now carries the locale), the catalogue route marking a session `Set-Cookie`
+  response `public` (default now `private`), an overstated no-echo claim, blanket test permissions,
+  and base paths that registered dead or root routes; all fixed. The re-audit found the Cloudflare
+  fix had itself introduced web cache poisoning — `searchParams.set` stripped a client's copy of the
+  key parameter from the key while the handler still saw it — so the parameter is kept in the key
+  instead; two Low findings were fixed with it. A third round found that the key still re-serialized
+  the query, so encoding variants shared an entry (it now concatenates onto the URL text as sent),
+  and that the documented ordering condition hard-coded priority 45 where the real rule is "after
+  the locale middleware". All `src` files at 100% branch/function/line; sixteen negative controls
+  observed failing — complete (PR pending)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

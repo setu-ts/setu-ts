@@ -123,7 +123,8 @@ export type LocalizationPluginOptions =
     readonly exposeCatalogues?: {
       /**
        * The route prefix: one or more plain path segments such as `/i18n` —
-       * letters, digits, `.`, `_`, `~` or `-` — and never the root.
+       * letters, digits, `.`, `_`, `~` or `-`, with no segment of only `.` or `..` —
+       * and never the root.
        */
       readonly basePath: string;
       /**

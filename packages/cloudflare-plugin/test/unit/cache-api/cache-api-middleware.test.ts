@@ -137,6 +137,51 @@ describe('cacheApiMiddleware — miss', () => {
     expect(key).not.toBe('https://example.test/cart?setu-cache-locale=en');
   });
 
+  it('keys on the URL text as sent, so encoding variants never share an entry (M103)', async () => {
+    // A re-serialized query folds these together, letting a client choose the
+    // exact text a cached reflection of `ctx.request.url` carries.
+    const urls = [
+      'https://example.test/page',
+      'https://example.test/page?',
+      'https://example.test/page?&&&',
+      'https://example.test/page?p=2',
+      'https://example.test/page?p=%32',
+      'https://example.test/page?q=a+b',
+      'https://example.test/page?q=a%20b',
+    ];
+    const cache = new FakeCacheApi();
+    for (const url of urls) {
+      const ctx = contextFor(url, { locale: 'de' });
+      await cacheApiMiddleware({ cache })(ctx, () => {
+        ctx.response.json({ ok: true });
+        return Promise.resolve();
+      });
+    }
+    expect(cache.matches).toEqual([
+      'https://example.test/page?setu-cache-locale=de',
+      'https://example.test/page?&setu-cache-locale=de',
+      'https://example.test/page?&&&&setu-cache-locale=de',
+      'https://example.test/page?p=2&setu-cache-locale=de',
+      'https://example.test/page?p=%32&setu-cache-locale=de',
+      'https://example.test/page?q=a+b&setu-cache-locale=de',
+      'https://example.test/page?q=a%20b&setu-cache-locale=de',
+    ]);
+  });
+
+  it('encodes the locale and drops a fragment, so the key always ends in the locale', async () => {
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/page?a=1#frag', {
+      locale: 'en&setu-cache-locale=de',
+    });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([
+      'https://example.test/page?a=1&setu-cache-locale=en%26setu-cache-locale%3Dde',
+    ]);
+  });
+
   it('honours a custom key function on BOTH the read and the write', async () => {
     // One implementation, two call sites: a key used only on the read would
     // store under a key nothing ever looks up.
