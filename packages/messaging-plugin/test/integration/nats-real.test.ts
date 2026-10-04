@@ -21,7 +21,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { MessagingPlugin } from '../../src/index.ts';
+import { MessagingPlugin, NatsConsumerNameCollisionError } from '../../src/index.ts';
 
 const natsUrl = Deno.env.get('NATS_URL');
 
@@ -169,16 +169,14 @@ describe({
     });
 
     it('re-subscribes the same queue on the same topic without an error (M90d review)', async () => {
-      // Review asked whether the duplicate-durable filter in `subscribe()`
-      // should also match JetStream's "consumer name already in use". Probed
-      // against the real server (nats-server v2.14.6): re-adding a durable
-      // consumer with an IDENTICAL configuration is idempotent and rejects
-      // nothing, so the ordinary repeat-subscribe path never reaches that
-      // filter at all. A genuine configuration CONFLICT under the same durable
-      // name answers "consumer already exists" and must keep propagating —
-      // widening the filter to swallow it would hide a real misconfiguration.
-      // This pins the behaviour so the filter is not "fixed" on the assumption
-      // that a repeat subscribe fails.
+      // Probed against the real server (nats-server v2.14.6): re-adding a
+      // durable consumer with an IDENTICAL configuration is idempotent and
+      // rejects nothing, so the ordinary repeat-subscribe path never reaches
+      // the "already exists" arm at all. A genuine configuration CONFLICT
+      // under the same name answers "consumer already exists" (err_code
+      // 10148); since M101b that arm reads the consumer's recorded queue and
+      // topic and refuses a mismatch by name (the collision case below)
+      // rather than attaching to it. This pins the idempotent half.
       const nats = await import('npm:nats@2.x');
       const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
       const streamName = `M90D_DUP_${suffix}`;
@@ -212,6 +210,141 @@ describe({
         await second.unsubscribe();
       } finally {
         await app.stop();
+        await jsm.streams.delete(streamName).catch(() => {});
+        await jsmConn.close();
+      }
+    });
+    it('serves RPC and two topics with a dotted queue in ONE application (M101b, V8-6)', async () => {
+      // Every case above subscribes one topic with a legal queue, which is
+      // precisely the shape under which V8-6 was invisible: the reply inbox
+      // subscribes with the dotted queue `rr.inbox.<uuid>`, which the nats
+      // client refused as a consumer name before the wire, so `request()` had
+      // never worked against a real server. The stream must cover the RPC
+      // subjects too: `rr.req.<topic>` and `rr.inbox.>`.
+      const nats = await import('npm:nats@2.x');
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const streamName = `M101B_RPC_${suffix}`;
+      const scope = `m101b.${suffix}`;
+      const ordersTopic = `${scope}.orders`;
+      const paymentsTopic = `${scope}.payments`;
+      const rpcTopic = `${scope}.quote`;
+
+      let broker: IMessageBroker | undefined;
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({
+            broker: 'nats',
+            url,
+            streamName,
+            streamSubjects: [`${scope}.>`, `rr.req.${scope}.>`, 'rr.inbox.>'],
+          }),
+          brokerProbe((b) => {
+            broker = b;
+          }),
+        ],
+      });
+
+      const jsmConn = await nats.connect({ servers: url });
+      const jsm = await jsmConn.jetstreamManager();
+      try {
+        await app.start();
+
+        const orders: unknown[] = [];
+        const payments: unknown[] = [];
+        await broker!.subscribe(ordersTopic, (m) => {
+          orders.push(m);
+        }, { queue: 'orders.eu' });
+        await broker!.subscribe(paymentsTopic, (m) => {
+          payments.push(m);
+        });
+        await broker!.respond<{ n: number }, { quote: number }>(rpcTopic, (req) => ({
+          quote: req.n * 2,
+        }));
+
+        await broker!.publish(ordersTopic, { order: 1 });
+        await broker!.publish(paymentsTopic, { payment: 1 });
+        const reply = await broker!.request<{ n: number }, { quote: number }>(
+          rpcTopic,
+          { n: 21 },
+          { timeoutMs: 10_000 },
+        );
+        expect(reply).toEqual({ quote: 42 });
+
+        await waitFor(() => orders.length > 0 && payments.length > 0, 'two-topic delivery');
+        // Each topic delivers only its own messages.
+        expect(orders).toEqual([{ order: 1 }]);
+        expect(payments).toEqual([{ payment: 1 }]);
+
+        // The dotted user queue became a legal, readable consumer name that
+        // records the raw queue it was created for.
+        const info = await jsm.consumers.info(streamName, 'orders_2eeu');
+        expect(info.config.filter_subject).toBe(ordersTopic);
+        expect(info.config.metadata?.['setu.queue']).toBe('orders.eu');
+      } finally {
+        await app.stop();
+        await jsm.streams.delete(streamName).catch(() => {});
+        await jsmConn.close();
+      }
+    });
+
+    it("refuses a queue that encodes onto another instance's consumer (M101b, V8-6)", async () => {
+      // `orders_2eeu` is a legal queue that encodes exactly like `orders.eu`.
+      // Two independent instances must not split one consumer's deliveries.
+      const nats = await import('npm:nats@2.x');
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const streamName = `M101B_COL_${suffix}`;
+      const scope = `m101bcol.${suffix}`;
+      const topic = `${scope}.orders`;
+
+      const jsmConn = await nats.connect({ servers: url });
+      const jsm = await jsmConn.jetstreamManager();
+      await jsm.streams.add({ name: streamName, subjects: [`${scope}.>`] });
+
+      let first: IMessageBroker | undefined;
+      let second: IMessageBroker | undefined;
+      const appA = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({ broker: 'nats', url, streamName }),
+          brokerProbe((b) => {
+            first = b;
+          }),
+        ],
+      });
+      const appB = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({ broker: 'nats', url, streamName }),
+          brokerProbe((b) => {
+            second = b;
+          }),
+        ],
+      });
+
+      try {
+        await appA.start();
+        await appB.start();
+        const received: unknown[] = [];
+        await first!.subscribe(topic, (m) => {
+          received.push(m);
+        }, { queue: 'orders.eu' });
+
+        const err = await second!.subscribe(topic, () => {}, { queue: 'orders_2eeu' }).then(
+          () => null,
+          (e: unknown) => e,
+        );
+        expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+        expect((err as NatsConsumerNameCollisionError).existingQueue).toBe('orders.eu');
+
+        // The first instance is unaffected and keeps every message.
+        await first!.publish(topic, { id: 1 });
+        await first!.publish(topic, { id: 2 });
+        await waitFor(() => received.length >= 2, 'first instance delivery');
+        expect(received).toEqual([{ id: 1 }, { id: 2 }]);
+      } finally {
+        await appB.stop();
+        await appA.stop();
         await jsm.streams.delete(streamName).catch(() => {});
         await jsmConn.close();
       }

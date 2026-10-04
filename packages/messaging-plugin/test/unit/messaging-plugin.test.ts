@@ -795,6 +795,26 @@ describe('MessagingPlugin', () => {
     expect(broker).toBeDefined();
   });
 
+  it('threads retry through to the kafka broker (M101b)', async () => {
+    // Observable as the subscribe-attempt count against an unknown topic: the
+    // configured `retries: 1` gives two attempts, where the default gives six.
+    const fakeClient = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'kafka',
+      client: fakeClient as unknown as IKafkaFactory,
+      retry: { retries: 1, initialRetryTime: 1 },
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    await expect(broker.subscribe('orders', () => {})).rejects.toThrow('Kafka topic "orders"');
+    const attempts = fakeClient.consumer({ groupId: 'messaging-consumers:orders' }).calls
+      .filter((c) => c.method === 'subscribe').length;
+    expect(attempts).toBe(2);
+  });
+
   it('threads replyTopic through to the kafka broker rather than storing it', async () => {
     const fakeClient = new FakeKafkaFactory();
     const { ctx } = createFakeContext();

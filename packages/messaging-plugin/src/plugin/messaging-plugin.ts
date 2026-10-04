@@ -310,6 +310,7 @@ export function MessagingPlugin(
           clientId?: string;
           defaultQueue?: string;
           replyTopic?: string;
+          retry?: KafkaOptions['retry'];
         };
         const kafkaOptions: KafkaOptions = {};
         if (opts.brokers !== undefined) kafkaOptions.brokers = opts.brokers;
@@ -317,6 +318,7 @@ export function MessagingPlugin(
         if (opts.clientId !== undefined) kafkaOptions.clientId = opts.clientId;
         if (opts.defaultQueue !== undefined) kafkaOptions.defaultQueue = opts.defaultQueue;
         if (opts.replyTopic !== undefined) kafkaOptions.replyTopic = opts.replyTopic;
+        if (opts.retry !== undefined) kafkaOptions.retry = opts.retry;
         if (logger !== undefined) kafkaOptions.logger = logger;
         broker = new KafkaBroker(ctx.runtime, serializer, kafkaOptions);
       } else if (brokerType === 'pubsub') {

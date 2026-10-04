@@ -14,6 +14,8 @@ import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { IKafkaEventEmitter, IKafkaFactory, KafkaOptions } from '../interfaces/index.ts';
+import { KafkaTopicUnavailableError } from '../errors.ts';
+import { describeError } from './describe-error.ts';
 
 /** Reply topic used when {@link KafkaOptions.replyTopic} is omitted. */
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
@@ -79,6 +81,7 @@ export function validateClient(client: unknown): client is IKafkaFactory {
  * @param brokers - Kafka bootstrap brokers
  * @param clientId - Kafka client ID
  * @param injectedClient - Optionally injected Kafka factory
+ * @param retry - kafkajs retry policy for a lazily built client
  * @returns The resolved factory
  * @throws {Error} If no client injected and kafkajs cannot be loaded
  */
@@ -86,6 +89,7 @@ async function resolveClient(
   brokers: readonly string[],
   clientId: string,
   injectedClient?: IKafkaFactory,
+  retry?: KafkaOptions['retry'],
 ): Promise<IKafkaFactory> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -97,8 +101,96 @@ async function resolveClient(
     return injectedClient;
   }
   const kafkajs = await loadKafkajs();
-  const kafka = new kafkajs.Kafka({ clientId, brokers: brokers as string[] });
+  // M101b: `retry` is forwarded verbatim — kafkajs owns the metadata retry,
+  // so the broker adds no loop of its own.
+  const kafka = new kafkajs.Kafka({
+    clientId,
+    brokers: brokers as string[],
+    ...(retry !== undefined ? { retry } : {}),
+  });
   return kafka as unknown as IKafkaFactory;
+}
+
+/** kafkajs's protocol error type for a topic the broker does not know. */
+const UNKNOWN_TOPIC_TYPE = 'UNKNOWN_TOPIC_OR_PARTITION';
+
+/** How many `cause` links to follow when classifying a kafkajs error. */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * The subscribe-retry budget when {@link KafkaOptions.retry} leaves a field
+ * out — kafkajs's own defaults (`src/retry/defaults.js`), so one set of
+ * numbers means the same thing to both.
+ */
+const DEFAULT_SUBSCRIBE_RETRY = {
+  retries: 5,
+  initialRetryTime: 300,
+  multiplier: 2,
+  maxRetryTime: 30_000,
+} as const;
+
+/** The resolved, validated subscribe-retry budget. */
+interface SubscribeRetryBudget {
+  readonly retries: number;
+  readonly initialRetryTime: number;
+  readonly multiplier: number;
+  readonly maxRetryTime: number;
+}
+
+/**
+ * Resolves and validates the subscribe-retry budget (M101b). Refused at
+ * construction rather than at the first subscribe: a `NaN` — what
+ * `Number(env.X)` yields for an unset variable — would make `attempt >= NaN`
+ * false forever, an unbounded loop.
+ *
+ * @param retry - The configured policy
+ * @returns The budget with kafkajs's defaults filled in
+ * @throws {Error} When a field is out of range
+ */
+function resolveSubscribeRetry(retry: KafkaOptions['retry']): SubscribeRetryBudget {
+  const budget: SubscribeRetryBudget = { ...DEFAULT_SUBSCRIBE_RETRY, ...retry };
+  const refuse = (field: string, rule: string): never => {
+    throw new Error(`KafkaOptions.retry.${field} must be ${rule}.`);
+  };
+  if (!Number.isInteger(budget.retries) || budget.retries < 0) {
+    refuse('retries', 'a non-negative integer');
+  }
+  if (!Number.isFinite(budget.initialRetryTime) || budget.initialRetryTime < 0) {
+    refuse('initialRetryTime', 'a finite, non-negative number of ms');
+  }
+  if (!Number.isFinite(budget.multiplier) || budget.multiplier < 1) {
+    refuse('multiplier', 'a finite number of at least 1');
+  }
+  if (!Number.isFinite(budget.maxRetryTime) || budget.maxRetryTime < 0) {
+    refuse('maxRetryTime', 'a finite, non-negative number of ms');
+  }
+  return budget;
+}
+
+/**
+ * Reports whether a kafkajs error (or one of its causes) is an unknown-topic
+ * protocol error. Measured against kafkajs 2.2.4, `subscribe` rejects with the
+ * bare `KafkaJSProtocolError` (its metadata retrier `bail`s every error but
+ * `LEADER_NOT_AVAILABLE`); kafkajs's retrier wraps an error it DID retry in
+ * `KafkaJSNumberOfRetriesExceeded` with the original as `cause`, so the chain
+ * is walked, bounded, in case a later kafkajs retries this one too.
+ *
+ * Measured against Kafka 4.0 (KRaft) with `auto.create.topics.enable=true`:
+ * the metadata request that TRIGGERS auto-creation answers this error, and the
+ * topic exists a moment later — so it is the broker's to retry, not to name
+ * at once.
+ *
+ * @param err - The rejection from `consumer.subscribe`
+ * @returns `true` when the topic is unknown to the broker
+ */
+function isUnknownTopicError(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current !== null; depth++) {
+    if (typeof current !== 'object') return false;
+    if ((current as { type?: unknown }).type === UNKNOWN_TOPIC_TYPE) return true;
+    current = (current as { cause?: unknown }).cause ?? null;
+  }
+  return false;
 }
 
 /**
@@ -154,6 +246,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
   #injectedClient: IKafkaFactory | undefined;
   #defaultQueue: string;
   #replyTopic: string;
+  #retry: KafkaOptions['retry'];
+  #subscribeRetry: SubscribeRetryBudget;
+  #logger: { error: (msg: string) => void } | undefined;
   #factory: IKafkaFactory | null = null;
   #producer: unknown | null = null;
   #ready = false;
@@ -180,6 +275,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#injectedClient = options?.client;
     this.#defaultQueue = options?.defaultQueue ?? 'messaging-consumers';
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
+    this.#retry = options?.retry;
+    this.#subscribeRetry = resolveSubscribeRetry(options?.retry);
+    this.#logger = options?.logger;
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
@@ -236,7 +334,12 @@ export class KafkaBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
-    this.#factory = await resolveClient(this.#brokers, this.#clientId, this.#injectedClient);
+    this.#factory = await resolveClient(
+      this.#brokers,
+      this.#clientId,
+      this.#injectedClient,
+      this.#retry,
+    );
 
     // Build producer unconditionally from the resolved factory
     const realFactory = this.#factory as unknown as { producer(): unknown };
@@ -439,8 +542,23 @@ export class KafkaBroker implements MessageBrokerAdapter {
       disconnect(): Promise<void>;
     };
 
-    await consumerTyped.connect();
-    await consumerTyped.subscribe({ topic, fromBeginning: false });
+    try {
+      await consumerTyped.connect();
+      await this.#subscribeWithRetry(consumerTyped, topic);
+    } catch (err) {
+      // M101b (V8-26): a consumer that failed to join is released rather than
+      // leaked, and an unknown topic is named instead of escaping as a raw
+      // protocol error that names no topic.
+      try {
+        await consumerTyped.disconnect();
+      } catch {
+        // Best-effort; the original failure is what the caller needs.
+      }
+      if (isUnknownTopicError(err)) {
+        throw new KafkaTopicUnavailableError(topic, groupId, err);
+      }
+      throw err;
+    }
 
     const activeConsumer: ActiveConsumer = {
       id: subscriptionId,
@@ -457,6 +575,11 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // documented `partition:offset` identity degrades to `"undefined:<offset>"`
     // — colliding across partitions and breaking the de-duplication the
     // identity exists for (90d verification, Finding 1).
+    // M101b: kafkajs restarts a consumer that crashes with a retriable cause,
+    // and REJECTS `run()` for one it declines to restart. Nothing else holds
+    // that promise, so an unread rejection would be an unhandled rejection
+    // that terminates the process; it is reported and the consumer marked
+    // stopped instead.
     consumerTyped.run({
       eachMessage: async ({ partition, message }) => {
         const msgTyped = message as unknown as {
@@ -488,6 +611,17 @@ export class KafkaBroker implements MessageBrokerAdapter {
         // Handler success triggers auto-commit; failure prevents commit
         await handler(deserialized, metadata);
       },
+    }).catch((err: unknown) => {
+      activeConsumer.running = false;
+      try {
+        this.#logger?.error(
+          `Kafka consumer for topic ${JSON.stringify(topic)} (group ${
+            JSON.stringify(groupId)
+          }) stopped: ${describeError(err)}`,
+        );
+      } catch {
+        // The logger is the last-resort sink; its own failure is swallowed.
+      }
     });
 
     return {
@@ -505,6 +639,46 @@ export class KafkaBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  /**
+   * Subscribes the consumer, retrying an unknown topic within the
+   * {@link KafkaOptions.retry} budget (M101b, V8-26).
+   *
+   * kafkajs does not retry `UNKNOWN_TOPIC_OR_PARTITION`, and a KRaft broker
+   * that auto-creates answers exactly that to the request that creates the
+   * topic — so without this a subscription to a topic that did not exist yet
+   * died at boot on a broker that would have created it. kafkajs restores the
+   * consumer's target topics when that error escapes, so subscribing the same
+   * consumer again is safe. Any other error, or the budget running out, is
+   * rethrown for the caller to classify.
+   *
+   * @param consumer - The connected consumer
+   * @param topic - The topic to subscribe
+   */
+  async #subscribeWithRetry(
+    consumer: { subscribe(options: { topic: string; fromBeginning?: boolean }): Promise<void> },
+    topic: string,
+  ): Promise<void> {
+    const budget = this.#subscribeRetry;
+    let delay = budget.initialRetryTime;
+    for (let attempt = 0;; attempt++) {
+      try {
+        await consumer.subscribe({ topic, fromBeginning: false });
+        return;
+      } catch (err) {
+        if (!isUnknownTopicError(err) || attempt >= budget.retries) {
+          throw err;
+        }
+      }
+      await new Promise<void>((resolve) => {
+        this.#runtime.setTimeout(resolve, delay);
+      });
+      if (!this.#factory) {
+        throw new Error('KafkaBroker was disconnected while subscribing');
+      }
+      delay = Math.min(delay * budget.multiplier, budget.maxRetryTime);
+    }
   }
 
   /** Subscribes through the header-aware internal path. @internal */

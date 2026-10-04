@@ -4,7 +4,9 @@
  * Publishes to topics, subscribes through consumer-group subscriptions, and
  * supports request-reply via a shared reply topic with per-instance
  * subscriptions. Topics must pre-exist; the consumer-group subscription
- * ({@linkcode SubscribeOptions.queue}) is created when absent.
+ * ({@linkcode SubscribeOptions.queue}, default `<defaultQueue>.<topic>`) is
+ * created when absent, and an existing one bound to another topic is refused
+ * with {@linkcode PubSubSubscriptionBoundElsewhereError}.
  *
  * The SDK is lazy-loaded through {@linkcode loadPubSubModule} and adapted to
  * the domain port via {@linkcode adaptPubSubModule}, or injected directly as
@@ -28,13 +30,48 @@ import { describeError } from './describe-error.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
-import { ReplyInboxUnavailableError } from '../errors.ts';
+import { PubSubSubscriptionBoundElsewhereError, ReplyInboxUnavailableError } from '../errors.ts';
 
 /** Default reply topic for request-reply. */
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
 
-/** Default consumer-group subscription name. */
+/** Default consumer-group subscription-name PREFIX (M101b: `<prefix>.<topic>`). */
 const DEFAULT_QUEUE = 'messaging-consumers';
+
+/** The service's subscription-ID length cap (Pub/Sub resource-naming rules). */
+const MAX_SUBSCRIPTION_NAME_LENGTH = 255;
+
+/** gRPC `ALREADY_EXISTS`. */
+const GRPC_ALREADY_EXISTS = 6;
+
+/**
+ * Derives the default subscription for a topic: `<defaultQueue>.<topic>`
+ * (M101b, V8-2).
+ *
+ * Pub/Sub subscription names are project-global, so one shared default meant
+ * a second topic attached to the first topic's subscription. `.` joins (the
+ * package's own `rr.req.` convention; Kafka's `:` is illegal in a Pub/Sub ID).
+ * Pub/Sub reserves no character, so the parts are NOT recoverable by splitting.
+ *
+ * @param defaultQueue - The configured prefix
+ * @param topic - The subscribed topic
+ * @returns The per-topic subscription name
+ * @internal
+ */
+export function deriveDefaultSubscription(defaultQueue: string, topic: string): string {
+  return `${defaultQueue}.${topic}`;
+}
+
+/**
+ * Reports whether the fully-qualified topic the service says a subscription is
+ * bound to is the topic the caller asked for. The caller may name a topic
+ * either short (`orders`) or fully qualified (`projects/p/topics/orders`).
+ */
+function isSameTopic(boundTopic: string, requestedTopic: string): boolean {
+  return requestedTopic.startsWith('projects/')
+    ? boundTopic === requestedTopic
+    : boundTopic.endsWith(`/topics/${requestedTopic}`);
+}
 
 /**
  * Declares the constructors used from the real GCP Pub/Sub SDK so the adapter
@@ -76,6 +113,13 @@ export interface PubSubSdkModule {
       on(event: 'error', handler: (err: unknown) => void): void;
       close(): Promise<void>;
       delete(): Promise<void>;
+      /**
+       * Reads the subscription's metadata (M101b). The SDK resolves a tuple
+       * whose first element is the `google.pubsub.v1.ISubscription`; only its
+       * fully-qualified `topic` is read, to refuse attaching to a subscription
+       * that is bound to another topic.
+       */
+      getMetadata(): Promise<[{ topic?: string | null }, ...unknown[]]>;
     };
     close(): Promise<void>;
   };
@@ -145,7 +189,13 @@ export interface PubSubOptions {
   credentials?: unknown;
   /** Injected transport (bypasses lazy SDK load). */
   client?: IPubSubTransport;
-  /** Default consumer-group subscription name. */
+  /**
+   * Default consumer-group subscription-name PREFIX (default
+   * `'messaging-consumers'`). A subscription with no
+   * {@linkcode SubscribeOptions.queue} uses `<defaultQueue>.<topic>`, one
+   * subscription per topic, because Pub/Sub subscription names are
+   * project-global (M101b).
+   */
   defaultQueue?: string;
   /** Shared reply topic for request-reply (must pre-exist). */
   replyTopic?: string;
@@ -204,6 +254,8 @@ export function adaptPubSubModule(
         },
       ) => void,
     ): Promise<IPubSubSubscription> => {
+      const sub = pubsub.subscription(subscription);
+
       // Create subscription on the topic if absent.
       try {
         await pubsub.topic(topic).createSubscription(subscription);
@@ -212,12 +264,23 @@ export function adaptPubSubModule(
         // including NOT_FOUND (gRPC code 5). Match on the documented error-code
         // discriminator rather than String(err) which is representation-dependent.
         const grpcCode = (err as { code?: number }).code;
-        if (grpcCode !== 6) {
+        if (grpcCode !== GRPC_ALREADY_EXISTS) {
           throw err;
         }
+        // M101b (V8-2): subscription names are project-global, so an existing
+        // one may be bound to ANOTHER topic. Attaching to it would hand this
+        // topic's handler the other topic's messages with no log. A missing
+        // `topic` cannot prove the binding either, so it is refused too.
+        const [metadata] = await sub.getMetadata();
+        const boundTopic = metadata.topic ?? '';
+        if (!isSameTopic(boundTopic, topic)) {
+          throw new PubSubSubscriptionBoundElsewhereError(
+            subscription,
+            boundTopic === '' ? '(unknown)' : boundTopic,
+            topic,
+          );
+        }
       }
-
-      const sub = pubsub.subscription(subscription);
 
       sub.on('error', (err) => {
         if (options.logger) {
@@ -474,8 +537,15 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       throw new Error('GcpPubSubBroker is not connected');
     }
 
+    const queue = options?.queue ?? deriveDefaultSubscription(this.#defaultQueue, topic);
+    if (queue.length > MAX_SUBSCRIPTION_NAME_LENGTH) {
+      throw new Error(
+        `Pub/Sub subscription name for topic ${JSON.stringify(topic)} is ${queue.length} ` +
+          `characters; the service allows at most ${MAX_SUBSCRIPTION_NAME_LENGTH}. Pass a ` +
+          'shorter SubscribeOptions.queue.',
+      );
+    }
     const subscriptionId = this.#runtime.uuid();
-    const queue = options?.queue ?? this.#defaultQueue;
 
     const sub = await this.#transport.open(topic, queue, (msg) => {
       (async () => {

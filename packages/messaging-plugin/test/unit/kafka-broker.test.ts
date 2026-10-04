@@ -3,8 +3,12 @@ import { expect } from '@std/expect';
 import { KafkaBroker, validateClient } from '../../src/brokers/kafka-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
-import { FakeKafkaFactory } from '../fixtures/fake-kafkajs-client.ts';
-import { RemoteHandlerError, RequestTimeoutError } from '../../src/errors.ts';
+import { FakeKafkaFactory, unknownTopicError } from '../fixtures/fake-kafkajs-client.ts';
+import {
+  KafkaTopicUnavailableError,
+  RemoteHandlerError,
+  RequestTimeoutError,
+} from '../../src/errors.ts';
 
 /**
  * KafkaBroker unit tests.
@@ -765,5 +769,213 @@ describe('KafkaBroker request-reply', () => {
     await broker.disconnect();
 
     await expect(pending).rejects.toThrow('disconnected');
+  });
+});
+
+describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () => {
+  const FAST = { retries: 2, initialRetryTime: 1 } as const;
+
+  async function rejection(promise: Promise<unknown>): Promise<unknown> {
+    return await promise.then(() => null, (e: unknown) => e);
+  }
+
+  function subscribeCalls(factory: FakeKafkaFactory, groupId: string): number {
+    return factory.consumer({ groupId }).calls.filter((c) => c.method === 'subscribe').length;
+  }
+
+  it('names a topic still unknown after the retry budget, naming topic and group', async () => {
+    const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: FAST,
+    });
+    await broker.connect();
+
+    const err = await rejection(broker.subscribe('orders', () => {}));
+
+    expect(err).toBeInstanceOf(KafkaTopicUnavailableError);
+    const named = err as KafkaTopicUnavailableError;
+    expect(named.topic).toBe('orders');
+    expect(named.groupId).toBe('messaging-consumers:orders');
+    expect(named.message).toContain('"orders"');
+    expect(named.message).toContain('"messaging-consumers:orders"');
+    expect(named.message).toContain('auto.create.topics.enable');
+    expect((named.cause as { type?: string }).type).toBe('UNKNOWN_TOPIC_OR_PARTITION');
+    // One attempt plus `retries`, and the consumer is released, not leaked.
+    const consumer = factory.consumer({ groupId: 'messaging-consumers:orders' });
+    expect(subscribeCalls(factory, 'messaging-consumers:orders')).toBe(3);
+    expect(consumer.calls.at(-1)?.method).toBe('disconnect');
+    await broker.disconnect();
+  });
+
+  it('names the topic at once with retries: 0', async () => {
+    const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 0 },
+    });
+    await broker.connect();
+
+    expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'g1' })))
+      .toBeInstanceOf(KafkaTopicUnavailableError);
+    expect(subscribeCalls(factory, 'g1')).toBe(1);
+    await broker.disconnect();
+  });
+
+  it('subscribes once a topic an auto-creating broker just created becomes known', async () => {
+    // A KRaft broker answers UNKNOWN_TOPIC_OR_PARTITION to the request that
+    // auto-creates the topic; the next attempt finds it (measured, Kafka 4.0).
+    const unknown = ['orders'];
+    const factory = new FakeKafkaFactory({ unknownTopics: unknown });
+    const consumer = factory.consumer({ groupId: 'messaging-consumers:orders' });
+    const original = consumer.subscribe.bind(consumer);
+    consumer.subscribe = (options) => {
+      const result = original(options);
+      unknown.length = 0; // created by the first (rejected) request
+      return result;
+    };
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: FAST,
+    });
+    await broker.connect();
+
+    const received: unknown[] = [];
+    await broker.subscribe('orders', (m) => {
+      received.push(m);
+    });
+    await broker.publish('orders', { n: 1 });
+
+    expect(subscribeCalls(factory, 'messaging-consumers:orders')).toBe(2);
+    expect(received).toEqual([{ n: 1 }]);
+    await broker.disconnect();
+  });
+
+  it('recognises an unknown topic wrapped in a retry-exhaustion cause chain', async () => {
+    const factory = new FakeKafkaFactory();
+    const consumer = factory.consumer({ groupId: 'g' });
+    const wrapped = Object.assign(new Error('retries exceeded'), {
+      name: 'KafkaJSNumberOfRetriesExceeded',
+      cause: unknownTopicError(),
+    });
+    consumer.subscribe = () => Promise.reject(wrapped);
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 0 },
+    });
+    await broker.connect();
+
+    const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'g' }));
+    expect(err).toBeInstanceOf(KafkaTopicUnavailableError);
+    expect((err as Error).cause).toBe(wrapped);
+    await broker.disconnect();
+  });
+
+  it('rethrows any other subscribe failure unchanged, without retrying', async () => {
+    const factory = new FakeKafkaFactory();
+    const consumer = factory.consumer({ groupId: 'g' });
+    const failures: unknown[] = [
+      Object.assign(new Error('not authorized'), { type: 'TOPIC_AUTHORIZATION_FAILED' }),
+      'a bare string',
+      // A cause chain longer than the walk, and one ending in a non-object.
+      { cause: { cause: { cause: { cause: { cause: { type: 'UNKNOWN_TOPIC_OR_PARTITION' } } } } } },
+      { cause: 'not an object' },
+    ];
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: FAST,
+    });
+    await broker.connect();
+
+    for (const failure of failures) {
+      let calls = 0;
+      consumer.subscribe = () => {
+        calls++;
+        return Promise.reject(failure);
+      };
+      expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'g' }))).toBe(failure);
+      expect(calls).toBe(1);
+    }
+    await broker.disconnect();
+  });
+
+  it('stops retrying when the broker is disconnected mid-wait', async () => {
+    const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 5, initialRetryTime: 20 },
+    });
+    await broker.connect();
+
+    const pending = rejection(broker.subscribe('orders', () => {}));
+    await broker.disconnect();
+    const err = await pending;
+
+    expect((err as Error).message).toContain('disconnected while subscribing');
+    expect(subscribeCalls(factory, 'messaging-consumers:orders')).toBe(1);
+  });
+
+  it('refuses an out-of-range retry budget at construction', () => {
+    const cases: Array<[Record<string, number>, string]> = [
+      [{ retries: Number.NaN }, 'retries'],
+      [{ retries: -1 }, 'retries'],
+      [{ retries: 1.5 }, 'retries'],
+      [{ initialRetryTime: -1 }, 'initialRetryTime'],
+      [{ initialRetryTime: Number.NaN }, 'initialRetryTime'],
+      [{ multiplier: 0.5 }, 'multiplier'],
+      [{ multiplier: Number.POSITIVE_INFINITY }, 'multiplier'],
+      [{ maxRetryTime: Number.POSITIVE_INFINITY }, 'maxRetryTime'],
+      [{ maxRetryTime: -5 }, 'maxRetryTime'],
+    ];
+    for (const [retry, field] of cases) {
+      expect(() =>
+        new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+          client: new FakeKafkaFactory(),
+          retry,
+        })
+      ).toThrow(`KafkaOptions.retry.${field}`);
+    }
+  });
+
+  it('reports a run() rejection through the logger and stays ready', async () => {
+    const crash = new Error('consumer crashed and was not restarted');
+    const errors: string[] = [];
+    const factory = new FakeKafkaFactory({ runRejection: crash });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      logger: { error: (m) => errors.push(m) },
+    });
+    await broker.connect();
+
+    await broker.subscribe('orders', () => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('"orders"');
+    expect(errors[0]).toContain('"messaging-consumers:orders"');
+    expect(errors[0]).toContain('consumer crashed and was not restarted');
+    expect(broker.isReady()).toBe(true);
+    await broker.disconnect();
+  });
+
+  it('contains a run() rejection with no logger, or a logger that throws', async () => {
+    // Either would otherwise be an unhandled rejection, which fails this test.
+    for (
+      const logger of [undefined, {
+        error: () => {
+          throw new Error('logger down');
+        },
+      }]
+    ) {
+      const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: new FakeKafkaFactory({ runRejection: new Error('crash') }),
+        ...(logger !== undefined ? { logger } : {}),
+      });
+      await broker.connect();
+      await broker.subscribe('orders', () => {});
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(broker.isReady()).toBe(true);
+      await broker.disconnect();
+    }
   });
 });
