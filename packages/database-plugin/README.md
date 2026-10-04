@@ -121,9 +121,14 @@ The bridge supports the **`'column-per-tenant'`** strategy only: it conjoins the
 every read and stamps it on every write (the column is spread LAST, so a caller's filter cannot
 override it, and stripped from every `update` payload, so no write can move a row between tenants).
 `'schema-per-tenant'` and `'database-per-tenant'` throw `TenantStoreStrategyUnsupportedError` at
-startup, because `IRepository` offers no schema or database switch. `DatabaseTenantDataStore` is
-also exported for an application that holds its own `IDatabaseService` and constructs the store
-directly.
+startup, because `IRepository` offers no schema or database switch. The tenant column comes from
+that strategy — `'tenant_id'` by default, `database: new ColumnPerTenant('org_id')` for another — so
+there is one place to name it. Lookups by key go through the repository's own `findById`, so an
+entity whose primary key is not `id` (a MongoDB `primaryKey: 'user_id'`, a composite key) is
+addressed the way its adapter is configured; the tenant column is then checked on the row that comes
+back. `DatabaseTenantDataStore` is also exported for an application that holds its own
+`IDatabaseService` and constructs the store directly; its optional second constructor argument names
+the column for a store used outside the multi-tenancy plugin.
 
 ## Options
 
@@ -914,7 +919,6 @@ imperative begin/commit.
 | `DatabaseAdapterOptions`                  | interface |
 | `DatabaseConnectionOptions`               | interface |
 | `DatabasePoolCapacity`                    | interface |
-| `DatabaseTenantDataStoreOptions`          | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
 | `DrizzleDatabase`                         | interface |

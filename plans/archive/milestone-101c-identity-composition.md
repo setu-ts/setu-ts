@@ -1,6 +1,6 @@
 # Milestone 101c — tenancy and identity features that do not compose
 
-> **Status:** Planning. Branch: `feat/m101c-identity-composition`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m101c-identity-composition`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
@@ -395,3 +395,21 @@ Plus the negative controls, each observed failing and reverted: §3.1 (tenant-si
   `IRepository` can express a schema switch.
 - Session `rotate`/`regenerate` interactions with the binding (M48, unchanged and already tested in
   `session-tenant-cross-write.test.ts`).
+
+## 10. Corrections after verification
+
+Recorded here rather than edited into §3.3, which stays as the design that was reviewed.
+
+- **The bridge's key lookups addressed a hardcoded `id`.** §3.3 specified `findById` / `update` /
+  `delete` as `findOne({ where: { id, [col]: tenantId } })`. On an entity whose primary key is not
+  named `id` that answers not-found for every row while the row stays in the store — reproduced
+  against real MongoDB with `primaryKey: 'user_id'`, the M79 hardcoded-`id` class. All three now
+  read through the repository's own `findById` (the adapter's configured key, scalar or composite)
+  and check the tenant column on the returned row. A unit case keyed by `user_id` pins it and fails
+  against the old lookup.
+- **`createDatabaseTenantDataStore({ tenantColumn })` was cut.** §3.3/§4.1 gave the factory a
+  `tenantColumn` option, but the plugin always hands the store a column strategy (default
+  `'tenant_id'`), so through the plugin the option was either redundant or a startup throw. The
+  column is named on the strategy instead (`database: new ColumnPerTenant('org_id')`).
+  `DatabaseTenantDataStoreOptions` is no longer exported; the constructor's optional `tenantColumn`
+  argument stays for a store used outside the plugin.

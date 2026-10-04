@@ -7189,10 +7189,12 @@ await repo.create({ id: 'ord-1' });
   `createDatabaseTenantDataStore` from `@setu-ts/database-plugin`, is the one store told the
   strategy over a real backend, and it supports `'column'` only: it conjoins the tenant column to
   every read and stamps it on every write, and throws `TenantStoreStrategyUnsupportedError` at
-  startup for `'schema'`/`'database'` (IRepository offers no schema or database switch). A
-  `register()` warning fires when a non-`'column'` strategy is selected with no `dataStore`
-  injected, and the `JwtResolver` arm of `resolver` warns that tenant identity comes from an
-  UNVERIFIED claim.
+  startup for `'schema'`/`'database'` (IRepository offers no schema or database switch). Its column
+  is the strategy's (`new ColumnPerTenant('org_id')` names another), and key lookups go through the
+  repository's own `findById`, so a primary key not named `id` is addressed as its adapter is
+  configured. A `register()` warning fires when a non-`'column'` strategy is selected with no
+  `dataStore` injected, and the `JwtResolver` arm of `resolver` warns that tenant identity comes
+  from an UNVERIFIED claim.
 - **Auto-added at priority 40.** Runs after observability (metrics 20 / telemetry 30), before auth
   (300). Exported for manual re-ordering.
 

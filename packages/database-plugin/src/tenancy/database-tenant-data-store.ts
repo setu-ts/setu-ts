@@ -26,6 +26,13 @@
  * tenant first (two calls) so a foreign tenant's id is a no-op, not a mutation
  * of another tenant's row.
  *
+ * **Lookup by key goes through the repository's own `findById`.** The bridge
+ * never names the key field itself: an entity whose primary key is not `id`
+ * (a Mongo `primaryKey: 'user_id'`, a Drizzle composite key) is addressed the
+ * way its adapter is configured, and the tenant column is then checked on the
+ * row that comes back. Writing `where: { id }` instead would silently answer
+ * "not found" for every such entity.
+ *
  * @module
  */
 import type {
@@ -78,7 +85,7 @@ const DEFAULT_TENANT_COLUMN = 'tenant_id';
  */
 export class DatabaseTenantDataStore implements ITenantDataStore {
   readonly #service: IDatabaseService;
-  /** The column named by `createDatabaseTenantDataStore({ tenantColumn })`, if any. */
+  /** The column named by the constructor's `tenantColumn`, if any. */
   readonly #configuredColumn: string | undefined;
   /** The column adopted from a `'column'` strategy via `useIsolation`, if any. */
   #resolvedColumn: string | undefined;
@@ -89,7 +96,10 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
    * @param service - The database service the store reads and writes through
    * @param tenantColumn - The tenant column to stamp and conjoin; when omitted
    *   the column is adopted from a `'column'` strategy handed to
-   *   {@linkcode useIsolation}, else it defaults to `'tenant_id'`
+   *   {@linkcode useIsolation}, else it defaults to `'tenant_id'`. Meant for a
+   *   store used OUTSIDE the multi-tenancy plugin; under the plugin, name the
+   *   column on the strategy instead, since the plugin always hands one over
+   *   and a different column here throws at `useIsolation`
    */
   constructor(service: IDatabaseService, tenantColumn?: string) {
     this.#service = service;
@@ -119,9 +129,9 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
       const column = strategy.getTenantColumn();
       if (this.#configuredColumn !== undefined && this.#configuredColumn !== column) {
         throw new TenantStoreStrategyUnsupportedError(
-          `createDatabaseTenantDataStore({ tenantColumn: '${this.#configuredColumn}' }) ` +
+          `new DatabaseTenantDataStore(service, '${this.#configuredColumn}') ` +
             `disagrees with the isolation strategy's column '${column}'; name the same column ` +
-            `in both, or omit tenantColumn to adopt the strategy's`,
+            `in both, or omit the tenantColumn argument to adopt the strategy's`,
         );
       }
       this.#resolvedColumn = column;
@@ -146,15 +156,26 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     return rows as unknown as readonly E[];
   }
 
+  /**
+   * Reads the row by key through the repository's own `findById` and returns
+   * it only when it belongs to `tenantId`; `null` otherwise.
+   */
+  async #ownedRow(
+    tenantId: string,
+    entity: string,
+    id: EntityKey,
+  ): Promise<Record<string, unknown> | null> {
+    const row = await this.#repo(entity).findById(id);
+    if (row === null || row[this.#column()] !== tenantId) return null;
+    return row;
+  }
+
   async findById<E, Id>(
     tenantId: string,
     entity: string,
     id: Id,
   ): Promise<E | null> {
-    const col = this.#column();
-    const row = await this.#repo(entity).findOne({
-      where: { id: id as EntityKey, [col]: tenantId },
-    });
+    const row = await this.#ownedRow(tenantId, entity, id as EntityKey);
     return row as unknown as (E | null);
   }
 
@@ -190,7 +211,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     const repo = this.#repo(entity);
     // Look the row up under the tenant first: a foreign tenant's id is a no-op,
     // not a mutation of another tenant's row.
-    const existing = await repo.findOne({ where: { id: id as EntityKey, [col]: tenantId } });
+    const existing = await this.#ownedRow(tenantId, entity, id as EntityKey);
     if (existing === null) return null;
     // Strip the tenant column from the payload so no update can move a row
     // between tenants.
@@ -203,28 +224,11 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   }
 
   async delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean> {
-    const col = this.#column();
-    const repo = this.#repo(entity);
     // Look the row up under the tenant first: a foreign tenant's id is a no-op.
-    const existing = await repo.findOne({ where: { id: id as EntityKey, [col]: tenantId } });
+    const existing = await this.#ownedRow(tenantId, entity, id as EntityKey);
     if (existing === null) return false;
-    return repo.delete(id as EntityKey);
+    return this.#repo(entity).delete(id as EntityKey);
   }
-}
-
-/**
- * Options for {@linkcode createDatabaseTenantDataStore}.
- *
- * @since 0.9.0
- */
-export interface DatabaseTenantDataStoreOptions {
-  /**
-   * The tenant column to stamp on every write and conjoin to every read. When
-   * omitted the column is adopted from a `'column'` strategy handed to
-   * `useIsolation`, else it defaults to `'tenant_id'`. A `column` strategy
-   * naming a DIFFERENT column throws at `useIsolation`.
-   */
-  readonly tenantColumn?: string;
 }
 
 /**
@@ -238,8 +242,11 @@ export interface DatabaseTenantDataStoreOptions {
  * after the tenancy plugin: every `register()` phase completes before any
  * `onInit`, so no ordering edge is needed.
  *
- * @param options - The tenant column, when it differs from the strategy's or
- *   the default
+ * The tenant column comes from the plugin's isolation strategy, which the
+ * plugin always hands the store: `'column-per-tenant'` uses `'tenant_id'`, and
+ * `database: new ColumnPerTenant('org_id')` names another column. There is no
+ * second place to name it, so the two cannot disagree.
+ *
  * @returns A factory the multi-tenancy plugin resolves in `onInit`
  *
  * @example
@@ -249,7 +256,7 @@ export interface DatabaseTenantDataStoreOptions {
  *
  * const app = createApplication({
  *   plugins: [
- *     DatabasePlugin({ type: 'postgres', /* … *\/ }),
+ *     DatabasePlugin({ type: 'memory' }),
  *     MultiTenancyPlugin({
  *       resolver: 'header',
  *       dataStore: createDatabaseTenantDataStore(),
@@ -259,11 +266,9 @@ export interface DatabaseTenantDataStoreOptions {
  * ```
  * @since 0.9.0
  */
-export function createDatabaseTenantDataStore(
-  options?: DatabaseTenantDataStoreOptions,
-): RegistryFactory<ITenantDataStore> {
+export function createDatabaseTenantDataStore(): RegistryFactory<ITenantDataStore> {
   return (services: IServiceRegistry): ITenantDataStore => {
     const service = services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    return new DatabaseTenantDataStore(service, options?.tenantColumn);
+    return new DatabaseTenantDataStore(service);
   };
 }

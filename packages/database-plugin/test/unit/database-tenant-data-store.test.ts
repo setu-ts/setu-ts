@@ -1,8 +1,9 @@
 /**
  * The tenant data-store bridge over a recording fake `IDatabaseService`
  * (M101c, V8-8): every method's translated `IRepository` call, the tenant
- * column spread/stamped LAST, strip-on-update, the strategy table, and the
- * factory's `CAPABILITIES.DATABASE` resolution.
+ * column spread/stamped LAST, strip-on-update, the strategy table, key
+ * lookups through the repository's own `findById` (so a key not named `id`
+ * works), and the factory's `CAPABILITIES.DATABASE` resolution.
  *
  * @module
  */
@@ -24,15 +25,20 @@ interface RecordedCall {
   readonly arg: unknown;
 }
 
-/** A recording `IRepository` over a fixed row set. */
+/**
+ * A recording `IRepository` over a fixed row set, keyed by `keyField` the way a
+ * real adapter is keyed by its configured primary key — so a repository whose
+ * key is not `id` answers `findById` by THAT field, as Mongo's
+ * `primaryKey: 'user_id'` does.
+ */
 class FakeRepository implements IRepository<Record<string, unknown>, EntityKey> {
   readonly calls: RecordedCall[] = [];
-  /** Rows the `findOne` lookups return, keyed by `where.id`. */
+  /** Rows by their primary key. */
   readonly rows = new Map<string, Record<string, unknown>>();
 
-  constructor(private readonly out: Record<string, unknown>[]) {
+  constructor(private readonly out: Record<string, unknown>[], keyField = 'id') {
     for (const row of this.out) {
-      this.rows.set(String(row.id), row);
+      this.rows.set(String(row[keyField]), row);
     }
   }
 
@@ -82,6 +88,7 @@ class FakeRepository implements IRepository<Record<string, unknown>, EntityKey> 
 
   // deno-lint-ignore require-await
   async findById(id: EntityKey): Promise<Record<string, unknown> | null> {
+    this.calls.push({ method: 'findById', arg: id });
     return this.rows.get(String(id)) ?? null;
   }
 
@@ -165,18 +172,21 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
     expect(call.arg).toEqual({ where: { tenant_id: 'a' } });
   });
 
-  it('findById looks one up under the tenant', async () => {
+  it('findById reads by key through the repository and checks the tenant column', async () => {
     const { store, repo } = storeWith();
     const row = await store.findById('a', 'Patient', '1');
-    const [call] = repo().calls;
-    expect(call.method).toBe('findOne');
-    expect(call.arg).toEqual({ where: { id: '1', tenant_id: 'a' } });
+    expect(repo().calls).toEqual([{ method: 'findById', arg: '1' }]);
     expect(row).toEqual(ROWS[0]);
   });
 
-  it('findById returns null when the id is unknown under the tenant', async () => {
+  it('findById returns null when the id is unknown', async () => {
     const { store } = storeWith();
     expect(await store.findById('a', 'Patient', '99')).toBeNull();
+  });
+
+  it("findById returns null for another tenant's row", async () => {
+    const { store } = storeWith();
+    expect(await store.findById('a', 'Patient', '2')).toBeNull();
   });
 
   it('find spreads the tenant column LAST so a caller filter cannot override it', async () => {
@@ -201,8 +211,7 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
     const { store, repo } = storeWith();
     const updated = await store.update('a', 'Patient', '1', { name: 'renamed', tenant_id: 'b' });
     const [lookup, write] = repo().calls;
-    expect(lookup.method).toBe('findOne');
-    expect(lookup.arg).toEqual({ where: { id: '1', tenant_id: 'a' } });
+    expect(lookup).toEqual({ method: 'findById', arg: '1' });
     expect(write.method).toBe('update');
     expect(write.arg).toEqual({ id: '1', data: { name: 'renamed' } });
     expect(updated).toMatchObject({ id: '1', name: 'renamed' });
@@ -211,19 +220,38 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
   it('update returns null when the id is unknown under the tenant (no write)', async () => {
     const { store, repo } = storeWith();
     expect(await store.update('a', 'Patient', '2', { name: 'x' })).toBeNull();
-    expect(repo().calls.map((c) => c.method)).toEqual(['findOne']);
+    expect(repo().calls.map((c) => c.method)).toEqual(['findById']);
   });
 
   it('delete looks the row up under the tenant first and returns false when absent', async () => {
     const { store, repo } = storeWith();
     expect(await store.delete('a', 'Patient', '2')).toBe(false);
-    expect(repo().calls.map((c) => c.method)).toEqual(['findOne']);
+    expect(repo().calls.map((c) => c.method)).toEqual(['findById']);
   });
 
   it('delete removes the row when it exists under the tenant', async () => {
     const { store, repo } = storeWith();
     expect(await store.delete('a', 'Patient', '1')).toBe(true);
-    expect(repo().calls.map((c) => c.method)).toEqual(['findOne', 'delete']);
+    expect(repo().calls.map((c) => c.method)).toEqual(['findById', 'delete']);
+  });
+
+  it('addresses an entity whose primary key is not `id` (findById, update, delete)', async () => {
+    // A repository keyed by `user_id`, the shape a Mongo `primaryKey: 'user_id'`
+    // mapping has. A bridge that wrote `where: { id }` answered not-found for
+    // every row here while the row stayed in the store.
+    const service = new FakeDatabaseService();
+    const repo = new FakeRepository([{ user_id: 'u-1', name: 'Ann', tenant_id: 'a' }], 'user_id');
+    service.repos.set('User', repo);
+    const store = new DatabaseTenantDataStore(service);
+
+    expect(await store.findById('a', 'User', 'u-1')).toMatchObject({ user_id: 'u-1' });
+    expect(await store.findById('b', 'User', 'u-1')).toBeNull();
+    expect(await store.update('a', 'User', 'u-1', { name: 'Ann2' })).toMatchObject({
+      name: 'Ann2',
+    });
+    expect(await store.delete('b', 'User', 'u-1')).toBe(false);
+    expect(await store.delete('a', 'User', 'u-1')).toBe(true);
+    expect(repo.rows.size).toBe(0);
   });
 
   it('a custom tenantColumn is used for the stamp and the conjoin', async () => {
@@ -297,11 +325,12 @@ describe('createDatabaseTenantDataStore (M101c, V8-8)', () => {
     expect(store).toBeInstanceOf(DatabaseTenantDataStore);
   });
 
-  it('passes tenantColumn through to the store', async () => {
+  it("takes its column from the plugin's strategy, with no second place to name it", async () => {
     const service = new FakeDatabaseService();
     service.repos.set('Patient', new FakeRepository(ROWS));
     const services = { get: () => service } as unknown as IServiceRegistry;
-    const store = createDatabaseTenantDataStore({ tenantColumn: 'org_id' })(services);
+    const store = createDatabaseTenantDataStore()(services);
+    store.useIsolation?.({ kind: 'column', getTenantColumn: () => 'org_id' });
     await store.findAll('a', 'Patient');
     expect(service.repos.get('Patient')!.calls[0].arg).toEqual({ where: { org_id: 'a' } });
   });

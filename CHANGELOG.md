@@ -9,15 +9,17 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **Tenant data-store bridge (M101c, V8-8).** `@setu-ts/database-plugin` now ships the one
-  `ITenantDataStore` over a real backend: `createDatabaseTenantDataStore(options?)` returns a
+  `ITenantDataStore` over a real backend: `createDatabaseTenantDataStore()` returns a
   `RegistryFactory` the multi-tenancy plugin resolves in `onInit`, so `DatabasePlugin` may be
   registered before or after the tenancy plugin. It returns a `DatabaseTenantDataStore` over
   `service.getRepository(entity)`, supporting the `'column-per-tenant'` strategy only — the tenant
   column is conjoined to every read (spread last, so a caller's filter cannot override it) and
   stamped on every write, and stripped from every `update` payload so no write can move a row
-  between tenants. `DatabaseTenantDataStoreOptions.tenantColumn` names the column; a `'column'`
-  strategy naming a different column throws at `useIsolation`, and `'schema'`/`'database'` throw
+  between tenants. The column comes from the plugin's isolation strategy (`'tenant_id'` by default,
+  `database: new ColumnPerTenant('org_id')` for another), and `'schema'`/`'database'` throw
   `TenantStoreStrategyUnsupportedError` because `IRepository` offers no schema or database switch.
+  Lookups by key go through the repository's own `findById`, so an entity whose primary key is not
+  `id` is addressed the way its adapter is configured, and the tenant column is checked on the row.
   `MultiTenancyPluginOptions.dataStore` widens to
   `ITenantDataStore | RegistryFactory<ITenantDataStore>`; a factory is resolved once at `onInit`,
   validated, and handed the strategy, and the service's late-binding slot throws
@@ -30,18 +32,23 @@ All notable changes to this project are documented here. The format follows
   middleware compares the session it finds in `ctx.state` right after it resolves a tenant. Both
   sites share the pure `tenantBindingMismatch(session, tenantId)` in `@setu-ts/common`, which also
   owns the two state keys — `SESSION_STATE_KEY` and `SESSION_TENANT_BINDING_KEY` — that the two
-  packages must agree on byte-for-byte. The seal narrows to an unbound session only, so a bound
-  session is never re-bound by a later, mismatched tenant.
+  packages must agree on byte-for-byte.
 
-- **CSRF path exclusion (M101c, V8-9).** `CsrfOptions.exclude` (http-security) and
-  `CsrfFormOptions.exclude` (session) list paths — exact string or `RegExp` — that skip the CSRF
-  check entirely, checked before the method test so an excluded path is never inspected. The
-  documented SAML recipe becomes `exclude: ['/auth/<provider>/acs']` on BOTH plugins, because an
-  origin allowlist cannot admit an IdP that serves `Referrer-Policy: no-referrer` (Keycloak does):
-  the browser posts the ACS with `Origin: null`, and `trustedOrigins: ['null']` would admit every
-  opaque-origin `POST` on every route.
+- **CSRF path exclusion (M101c, V8-9).** `CsrfOptions.exclude` (http-security) lists paths — exact
+  string or `RegExp` — that skip the CSRF check entirely, checked before the method test so an
+  excluded path is never inspected; it matches the session plugin's existing
+  `CsrfFormOptions.exclude`. The documented SAML recipe becomes `exclude: ['/auth/<provider>/acs']`
+  on BOTH plugins, because an origin allowlist cannot admit an IdP that serves
+  `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS with `Origin: null`, and
+  `trustedOrigins: ['null']` would admit every opaque-origin `POST` on every route.
 
 ### Changed
+
+- **A tenant-bound session is never re-bound (M101c, V8-7).** The session plugin now seals the
+  tenant only into a session that carries no binding yet. Previously a session whose tenant was
+  resolved after the session loaded could be re-sealed to a different tenant on commit, so a refused
+  request re-bound the session to the tenant it was refused under. A regenerated session still
+  adopts the current tenant, since `regenerate()` drops the binding.
 
 - **SAML ACS binding checked before the request is consumed (M101c, V8-25).** The binding compare
   moves into the per-request request-cache adapter's `getAsync`, the first point at which the

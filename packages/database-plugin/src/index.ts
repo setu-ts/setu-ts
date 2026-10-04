@@ -140,7 +140,6 @@ export {
   DatabaseTenantDataStore,
   TenantStoreStrategyUnsupportedError,
 } from './tenancy/database-tenant-data-store.ts';
-export type { DatabaseTenantDataStoreOptions } from './tenancy/database-tenant-data-store.ts';
 
 // Typed native Drizzle query access
 export {
