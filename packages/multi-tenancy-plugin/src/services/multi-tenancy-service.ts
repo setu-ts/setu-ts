@@ -43,11 +43,6 @@ export class MultiTenancyService implements IMultiTenancyService {
     this.store = store;
   }
 
-  /** Whether the store has been bound, for the health indicator. */
-  get storeBound(): boolean {
-    return this.store !== null;
-  }
-
   /** The bound store; throws when it is not bound yet. */
   private requireStore(): ITenantDataStore {
     if (this.store === null) {

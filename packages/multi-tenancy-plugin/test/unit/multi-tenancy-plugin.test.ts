@@ -782,13 +782,6 @@ describe('multi tenancy plugin', () => {
       });
       await plugin.register(ctxAsPlugin(ctx));
 
-      // No store is bound at register() time: the service slot is empty, so a
-      // repository call before onInit would throw the named refusal.
-      const service = ctx.registeredServices.get(
-        CAPABILITIES.MULTI_TENANCY,
-      ) as MultiTenancyService;
-      expect(service.storeBound).toBe(false);
-
       // The onInit hook is registered, not run, during register().
       expect(ctx.onInitCallbacks).toHaveLength(1);
 
@@ -801,7 +794,6 @@ describe('multi tenancy plugin', () => {
       // Fire onInit: the factory is resolved through resolveRegistryEntry with
       // the 'MultiTenancyPlugin.dataStore' label, validated, and bound.
       await ctx.onInitCallbacks[0]!();
-      expect(service.storeBound).toBe(true);
 
       // After binding the health indicator flips to 'custom'.
       const after = (await health!.checkFn()) as { data: { store: string } };

@@ -109,7 +109,6 @@ describe('multi tenancy service', () => {
     // one arrives via `bindStore` from the plugin's `onInit`. A repository
     // request before that point must fail loudly with the named error.
     const service = new MultiTenancyService({});
-    expect(service.storeBound).toBe(false);
     expect(() => service.getRepositoryFor('acme', 'User')).toThrow(TenantDataStoreNotReadyError);
   });
 
@@ -117,7 +116,6 @@ describe('multi tenancy service', () => {
     const service = new MultiTenancyService({});
     const store = {} as unknown as ITenantDataStore;
     service.bindStore(store);
-    expect(service.storeBound).toBe(true);
     // A bound store means the repository is produced (the store is reached);
     // it no longer throws the not-ready refusal.
     const repo = service.getRepositoryFor('acme', 'User');
