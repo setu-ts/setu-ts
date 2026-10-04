@@ -340,14 +340,14 @@ the way it keys on the tenant since M70b.
 ### 3.13 The `/format` subpath is proven browser-safe, not assumed
 
 - **Decision:** `src/format/index.ts` re-exports `format`, `negotiateLocale`, `parseAcceptLanguage`,
-  `FormatValues` and `AcceptLanguage`. Modules under `src/format/` may import `@setu-ts/common` ONLY
-  with `import type` (erased at runtime) and may value-import only each other. Two checks enforce
-  it: (1) a structural gate runs `deno info --json src/format/index.ts` and fails if any module in
-  the RUNTIME graph (reached through a dependency carrying a `code` specifier, §1 probe) lies
-  outside `src/format/`; (2) a behavioural check spawns a subprocess whose probe deletes
-  `globalThis.Deno`, asserts `typeof process === 'undefined'`, imports the subpath and compares
-  `format(...)` output byte-for-byte with the in-process result under the SAME Deno `Intl` — this
-  checks import and runtime independence, NOT server-versus-browser output parity, which §3.6
+  `FormatValues`, `FormatOptions` and `AcceptLanguage`. Modules under `src/format/` may import
+  `@setu-ts/common` ONLY with `import type` (erased at runtime) and may value-import only each
+  other. Two checks enforce it: (1) a structural gate runs `deno info --json src/format/index.ts`
+  and fails if any module in the RUNTIME graph (reached through a dependency carrying a `code`
+  specifier, §1 probe) lies outside `src/format/`; (2) a behavioural check spawns a subprocess whose
+  probe deletes `globalThis.Deno`, asserts `typeof process === 'undefined'`, imports the subpath and
+  compares `format(...)` output byte-for-byte with the in-process result under the SAME Deno `Intl`
+  — this checks import and runtime independence, NOT server-versus-browser output parity, which §3.6
   deliberately does not claim. `deno.json` `exports` gains `"./format": "./src/format/index.ts"`.
 - **Why:** the formatter's reason to exist is one implementation on both sides. A stray value import
   of `common` would type-check, pass a Deno-only behaviour test (nothing in `common` touches `Deno`
