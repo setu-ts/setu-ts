@@ -5679,7 +5679,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and a join outlasting the bound is disconnected the moment it settles rather than under it:
   measured on Kafka 4.0, `app.stop()` 10.0 s in both N1 cases and every N2 window, 0 delivered, exit
   0. Round 4 (on `ab9598e6`) found that fix taking `initialRetryTime: 0` literally where kafkajs
-  reads `|| 300` — 1393 restarts in a 20 s outage, now 64 — complete (PR pending).
+  reads `|| 300` — 1393 restarts in a 20 s outage, now 64, fixed on `d015a9b4`; the maintainer
+  waived a fifth round — complete (PR pending).
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
