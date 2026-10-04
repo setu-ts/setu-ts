@@ -5636,7 +5636,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 101b** (`packages/messaging-plugin` — message transports that fail against the real
   broker): three arms that passed every fake-backed test and failed on first contact with the real
   server. **V8-2:** a Pub/Sub subscription with no `queue` is named per topic,
-  `<defaultQueue>.<topic>` (breaking), and an existing subscription bound to another topic — read
+  `<defaultQueue>.<topic ID>` (breaking), and an existing subscription bound to another topic — read
   through a new `getMetadata` facade member — is refused with
   `PubSubSubscriptionBoundElsewhereError` rather than attached to. **V8-6:** a NATS queue is encoded
   into a legal JetStream consumer name (`.` → `_2e`, the nine characters the client refuses held as

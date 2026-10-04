@@ -293,4 +293,26 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { ignore: !emulatorHost }, 
     expect(named.boundTopic).toBe(`projects/${projectId}/topics/${TOPIC_A}`);
     expect(named.requestedTopic).toBe(TOPIC_TAKEN);
   });
+  it('derives a legal default subscription for a fully-qualified topic name (M101b review)', async () => {
+    // Deriving from the name AS GIVEN produced `messaging-consumers.projects/…`,
+    // which the service refuses with INVALID_ARGUMENT; the topic ID is used.
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MessagingPlugin({ broker: 'pubsub', projectId, replyTopic: REPLY_TOPIC }),
+      ],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+
+    const got: { id: number }[] = [];
+    await broker.subscribe<{ id: number }>(`projects/${projectId}/topics/${TOPIC_B}`, (m) => {
+      got.push(m);
+    });
+    await broker.publish(TOPIC_B, { id: 9 });
+    await until(() => got.length > 0);
+    await app.stop();
+
+    expect(got).toEqual([{ id: 9 }]);
+  });
 });

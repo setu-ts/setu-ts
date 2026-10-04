@@ -379,6 +379,19 @@ export function MessagingPlugin(
       // Connect the broker (async for Redis)
       await broker.connect();
 
+      // Register the close handler IMMEDIATELY after connecting (M101b). The
+      // kernel runs every close hook registered so far when startup fails,
+      // but only those — and a declared subscription below can now reject on
+      // purpose (`KafkaTopicUnavailableError`,
+      // `PubSubSubscriptionBoundElsewhereError`,
+      // `NatsConsumerNameCollisionError`). Registered after it, the hook never
+      // existed on that path, so the connected broker was never closed and the
+      // process could not exit. The closure reads `broker` at close time, so
+      // it reaches the decorators applied below.
+      ctx.lifecycle.onClose(async () => {
+        await broker.disconnect();
+      });
+
       if (telemetry) {
         broker = new TracedBroker(broker, telemetry, brokerType);
       }
@@ -471,11 +484,6 @@ export function MessagingPlugin(
         return { status: 'up', data: { broker: brokerType, reachable: true } };
       };
       ctx.health.register(token, healthIndicator);
-
-      // Register close handler
-      ctx.lifecycle.onClose(async () => {
-        await broker.disconnect();
-      });
 
       // Factory entries resolve at `onInit` — the first phase at which the
       // registry holds every capability, and still before the application

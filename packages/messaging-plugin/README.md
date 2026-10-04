@@ -205,12 +205,13 @@ its filter matches the topic.
 
 ### Pub/Sub subscriptions
 
-When `queue` is not supplied, each subscription is derived per topic — `<defaultQueue>.<topic>`
-(default prefix `messaging-consumers`) — because a Pub/Sub subscription name is **project-global**:
-the old single shared default attached a second topic to the first topic's subscription, so one
-topic's handler consumed the other's messages with no log, and the RPC channel of one run attached
-to the previous run's. A caller-supplied `queue` is used verbatim, so competing consumers of one
-topic keep sharing a subscription.
+When `queue` is not supplied, each subscription is derived per topic — `<defaultQueue>.<topic ID>`
+(default prefix `messaging-consumers`; a fully-qualified `projects/<p>/topics/<id>` name contributes
+only its ID, because `/` is illegal in a subscription ID) — because a Pub/Sub subscription name is
+**project-global**: the old single shared default attached a second topic to the first topic's
+subscription, so one topic's handler consumed the other's messages with no log, and the RPC channel
+of one run attached to the previous run's. A caller-supplied `queue` is used verbatim, so competing
+consumers of one topic keep sharing a subscription.
 
 The broker creates a subscription when it is absent. When it already exists, the broker reads which
 topic it is bound to and refuses one bound elsewhere with `PubSubSubscriptionBoundElsewhereError`

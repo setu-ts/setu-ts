@@ -535,6 +535,33 @@ describe('GcpPubSubBroker', () => {
       ]);
     });
 
+    it('derives the default from the topic ID when the topic is fully qualified', async () => {
+      // `/` is illegal in a subscription ID: the emulator answers
+      // INVALID_ARGUMENT for `messaging-consumers.projects/p/topics/orders`.
+      const opened: string[] = [];
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: (_topic: string, subscription: string) => {
+          opened.push(subscription);
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+      await broker.connect();
+
+      await broker.subscribe('projects/p/topics/orders', () => {});
+      await broker.subscribe('orders', () => {});
+
+      // Both spellings of one topic share its one default subscription.
+      expect(opened).toEqual(['messaging-consumers.orders', 'messaging-consumers.orders']);
+    });
+
     it('refuses a subscription name over the 255-character limit before opening', async () => {
       let openCalls = 0;
       const transport: IPubSubTransport = {

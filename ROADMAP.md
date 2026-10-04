@@ -12352,21 +12352,21 @@ topic binding, a durable-name grammar, topic leadership at subscribe — that a 
 accepts. All three need the same deliverable: a real-backend case per arm that exercises RPC and a
 second topic, not one topic at a time. None is a regression; V8-2's arm was never run on `0.7.0`.
 
-**Shipped.** Pub/Sub derives `<defaultQueue>.<topic>` and, on `ALREADY_EXISTS`, reads the existing
-subscription's topic through a new `getMetadata` facade member and refuses one bound elsewhere with
-`PubSubSubscriptionBoundElsewhereError`. NATS encodes each character the client refuses as `_` + two
-hex digits, records the raw queue as `setu.queue` consumer metadata, and refuses a collision — in
-process, and across processes on the server's `10148 consumer already exists` (the code the old
-`'consumer name already exists'`/`'duplicate'` match never saw) — with
-`NatsConsumerNameCollisionError`. Kafka retries an unknown topic within `KafkaOptions.retry` (now
-validated and forwarded), then throws `KafkaTopicUnavailableError`, and a `run()` rejection reaches
-the logger. Each arm's real suite drives two topics and RPC in one application: real NATS, Kafka 4.0
-(CI's image), and the Pub/Sub emulator run twice against one instance. Every negative control
-reproduced the run's own signature — `invalid durable name - durable name cannot contain '.'`, a
-fresh-topic boot dying with the topic named, and with both Pub/Sub halves reverted a cross-topic
-misdelivery on run 1 and the second run's `RequestTimeoutError`. Two deployment facts surfaced and
-are documented rather than fixed: a NATS account admits only ONE stream owning `rr.inbox.>`, and the
-consumer metadata needs NATS 2.10+.
+**Shipped.** Pub/Sub derives `<defaultQueue>.<topic ID>` and, on `ALREADY_EXISTS`, reads the
+existing subscription's topic through a new `getMetadata` facade member and refuses one bound
+elsewhere with `PubSubSubscriptionBoundElsewhereError`. NATS encodes each character the client
+refuses as `_` + two hex digits, records the raw queue as `setu.queue` consumer metadata, and
+refuses a collision — in process, and across processes on the server's
+`10148 consumer already exists` (the code the old `'consumer name already exists'`/`'duplicate'`
+match never saw) — with `NatsConsumerNameCollisionError`. Kafka retries an unknown topic within
+`KafkaOptions.retry` (now validated and forwarded), then throws `KafkaTopicUnavailableError`, and a
+`run()` rejection reaches the logger. Each arm's real suite drives two topics and RPC in one
+application: real NATS, Kafka 4.0 (CI's image), and the Pub/Sub emulator run twice against one
+instance. Every negative control reproduced the run's own signature —
+`invalid durable name - durable name cannot contain '.'`, a fresh-topic boot dying with the topic
+named, and with both Pub/Sub halves reverted a cross-topic misdelivery on run 1 and the second run's
+`RequestTimeoutError`. Two deployment facts surfaced and are documented rather than fixed: a NATS
+account admits only ONE stream owning `rr.inbox.>`, and the consumer metadata needs NATS 2.10+.
 
 ---
 

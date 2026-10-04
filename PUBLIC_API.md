@@ -5112,7 +5112,8 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   credentials?: unknown;
   /**
    * Prefix of the per-topic default subscription. Since M101b a subscription with
-   * no `queue` uses `<defaultQueue>.<topic>`: Pub/Sub subscription names are
+   * no `queue` uses `<defaultQueue>.<topic ID>` (a fully-qualified topic name
+   * contributes only its ID): Pub/Sub subscription names are
    * project-global, so the previously shared name attached a second topic to the
    * first topic's subscription. An existing subscription bound to another topic is
    * refused with `PubSubSubscriptionBoundElsewhereError`; a name over 255

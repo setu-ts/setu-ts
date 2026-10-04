@@ -899,16 +899,38 @@ describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () =>
     await broker.disconnect();
   });
 
-  it('stops retrying when the broker is disconnected mid-wait', async () => {
+  it('stops retrying when the broker is disconnected mid-wait, cancelling the wait', async () => {
+    // A one-minute backoff: the wait must be CANCELLED by disconnect(), not
+    // merely abandoned — a pending timer would hold this test (and a real
+    // process) open for the whole minute, and Deno's sanitizer reports it.
     const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
     const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
       client: factory,
-      retry: { retries: 5, initialRetryTime: 20 },
+      retry: { retries: 5, initialRetryTime: 60_000 },
+    });
+    await broker.connect();
+
+    const started = performance.now();
+    const pending = rejection(broker.subscribe('orders', () => {}));
+    await new Promise((resolve) => setTimeout(resolve, 10)); // let it enter the wait
+    await broker.disconnect();
+    const err = await pending;
+
+    expect((err as Error).message).toContain('disconnected while subscribing');
+    expect(subscribeCalls(factory, 'messaging-consumers:orders')).toBe(1);
+    expect(performance.now() - started).toBeLessThan(5_000);
+  });
+
+  it('stops retrying when disconnect() lands before the first attempt', async () => {
+    const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 5, initialRetryTime: 1 },
     });
     await broker.connect();
 
     const pending = rejection(broker.subscribe('orders', () => {}));
-    await broker.disconnect();
+    await broker.disconnect(); // before the consumer has even connected
     const err = await pending;
 
     expect((err as Error).message).toContain('disconnected while subscribing');

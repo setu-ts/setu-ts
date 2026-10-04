@@ -4,7 +4,7 @@
  * Publishes to topics, subscribes through consumer-group subscriptions, and
  * supports request-reply via a shared reply topic with per-instance
  * subscriptions. Topics must pre-exist; the consumer-group subscription
- * ({@linkcode SubscribeOptions.queue}, default `<defaultQueue>.<topic>`) is
+ * ({@linkcode SubscribeOptions.queue}, default `<defaultQueue>.<topic ID>`) is
  * created when absent, and an existing one bound to another topic is refused
  * with {@linkcode PubSubSubscriptionBoundElsewhereError}.
  *
@@ -45,7 +45,7 @@ const MAX_SUBSCRIPTION_NAME_LENGTH = 255;
 const GRPC_ALREADY_EXISTS = 6;
 
 /**
- * Derives the default subscription for a topic: `<defaultQueue>.<topic>`
+ * Derives the default subscription for a topic: `<defaultQueue>.<topic ID>`
  * (M101b, V8-2).
  *
  * Pub/Sub subscription names are project-global, so one shared default meant
@@ -53,13 +53,21 @@ const GRPC_ALREADY_EXISTS = 6;
  * package's own `rr.req.` convention; Kafka's `:` is illegal in a Pub/Sub ID).
  * Pub/Sub reserves no character, so the parts are NOT recoverable by splitting.
  *
+ * The topic's ID is used, never the name as given: a caller may name the
+ * topic fully qualified (`projects/p/topics/orders`), and `/` is illegal in a
+ * subscription ID — the service answers `INVALID_ARGUMENT` (measured on the
+ * emulator), where the pre-M101b fixed default was accepted.
+ *
  * @param defaultQueue - The configured prefix
- * @param topic - The subscribed topic
+ * @param topic - The subscribed topic, short or fully qualified
  * @returns The per-topic subscription name
- * @internal
  */
-export function deriveDefaultSubscription(defaultQueue: string, topic: string): string {
-  return `${defaultQueue}.${topic}`;
+function deriveDefaultSubscription(defaultQueue: string, topic: string): string {
+  const marker = topic.lastIndexOf('/topics/');
+  const topicId = topic.startsWith('projects/') && marker !== -1
+    ? topic.slice(marker + '/topics/'.length)
+    : topic;
+  return `${defaultQueue}.${topicId}`;
 }
 
 /**
@@ -192,7 +200,7 @@ export interface PubSubOptions {
   /**
    * Default consumer-group subscription-name PREFIX (default
    * `'messaging-consumers'`). A subscription with no
-   * {@linkcode SubscribeOptions.queue} uses `<defaultQueue>.<topic>`, one
+   * {@linkcode SubscribeOptions.queue} uses `<defaultQueue>.<topic ID>`, one
    * subscription per topic, because Pub/Sub subscription names are
    * project-global (M101b).
    */

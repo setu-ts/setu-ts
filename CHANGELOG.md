@@ -123,7 +123,8 @@ All notable changes to this project are documented here. The format follows
   `MailTemplate`, and every object literal assigned to one, compiles unchanged.
 
 - **BREAKING: a Pub/Sub subscription with no `queue` is named per topic (M101b, V8-2).** The default
-  is `<defaultQueue>.<topic>` (`messaging-consumers.<topic>`) instead of one shared
+  is `<defaultQueue>.<topic ID>` (`messaging-consumers.<topic>`; a fully-qualified topic name
+  contributes only its ID, since `/` is illegal in a subscription ID) instead of one shared
   `messaging-consumers`. Subscription names are project-global, so the shared default attached a
   second topic to the first topic's subscription — its handler consumed the other topic's messages
   with no log — and the RPC channel of one run to the previous run's. An existing subscription bound
@@ -145,6 +146,14 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **A `MessagingPlugin` whose declared subscription rejects no longer leaks its broker (M101b).**
+  `register()` connected the broker, subscribed the declared entries, and only then registered the
+  close hook — so when a declared subscription rejected `start()`, the kernel's failed-start cleanup
+  had no hook to run, the connected broker was never closed, and the process could not exit
+  (measured against a real Kafka broker). M101b makes that rejection a documented outcome, so the
+  hook is now registered directly after `connect()`. A Kafka subscribe retry waiting out its backoff
+  is likewise cancelled by `disconnect()` instead of holding a timer for up to `maxRetryTime`.
 
 - **NATS request-reply works against a real server (M101b, V8-6).** The reply inbox subscribes with
   the dotted queue `rr.inbox.<uuid>`, which was used verbatim as the JetStream consumer name, and

@@ -248,6 +248,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
   #replyTopic: string;
   #retry: KafkaOptions['retry'];
   #subscribeRetry: SubscribeRetryBudget;
+  /** Advanced by `disconnect()`, so a subscribe retry waiting across it stops (M101b). */
+  #generation = 0;
+  /** Cancels each pending subscribe-retry wait, so `disconnect()` holds no timer open. */
+  #retryWaits = new Set<() => void>();
   #logger: { error: (msg: string) => void } | undefined;
   #factory: IKafkaFactory | null = null;
   #producer: unknown | null = null;
@@ -358,6 +362,11 @@ export class KafkaBroker implements MessageBrokerAdapter {
    */
   async disconnect(): Promise<void> {
     this.#supervisor.stop();
+    // M101b: end every subscribe retry waiting out its backoff now, rather
+    // than leaving its timer to hold the process for up to `maxRetryTime`.
+    this.#generation++;
+    for (const cancel of this.#retryWaits) cancel();
+    this.#retryWaits.clear();
     // Reject in-flight requests and close the reply inbox before the transport
     // goes away, so no timer or subscription outlives the connection.
     await this.#rr.close();
@@ -520,6 +529,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
     }
 
     const subscriptionId = this.#runtime.uuid();
+    // Captured before the first await, so a `disconnect()` racing this call is
+    // seen by the retry loop however early it lands (M101b).
+    const generation = this.#generation;
     const groupId = options?.queue ?? deriveDefaultGroupId(this.#defaultQueue, topic);
 
     // Create consumer unconditionally from the resolved factory
@@ -544,7 +556,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
     try {
       await consumerTyped.connect();
-      await this.#subscribeWithRetry(consumerTyped, topic);
+      await this.#subscribeWithRetry(consumerTyped, topic, generation);
     } catch (err) {
       // M101b (V8-26): a consumer that failed to join is released rather than
       // leaked, and an unknown topic is named instead of escaping as a raw
@@ -655,10 +667,13 @@ export class KafkaBroker implements MessageBrokerAdapter {
    *
    * @param consumer - The connected consumer
    * @param topic - The topic to subscribe
+   * @param generation - The connection generation `subscribe()` started in;
+   *   a `disconnect()` since then ends the retry
    */
   async #subscribeWithRetry(
     consumer: { subscribe(options: { topic: string; fromBeginning?: boolean }): Promise<void> },
     topic: string,
+    generation: number,
   ): Promise<void> {
     const budget = this.#subscribeRetry;
     let delay = budget.initialRetryTime;
@@ -672,9 +687,15 @@ export class KafkaBroker implements MessageBrokerAdapter {
         }
       }
       await new Promise<void>((resolve) => {
-        this.#runtime.setTimeout(resolve, delay);
+        const cancel = (): void => {
+          this.#runtime.clearTimeout(handle);
+          this.#retryWaits.delete(cancel);
+          resolve();
+        };
+        const handle = this.#runtime.setTimeout(cancel, delay);
+        this.#retryWaits.add(cancel);
       });
-      if (!this.#factory) {
+      if (generation !== this.#generation) {
         throw new Error('KafkaBroker was disconnected while subscribing');
       }
       delay = Math.min(delay * budget.multiplier, budget.maxRetryTime);
