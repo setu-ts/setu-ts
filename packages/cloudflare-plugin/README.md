@@ -433,6 +433,13 @@ job.
   shared store: a hit in one colo says nothing about another, and a `delete` does not evict
   globally. It reports under `X-Cache-Api`, so it composes with `cache-plugin`'s `cacheMiddleware`
   (which reports under `X-Cache` and reads a store every colo shares) rather than colliding with it.
+- **The default key carries the resolved tenant and locale.** The key is a URL string the platform
+  matches with no request headers, so `Vary` cannot separate entries here; `ctx.request.tenant` and
+  `ctx.request.locale` are appended to the URL text as `setu-cache-tenant` and `setu-cache-locale`
+  parameters instead. The middleware must run after the tenant and locale middleware (globally, at a
+  higher priority number than 40 and 45), and a request no key can keep apart from another — a
+  fragment, un-normalized URL text, an unencodable id, or a reserved parameter on a request that
+  lacks the value — is served uncached. A custom `key` must include both itself.
 - **The edge cache refuses some responses, and the middleware skips them rather than failing.**
   Non-GET, 206, `Vary: *`, and an uncleared `Set-Cookie` all make `caches.default.put` throw; those
   are checked first. `Cache-Control: private=Set-Cookie` is the platform's opt-in. Streaming
