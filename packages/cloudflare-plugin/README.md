@@ -437,9 +437,10 @@ job.
   matches with no request headers, so `Vary` cannot separate entries here; `ctx.request.tenant` and
   `ctx.request.locale` are appended to the URL text as `setu-cache-tenant` and `setu-cache-locale`
   parameters instead. The middleware must run after the tenant and locale middleware (globally, at a
-  higher priority number than 40 and 45), and a request no key can keep apart from another — a
-  fragment, un-normalized URL text, an unencodable id, or a reserved parameter on a request that
-  lacks the value — is served uncached. A custom `key` must include both itself.
+  higher priority number than theirs — 40 and 45 by default, or whatever `middlewarePriority` and
+  `middleware.priority` are set to), and a request no key can keep apart from another — a fragment,
+  un-normalized URL text, an unencodable id, or a reserved parameter on a request that lacks the
+  value — is served uncached. A custom `key` must include both itself.
 - **The edge cache refuses some responses, and the middleware skips them rather than failing.**
   Non-GET, 206, `Vary: *`, and an uncleared `Set-Cookie` all make `caches.default.put` throw; those
   are checked first. `Cache-Control: private=Set-Cookie` is the platform's opt-in. Streaming

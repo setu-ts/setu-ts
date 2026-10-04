@@ -56,16 +56,21 @@ export interface CacheApiMiddlewareOptions {
    * which is what the platform's own cache keys on — plus, when the request
    * carries a resolved `ctx.request.tenant` (the multi-tenancy plugin) and/or
    * `ctx.request.locale` (the localization plugin), a `setu-cache-tenant` and
-   * a `setu-cache-locale` query parameter naming them, appended last. The key is a
-   * URL STRING, so the platform matches it with no request headers and `Vary`
-   * cannot separate entries here. The locale in the key is the one present
-   * when this middleware runs, so it must run AFTER the tenant and locale
-   * middleware: a GLOBAL registration needs a higher priority number than
-   * theirs (40 and 45 by default, or the configured priorities); where either
-   * is applied per route instead, this one must be too, listed after it; and
-   * a `replaceTenant` or `replaceLocale` made inside the handler is not
-   * reflected — such a route must not be cached here. A custom `key` replaces
-   * all of this and must include the tenant and locale itself.
+   * a `setu-cache-locale` query parameter naming them, appended last. The key
+   * is a URL STRING, so the platform matches it with no request headers and
+   * `Vary` cannot separate entries here. The tenant and locale in the key are
+   * the ones present when this middleware runs, so it must run AFTER the
+   * tenant and locale middleware: a GLOBAL registration needs a higher
+   * priority number than theirs (40 and 45 by default, or the configured
+   * priorities); where either is applied per route instead, this one must be
+   * too, listed after it; and a `replaceTenant` or `replaceLocale` made inside
+   * the handler is not reflected — such a route must not be cached here. That
+   * priority is a LOWER bound only: a global registration still runs before
+   * passive authentication (300) and every guard, so a HIT is served without
+   * them — inherent to global response caching, as with `cache-plugin`. A
+   * response that depends on who is asking belongs behind a per-route
+   * registration listed after its guards. A custom `key` replaces all of this
+   * and must include the tenant and locale itself.
    */
   readonly key?: (ctx: IRequestContext) => string;
   /** Returning `true` skips the cache entirely for this request. */
@@ -230,7 +235,8 @@ function isParsedForm(url: string): boolean {
  *
  * @example
  * ```typescript
- * app.router.get('/catalog', listCatalog, {
+ * app.router.get('/catalog', {
+ *   handler: listCatalog,
  *   middleware: [cacheApiMiddleware({ ttlSeconds: 300 })],
  * });
  * ```
