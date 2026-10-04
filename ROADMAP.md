@@ -12303,6 +12303,13 @@ failure — applied across seven packages, with one outage test per package driv
 **Regression note.** Only V8-1 regressed, and only through M99a's fix for V7-4. The rest are
 identical on `0.7.0` or concern `0.8.0` diagnostics surface.
 
+**Shipped.** One rule, `withDeadline` in `common`: every backend call is bounded and an expired
+bound is a recorded failure. Service Bus answers a retained outage at once; a saturated Drizzle pool
+(with `poolStats`) is `up` with `reachable: 'unknown'` and a pool timeout `degraded`; Vault requests
+are bounded and answer `503`; cache, queue and scheduler-lock Redis commands carry a
+`commandTimeoutMs`; a hung lock acquire is a counted `lockFailed`; an unread depth row is absent.
+Proven against a real paused Redis 7, PostgreSQL 16, Vault, and the Service Bus emulator.
+
 ---
 
 ### Milestone 101b: Message Transports That Fail Against the Real Broker
@@ -12818,7 +12825,7 @@ are corrected to the version the registry shows first shipping each symbol.
 | 100d      | ✅     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |
 | 100e      | ✅     | auth-plugin — passkeys (WebAuthn) ([#391](https://github.com/setu-ts/setu-ts/pull/391))                                                                                                                                                       |
 | 100f      | ✅     | auth-plugin — SAML 2.0 service provider (PR #393)                                                                                                                                                                                             |
-| 101a      | ⬜     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
+| 101a      | ✅     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
 | 101b      | ⬜     | messaging-plugin — message transports that fail against the real broker                                                                                                                                                                       |
 | 101c      | ⬜     | session + multi-tenancy + database + auth + http-security — tenancy and identity features that do not compose                                                                                                                                 |
 | 101d      | ⬜     | sdk + telemetry + react-router + full-stack-starter — two sides of a service call that disagree                                                                                                                                               |

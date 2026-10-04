@@ -1,6 +1,6 @@
 # Milestone 101a — health that reports healthy, and calls that hang, when a dependency fails
 
-> **Status:** Planning. Branch: `feat/m101a-bounded-health`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m101a-bounded-health`. `develop` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR. **Sequence:**
 > first of the M101 letters (ROADMAP "Sequence") — it holds the release's only regression. M101b
 > rebases on this branch's `messaging-plugin` health changes and reuses the outage-suite shape §3.2
@@ -496,3 +496,109 @@ pass vacuously.
   widening with devtool consequences, owned by whichever letter next widens that DTO.
 - Consolidating `auth-plugin`'s private `attempt` onto `withDeadline` (different contract, §3.1).
 - Every transport-level broker defect: M101b.
+
+## 10. Corrections recorded during implementation
+
+Each is a place the shipped code or tests differ from the text above; the text is left as written.
+
+- **§3.1 `withDeadline` timing is optional.** `DeadlineOptions.timing?` defaults to the ambient
+  `setTimeout`/`clearTimeout`, the `createCachedProbe` default, so a caller with no runtime to hand
+  can use it; every plugin call site still passes `resolveProbeTiming(ctx.runtime)`.
+- **§3.1 / §4 `deadlineRangeError` is exported** from `common` beside `withDeadline`, so an option
+  holder refuses a bad bound at construction with the same rule and message the call applies.
+- **§3.2 / §8 the background clear checks probe identity only.** It clears `#evidence` when the
+  probe answers `true` and is still the current one. Every newly recorded failure rebuilds the probe
+  and `disconnect()` drops it, so the identity check alone stops a late `true` erasing a newer
+  failure; the separate `#evidence` identity check was dropped as redundant.
+- **§3.4 the secrets option is `cacheTtl`**, not `cacheTtlSeconds`. The `503` status test lives in a
+  new `test/integration/vault-unavailable-status.test.ts` rather than an extension of
+  `secrets-plugin.test.ts`, and `requestTimeoutMs` is validated in the provider constructor, which
+  runs inside `register()`.
+- **§3.5 validation moved to the factory.** `CachePlugin(...)` and `QueuePlugin(...)` refuse an
+  out-of-range `commandTimeoutMs` for the Redis arm when called, not at construction of the store;
+  `cache-plugin` threads the option through its existing store-options builder.
+- **§3.5 / §3.6 the queue outage assertions** were written against what the real paused Redis
+  produces, recorded in the test rather than the plan's exact `failure` string.
+- **§3.7 test home.** The fake-timer cases live in a new `test/unit/scheduler-lock-bound.test.ts`,
+  not an extension of `scheduler-service.test.ts`. The `RangeError` for a `commandTimeoutMs` above
+  `acquireTimeoutMs` names both values. The real-backend file adds a second case driving `RedisLock`
+  directly, proving a timed-out `SET` leaves no key held after unpause, and the kernel case asserts
+  "dispatched resumes" as handler runs resuming rather than a counter.
+- **A flake fixed in passing.** `scheduler-observations.test.ts`'s hostile-then case waited a fixed
+  150 ms and failed under coverage load; it now polls until the expected runs have happened.
+- **`DOC_LINT_BASELINE` under `RUST_BACKTRACE=1`.** With that variable set, `deno doc --lint` prints
+  a stack backtrace that `generate-api-docs.ts` classifies as a fatal child error; the count itself
+  is at the 496 baseline. Not changed here.
+
+### Recorded after milestone verification and code review
+
+- **§3.3 a saturated pool is `up` only while queries complete.** `idle === 0 && waiting > 0` is also
+  what a hung database looks like, so the plan's `undefined` + saturated → `up` row would have kept
+  a dead database in rotation. The Drizzle adapter (with `poolStats`) counts queries that complete
+  through it; the indicator samples that count each poll and reads `up` only when it moved within
+  the last 10 seconds, otherwise `degraded`. Maintainer's choice among three options. The mapping
+  rows are in a new `test/unit/database-indicator-mapping.test.ts` rather than `plugin.test.ts`, and
+  the live Postgres file gains a no-progress cell (`/ready` 503).
+- **§3.4 the Vault body read is bounded too**, and `connect()` refuses an address that is not an
+  absolute `http:`/`https:` URL. The plan bounded the request only, so headers followed by silence
+  hung.
+- **§3.5 `RedisQueue` transitions are atomic.** With `commandTimeoutMs`, a rejected command may
+  still apply on the server, so a multi-command transition (reserve, ack, requeue, dead-letter)
+  could stop half-way and lose a job. Each now runs as one Lua script through an optional
+  `IRedisQueueClient.eval?`; a client without it keeps the sequential path.
+- **§3.7 a failed delay-slot claim counts `lock-failed`**, not `contended`: the entry carries a
+  tri-state `slotClaim` instead of a boolean.
+- **§3.1 a throwing `onTimeout`** is caught; its thrown value becomes the expiry error.
+- **§6 test homes.** The `withDeadline` tests live at `test/unit/health/deadline.test.ts`. The cache
+  "options reach the store" row is proven by `test/integration/outage-real.test.ts` (CI), not a unit
+  test: dropping the forwarding line makes it fail. There is no seam to read a built client's
+  `commandTimeout` without one.
+
+## 11. Design security review (recorded after implementation, at the maintainer's direction)
+
+The maintainer requested a committed-tree security audit this plan did not schedule. Round 1 failed
+because no design review existed, so this one is recorded after implementation (the M98h/M98k
+precedent) rather than presented as having guided the design.
+
+**Flows reviewed.** The Vault request and body read (token in `X-Vault-Token`, `address` from
+configuration, secret name → URL path); dependency answers from Vault, Redis, PostgreSQL and Service
+Bus consumed by health and readiness; the `/health` and `/ready` bodies; the `RedisQueue` Lua
+transitions; the scheduler's distributed-lock acquisition.
+
+**Assets.** The Vault token, secret values, availability of the application (a hung dependency must
+not hang a probe or a request), and the truthfulness of `/ready`.
+
+**Attackers.** A caller whose input reaches a secret name or a queue job id; a slow, hung or hostile
+dependency (headers then silence, an unbounded body, a late reply); an operator misconfiguration (a
+`file:` address, a non-numeric bound); a reader of logs and probe bodies.
+
+**Obligations.**
+
+1. Every new dependency call is bounded in time, and a bound that is not a finite non-negative
+   number is refused at construction (never treated as "off").
+2. No error body or log line carries the Vault address's userinfo or the token.
+3. A secret name cannot leave the KV v2 data path: each segment is percent-encoded, and an empty,
+   `.` or `..` segment is refused before any request.
+4. A Vault answer is bounded in size (1 MiB), with the stream cancelled past the cap, and the memory
+   a read holds is bounded by the same cap: chunks are copied as they arrive, never retained.
+5. A secret name quoted in an error message has its C0 and C1 control characters, DEL and U+2028/
+   U+2029 escaped and is cut after 256 characters; a name longer than 4096 encoded characters is
+   refused as an input error, checked before any segment is examined.
+6. Lua transitions take ids and payloads only through `KEYS`/`ARGV`, never by string building.
+7. A late lock token is released, and a hung or throwing lock does not run the job.
+8. An unobservable signal never reads as evidence of health beyond what is documented (§3.3, the
+   typed-seam case).
+
+**Findings.**
+
+| #  | Finding                                                                                                                                            | Disposition                                                                   |
+| -- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| F1 | No design review in this plan                                                                                                                      | Closed by this section                                                        |
+| O1 | Vault name unencoded (`../` reached any endpoint with the token); CRLF name logged raw (pre-existing)                                              | Fixed: obligations 3 and 5                                                    |
+| O2 | Vault body unbounded in size (pre-existing)                                                                                                        | Fixed: obligation 4                                                           |
+| O3 | Typed seam + saturated pool reads `up` over a hung database                                                                                        | Accepted, documented in the database README and PUBLIC_API                    |
+| H1 | Round 2: 16-byte chunks each pinned a 64 KiB backing buffer, so a read under the 1 MiB cap peaked at 2.4 GiB                                       | Fixed: chunks copied into one owned buffer (peak 131 MiB on the same probe)   |
+| L1 | Round 2: NEL, CSI and U+2028 reached log lines raw                                                                                                 | Fixed: obligation 5 widened to C1 and the separators                          |
+| L2 | Round 2: a ≥65 KB name failed in the transport and read as `503`                                                                                   | Fixed: 4096-character encoded-path cap, refused before any request            |
+| L3 | Round 3: a name over the cap with an empty/`.`/`..` segment was refused by the segment check, which quoted it whole (1 MB name → 21 MB log record) | Fixed: length checked first; every quoted name cut at 256 characters          |
+| L4 | Round 4: "Secret not found" quoted an unbounded name for env/AWS/GCP/Azure                                                                         | Already closed by the L3 truncation (verified: 1 MB name → 7,163-byte record) |

@@ -943,12 +943,25 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       ],
     });
     await app.start();
+    // A caught behaviour settles in one run; without one the executor retries
+    // up to the limit of 3. Wait for that many runs (and, when observed, that
+    // many settled attempts) rather than a fixed window, which a loaded runner
+    // can outlast, then a short quiet period to catch any extra run.
+    const expectedRuns = catchingBehaviour ? 1 : 3;
+    const source = app.services.getAll<ISchedulerDiagnosticsSource>(
+      CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+    )[0]!;
+    const settled = () =>
+      counts.handlerRuns >= expectedRuns &&
+      (!observed ||
+        (recordOf(source.snapshot(), 'hostile-alias', 'attempt')?.count ?? 0) >= expectedRuns);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
-        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-      )[0]!.snapshot();
-      return { counts, attempt: recordOf(snapshot, 'hostile-alias', 'attempt') };
+      const deadline = performance.now() + 5000;
+      while (!settled() && performance.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { counts, attempt: recordOf(source.snapshot(), 'hostile-alias', 'attempt') };
     } finally {
       await app.stop();
     }

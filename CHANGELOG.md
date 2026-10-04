@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`withDeadline`, `deadlineRangeError` and `DeadlineOptions` in `common` (M101a).** A bound on one
+  backend call whose expiry is a REJECTION with the caller's own error, never a swallowed timeout:
+  the call receives an `AbortSignal`, is raced against the deadline in case it ignores the signal,
+  and its own rejection is never masked. It is the request-path counterpart of `createCachedProbe`,
+  which never rejects. `deadlineRangeError` lets an option holder refuse a bad bound at
+  construction.
+- **New bound options (M101a).** `CachePlugin`'s Redis store and `QueuePlugin`'s `'redis'` adapter
+  take `commandTimeoutMs` (default `15000`, `0` disables), applied as the ioredis `commandTimeout`
+  on the client they build. `SchedulerPlugin`'s `DistributedLockOptions` take `acquireTimeoutMs`
+  (default `5000`, `0` waits) and `commandTimeoutMs` (default `acquireTimeoutMs`, or `15000` when
+  that is `0`). The `vault` secrets provider takes `requestTimeoutMs` (default `5000`). Each
+  `commandTimeoutMs` applies only to a Redis client the plugin builds, never an injected one;
+  `acquireTimeoutMs` bounds every acquire, an injected `lock` included, and `requestTimeoutMs`
+  bounds an injected `http` too. An out-of-range value — including `NaN`, which `Number(env.X)`
+  yields for an unset variable — throws `RangeError` at startup.
+- **`SecretProviderUnavailableError` (M101a).** Exported by `@setu-ts/secrets-plugin` and carrying a
+  `503` status hint, so an application running `errorHandler` answers an unreachable provider with a
+  retryable `503` instead of a masked `500`. The transport error is kept as `cause` and never
+  reaches the response body.
 - **Mail bodies rendered through the view engine (M102).** `MailPluginOptions.templates` gains a
   component arm beside the released string arm: `{ view, text? }`, where `view` and `text` are
   `Component`s (a JSX function, an `html` tagged template, or a plain `(props) => string`) rendered
@@ -23,6 +42,58 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Every backend call M101a covers is now bounded by default, and an expired bound is a recorded
+  failure.** A paused or partitioned Redis keeps its socket open, so a cache, queue or
+  scheduler-lock command used to wait forever. It now rejects inside the bound: a cache call is
+  counted `failed` and the `cache` indicator reports `down`; `queue.add()` rejects and a poll
+  records the failure — though the server may still apply a timed-out command, so a rejected `add()`
+  can have enqueued the job and a retry can run it twice; a lock acquire that does not settle is a
+  skipped fire, logged, counted `lockFailed` and re-armed for the next slot, so a paused backend
+  skips fires instead of stopping the schedule. A token an abandoned acquire returns later is
+  released, and `RedisLock` releases the exact token of a timed-out `SET`, which can still apply
+  once Redis answers. Verified against a real paused Redis 7.
+- **`RedisQueue` transitions are atomic (M101a).** `enqueue`, `reserve`, `ack`, `requeue` and
+  dead-lettering each run as one Lua script when the client exposes `eval` — always true of the
+  client the adapter builds. They used to run as separate commands, so a command that timed out
+  locally but was applied by the server afterwards could leave a reserved job in neither the ready
+  nor the processing set, lost with its payload still stored. An injected client without `eval`
+  keeps the separate commands. A `reserve` the server applies after its local timeout still leaves
+  the job in the processing set, and nothing reclaims it, so it needs moving back by hand. Verified
+  against a live Redis 7.
+- **A Vault request that fails on the network or does not answer in `requestTimeoutMs` now rejects
+  with `SecretProviderUnavailableError` (`503`)** instead of a plain error served as a masked `500`.
+  The bound covers reading the response body too. `connect()` now refuses an address that is not an
+  absolute `http:`/`https:` URL, so a malformed address fails at startup rather than as a `503` on
+  every read. A Vault that answers with an HTTP error keeps its handling: `404` reads as `null`, any
+  other error status rejects with a plain `Error`.
+- **The Vault provider encodes secret names and caps response bodies (M101a security audit).** Each
+  `/`-separated segment of a name is percent-encoded, and a name with an empty, `.` or `..` segment
+  is refused before any request — `../../sys/health` used to reach another Vault endpoint with the
+  token attached. A name that relied on a literal `%`, `?` or `#` reaching Vault unencoded now reads
+  a different path. A name longer than 4096 characters once encoded is refused as an input error
+  instead of failing in the transport and reading as an outage (`503`). A read body over 1 MiB is
+  refused with a plain `Error`, and the memory a read holds stays within that 1 MiB however small
+  the chunks a dependency sends. Secret names quoted in `secrets-plugin` error messages have C0 and
+  C1 control characters, DEL, and U+2028/U+2029 escaped, so a name cannot start a new log line, and
+  quoted only up to its first 256 characters.
+- **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
+  registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
+  `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
+  every saturated replica at once — but only while queries through the adapter keep completing (one
+  within the last 10 seconds). A full pool with no completed query is a hung database and reports
+  `degraded`. Once `getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native
+  instance, its queries bypass the adapter, so progress is unobservable and a saturated pool reads
+  `up`. A pool connection timeout now reports `degraded` rather than `down` — the probe used to
+  answer `false` for it, though the database never answered either way. Verified against a live
+  PostgreSQL 16 pool.
+- **A retained Service Bus outage is answered at once (M101a).** With a recorded network failure,
+  `reachability()` now returns `false` immediately and runs the management probe in the background,
+  where a `true` answer clears the outcome for the next read. It used to await that probe, whose
+  2-second bound tied the indicator's, so the indicator's bound fired first and a recorded outage
+  was reported `up`.
+- **Queue depth observations drop a row the latest cycle did not read (M101a)** instead of keeping
+  the previous count. The source's `failure` and `depthCoverage: 'partial'` say why; an unreadable
+  depth is never reported as a retained zero.
 - **BREAKING: `TemplateEngine.render` is asynchronous (M102).** The exported class's
   `render(name, data)` now returns `Promise<RenderedTemplate>`, because `IViewEngine.render` may
   answer a promise and both template arms share one lookup; every refusal (unknown template, missing

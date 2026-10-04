@@ -5578,6 +5578,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (`jsr:@setu-ts/common@<version>`) is a bump site a `^`-only sweep misses (see
   `docs/releasing.md`), and an in-place edit to the published `[0.7.0]` CHANGELOG section (the M99c
   Blob default) was reverted to its tag text, since 0.7.0 did not have that behaviour.
+- **Milestone 101a** (`common` + `messaging-plugin` + `database-plugin` + `secrets-plugin` +
+  `cache-plugin` + `queue-plugin` + `scheduler-plugin` — health that reports healthy, and calls that
+  hang, when a dependency fails): one rule, built on the new `withDeadline` in `common`, applied
+  across seven packages — every backend call is bounded, and an expired bound is a recorded failure.
+  V8-1 (the regression): a retained Service Bus outage answers `false` at once, with the management
+  probe only clearing it in the background. V8-3: a saturated Drizzle pool (seen through
+  `poolStats`) is `up` with `reachable: 'unknown'` only while queries complete through the adapter
+  (a hung database reads `degraded`), and a pool timeout is `degraded` rather than `down`. V8-4:
+  Vault requests are bounded by `requestTimeoutMs` and an outage rejects with the new
+  `SecretProviderUnavailableError` (`503`). V8-5: cache and queue Redis commands carry
+  `commandTimeoutMs`. V8-23: an unread queue depth row is absent, never a retained zero. V8-24: a
+  hung lock acquire is bounded by `acquireTimeoutMs`, counted `lockFailed`, re-armed, and a late
+  token released. Every bound refuses an out-of-range value (including `NaN`) at startup. Proven
+  against a real paused Redis 7 (CI, pinned by `test/apps-gate.test.ts`), PostgreSQL 16, Vault and
+  the Service Bus emulator. An unplanned security audit, requested by the maintainer, ran four
+  fresh-context rounds: round 1 found no design review (now plan §11, recorded after the fact) and
+  pre-existing Vault defects — an unencoded secret name reached any Vault endpoint with the token,
+  and bodies were unbounded — both fixed; round 2 found 16-byte chunks pinning 64 KiB buffers (a
+  read peaked at 2.4 GiB under the 1 MiB cap, now 131 MiB); rounds 2–3 found unbounded and partly
+  escaped names in messages. Round 4 passed on `0caf9f9` — complete (PR #401).
 - **Milestone 102** (`packages/mail-plugin` — mail bodies rendered through the view engine. M29's
   `TemplateEngine` is 94 lines of `{{ variable }}` substitution, the right size for a welcome mail
   and the wrong size for an invoice or a digest, which every application built by concatenating

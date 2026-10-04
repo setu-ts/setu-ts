@@ -3,7 +3,13 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { RedisLock, validateClient } from '../../src/lock/redis-lock.ts';
+import {
+  createRedisLockClient,
+  DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
+  RedisLock,
+  validateClient,
+} from '../../src/lock/redis-lock.ts';
+import type { RedisLockClientOptions } from '../../src/lock/redis-lock.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
 
 describe('RedisLock', () => {
@@ -294,5 +300,91 @@ describe('RedisLock N2 - error message', () => {
       expect(msg).toContain('set');
       expect(msg).toContain('eval');
     }
+  });
+});
+
+describe('RedisLock command bound (M101a V8-24)', () => {
+  /** Records the arguments each construction received. */
+  function recordingCtor() {
+    const built: Array<
+      { url: string; options: RedisLockClientOptions | undefined; arity: number }
+    > = [];
+    class Ctor {
+      constructor(url: string, options?: RedisLockClientOptions) {
+        built.push({ url, options, arity: arguments.length });
+      }
+    }
+    return { Ctor, built };
+  }
+
+  it('builds the client with the configured commandTimeout', () => {
+    const { Ctor, built } = recordingCtor();
+    createRedisLockClient(Ctor, 'redis://h:1', 500);
+    expect(built).toEqual([{ url: 'redis://h:1', options: { commandTimeout: 500 }, arity: 2 }]);
+  });
+
+  it('0 builds the client exactly as before the bound existed', () => {
+    const { Ctor, built } = recordingCtor();
+    createRedisLockClient(Ctor, 'redis://h:1', 0);
+    expect(built).toEqual([{ url: 'redis://h:1', options: undefined, arity: 1 }]);
+  });
+
+  it('defaults the bound to the M98l value', () => {
+    expect(DEFAULT_REDIS_COMMAND_TIMEOUT_MS).toBe(15_000);
+    expect(() => new RedisLock({ url: 'redis://h:1' })).not.toThrow();
+  });
+
+  it('refuses an out-of-range commandTimeoutMs without echoing it', () => {
+    for (const value of [Number.NaN, -1, 2 ** 31, Number.POSITIVE_INFINITY]) {
+      expect(() => new RedisLock({ url: 'redis://h:1', commandTimeoutMs: value })).toThrow(
+        'scheduler-plugin: commandTimeoutMs must be a number from 0 to 2147483647 ' +
+          '(0 disables the bound)',
+      );
+    }
+    for (const value of [0, 2_147_483_647]) {
+      expect(() => new RedisLock({ url: 'redis://h:1', commandTimeoutMs: value })).not.toThrow();
+    }
+  });
+
+  /** A fake whose SET is written (applied) and then times out on the client. */
+  class AppliedThenTimedOut extends FakeRedisClient {
+    override async set(
+      key: string,
+      value: string,
+      option: string,
+      pxFlag: string,
+      ttl: number,
+    ): Promise<string | null> {
+      await super.set(key, value, option, pxFlag, ttl);
+      throw new Error('Command timed out');
+    }
+  }
+
+  it('a SET that applies and then rejects is released with its own key and token', async () => {
+    const fake = new AppliedThenTimedOut();
+    const lock = new RedisLock({ url: 'redis://h:1', client: fake });
+    await lock.connect();
+
+    await expect(lock.acquire('job', 30_000)).rejects.toThrow('Command timed out');
+
+    const set = fake.calls.find((c) => c.method === 'set')!;
+    const evals = fake.calls.filter((c) => c.method === 'eval');
+    expect(evals.length).toBe(1);
+    expect(evals[0].args.slice(1)).toEqual([1, 'job', set.args[1]]);
+    // The key is gone, not held for 30 s by a token nobody owns.
+    expect(await fake.get('job')).toBeNull();
+    await lock.disconnect();
+  });
+
+  it('a release that also fails does not replace the SET rejection', async () => {
+    class BothFail extends AppliedThenTimedOut {
+      override eval(): Promise<number | string | null> {
+        return Promise.reject(new Error('eval also failed'));
+      }
+    }
+    const lock = new RedisLock({ url: 'redis://h:1', client: new BothFail() });
+    await lock.connect();
+    await expect(lock.acquire('job', 30_000)).rejects.toThrow('Command timed out');
+    await lock.disconnect();
   });
 });

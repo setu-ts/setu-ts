@@ -10,6 +10,13 @@
 import { attachConnectionErrorReporter } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
+import {
+  ACK_SCRIPT,
+  DEAD_LETTER_SCRIPT,
+  ENQUEUE_SCRIPT,
+  REQUEUE_SCRIPT,
+  RESERVE_SCRIPT,
+} from './redis-queue-scripts.ts';
 import type {
   IRedisQueueClient,
   RedisQueueOptions,
@@ -35,12 +42,68 @@ async function loadIoredis(): Promise<typeof import('npm:ioredis@5.x').Redis> {
   return mod.Redis;
 }
 
-/** Constructs an ioredis client without opening its socket before connect(). */
+/**
+ * Default bound on one Redis command, in milliseconds (M101a V8-5).
+ *
+ * Above the ~10 s `maxRetriesPerRequest` budget that already covers a STOPPED
+ * server, so it bounds only the open-but-silent connection (a paused or
+ * partitioned server) and never rejects a command a reconnect was about to
+ * deliver — the M98l backplane reasoning, unchanged.
+ */
+export const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 15_000;
+
+/** The largest delay a runtime timer accepts (2^31 - 1 ms). */
+const MAX_REDIS_COMMAND_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * Resolve and validate `commandTimeoutMs`.
+ *
+ * `NaN` (what `Number(env.X)` yields for an unset variable) would otherwise
+ * reach ioredis and silently disable the bound, so it is refused with the
+ * other out-of-range values. The message is fixed and never echoes the value.
+ *
+ * @param value - The configured bound, or `undefined` for the default
+ * @returns The bound in milliseconds; `0` disables it
+ * @throws {RangeError} If the value is not a number from `0` to `2147483647`
+ */
+export function resolveCommandTimeoutMs(value: number | undefined): number {
+  const resolved = value ?? DEFAULT_REDIS_COMMAND_TIMEOUT_MS;
+  if (
+    typeof resolved !== 'number' || !Number.isFinite(resolved) || resolved < 0 ||
+    resolved > MAX_REDIS_COMMAND_TIMEOUT_MS
+  ) {
+    throw new RangeError(
+      'queue-plugin: options.commandTimeoutMs must be a number from 0 to ' +
+        `${MAX_REDIS_COMMAND_TIMEOUT_MS} (0 disables the bound)`,
+    );
+  }
+  return resolved;
+}
+
+/** The constructor options a lazily built client receives. */
+export type LazyRedisClientOptions = {
+  readonly lazyConnect: true;
+  readonly commandTimeout?: number;
+};
+
+/**
+ * Constructs an ioredis client without opening its socket before connect().
+ *
+ * @param RedisCtor - The ioredis constructor
+ * @param url - Redis connection URL
+ * @param commandTimeoutMs - Bound on one command; `0` omits `commandTimeout`
+ *   so ioredis applies none
+ * @returns The constructed client
+ */
 export function createLazyRedisClient(
-  RedisCtor: new (url: string, options: { readonly lazyConnect: true }) => unknown,
+  RedisCtor: new (url: string, options: LazyRedisClientOptions) => unknown,
   url: string,
+  commandTimeoutMs: number = DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
 ): IRedisQueueClient {
-  return new RedisCtor(url, { lazyConnect: true }) as IRedisQueueClient;
+  const options: LazyRedisClientOptions = commandTimeoutMs === 0
+    ? { lazyConnect: true }
+    : { lazyConnect: true, commandTimeout: commandTimeoutMs };
+  return new RedisCtor(url, options) as IRedisQueueClient;
 }
 
 /**
@@ -71,6 +134,8 @@ export function validateClient(client: unknown): client is IRedisQueueClient {
  * @param injectedClient - Optionally injected ioredis-compatible client
  * @param reporter - Receives the BUILT client's connection errors; never
  *   attached to an injected client, which belongs to the caller
+ * @param commandTimeoutMs - Bound applied to the BUILT client only; an
+ *   injected client is the caller's and keeps its own configuration
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
@@ -78,6 +143,7 @@ async function resolveClient(
   url: string,
   injectedClient: IRedisQueueClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
+  commandTimeoutMs: number,
 ): Promise<IRedisQueueClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -89,7 +155,7 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  const client = createLazyRedisClient(RedisCtor, url);
+  const client = createLazyRedisClient(RedisCtor, url, commandTimeoutMs);
   if (reporter !== undefined) {
     attachConnectionErrorReporter(client, reporter);
   }
@@ -123,6 +189,7 @@ export class RedisQueue implements QueueAdapter {
   /** Retention for a dead-lettered job's payload; unbounded when undefined. */
   #deadLetterTtlMs: number | undefined;
   #reporter: ConnectionErrorReporter | undefined;
+  #commandTimeoutMs: number;
   #ready = false;
   /**
    * M70c: present only when the client exposes `ping()`; its absence is
@@ -133,7 +200,13 @@ export class RedisQueue implements QueueAdapter {
    */
   isHealthy?: () => Promise<boolean>;
 
+  /**
+   * @param options - Connection, client and retention options
+   * @throws {RangeError} If `commandTimeoutMs` is not a number from `0` to
+   *   `2147483647`
+   */
   constructor(options?: RedisQueueOptions) {
+    this.#commandTimeoutMs = resolveCommandTimeoutMs(options?.commandTimeoutMs);
     this.#url = options?.url ?? 'redis://localhost:6379';
     this.#injectedClient = options?.client;
     this.#deadLetterTtlMs = options?.deadLetterTtlMs;
@@ -144,7 +217,12 @@ export class RedisQueue implements QueueAdapter {
     if (this.#ready) {
       return;
     }
-    this.#client = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
+    this.#client = await resolveClient(
+      this.#url,
+      this.#injectedClient,
+      this.#reporter,
+      this.#commandTimeoutMs,
+    );
     if (typeof this.#client.connect === 'function') {
       await this.#client.connect();
     }
@@ -198,9 +276,16 @@ export class RedisQueue implements QueueAdapter {
 
     const readyKey = `queue:${job.name}:ready`;
     const jobsKey = `queue:${job.name}:jobs`;
+    const payload = JSON.stringify(job);
+
+    const atomic = this.#atomic([jobsKey, readyKey], [job.id, payload, job.availableAtMs]);
+    if (atomic !== null) {
+      await atomic(ENQUEUE_SCRIPT);
+      return;
+    }
 
     // Store job payload
-    await this.#client.hset(jobsKey, job.id, JSON.stringify(job));
+    await this.#client.hset(jobsKey, job.id, payload);
 
     // Add to ready set with score = availableAtMs
     await this.#client.zadd(readyKey, job.availableAtMs, job.id);
@@ -214,6 +299,12 @@ export class RedisQueue implements QueueAdapter {
     const readyKey = `queue:${name}:ready`;
     const processingKey = `queue:${name}:processing`;
     const jobsKey = `queue:${name}:jobs`;
+
+    const atomic = this.#atomic([readyKey, processingKey, jobsKey], [nowMs, limit]);
+    if (atomic !== null) {
+      const raws = await atomic(RESERVE_SCRIPT) as readonly string[];
+      return raws.map((raw) => JSON.parse(raw) as StoredJob<T>);
+    }
 
     // Get due jobs (score <= nowMs)
     const dueIds = await this.#client.zrangebyscore(readyKey, '-inf', nowMs, 'LIMIT', 0, limit);
@@ -251,6 +342,12 @@ export class RedisQueue implements QueueAdapter {
     const processingKey = `queue:${name}:processing`;
     const jobsKey = `queue:${name}:jobs`;
 
+    const atomic = this.#atomic([processingKey, jobsKey], [id]);
+    if (atomic !== null) {
+      await atomic(ACK_SCRIPT);
+      return;
+    }
+
     // Remove from processing
     await this.#client.zrem(processingKey, id);
 
@@ -283,9 +380,18 @@ export class RedisQueue implements QueueAdapter {
 
     // Update job
     const updated: StoredJob<T> = { ...job, availableAtMs, attempts };
+    const payload = JSON.stringify(updated);
+
+    // The read above changes nothing, so a timeout there is harmless; the three
+    // writes are the transition and run as one script.
+    const atomic = this.#atomic([jobsKey, processingKey, readyKey], [id, payload, availableAtMs]);
+    if (atomic !== null) {
+      await atomic(REQUEUE_SCRIPT);
+      return;
+    }
 
     // Update payload
-    await this.#client.hset(jobsKey, id, JSON.stringify(updated));
+    await this.#client.hset(jobsKey, id, payload);
 
     // Remove from processing
     await this.#client.zrem(processingKey, id);
@@ -301,6 +407,18 @@ export class RedisQueue implements QueueAdapter {
 
     const processingKey = `queue:${name}:processing`;
     const deadKey = `queue:${name}:dead`;
+
+    const atomic = this.#atomic(
+      [processingKey, deadKey, `queue:${name}:jobs`, `queue:${name}:dead:jobs`],
+      [id, nowMs, this.#retention() === null ? '0' : '1'],
+    );
+    if (atomic !== null) {
+      // The move and the dead-set insert land together, so a concurrent sweep
+      // can never see a member whose payload has not been moved yet.
+      await atomic(DEAD_LETTER_SCRIPT);
+      await this.#sweepDeadLetters(name, nowMs);
+      return;
+    }
 
     // Remove from processing
     await this.#client.zrem(processingKey, id);
@@ -321,6 +439,28 @@ export class RedisQueue implements QueueAdapter {
     await this.#client.zadd(deadKey, nowMs, id);
 
     await this.#sweepDeadLetters(name, nowMs);
+  }
+
+  /**
+   * Returns a runner for one atomic Lua transition over `keys` and `args`, or
+   * `null` when the client has no `eval` and the caller must fall back to
+   * separate commands (see `IRedisQueueClient.eval`).
+   *
+   * @param keys - The script's `KEYS`
+   * @param args - The script's `ARGV`
+   * @returns A function running a script with those keys and args, or `null`
+   */
+  #atomic(
+    keys: readonly string[],
+    args: readonly (string | number)[],
+  ): ((script: string) => Promise<unknown>) | null {
+    const client = this.#client;
+    if (client === null || typeof client.eval !== 'function') {
+      return null;
+    }
+    const evaluate = client.eval;
+    // Bound to the client: ioredis reads `this` inside every command method.
+    return (script) => evaluate.call(client, script, keys.length, ...keys, ...args);
   }
 
   /**

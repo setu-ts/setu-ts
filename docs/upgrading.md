@@ -12,6 +12,43 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, the `database` and
+`queue` health data, `commandTimeoutMs`) do not fail to compile; each is a default that now applies
+to a running application. The three M102 mail entries can.
+
+### Keep `acquireTimeoutMs` below each scheduled job's interval
+
+Every distributed-lock acquire is now bounded by `distributedLock.acquireTimeoutMs`, default `5000`.
+An acquire still unsettled at the bound skips that fire. If a job runs more often than every five
+seconds, set `acquireTimeoutMs` below its interval. If you set `commandTimeoutMs`, it must not
+exceed a non-zero `acquireTimeoutMs`, or `SchedulerPlugin(...)` throws `RangeError`. `0` restores
+the old unbounded wait, which leaves the schedule parked while the lock backend is unreachable.
+
+### Catch `SecretProviderUnavailableError` where you handled a Vault error
+
+A Vault request that fails on the network or times out (default `requestTimeoutMs: 5000`) now
+rejects with `SecretProviderUnavailableError`, answered `503` through `errorHandler`, instead of a
+plain `Error` answered as a masked `500`. Catch it by identity if you handled the old error, and
+raise `requestTimeoutMs` if a slow Vault legitimately takes longer.
+
+### Review alerts keyed on the `database` and `queue` health data
+
+A Drizzle pool connection timeout now reports `degraded` instead of `down`, and, with `poolStats`
+supplied, a saturated pool reports `up` with `reachable: 'unknown'` while its queries keep
+completing through the adapter (a full pool with no completed query in 10 seconds reports
+`degraded`; queries run on your own Drizzle instance are not counted, while once the typed
+`getDrizzleDatabase`/`getDrizzleTransaction` seam is used progress is unobservable and saturation
+reads `up`). An alert that paged on `down` for pool exhaustion should watch `degraded` or
+`data.capacity` instead. Separately, a queue depth row the latest diagnostics cycle could not read
+is now absent rather than repeating the previous count; a dashboard should read `depthCoverage`
+instead of assuming every name has a row.
+
+### Raise `commandTimeoutMs` for a slow Redis network
+
+Cache and queue Redis commands are now bounded at `15000` ms through `commandTimeoutMs`. An injected
+client is unaffected. Set `commandTimeoutMs` higher, or `0` to disable, if a command legitimately
+takes longer.
+
 ### Await `TemplateEngine.render` if you call the mail template engine directly
 
 `@setu-ts/mail-plugin`'s exported `TemplateEngine.render(name, data)` now returns a

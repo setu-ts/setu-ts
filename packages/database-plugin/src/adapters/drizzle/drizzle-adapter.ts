@@ -33,7 +33,14 @@ import {
   resolveKeysetSort,
   sortFingerprint,
 } from '@setu-ts/common';
-import { DATABASE_POOL_CAPACITY } from '../../health/database-capacity.ts';
+import {
+  DATABASE_POOL_CAPACITY,
+  DATABASE_QUERY_PROGRESS,
+  isSaturated,
+  PoolSaturatedProbeSkipped,
+  readPoolCapacity,
+} from '../../health/database-capacity.ts';
+import { isPoolExhaustion } from '../../errors/classify.ts';
 import type { DatabasePoolCapacity } from '../../interfaces/index.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
@@ -211,6 +218,26 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    */
   [DATABASE_POOL_CAPACITY]?: () => DatabasePoolCapacity;
 
+  /**
+   * Internal completed-query count (M101a V8-3). Attached beside
+   * {@linkcode DATABASE_POOL_CAPACITY} — only with `poolStats`, since the
+   * indicator consults it only to tell a saturated pool from a hung database.
+   * Returns `null` once the typed query seam has handed out the native
+   * instance, since those queries never cross the adapter and cannot be
+   * counted.
+   */
+  [DATABASE_QUERY_PROGRESS]?: () => number | null;
+
+  /** Queries this adapter has seen resolve: `rawQuery` and every data-source call. */
+  #completedQueries = 0;
+
+  /**
+   * Whether the typed query seam (`getDrizzleDatabase` /
+   * `getDrizzleTransaction`) has handed out a native instance. Its queries
+   * bypass {@link #completedQueries}, so from then on progress is unobservable.
+   */
+  #nativeHandleIssued = false;
+
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
   private _transactionBridge:
@@ -239,6 +266,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const poolStats = (this._options as DrizzleAdapterOptions | undefined)?.poolStats;
     if (poolStats !== undefined) {
       this[DATABASE_POOL_CAPACITY] = poolStats;
+      this[DATABASE_QUERY_PROGRESS] = () =>
+        this.#nativeHandleIssued ? null : this.#completedQueries;
     }
   }
 
@@ -363,12 +392,31 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * `rawQuery`, so the probe cannot diverge from the query path. `false`
    * for an adapter that lost its connection or was refused, so an outage
    * reads as a fact.
+   *
+   * Pool saturation is NOT an outage (M101a V8-3), and the probe REJECTS for
+   * it rather than answering `false`, so the service reports `undefined`:
+   *
+   * - When `poolStats` reports every connection busy with callers waiting
+   *   (`idle === 0 && waiting > 0`), no `SELECT 1` is queued at all — a
+   *   queued probe is one more waiter on the pool it is measuring.
+   * - A rejection that IS pool exhaustion (the node-postgres connection
+   *   timeout) is rethrown, since the database never answered either way.
+   *
+   * The `database` indicator then reads the capacity snapshot to tell a
+   * saturated pool (`up`, `reachable: 'unknown'`) from an unanswered probe.
    */
   async #probeWithRawQuery(): Promise<boolean> {
+    const capacity = readPoolCapacity(this);
+    if (capacity !== undefined && isSaturated(capacity)) {
+      throw new PoolSaturatedProbeSkipped();
+    }
     try {
       await this.rawQuery('SELECT 1');
       return true;
-    } catch {
+    } catch (error) {
+      if (isPoolExhaustion(error)) {
+        throw error;
+      }
       return false;
     }
   }
@@ -378,6 +426,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     if (!this._db || !this._configuredDatabase) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
+    this.#nativeHandleIssued = true;
     return { database: this._configuredDatabase, query: this._db, scope: 'outer' };
   }
 
@@ -422,13 +471,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const rollbackSentinel = { code: 'ROLLBACK_SENTINEL' };
 
     const handle: IAdapterTransaction & DrizzleQueryHandleProvider = {
-      [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
+      [DRIZZLE_QUERY_HANDLE]: (): NativeDrizzleQueryHandle => {
+        this.#nativeHandleIssued = true;
         return { database: configuredDatabase, query: tx, scope: 'transaction' };
       },
 
-      createDataSource(entity: string): DataSource {
-        return createDrizzleDataSourceInner(tx, entity, tables, operators, entities);
-      },
+      createDataSource: (entity: string): DataSource =>
+        this.#countingCompletions(
+          createDrizzleDataSourceInner(tx, entity, tables, operators, entities),
+        ),
 
       async commit(): Promise<void> {
         hold.resolve();
@@ -477,6 +528,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     // function`, so `query()` could never work on any driver.
     const statement = new sqlClass(bindRawStatement(sql, params ?? [], tag));
     const result = await execute.call(this._db, statement);
+    this.#completedQueries++;
     return (result as { rows?: T[] }).rows ?? result as T[];
   }
 
@@ -490,13 +542,33 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
     const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
-    return createDrizzleDataSourceInner(
+    return this.#countingCompletions(createDrizzleDataSourceInner(
       this._db,
       entity,
       this.resolveTables(),
       this._operators!,
       entities,
-    );
+    ));
+  }
+
+  /**
+   * Wraps every method of a data source so each call that RESOLVES counts as
+   * a completed query (M101a V8-3). A rejection is not progress: a hung
+   * database rejects at the pool's connection timeout, if at all.
+   *
+   * @param source - The data source to wrap
+   * @returns A data source with the same methods and behavior
+   */
+  #countingCompletions(source: DataSource): DataSource {
+    const wrapped: Record<string, unknown> = {};
+    for (const [name, method] of Object.entries(source)) {
+      wrapped[name] = async (...args: unknown[]): Promise<unknown> => {
+        const result = await (method as (...a: unknown[]) => Promise<unknown>)(...args);
+        this.#completedQueries++;
+        return result;
+      };
+    }
+    return wrapped as unknown as DataSource;
   }
 
   /**

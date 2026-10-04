@@ -436,7 +436,10 @@ describe('QueueObservationCollector — depth scheduler', () => {
     expect(target.read(0).depthCoverage).toBe('complete');
   });
 
-  it('reports a failed count as partial with a fixed category, keeping earlier counts', async () => {
+  // M101a V8-23: an unread name has NO row. Before this letter the cycle
+  // merge-wrote, so a failed name kept its last count — a retained zero with a
+  // climbing ageMs presented as current.
+  it('drops the row of a name whose count failed, and a later cycle restores it', async () => {
     const { collector: target, runtime } = collector({ depths: DEPTHS });
     let fail = false;
     const counting = reader({
@@ -452,16 +455,66 @@ describe('QueueObservationCollector — depth scheduler', () => {
     });
     target.startDepths(counting);
     await settle();
+    expect(target.read(0).depths.map((d) => d.queueAlias).sort()).toEqual(['emails', 'images']);
     fail = true;
     await runtime.advanceMs(1_000);
     const batch = target.read(0);
     expect(batch.failure).toBe('depth-read-failed');
     expect(batch.depthCoverage).toBe('partial');
-    const images = batch.depths.find((d) => d.queueAlias === 'images')!;
-    expect(images.coverage).toBe('complete');
-    expect(images.ageMs).toBe(1_000);
+    expect(batch.depths.find((d) => d.queueAlias === 'images')).toBeUndefined();
     expect(batch.depths.find((d) => d.queueAlias === 'emails')!.coverage).toBe('partial');
     expect(JSON.stringify(batch)).not.toContain('canary-error-SYNTHETIC');
+    fail = false;
+    await runtime.advanceMs(1_000);
+    const restored = target.read(0);
+    expect(restored.failure).toBe('none');
+    expect(restored.depthCoverage).toBe('complete');
+    expect(restored.depths.find((d) => d.queueAlias === 'images')).toMatchObject({
+      ready: 9,
+      coverage: 'complete',
+    });
+  });
+
+  it('drops the row of a name whose count timed out, naming the timeout', async () => {
+    const { collector: target, runtime } = collector({ depths: DEPTHS });
+    let hang = false;
+    const counting = reader({
+      names: () => [NAME_CANARY, 'image.resize'],
+      results: {
+        'image.resize': () =>
+          hang
+            ? new Promise<QueueDepths>(() => {})
+            : Promise.resolve({ ready: 0, processing: 0, dead: 0 }),
+      },
+    });
+    target.startDepths(counting);
+    await settle();
+    hang = true;
+    await runtime.advanceMs(1_000);
+    await runtime.advanceMs(200);
+    const batch = target.read(0);
+    expect(batch.failure).toBe('depth-read-timed-out');
+    expect(batch.depths.map((d) => d.queueAlias)).toEqual(['emails']);
+  });
+
+  it('leaves no rows after a wholly failed cycle while the source stays ready', async () => {
+    const { collector: target, runtime } = collector({ depths: DEPTHS });
+    let fail = false;
+    target.startDepths(reader({
+      names: () => [NAME_CANARY, 'image.resize'],
+      read: () =>
+        fail
+          ? Promise.reject(new Error('down'))
+          : Promise.resolve({ ready: 0, processing: 0, dead: 0 }),
+    }));
+    await settle();
+    expect(target.read(0).depths).toHaveLength(2);
+    fail = true;
+    await runtime.advanceMs(1_000);
+    const batch = target.read(0);
+    expect(batch.depths).toEqual([]);
+    expect(batch.failure).toBe('depth-read-failed');
+    expect(batch.state).toBe('ready');
   });
 
   it('treats a synchronous throw and an invalid count shape as failed counts', async () => {
