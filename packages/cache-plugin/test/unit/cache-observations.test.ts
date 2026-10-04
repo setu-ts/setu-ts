@@ -367,7 +367,12 @@ describe('observeCacheCall — transparency', () => {
       globalThis.addEventListener('unhandledrejection', onUnhandled);
       try {
         void service.get('k');
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        // The runtime reports an unhandled rejection on a later turn of the
+        // event loop, and how many turns later depends on load (one turn
+        // flaked on CI), so wait turn by turn up to a bound rather than once.
+        for (let turn = 0; turn < 200 && unhandled === 0; turn++) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
       } finally {
         globalThis.removeEventListener('unhandledrejection', onUnhandled);
       }
