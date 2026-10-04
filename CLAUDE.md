@@ -5671,7 +5671,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   delivers un-normalized, so a URL that is not its own serialization is served uncached as well; a
   sixth found that a locale-less request carrying the reserved parameter keyed like a localized one,
   and it is served uncached too. All `src` files at 100% branch/function/line; twenty negative
-  controls observed failing — complete (PR pending)
+  controls observed failing — complete (PR #405)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
