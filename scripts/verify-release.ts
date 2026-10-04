@@ -45,11 +45,15 @@
  * failing on it. CI runs this on every pull request, so failing would turn
  * every unrelated PR red; `scripts/publish-packages.ts` is where a hold
  * refuses.
+ * 9. Every pull request merged since the previous `v*` tag is represented in the
+ *    shipping changelog section, and no milestone PR's entry sits under an
+ *    already-published heading (`scripts/changelog-prs.ts`).
  */
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
 import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
 import { extractReleaseNotes } from './release-notes.ts';
+import { checkChangelogPrs, describeFindings, mergedPullRequests } from './changelog-prs.ts';
 
 const expected = Deno.args[0];
 if (!expected) {
@@ -245,6 +249,30 @@ if (changelog === null) {
       `Release body is built from it, and that step runs after the publish, ` +
       `which cannot be repeated.`,
   );
+}
+
+// ── 9: every PR merged since the previous tag has an entry, in the right place ─
+
+// The three manual release-cutting checks that each saved a release (alpha.10,
+// v0.3.0, v0.4.0 — see scripts/changelog-prs.ts), run against the merge log.
+// Needs the tag reachable: a shallow clone fails loudly here rather than
+// passing over an empty list.
+if (changelog !== null) {
+  try {
+    const { previousTag, merged } = await mergedPullRequests();
+    const prs = checkChangelogPrs(changelog, expected, merged);
+    for (const line of describeFindings(prs)) problems.push(line);
+    console.log(
+      `changelog PR coverage: ${merged.length} pull request(s) merged since ${previousTag}, ` +
+        `${prs.represented} represented in ${prs.shippingSection}, ${prs.exempt} exempt.`,
+    );
+  } catch (error: unknown) {
+    problems.push(
+      `changelog PR coverage could not run: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 // ── 8: the GitHub Release must carry the lockfile resolved-set artifact ────

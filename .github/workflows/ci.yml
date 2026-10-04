@@ -457,9 +457,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Resolves third-party code: `publish:check` type-checks every package,
-          # which fetches the whole graph. The only git here is `git ls-files`
-          # inside the version sweep — a local read.
+          # which fetches the whole graph. The git here is `git ls-files` inside
+          # the version sweep and the merge-log read inside release:verify's
+          # changelog check — both local reads, no credential needed.
           persist-credentials: false
+          # release:verify check 9 lists the pull requests merged since the
+          # previous `v*` tag. A shallow clone reaches no tag and the check
+          # fails loudly rather than passing over nothing.
+          fetch-depth: 0
 
       - uses: denoland/setup-deno@v2
         with:
