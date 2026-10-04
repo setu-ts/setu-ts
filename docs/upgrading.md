@@ -16,6 +16,15 @@ The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, th
 `queue` health data, `commandTimeoutMs`) do not fail to compile; each is a default that now applies
 to a running application. The three M102 mail entries can.
 
+### Regenerate clients whose OpenAPI document declares `3xx` responses
+
+Generated SDK clients keep an error arm for every declared `3xx`, including the statuses `fetch`
+follows automatically (`301`, `302`, `303`, `307`, and `308`), since an unfollowed one — no
+`Location` — still throws `HttpClientError`. Regenerate affected clients; any operation declaring an
+auto-follow redirect or the OpenAPI `3XX` range now returns `unknown`, representing the follow
+target body the document does not name. This also applies when the operation declares a `2xx`
+response alongside the redirect.
+
 ### Keep `acquireTimeoutMs` below each scheduled job's interval
 
 Every distributed-lock acquire is now bounded by `distributedLock.acquireTimeoutMs`, default `5000`.

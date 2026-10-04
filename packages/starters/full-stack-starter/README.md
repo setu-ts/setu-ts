@@ -203,7 +203,7 @@ Plugin options must be decided **before** the plugins are constructed — which 
 yet. `createFullStackAppFromConfig` closes that ordering gap for every option at once:
 
 ```typescript
-import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
+import { createFullStackAppFromConfig, fullStackConfigOf } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
   // `prismaClient` is generated and constructed by the application — a Prisma v7
@@ -212,6 +212,8 @@ const app = await createFullStackAppFromConfig((config) => ({
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
 }), { config: { envFilePath: ['.env.local', '.env'] } });
 
+const config = fullStackConfigOf(app); // the exact snapshot passed to the callback
+
 await app.start({ port: 3000 });
 ```
 
@@ -219,6 +221,9 @@ Configuration is loaded once and the **same snapshot** is registered under `CAPA
 the values the composition branched on are the values handlers read — not a second snapshot taken a
 moment later. The resolver runs exactly once; if it throws, or configuration fails to load, the
 promise rejects and no partially-composed application exists.
+
+Post-factory code reads that same object with `fullStackConfigOf(app)`. Calling the accessor for an
+application built by another factory throws `FullStackConfigUnavailableError`.
 
 This is why no plugin option carries a config-key shorthand such as `urlFromConfig`: that field
 would need its value at the same impossible moment. Secrets are further out of reach — they are
@@ -286,15 +291,17 @@ Two consequences follow from the list being positional:
 
 ## Exports
 
-| Export                         | Kind      |
-| ------------------------------ | --------- |
-| `buildFullStackPlugins`        | function  |
-| `createFullStackApp`           | function  |
-| `createFullStackAppFromConfig` | function  |
-| `FromConfigOptions`            | interface |
-| `FullStackStarterOptions`      | interface |
-| `RealtimeArm`                  | interface |
-| `StaticPluginOptions`          | type      |
+| Export                            | Kind      |
+| --------------------------------- | --------- |
+| `buildFullStackPlugins`           | function  |
+| `createFullStackApp`              | function  |
+| `createFullStackAppFromConfig`    | function  |
+| `FullStackConfigUnavailableError` | class     |
+| `fullStackConfigOf`               | function  |
+| `FromConfigOptions`               | interface |
+| `FullStackStarterOptions`         | interface |
+| `RealtimeArm`                     | interface |
+| `StaticPluginOptions`             | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

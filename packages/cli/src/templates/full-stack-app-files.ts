@@ -443,6 +443,11 @@ import { currentUserContext, sessionContext } from '~/lib/context-keys.server.ts
  *
  * The \`.server.ts\` suffix is safe here: React Router strips the \`middleware\`
  * export — and the imports only it uses — from the browser bundle.
+ *
+ * A refusal from this layer is rendered by React Router's route error boundary,
+ * not by the kernel error responder. Throw \`redirect()\` for anonymous document
+ * requests or \`data(..., { status: 403 })\` for a forbidden page; API callers
+ * that require Problem Details should call a kernel API route.
  */
 export const requireUser: MiddlewareFunction<Response> = ({ context }, next) => {
   const email = context.get(sessionContext)?.get<string>('userEmail');
