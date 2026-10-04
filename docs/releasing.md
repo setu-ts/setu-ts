@@ -88,6 +88,24 @@ git fetch origin
 git switch -c release/v0.3.0 origin/develop
 ```
 
+- **Run the bump, then read what it did:**
+
+  ```fish
+  deno task release:bump 0.9.0 --dry-run    # the plan: every file and its replacement count
+  deno task release:bump 0.9.0              # the same, written; refuses a dirty tree
+  ```
+
+  `scripts/bump-version.ts` moves every site the bullets below describe — the members' `version`,
+  every `@setu-ts/<pkg>@<old>` reference by package name (manifests, the SDK's pinned import-map
+  value and inline specifiers, lockfiles including their `major.minor` shorthand, the Dockerfiles'
+  quoted errors, the guides' install snippets), `SDK_VERSION`, the chart's `appVersion`, the
+  rendered manifests' version label, both `Unreleased` headings, and `POST_ALPHA_MINOR_LINES` when a
+  new minor line opens — then re-sweeps the result with `check:versions`' own reader and fails on a
+  residual reference. It never rewrites a bare version number (the range and the `@since` traps
+  below are why), honours `version:history` markers, and prints the steps it cannot take. **The
+  bullets below are kept as the record of WHY each site exists**; after a bump, read them as the
+  checklist the tool's residual list points at, not as steps to repeat by hand.
+
 - Bump `version` in every workspace member's `deno.json`.
 - **Bump the cross-package specifiers to match, and do not trust the count in this sentence.** Under
   semver a `^0.1.0` range does **not** match a `0.1.0-alpha.1` prerelease, so a version bump that
@@ -260,6 +278,13 @@ deno task release:verify 0.3.0
 deno task check:versions
 deno task release:publish --dry-run
 ```
+
+`release:verify` check 9 (`scripts/changelog-prs.ts`) now performs the first and third of the three
+release-cutting changelog checks that each saved a release: every pull request merged since the
+previous tag is represented in the shipping section (a `feat/m<id>-…` PR by its `M<id>`, any other
+PR that changed a published `src/` tree by its `#<number>`), and no milestone's entry sits under an
+already-published heading. The second check — the section does not contradict itself — is still
+yours: read it once as a whole.
 
 **A publication hold blocks every release.** `PUBLICATION_HOLDS` in `scripts/release-packages.ts`
 names packages that must not reach JSR yet, and why. While a hold applies, `release:publish` refuses

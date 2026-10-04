@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Release tooling: `release:bump` and `release:verify` check 9.**
+  `deno task release:bump <version>` moves every site a version bump has to touch — discovered by
+  package name wherever a reference carries one, enumerated with its reason where it does not — and
+  re-sweeps the result with `check:versions`' own reader; `--dry-run` prints the plan.
+  `release:verify` gains check 9 (`scripts/changelog-prs.ts`): every pull request merged since the
+  previous tag is represented in the shipping changelog section, and no milestone PR's entry sits
+  under an already-published heading — the two manual release-cutting checks that each saved a
+  release. CI's publish-dry-run job checks out full history so the merge log is reachable, and the
+  release workflow calls the `release:verify` task rather than an inline copy. No package source
+  changed.
 - **Service-call agreement (M101d).** The SDK adds `createTraceContextInterceptor` and
   `ClientRetryPolicy`; the full-stack starter adds `fullStackConfigOf` and
   `FullStackConfigUnavailableError` for the exact composition snapshot; and `contextToTraceparent`
