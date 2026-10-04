@@ -107,6 +107,15 @@ describe('minorLine / isLater', () => {
     expect(isLater('0.8.1-rc.1', '0.8.1')).toBe(true);
     expect(isLater('0.8.1', '0.8.1-rc.1')).toBe(false);
     expect(isLater('0.8.1-rc.1', '0.8.1-rc.2')).toBe(true);
+    // SemVer §11.4 identifier precedence, which a string compare gets wrong.
+    expect(isLater('0.9.0-rc.2', '0.9.0-rc.10')).toBe(true);
+    expect(isLater('0.9.0-rc.10', '0.9.0-rc.2')).toBe(false);
+    expect(isLater('0.9.0-rc', '0.9.0-rc.1')).toBe(true);
+    expect(isLater('0.9.0-rc.1', '0.9.0-rc')).toBe(false);
+    expect(isLater('0.9.0-1', '0.9.0-alpha')).toBe(true);
+    expect(isLater('0.9.0-alpha', '0.9.0-1')).toBe(false);
+    expect(isLater('0.9.0-alpha', '0.9.0-beta')).toBe(true);
+    expect(isLater('0.9.0-rc.1+b1', '0.9.0-rc.1+b2')).toBe(false);
     expect(isLater('x', '0.9.0')).toBe(false);
   });
 });

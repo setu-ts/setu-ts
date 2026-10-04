@@ -250,7 +250,15 @@ export async function mergedPullRequests(
 ): Promise<{ previousTag: string; merged: readonly MergedPullRequest[] }> {
   let previousTag: string;
   try {
-    previousTag = (await git(['describe', '--tags', '--abbrev=0', '--match', 'v*'])).trim();
+    // On a tag-triggered release run the release's own tag sits on HEAD, and
+    // describing HEAD would pick it — an empty range, so the check would pass
+    // while checking nothing. Describe from the parent in that case only.
+    const tagsAtHead = (await git(['tag', '--points-at', 'HEAD', '--list', 'v*']))
+      .split('\n')
+      .filter((tag) => tag.trim() !== '');
+    const describeFrom = tagsAtHead.length === 0 ? 'HEAD' : 'HEAD^';
+    previousTag = (await git(['describe', '--tags', '--abbrev=0', '--match', 'v*', describeFrom]))
+      .trim();
   } catch (error: unknown) {
     throw new Error(
       'No release tag is reachable from HEAD, so merged pull requests cannot be listed. ' +

@@ -134,7 +134,24 @@ export function isLater(from: string, to: string): boolean {
   if (preA === preB) return false;
   if (preA === '') return false; // a release precedes nothing with the same core
   if (preB === '') return true; // a release follows its prereleases
-  return preB > preA;
+  // SemVer §11.4: compare dot-separated identifiers left to right; numeric
+  // ones numerically, numeric below alphanumeric, a shorter list lower.
+  // A plain string compare ranks `rc.10` below `rc.2`.
+  const idsA = preA.split('.');
+  const idsB = preB.split('.');
+  for (let i = 0; i < Math.max(idsA.length, idsB.length); i += 1) {
+    const x = idsA[i];
+    const y = idsB[i];
+    if (x === undefined) return true;
+    if (y === undefined) return false;
+    if (x === y) continue;
+    const numericX = /^\d+$/.test(x);
+    const numericY = /^\d+$/.test(y);
+    if (numericX && numericY) return Number(y) > Number(x);
+    if (numericX !== numericY) return numericX;
+    return y > x;
+  }
+  return false;
 }
 
 /**

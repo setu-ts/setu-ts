@@ -185,6 +185,7 @@ describe('mergedPullRequests (git seam)', () => {
     const calls: string[][] = [];
     const git = (args: readonly string[]): Promise<string> => {
       calls.push([...args]);
+      if (args[0] === 'tag') return Promise.resolve('');
       if (args[0] === 'describe') return Promise.resolve('v0.8.0\n');
       if (args[0] === 'log') {
         return Promise.resolve(
@@ -209,8 +210,29 @@ describe('mergedPullRequests (git seam)', () => {
       pr(405, 'feat/m103-localization-plugin', ['packages/common/src/tokens.ts', 'CHANGELOG.md']),
       pr(399, 'fix/398-review-findings', ['CLAUDE.md']),
     ]);
-    expect(calls[1]).toEqual(['log', '--merges', '--format=%H%x1f%s', 'v0.8.0..HEAD']);
-    expect(calls[2]).toEqual(['diff', '--name-only', 'aaa^1', 'aaa']);
+    expect(calls[0]).toEqual(['tag', '--points-at', 'HEAD', '--list', 'v*']);
+    expect(calls[1]).toEqual(['describe', '--tags', '--abbrev=0', '--match', 'v*', 'HEAD']);
+    expect(calls[2]).toEqual(['log', '--merges', '--format=%H%x1f%s', 'v0.8.0..HEAD']);
+    expect(calls[3]).toEqual(['diff', '--name-only', 'aaa^1', 'aaa']);
+  });
+
+  it('describes from the parent when the release tag sits on HEAD (a tag-triggered run)', async () => {
+    // Describing HEAD would return v0.9.0 itself, an empty range, and the check
+    // would pass while checking nothing.
+    const calls: string[][] = [];
+    const git = (args: readonly string[]): Promise<string> => {
+      calls.push([...args]);
+      if (args[0] === 'tag') return Promise.resolve('v0.9.0\n');
+      if (args[0] === 'describe') {
+        return Promise.resolve(args.at(-1) === 'HEAD^' ? 'v0.8.0\n' : 'v0.9.0\n');
+      }
+      if (args[0] === 'log') return Promise.resolve('');
+      throw new Error(`unexpected git ${args.join(' ')}`);
+    };
+    const { previousTag } = await mergedPullRequests(git);
+    expect(previousTag).toBe('v0.8.0');
+    expect(calls[1]).toEqual(['describe', '--tags', '--abbrev=0', '--match', 'v*', 'HEAD^']);
+    expect(calls[2]).toEqual(['log', '--merges', '--format=%H%x1f%s', 'v0.8.0..HEAD']);
   });
 
   it('fails loudly when no tag is reachable, naming the shallow-checkout remedy', async () => {
