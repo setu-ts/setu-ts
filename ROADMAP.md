@@ -12551,6 +12551,97 @@ on one branch with no behavioural risk — V8-30 is the one code change, and it 
 
 ---
 
+## Milestone 102: Mail Bodies Rendered Through the View Engine
+
+**Package:** `@setu-ts/mail-plugin`
+
+**Objective:** Let an application author an email body the way it authors a page — as a component
+the view engine renders — instead of a `{{ variable }}` string, without a second rendering mechanism
+and without the two plugins importing each other.
+
+**The gap is the shape of what M29 shipped, not a defect in it.** `TemplateEngine`
+(`mail-plugin/src/templates/template-engine.ts`) is 94 lines of named `{{ variable }}` substitution:
+no conditionals, no loops, no layouts, no components. That is the right size for a welcome mail and
+the wrong size for the invoice, the digest, and the order summary a client application sends on day
+two — every one of which an application today builds by concatenating strings by hand, which is
+exactly what M92 removed from HTTP responses. Meanwhile M92 shipped an `IViewEngine` under
+`CAPABILITIES.VIEW` (`common/src/services/view.ts:51`) whose `render` answers a primitive HTML
+string for a JSX component, an `html` tagged template, or a plain `(props) => string` function, with
+escaping owned by the rendering runtime. The capability exists; nothing lets a mail body reach it.
+
+**The bridge lives in `mail-plugin`, resolved as an OPTIONAL capability, and the committed `IMailer`
+contract does not change.** Three shapes were weighed. A free function in `view-plugin`
+(`sendRenderedMail(services, Component, props, envelope)`) would type-check props against the
+component, but it is the three lines an application already writes, bypasses the named-template
+registry, and would have no reader but its own test — the dead-surface rule. Shipping both would put
+two public surfaces on one capability. So `MailPluginOptions.templates` gains a **component arm**
+beside the string arm, `MailPlugin` declares `CAPABILITIES.VIEW` in `optionalDependencies` and
+resolves the engine once at `register()` — the `@Render` precedent
+(`decorator-plugin/src/plugin/decorator-plugin.ts:422-431`) — and
+`sendTemplate(name, envelope,
+data)` renders a component template through `IViewEngine.render` with
+`data` as its props. Every holder of `IMailer` that calls `sendTemplate` gets the new arm with no
+code change.
+
+**Deliverables.**
+
+- **`MailTemplate` becomes a union of two arms.** The string arm is the released
+  `{ html?: string; text?: string }`, unchanged. The component arm is
+  `{ view: Component<never>; text?: Component<never> }`: `view` renders the HTML body, `text` the
+  plain-text body, both through the SAME `IViewEngine.render`. A plain-string component is a valid
+  `Component` whose output the engine returns unchanged (M92 §3.15), so a text body is simply a
+  function returning a string. Each arm carries `never`-typed members forbidding the other arm's
+  keys, so a template mixing `view` with `html` is a compile error rather than a silent precedence
+  rule.
+- **A component template with no `CAPABILITIES.VIEW` provider fails at `register()`**, naming both
+  remedies (register `ViewPlugin` or any other provider of the token, or drop the component
+  templates) — never at the first `sendTemplate`, where the failure would be a request-time throw on
+  a path the application has already shipped. The check is per application, so one with only string
+  templates needs no view plugin at all. The `optionalDependencies` edge is what makes the
+  `register()`-time lookup a contract rather than plugin-order luck; `view-plugin` declares no
+  dependency and no `optionalDependencies`, so the edge cannot form a cycle (the M90i P1 class is
+  re-established from source, not inherited).
+- **`TemplateEngine.render` becomes asynchronous** (`Promise<RenderedTemplate>`), because
+  `IViewEngine.render` answers `string | Promise<string>` and an async component's render genuinely
+  is a promise. This is the milestone's one **breaking change** — a direct caller of the exported
+  class must `await` — and it is CHANGELOG'd with migration text and recorded in
+  `docs/upgrading.md`. `MailService.sendTemplate` already awaited the provider and now awaits the
+  render too; `send` is untouched.
+- **`data` is the props bag, passed verbatim, with no missing-key check.** The string arm throws on
+  a placeholder whose key is absent from `data`; a component reads whatever it reads, so no such
+  check is possible, and the docs say so rather than imply parity. The committed signature keeps
+  `data` as `Readonly<Record<string, unknown>>`, so a mistyped prop through `sendTemplate` is a
+  runtime defect; the compile-time route is to call `engine.render(Component, props)` and
+  `mailer.send` by hand, which the README shows beside the template form.
+- **Escaping is the rendering runtime's, exactly as for a page.** An `html` tagged template and a
+  JSX component escape their interpolations; a hand-written template literal does not, and the
+  caveat M92 states for `IViewEngine.render` applies unchanged to a mail body. The text body is used
+  verbatim, matching the string arm's raw text substitution.
+- **Docs.** The `mail-plugin` README gains the component arm in its options table and Templates
+  section with a compilable example; `PUBLIC_API.md`'s Mail section gains the arm, the `register()`
+  refusal, the async `render`, and the no-missing-key note; ARCHITECTURE's `@setu-ts/mail-plugin`
+  row gains the optional `view` dependency; CHANGELOG and `docs/upgrading.md` carry the breaking
+  change.
+
+**Not a deliverable.** No `common` change and no new capability token — `IMailer`, `IViewEngine`,
+`Component<P>`, `CAPABILITIES.MAIL` and `CAPABILITIES.VIEW` are all committed. No new package. No
+layout mechanism (a layout is a component taking `children`, M92's rule). No subject templating —
+`subject` stays verbatim from the envelope, as the committed `sendTemplate` signature requires. No
+CSS inlining, MJML, or `react-email` integration: each is reachable today as a component that
+returns a string, through the `'custom'` engine arm, or by rendering ahead of `send`, and none needs
+a seam this milestone does not already give it. A container-supplied engine
+(`@Injectable({ token: CAPABILITIES.VIEW })` under `DiPlugin`) is NOT consulted — `DecoratorPlugin`
+registers it into `ctx.container` during its own `register()`, which runs after this plugin's, so
+there is nothing to find at the time the lookup runs; the refusal message says to register a
+provider of the token in the registry.
+
+**Folded in at the maintainer's direction (pre-existing, found by verification).** The log and
+SendGrid providers now refuse a send while disconnected, as SMTP and SES already did — a send after
+`app.stop()` had reported success on the log provider and POSTed a real email through SendGrid. And
+the `@since` gate, which skipped every `@since 0.1.0` tag because that line shipped only as
+prereleases, now checks such a tag against the line's last prerelease; the 62 wrong tags it surfaced
+are corrected to the version the registry shows first shipping each symbol.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                       |
@@ -12742,3 +12833,4 @@ on one branch with no behavioural risk — V8-30 is the one code change, and it 
 | 101f      | ⬜     | cli + common + diagnostics sources — the devtool lifecycle                                                                                                                                                                                    |
 | 101g      | ⬜     | cli + testing + full-stack template — scaffolds that are not wired                                                                                                                                                                            |
 | 101h      | ⬜     | common + docs — documentation, plus redaction setup that takes extra work                                                                                                                                                                     |
+| 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |

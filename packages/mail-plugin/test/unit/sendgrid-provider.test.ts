@@ -85,4 +85,21 @@ describe('SendGridProvider', () => {
     ).rejects.toThrow('SendGrid send failed: HTTP 401');
     expect(calls[0]?.url).toBe('https://eu.sendgrid.example/send');
   });
+
+  it('rejects a send before connect and after disconnect, making no HTTP request', async () => {
+    // Before this, a send after app.stop() still POSTed a REAL email to
+    // SendGrid. Observed through `.catch`, so a synchronous throw would fail.
+    const { http, calls } = fakeHttp();
+    const provider = new SendGridProvider({ apiKey: 'k', http });
+    const message: OutgoingMail = { from: 'me@x.com', to: 'a@x.com', subject: 'Hi' };
+    const before = await provider.send(message).then(() => 'resolved', (e: Error) => e.message);
+    expect(before).toBe('SendGridProvider is not connected');
+
+    await provider.connect();
+    await provider.disconnect();
+    const after = await provider.send(message).then(() => 'resolved', (e: Error) => e.message);
+    expect(after).toBe('SendGridProvider is not connected');
+
+    expect(calls).toHaveLength(0);
+  });
 });

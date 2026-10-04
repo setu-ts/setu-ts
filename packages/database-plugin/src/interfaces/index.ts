@@ -808,7 +808,7 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
  *   options: { url: 'mongodb://localhost:27017/mydb' },
  * });
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoDatabaseOptions extends DatabaseConnectionOptions {
   /** Selects the Mongo arm. */
@@ -824,7 +824,7 @@ export interface MongoDatabaseOptions extends DatabaseConnectionOptions {
  * It is exported because the arms below reference it, so a caller building a
  * configuration incrementally can name the shared half.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
   /**
@@ -884,7 +884,7 @@ export interface MongoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'l
  * const lazy: MongoAdapterOptions = { url: 'mongodb://127.0.0.1:27017/app' };
  * const injected: MongoAdapterOptions = { client: myMongoClient, database: 'app' };
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export type MongoAdapterOptions =
   | (MongoAdapterOptionsBase & {
@@ -917,7 +917,7 @@ export type MongoAdapterOptions =
  * It is exported because the arms below reference it, so a caller building a
  * configuration incrementally can name the shared half.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
   /**
@@ -973,7 +973,7 @@ export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, '
  * const lazy: DynamoAdapterOptions = { region: 'us-east-1' };
  * const injected: DynamoAdapterOptions = { client: myDynamoClient };
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export type DynamoAdapterOptions =
   | (DynamoAdapterOptionsBase & {
@@ -1040,7 +1040,7 @@ export type DynamoAdapterOptions =
  *   options: { region: 'us-east-1' },
  * });
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoDatabaseOptions extends DatabaseConnectionOptions {
   /** Selects the DynamoDB arm. */

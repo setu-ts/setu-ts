@@ -27,6 +27,18 @@ All notable changes to this project are documented here. The format follows
   `503` status hint, so an application running `errorHandler` answers an unreachable provider with a
   retryable `503` instead of a masked `500`. The transport error is kept as `cause` and never
   reaches the response body.
+- **Mail bodies rendered through the view engine (M102).** `MailPluginOptions.templates` gains a
+  component arm beside the released string arm: `{ view, text? }`, where `view` and `text` are
+  `Component`s (a JSX function, an `html` tagged template, or a plain `(props) => string`) rendered
+  through the `IViewEngine` registered under `CAPABILITIES.VIEW`, with `sendTemplate`'s `data`
+  passed verbatim as each component's props. `MailPlugin` declares `CAPABILITIES.VIEW` in
+  `optionalDependencies` and resolves the engine once at `register()`; a component template
+  configured with no provider fails at `register()` naming both remedies, never on the first send.
+  `MailTemplate` is now the union `MailStringTemplate | MailComponentTemplate` (both exported), and
+  the two arms cannot mix in one template (a compile error). Escaping is the rendering runtime's,
+  and the component arm performs no missing-key check — an absent key renders as `undefined`. The
+  committed `IMailer` contract is unchanged, so every holder calling `sendTemplate` gets the arm
+  with no code change.
 
 ### Changed
 
@@ -82,6 +94,34 @@ All notable changes to this project are documented here. The format follows
 - **Queue depth observations drop a row the latest cycle did not read (M101a)** instead of keeping
   the previous count. The source's `failure` and `depthCoverage: 'partial'` say why; an unreadable
   depth is never reported as a retained zero.
+- **BREAKING: `TemplateEngine.render` is asynchronous (M102).** The exported class's
+  `render(name, data)` now returns `Promise<RenderedTemplate>`, because `IViewEngine.render` may
+  answer a promise and both template arms share one lookup; every refusal (unknown template, missing
+  placeholder key) is now a rejection rather than a synchronous throw. `MailService` is unaffected
+  (it awaits). A direct caller of `TemplateEngine` adds an `await`; the constructor also gains an
+  optional second parameter, the view engine, which the plugin supplies. See `docs/upgrading.md`.
+- **BREAKING: the log and SendGrid mail providers refuse a send while not connected.** Both accepted
+  a send outside `connect()`..`disconnect()`, unlike the SMTP and SES providers: a send after
+  `app.stop()` reported success on the log provider and still POSTed a real email through SendGrid.
+  Both now reject with `'LogProvider is not connected'` / `'SendGridProvider is not
+  connected'`.
+  Through `MailPlugin` nothing changes before `stop()`, since the plugin connects the provider
+  during `register()`. A test constructing `LogProvider` directly must now call
+  `await provider.connect()` before sending.
+- **BREAKING: `MailTemplate` is a union type, no longer an interface (M102).** It is now
+  `MailStringTemplate | MailComponentTemplate`, so `interface X extends MailTemplate` fails with
+  `TS2312` and `class Y implements MailTemplate` with `TS2422`. Extend or implement
+  `MailStringTemplate` instead, which has the released `{ html?, text? }` shape. A value typed
+  `MailTemplate`, and every object literal assigned to one, compiles unchanged.
+
+### Fixed
+
+- **62 `@since` tags named a release that does not ship their symbol.** The MongoDB, DynamoDB and
+  cursor-paging surfaces of `@setu-ts/database-plugin` (61 tags) carried `@since 0.1.0` while first
+  shipping in `0.2.0`, and the kernel router's `ROUTE_ENTRY` first shipped in `0.3.0`. Each is
+  corrected to the first published version whose file contains the symbol. They survived because the
+  `@since` gate skipped every `0.1.0` tag — that line shipped only as `0.1.0-alpha.*` — and now
+  checks such a tag against the line's last prerelease instead.
 
 ## [0.8.0] — 2026-10-03
 

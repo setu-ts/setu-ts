@@ -5598,6 +5598,41 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and bodies were unbounded — both fixed; round 2 found 16-byte chunks pinning 64 KiB buffers (a
   read peaked at 2.4 GiB under the 1 MiB cap, now 131 MiB); rounds 2–3 found unbounded and partly
   escaped names in messages. Round 4 passed on `0caf9f9` — complete (PR #401).
+- **Milestone 102** (`packages/mail-plugin` — mail bodies rendered through the view engine. M29's
+  `TemplateEngine` is 94 lines of `{{ variable }}` substitution, the right size for a welcome mail
+  and the wrong size for an invoice or a digest, which every application built by concatenating
+  strings — exactly what M92 removed from HTTP responses. `MailPluginOptions.templates` gains a
+  **component arm** beside the string arm (`{ view, text? }`, both `Component`s), rendered through
+  the `IViewEngine` under `CAPABILITIES.VIEW` with `sendTemplate`'s `data` passed verbatim as props,
+  so the committed `IMailer` contract is unchanged. **The bridge lives in `mail-plugin`, as an
+  optional capability** — a typed free function in `view-plugin` was rejected as the three lines an
+  application already writes, with no reader but its own test (maintainer decision). `MailPlugin`
+  declares `CAPABILITIES.VIEW` in `optionalDependencies` and resolves the engine ONCE at
+  `register()`; a component template with no provider fails at startup naming both remedies (the M92
+  `@Render` precedent), performed inside the `TemplateEngine` constructor so it is testable without
+  a plugin context. The two arms carry `never`-typed cross-arm members, so a template mixing `view`
+  and `html` is a compile error rather than a precedence rule (pinned by self-validating
+  `@ts-expect-error` rows). **One breaking change**: `TemplateEngine.render` is now asynchronous,
+  because `IViewEngine.render` may answer a promise and both arms share one lookup — CHANGELOG'd
+  with migration text and a `docs/upgrading.md` entry. Two asymmetries with the string arm are
+  stated in three doc sites and pinned by tests rather than implied away: escaping is the rendering
+  runtime's (an `html` template escapes, a hand-written literal does not), and there is NO
+  missing-key check (an absent key renders as `undefined`). Only the registry is consulted — a
+  container-supplied engine lands during `DecoratorPlugin`'s own `register()`, after this one.
+  Verified through a real kernel app with the real `ViewPlugin` under the non-default `hono-html`
+  arm, `MailPlugin` listed BEFORE `ViewPlugin` so the edge rather than array order is what orders
+  them; `ViewRenderError` and `UnresolvedSuspenseError` propagate unwrapped with the provider never
+  reached. Four negative controls each observed failing and reverted. All changed `src` files at
+  100% branch/function/line. **Two pre-existing defects the verification surfaced are fixed here at
+  the maintainer's direction** (the M58 `g controller` / M59 `detectRuntime` precedent): the log and
+  SendGrid providers accepted a send while disconnected — after `app.stop()` the log provider
+  reported success and SendGrid still POSTed a real email, while SMTP and SES refused — and the
+  `@since` gate skipped every `@since 0.1.0` tag, because that line shipped only as `0.1.0-alpha.*`,
+  reporting them as "ahead of the registry". The gate now checks such a tag against the line's last
+  prerelease, which took it from 946 verified tags to 1,728 and surfaced 62 wrong ones — the
+  MongoDB, DynamoDB and cursor-paging surfaces of `database-plugin` tagged `0.1.0` while shipping in
+  `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
+  registry rather than guessed) — complete (PR #400)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

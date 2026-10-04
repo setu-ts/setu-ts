@@ -12,7 +12,9 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-Nothing below fails to compile; each change is a default that now applies to a running application.
+The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, the `database` and
+`queue` health data, `commandTimeoutMs`) do not fail to compile; each is a default that now applies
+to a running application. The three M102 mail entries can.
 
 ### Keep `acquireTimeoutMs` below each scheduled job's interval
 
@@ -46,6 +48,30 @@ instead of assuming every name has a row.
 Cache and queue Redis commands are now bounded at `15000` ms through `commandTimeoutMs`. An injected
 client is unaffected. Set `commandTimeoutMs` higher, or `0` to disable, if a command legitimately
 takes longer.
+
+### Await `TemplateEngine.render` if you call the mail template engine directly
+
+`@setu-ts/mail-plugin`'s exported `TemplateEngine.render(name, data)` now returns a
+`Promise<RenderedTemplate>` (M102), so a direct caller adds an `await`; unknown-template and
+missing-placeholder refusals arrive as rejections rather than synchronous throws. Nothing to do if
+you only ever reached templates through `IMailer.sendTemplate`, which already returned a promise.
+The constructor's new second parameter (a view engine) is optional and only needed for the new
+component-template arm, which `MailPlugin` supplies for you.
+
+### Extend `MailStringTemplate`, not `MailTemplate`
+
+`MailTemplate` is now the union `MailStringTemplate | MailComponentTemplate` (M102). TypeScript
+refuses to extend or implement a union, so `interface X extends MailTemplate` (`TS2312`) and
+`class Y implements MailTemplate` (`TS2422`) stop compiling. Name `MailStringTemplate` instead — it
+carries the released `{ html?, text? }` shape. Anything that only holds or assigns a `MailTemplate`
+value needs no change.
+
+### Connect a `LogProvider` before sending through it directly
+
+`@setu-ts/mail-plugin`'s `LogProvider` and `SendGridProvider` now reject a send while not connected,
+matching the SMTP and SES providers. Through `MailPlugin` nothing changes, because the plugin
+connects the provider during `register()`. A test that constructs `new LogProvider()` and sends on
+it without connecting must add `await provider.connect()` first.
 
 ## 0.8.0
 

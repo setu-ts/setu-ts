@@ -3345,6 +3345,11 @@
           "jsr:@setu-ts/common@0.8"
         ]
       },
+      "packages/mail-plugin": {
+        "dependencies": [
+          "jsr:@hono/hono@^4.12.30"
+        ]
+      },
       "packages/messaging-plugin": {
         "dependencies": [
           "npm:@azure/service-bus@7",

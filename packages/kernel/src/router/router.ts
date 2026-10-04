@@ -87,7 +87,7 @@ import type { Context as HonoContext, Next as HonoNext } from '@hono/hono';
  * HTTP verbs, route groups with prefix composition, and static-over-param
  * matching preference.
  *
- * @since 0.1.0
+ * @since 0.3.0
  */
 /**
  * Key under which a route's {@linkcode RouteEntry} is carried on the stub

@@ -15,8 +15,11 @@ import { expect } from '@std/expect';
 
 import {
   collectSinceTags,
+  comparePrerelease,
   defaultListSourceFiles,
   type FetchLike,
+  lineStandIn,
+  mayBeSkipped,
   packageNameFor,
   registryFileUrl,
   resolveFollowingSymbol,
@@ -122,6 +125,85 @@ describe('symbolPresent', () => {
     // was renamed; a substring match would pass `Widget` against `WidgetV2`.
     expect(symbolPresent('export interface WidgetV2 {}\n', 'Widget')).toBe(false);
     expect(symbolPresent('export interface MyWidget {}\n', 'Widget')).toBe(false);
+  });
+});
+
+describe('comparePrerelease', () => {
+  it('orders numeric identifiers numerically, not lexically', () => {
+    expect(comparePrerelease('alpha.9', 'alpha.10')).toBeLessThan(0);
+    expect(comparePrerelease('alpha.10', 'alpha.9')).toBeGreaterThan(0);
+  });
+
+  it('puts numeric identifiers below alphanumeric ones, and orders words lexically', () => {
+    expect(comparePrerelease('1', 'alpha')).toBeLessThan(0);
+    expect(comparePrerelease('alpha', '1')).toBeGreaterThan(0);
+    expect(comparePrerelease('alpha', 'beta')).toBeLessThan(0);
+    expect(comparePrerelease('beta', 'alpha')).toBeGreaterThan(0);
+  });
+
+  it('puts a shorter run of equal identifiers first, and equals itself', () => {
+    expect(comparePrerelease('alpha', 'alpha.1')).toBeLessThan(0);
+    expect(comparePrerelease('alpha.1', 'alpha.1')).toBe(0);
+  });
+
+  it('orders numeric identifiers past 2^53 exactly', () => {
+    expect(comparePrerelease('rc.9007199254740992', 'rc.9007199254740993')).toBeLessThan(0);
+    expect(comparePrerelease('rc.9007199254740993', 'rc.9007199254740992')).toBeGreaterThan(0);
+    expect(comparePrerelease('rc.99999999999999999', 'rc.100000000000000000')).toBeLessThan(0);
+  });
+
+  it('ignores build metadata, which never affects precedence', () => {
+    expect(comparePrerelease('alpha.2+ci.1', 'alpha.10')).toBeLessThan(0);
+    expect(comparePrerelease('alpha.10', 'alpha.2+ci.1')).toBeGreaterThan(0);
+    expect(comparePrerelease('alpha.2+ci.1', 'alpha.2+ci.9')).toBe(0);
+  });
+});
+
+describe('mayBeSkipped', () => {
+  it('skips a prerelease ahead of an earlier prerelease of the same line', () => {
+    expect(mayBeSkipped('0.8.0-alpha.2', ['0.7.0', '0.8.0-alpha.1'])).toBe(true);
+    expect(mayBeSkipped('0.8.0-alpha.10', ['0.8.0-alpha.9'])).toBe(true);
+  });
+
+  it('reports a prerelease older than one the registry holds', () => {
+    expect(mayBeSkipped('0.8.0-alpha.1', ['0.8.0-alpha.2'])).toBe(false);
+  });
+
+  it('orders a plain release above its own prereleases and below the next line', () => {
+    expect(mayBeSkipped('0.8.0', ['0.8.0-rc.1'])).toBe(true);
+    expect(mayBeSkipped('0.8.0-rc.1', ['0.8.0'])).toBe(false);
+    expect(mayBeSkipped('0.6.1', ['0.6.0', '0.7.0'])).toBe(false);
+  });
+
+  it('compares release parts past 2^53 exactly', () => {
+    expect(mayBeSkipped('9007199254740993.0.0', ['9007199254740992.0.0'])).toBe(true);
+    expect(mayBeSkipped('9007199254740992.0.0', ['9007199254740993.0.0'])).toBe(false);
+    expect(mayBeSkipped('0.10.0', ['0.9.0', '0.09.1'])).toBe(true);
+  });
+
+  it('ignores build metadata and unparseable registry entries', () => {
+    expect(mayBeSkipped('0.8.0-alpha.2', ['0.8.0-alpha.2+ci.1'])).toBe(false);
+    expect(mayBeSkipped('0.8.0', ['latest', '0.7.0'])).toBe(true);
+  });
+});
+
+describe('lineStandIn', () => {
+  it("picks the line's last prerelease, ignoring other lines", () => {
+    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2', '0.1.0-alpha.10', '0.1.0-alpha.9', '0.2.0']))
+      .toBe('0.1.0-alpha.10');
+  });
+
+  it('answers null when the line shipped no prerelease', () => {
+    expect(lineStandIn('0.5.1', ['0.5.0', '0.6.0'])).toBeNull();
+  });
+
+  it('picks the later prerelease when one carries build metadata', () => {
+    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2+ci.1', '0.1.0-alpha.10']))
+      .toBe('0.1.0-alpha.10');
+  });
+
+  it('answers null for a tag that is itself a prerelease', () => {
+    expect(lineStandIn('0.1.0-alpha.5', ['0.1.0-alpha.10'])).toBeNull();
   });
 });
 
@@ -314,15 +396,43 @@ describe('run', () => {
     expect(finding?.message).toContain('never published');
   });
 
-  it('skips a version whose release LINE shipped only as a prerelease', async () => {
+  it('checks a plain release whose LINE shipped only as prereleases against its last one', async () => {
     // `@since 0.1.0` is the repo-wide spelling for "since the first release",
-    // and that line shipped only as `0.1.0-alpha.*` — the exact string is
-    // absent from the registry while the release it names plainly exists.
-    // Reporting it would have produced 783 findings across the corpus, which
-    // is how the first cut of the rule above was caught: the unit test passed
-    // and its control discriminated, and the rule was still wrong at scale.
+    // and that line shipped only as `0.1.0-alpha.*`. This gate used to SKIP
+    // such a tag as "ahead of the registry" — which it is not — leaving every
+    // one of ~780 tags unverifiable; turning the check on found 62 wrong ones.
+    // `alpha.10` must be chosen over `alpha.9`: a lexical sort picks alpha.9.
     const file = 'packages/mock/src/first.ts';
     const source = `/** First release.\n * @since 0.1.0\n */\nexport const First = true;\n`;
+    const base = options();
+    const calls: string[] = [];
+    const result = await run({
+      ...base,
+      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      listSourceFiles: () => Promise.resolve([file]),
+      fetchImpl: fakeFetch({
+        'https://jsr.io/@setu-ts/mock/meta.json': {
+          status: 200,
+          body: JSON.stringify({
+            versions: { '0.1.0-alpha.9': {}, '0.1.0-alpha.10': {}, '0.2.0': {} },
+          }),
+        },
+        'https://jsr.io/@setu-ts/mock/0.1.0-alpha.10/src/first.ts': {
+          status: 200,
+          body: 'export const First = true;\n',
+        },
+      }, calls),
+    });
+    expect(result.findings).toHaveLength(0);
+    expect(result.skipped.find((s) => s.file === file)).toBeUndefined();
+    expect(result.verified).toBe(1);
+    expect(calls).toContain('https://jsr.io/@setu-ts/mock/0.1.0-alpha.10/src/first.ts');
+    expect(calls.some((c) => c.includes('alpha.9/'))).toBe(false);
+  });
+
+  it('FAILS a 0.1.0 tag on a symbol the 0.1.0 line never shipped, naming the stand-in', async () => {
+    const file = 'packages/mock/src/first.ts';
+    const source = `/** Added later.\n * @since 0.1.0\n */\nexport const Later = true;\n`;
     const base = options();
     const result = await run({
       ...base,
@@ -333,10 +443,36 @@ describe('run', () => {
           status: 200,
           body: JSON.stringify({ versions: { '0.1.0-alpha.3': {}, '0.2.0': {} } }),
         },
+        'https://jsr.io/@setu-ts/mock/0.1.0-alpha.3/src/first.ts': {
+          status: 200,
+          body: 'export const Earlier = true;\n',
+        },
       }),
     });
-    expect(result.findings).toHaveLength(0);
-    expect(result.skipped.find((s) => s.file === file)?.reason).toContain('not on the registry');
+    const finding = result.findings.find((f) => f.file === file);
+    expect(finding?.kind).toBe('symbol-absent');
+    expect(finding?.version).toBe('0.1.0');
+    expect(finding?.message).toContain('0.1.0-alpha.3 (the last release of the 0.1.0 line)');
+  });
+
+  it('compares a prerelease tag exactly rather than resolving it to its line', async () => {
+    // Only a PLAIN release is resolved through its line; `0.1.0-alpha.5`
+    // absent from a registry holding alpha.10 is a version that never shipped.
+    const file = 'packages/mock/src/first.ts';
+    const source = `/** A prerelease.\n * @since 0.1.0-alpha.5\n */\nexport const First = true;\n`;
+    const base = options();
+    const result = await run({
+      ...base,
+      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      listSourceFiles: () => Promise.resolve([file]),
+      fetchImpl: fakeFetch({
+        'https://jsr.io/@setu-ts/mock/meta.json': {
+          status: 200,
+          body: JSON.stringify({ versions: { '0.1.0-alpha.10': {}, '0.2.0': {} } }),
+        },
+      }),
+    });
+    expect(result.findings.find((f) => f.file === file)?.kind).toBe('version-absent');
   });
 
   it('does not let a non-semver registry version claim a release line', async () => {

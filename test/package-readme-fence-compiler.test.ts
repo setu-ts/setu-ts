@@ -120,7 +120,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 3,
-  'packages/mail-plugin/README.md': 2,
+  // M102: +1 for the component-template example rendered through the view engine.
+  'packages/mail-plugin/README.md': 3,
   'packages/metrics-plugin/README.md': 2,
   'packages/runtime/README.md': 3,
   // M98n: +1 for the devtool-gated observed-fetch composition.
