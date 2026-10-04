@@ -12644,7 +12644,8 @@ are corrected to the version the registry shows first shipping each symbol.
 
 ## Milestone 103: Localization — Messages, Locale Resolution and a Shared Formatter
 
-**Package(s):** new `@setu-ts/localization-plugin`; `packages/common` (one token, one contract)
+**Package(s):** new `@setu-ts/localization-plugin`; `packages/common` (one token, one contract, one
+optional `IRequest` member); `packages/cache-plugin` (a default locale segment in the cache key)
 
 **Objective:** Give an application one place to keep its user-facing strings per locale, one way to
 learn which locale a request wants, and one formatter that produces the same text on the server and
@@ -12690,10 +12691,29 @@ npm dependency.
   `LocalizationMessage` (a string, or a plural-form record keyed by the CLDR categories
   `zero`/`one`/`two`/`few`/`many`/`other`) and `MessageCatalogue`. The contract lives in `common` so
   a plugin that formats text (mail, notification, a future error-page renderer) can resolve it
-  without importing this plugin (§2.2). **One token and one contract are the whole `common` change;
-  `IRequest` is not widened** — the resolved locale is published to `ctx.state` under a key this
-  plugin alone writes and reads, with a `localeOf(ctx)` accessor (the M48 `getSession(ctx)`
-  precedent), following the `<owner-package>:<kebab-key>` convention (`common/src/state-keys.ts:5`).
+  without importing this plugin (§2.2).
+- **`IRequest.locale?: string` is a first-class request field, the `tenant` precedent exactly** — a
+  BCP 47 tag, optional, populated by this plugin's middleware, absent when the plugin is not
+  registered or nothing resolved, and read STRUCTURALLY by any plugin holding a request context. It
+  is a field rather than a `ctx.state` key because the second reader already exists: a state key
+  read by another package must live as a constant in `common` anyway (`common/src/state-keys.ts:5`),
+  so the "no widening" alternative was the same `common` change in a less discoverable place. It
+  gets the M71 one-implicit-write seal and a `replaceLocale(request, tag)` beside `replaceTenant`
+  (`common/src/request-identity.ts:161`), so two independent writers fail loudly and an intentional
+  override — a user preference loaded after authentication — has a named spelling. **Three things to
+  watch, none of them a reason not to do it:** (1) it is a flagged `common` widening, so it ships
+  with its `PUBLIC_API.md` entry and CHANGELOG line; additive and optional, so no implementor or
+  test double breaks. (2) The seal is per request — M87 measured the existing two-field seal at ~0.5
+  µs, and a third field adds to it; consistency with `user`/`tenant` is worth that, and the plan
+  records the measurement rather than assuming it. (3) A reader at a LOWER priority than 45 sees
+  `undefined` on every request — the same hazard `tenant` has at 40, with the same answer: the
+  priority table says who runs first, and the field's JSDoc says so.
+- **`cache-plugin` keys on the locale by default.** `cacheMiddleware` already composes a
+  length-prefixed tenant segment from `ctx.request.tenant?.id`
+  (`cache-plugin/src/utils/cache-key.ts:42`), which is how M70b closed X4-1; it gains a locale
+  segment from `ctx.request.locale` the same way, so one locale's cached body is never served to
+  another WITHOUT the application remembering a `vary` callback. Absent locale → empty segment →
+  every existing key is byte-identical (pinned by a test), so nothing released changes.
 - **Catalogues are validated at `register()`, never at the first request.** `supportedLocales` (at
   least one; the first is the default) and a `catalogues` record, or an injected `IMessageSource`
   that loads them once at `register()` — the inject-or-static shape, no filesystem convention, so
@@ -12718,8 +12738,8 @@ npm dependency.
   `#ended` — M48 verified this in source), and every governed response carries `Content-Language`
   with the resolved tag. Without `Vary`, `cache-plugin`'s middleware and any CDN serve one locale's
   body to another: `cacheMiddleware` keys on method, URL, tenant and a caller-supplied `vary`
-  (`cache-plugin/src/interfaces/index.ts:165`), so the README shows the `vary` callback that adds
-  the locale, and a test proves two locales produce two cache entries.
+  (`cache-plugin/src/interfaces/index.ts:165`) — the locale segment above makes that automatic, and
+  a test through the REAL `cacheMiddleware` proves two locales produce two entries.
 - **The catalogue resource route is opt-in.** `exposeCatalogues: { basePath }` registers
   `GET <basePath>/:locale.json` serving one SUPPORTED locale's catalogue (anything else is a 404,
   never a lookup) under a configurable `Cache-Control`, so a browser can fetch exactly what the
@@ -12750,8 +12770,8 @@ deliverable (or a later CLI milestone)**, since M101g owns that template and M10
 `react-router-plugin` underneath it. No change to `view-plugin`, `mail-plugin` or
 `decorator-plugin`: a component receives strings as props, and a `@Params(Custom('locale'))`
 resolver is the application's two lines, shown in the README rather than shipped as a decorator
-(`decorator-plugin` may not import this plugin). No `IRequest.locale` — the state key suffices and
-widening a committed `common` interface for one reader is the dead-surface rule.
+(`decorator-plugin` may not import this plugin). `cache-plugin`'s change is one segment in one
+function and a test, nothing on its options surface.
 
 **Not a deliverable, named rather than implied.** ICU MessageFormat syntax (`select`, nested plural,
 `offset`) — a follow-on once the catalogue shape has a consumer. Translation-file tooling
