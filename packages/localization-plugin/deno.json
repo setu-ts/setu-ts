@@ -20,14 +20,17 @@
   "test": {
     "permissions": {
       "read": true,
-      "write": true,
+      "write": [
+        "."
+      ],
       "env": true,
-      "run": true,
+      "run": [
+        "deno"
+      ],
       "sys": [
         "hostname",
         "cpus"
-      ],
-      "net": true
+      ]
     }
   },
   "tasks": {

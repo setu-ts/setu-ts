@@ -152,8 +152,12 @@ locale is final:
   middleware, not inside the handler. A route that changes the locale in its handler must not be
   response-cached.
 
-The cache segment protects only `cache-plugin`'s own store. `Vary` is what protects every cache you
-do not own.
+`@setu-ts/cloudflare-plugin`'s `cacheApiMiddleware` keys on a URL, which the platform matches with
+no request headers — `Vary` cannot separate its entries — so its default key carries the resolved
+locale as a `setu-cache-locale` parameter (on the key, never the request). A custom `key` replaces
+that and must include `ctx.request.locale` itself.
+
+`Vary` protects the caches you do not configure: browsers, proxies and CDNs that honour it.
 
 ## Rendering paths
 
@@ -255,7 +259,10 @@ const text = greeting === undefined ? '' : format(greeting, { name: 'Ada' }, loc
 ```
 
 The route serves only supported locales, each overlaid on the default locale's messages so a partial
-catalogue falls back exactly as `t()` does. Anything else is a `404` with a fixed detail.
+catalogue falls back exactly as `t()` does. Anything else is a `404` with a fixed detail. Its
+default `Cache-Control` is `private, max-age=3600`: browser-cached, never shared, because a session
+with `rolling` or `idleTimeoutMs` refreshes its cookie on every response and a shared cache must not
+store that. Set `cacheControl: 'public, max-age=3600'` when no session cookie reaches the route.
 
 ## Formatting
 
@@ -280,21 +287,21 @@ translation gap never fails a request. At most 256 distinct keys are tracked. Se
 
 ## Options
 
-| Option                   | Default         | Description                                                        |
-| ------------------------ | --------------- | ------------------------------------------------------------------ |
-| `supportedLocales`       | —               | BCP 47 tags; the first is the default. Required.                   |
-| `catalogues`             | —               | Catalogues keyed by tag. Exactly one of this and `source`.         |
-| `source`                 | —               | An `IMessageSource` loaded once at `register()`.                   |
-| `allowPartialCatalogues` | `false`         | Accept locales missing default keys, with one warning each.        |
-| `onMissing`              | `'key'`         | `'throw'` throws `MissingMessageError` for an unknown key.         |
-| `timeZone`               | runtime zone    | IANA zone `Date` values are formatted in; validated at startup.    |
-| `tenantLocale`           | —               | `(tenant) => tag`, consulted after `Accept-Language`.              |
-| `middleware.enabled`     | `true`          | `false` registers no global middleware; use `localeMiddleware`.    |
-| `middleware.priority`    | `45`            | After tenant (40), before logging (50).                            |
-| `middleware.query`       | `'locale'`      | Query parameter source; `false` disables it.                       |
-| `middleware.cookie`      | `'setu_locale'` | Cookie source; `false` disables it and drops `Cookie` from `Vary`. |
-| `middleware.exclude`     | six probe paths | Paths skipped entirely; `[]` disables exclusion.                   |
-| `exposeCatalogues`       | off             | `{ basePath, cacheControl? }` serves `GET <basePath>/:locale`.     |
+| Option                   | Default         | Description                                                                                                        |
+| ------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `supportedLocales`       | —               | BCP 47 tags; the first is the default. Required.                                                                   |
+| `catalogues`             | —               | Catalogues keyed by tag. Exactly one of this and `source`.                                                         |
+| `source`                 | —               | An `IMessageSource` loaded once at `register()`.                                                                   |
+| `allowPartialCatalogues` | `false`         | Accept locales missing default keys, with one warning each.                                                        |
+| `onMissing`              | `'key'`         | `'throw'` throws `MissingMessageError` for an unknown key.                                                         |
+| `timeZone`               | runtime zone    | IANA zone `Date` values are formatted in; validated at startup.                                                    |
+| `tenantLocale`           | —               | `(tenant) => tag`, consulted after `Accept-Language`.                                                              |
+| `middleware.enabled`     | `true`          | `false` registers no global middleware; use `localeMiddleware`.                                                    |
+| `middleware.priority`    | `45`            | After tenant (40), before logging (50).                                                                            |
+| `middleware.query`       | `'locale'`      | Query parameter source; `false` disables it.                                                                       |
+| `middleware.cookie`      | `'setu_locale'` | Cookie source; `false` disables it and drops `Cookie` from `Vary`.                                                 |
+| `middleware.exclude`     | six probe paths | Paths skipped entirely; `[]` disables exclusion.                                                                   |
+| `exposeCatalogues`       | off             | `{ basePath, cacheControl? }` serves `GET <basePath>/:locale`; `cacheControl` defaults to `private, max-age=3600`. |
 
 ## Health Indicator
 

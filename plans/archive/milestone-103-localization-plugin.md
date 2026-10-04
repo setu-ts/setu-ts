@@ -621,10 +621,32 @@ text is left as written; this section is authoritative where they disagree.
   formatting the served catalogue; the behavioural probe surfaced it, and it is now documented and
   pinned rather than left implicit.
 
-Twelve negative controls were each observed failing and reverted: the locale segment dropped from
+**Found by the committed-tree security audit (fresh agent, `8f7de96a`), fixed on this branch:**
+
+- **F1 (Medium) — the Cloudflare Cache API served one locale's page to everyone.**
+  `cloudflare-plugin`'s `cacheApiMiddleware` keyed on the bare URL, and a URL-string key is matched
+  with no request headers, so neither the locale segment (that is `cache-plugin`'s) nor `Vary` could
+  separate entries — the claim in §10 and three doc sites that `Vary` protects "caches the plugin
+  does not own" was false for this one. Its default key now carries the resolved locale; a
+  client-supplied parameter is overwritten. `cloudflare-plugin` joins the package list for that one
+  function. The same middleware's missing TENANT segment predates M103 and is left to a `fix/…`
+  branch.
+- **F2 (Low) — "the 404 echoes nothing" was false at the wire.** The detail is fixed, but the
+  responder's `instance` reflects the request path as received (a raw client can send `<`); the test
+  title and the §10 row now claim only the fixed detail.
+- **F3 (Low) — the catalogue route marked a session `Set-Cookie` response `public`.** A session with
+  `rolling` or `idleTimeoutMs` refreshes its cookie on every response; the default is now
+  `private, max-age=3600`, with `public` an explicit opt-in.
+- **F4 (Low) — test permissions were blanket.** The package grants no `net`, `run` only `deno`, and
+  `write` only its own directory.
+- Also from the audit's observations: `exposeCatalogues.basePath` accepted `?`, `#`, `//` and
+  control characters (each a dead route) and the root (which claims every unrouted single-segment
+  `GET`); it now accepts only plain path segments.
+
+Thirteen negative controls were each observed failing and reverted: the locale segment dropped from
 the cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
 ignoring `q=0`, the header split before slicing, `Content-Language` written from the initial locale,
 a prototype lookup in the formatter, the warned-key cap removed, `Cookie` dropped from `Vary`, and
 the catalogue route's default overlay dropped, the `cacheControl` probe removed, and the candidate
-length cap removed. The planted `@setu-ts/common` value import is a permanent negative control
-inside the e2e suite.
+length cap removed; and, after the audit, the Cloudflare locale key reverted to the bare URL. The
+planted `@setu-ts/common` value import is a permanent negative control inside the e2e suite.

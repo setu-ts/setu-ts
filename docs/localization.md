@@ -73,10 +73,13 @@ concatenated into HTML by hand is not escaped, exactly as with a view component 
 A localized response must never be served to a reader of another language. Two mechanisms cover two
 kinds of cache:
 
-- **Caches you do not own** — browsers, CDNs, proxies — rely on `Vary: Accept-Language` (plus
+- **Caches that honour `Vary`** — browsers, CDNs, proxies — rely on `Vary: Accept-Language` (plus
   `Cookie` while the cookie source is on), which the middleware writes on every governed response.
 - **`cache-plugin`'s own store** keys on `ctx.request.locale` automatically, as it keys on the
   tenant.
+- **`cloudflare-plugin`'s Cache API middleware** keys on a URL, which the platform matches with no
+  request headers, so it carries the locale in its default key instead; a custom `key` must include
+  `ctx.request.locale` itself.
 
 The second holds only when the cache runs after the locale is final. A route-level `cacheMiddleware`
 always does. A global one must be registered above priority 45. A locale changed inside a handler

@@ -51,10 +51,18 @@ function bindingsWithWaitUntil(sink: Promise<unknown>[]): ICloudflareBindings {
 /** A context for one request, optionally carrying the bindings capability. */
 function contextFor(
   url: string,
-  options?: { readonly method?: string; readonly services?: IServiceRegistry },
+  options?: {
+    readonly method?: string;
+    readonly services?: IServiceRegistry;
+    readonly locale?: string;
+  },
 ): IRequestContext {
   return createTestContext({
-    request: { url, method: (options?.method ?? 'GET') as 'GET' },
+    request: {
+      url,
+      method: (options?.method ?? 'GET') as 'GET',
+      ...(options?.locale === undefined ? {} : { locale: options.locale }),
+    },
     ...(options?.services === undefined ? {} : { services: options.services }),
   });
 }
@@ -95,6 +103,31 @@ describe('cacheApiMiddleware — miss', () => {
 
     expect(cache.matches).toEqual(['https://example.test/search?q=hono&page=2']);
     expect(cache.puts.at(0)?.key).toBe('https://example.test/search?q=hono&page=2');
+  });
+
+  it('keys a localized request on its locale, so two locales never share an entry (M103)', async () => {
+    const cache = new FakeCacheApi();
+    for (const locale of ['de', 'en']) {
+      const ctx = contextFor('https://example.test/cart?page=1', { locale });
+      await cacheApiMiddleware({ cache })(ctx, () => {
+        ctx.response.json({ locale });
+        return Promise.resolve();
+      });
+    }
+    expect(cache.puts.map((put) => put.key)).toEqual([
+      'https://example.test/cart?page=1&setu-cache-locale=de',
+      'https://example.test/cart?page=1&setu-cache-locale=en',
+    ]);
+  });
+
+  it('cannot be steered into another locale entry by a client-supplied parameter', async () => {
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/cart?setu-cache-locale=en', { locale: 'de' });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({});
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual(['https://example.test/cart?setu-cache-locale=de']);
   });
 
   it('honours a custom key function on BOTH the read and the write', async () => {

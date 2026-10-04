@@ -5634,8 +5634,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
   registry rather than guessed) — complete (PR #400)
 - **Milestone 103** (`packages/localization-plugin` (new), `packages/common`,
-  `packages/cache-plugin`, `packages/testing`, and one `packages/cli` claim-table line —
-  localization): `LocalizationPlugin` registers an `ILocalizer` under the new
+  `packages/cache-plugin`, `packages/cloudflare-plugin`, `packages/testing`, and one `packages/cli`
+  claim-table line — localization): `LocalizationPlugin` registers an `ILocalizer` under the new
   `CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()` (unknown or malformed tags,
   unlisted locales, malformed messages, and locales missing default keys refused by name;
   `allowPartialCatalogues` downgrades the last to one warning per locale), and resolves each
@@ -5654,8 +5654,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   implementation, not identical output (`Intl` data and time zones differ, so dates take an explicit
   `timeZone`). PR review of the plan caught four defects before any code: `*` ignoring `q=0`, `Vary`
   missing `Cookie`, a cross-runtime parity claim no test could make, and a date cache keyed by
-  locale alone. Implementation found `@setu-ts/testing` dropping a seeded locale. All `src` files at
-  100% branch/function/line; twelve negative controls observed failing — complete (PR pending)
+  locale alone. Implementation found `@setu-ts/testing` dropping a seeded locale. The fresh-context
+  security audit then found the Cloudflare Cache API serving one locale's page to everyone (a
+  URL-string key is matched with no request headers, so `Vary` could not help — its default key now
+  carries the locale), the catalogue route marking a session `Set-Cookie` response `public` (default
+  now `private`), an overstated no-echo claim, blanket test permissions, and base paths that
+  registered dead or root routes; all fixed. All `src` files at 100% branch/function/line; thirteen
+  negative controls observed failing — complete (PR pending)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

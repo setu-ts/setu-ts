@@ -121,9 +121,16 @@ export type LocalizationPluginOptions =
      * when absent.
      */
     readonly exposeCatalogues?: {
-      /** The route prefix; must start with `/` and contain no `:` or `*`. */
+      /**
+       * The route prefix: one or more plain path segments such as `/i18n` —
+       * letters, digits, `.`, `_`, `~` or `-` — and never the root.
+       */
       readonly basePath: string;
-      /** The `Cache-Control` value. Default `'public, max-age=3600'`. */
+      /**
+       * The `Cache-Control` value. Default `'private, max-age=3600'` — never
+       * shared, because a session may refresh its cookie on this response. Set
+       * `'public, …'` only when no session cookie reaches the route.
+       */
       readonly cacheControl?: string;
     };
   }

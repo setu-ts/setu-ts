@@ -47,7 +47,7 @@ describe('the catalogue route', () => {
     await start();
     const response = await get('/i18n/de-AT');
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('public, max-age=3600');
+    expect(response.headers.get('cache-control')).toBe('private, max-age=3600');
     expect(response.headers.get('content-language')).toBe('de-AT');
     expect(await response.json()).toEqual({
       locale: 'de-AT',
@@ -62,7 +62,7 @@ describe('the catalogue route', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
 
-  it('answers an unknown locale with a fixed Problem Details 404 that echoes nothing', async () => {
+  it('answers an unknown locale with a fixed Problem Details 404 detail', async () => {
     await start();
     const response = await get('/i18n/%3Cscript%3E');
     expect(response.status).toBe(404);
@@ -73,11 +73,12 @@ describe('the catalogue route', () => {
     expect(body.status).toBe(404);
     expect(body.detail).toBe('Unknown locale');
     expect(body).not.toHaveProperty('message');
-    // The detail is fixed; the only request-derived member is the responder's
-    // standard `instance` — the request path, percent-encoded as received —
-    // which every Problem Details response in the application carries.
+    // The DETAIL is fixed and never echoes the parameter. The responder's
+    // standard `instance` member reflects the request path exactly as it
+    // arrived — `fetch` percent-encodes `<`, a raw client need not — like every
+    // Problem Details response in the application, kernel 404s included.
     expect(body.instance).toBe('/i18n/%3Cscript%3E');
-    expect(JSON.stringify(body)).not.toContain('<');
+    expect(String(body.detail)).not.toContain('script');
   });
 
   it('is exact: a non-canonical spelling is not served', async () => {

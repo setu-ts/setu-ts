@@ -63,7 +63,18 @@ describe('LocalizationPlugin — construction refusals', () => {
   });
 
   it('refuses a bad catalogue basePath', () => {
-    for (const basePath of ['i18n', '/i18n/:x', '/i18n/*', 7 as unknown as string]) {
+    for (
+      const basePath of [
+        'i18n',
+        '/i18n/:x',
+        '/i18n/*',
+        '/',
+        '/i18n?x',
+        '/a//b',
+        '/i18n\r\n',
+        7 as unknown as string,
+      ]
+    ) {
       expect(() => LocalizationPlugin({ ...BASE, exposeCatalogues: { basePath } })).toThrow(
         'exposeCatalogues.basePath',
       );
@@ -220,8 +231,10 @@ describe('LocalizationPlugin — register()', () => {
     );
     expect([...fake.routes.keys()]).toEqual(['/i18n/:locale']);
 
-    const root = createFakeContext();
-    await LocalizationPlugin({ ...BASE, exposeCatalogues: { basePath: '/' } }).register(root.ctx);
-    expect([...root.routes.keys()]).toEqual(['/:locale']);
+    const nested = createFakeContext();
+    await LocalizationPlugin({ ...BASE, exposeCatalogues: { basePath: '/api/i18n' } }).register(
+      nested.ctx,
+    );
+    expect([...nested.routes.keys()]).toEqual(['/api/i18n/:locale']);
   });
 });

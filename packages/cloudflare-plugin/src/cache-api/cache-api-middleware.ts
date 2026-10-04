@@ -53,7 +53,13 @@ export interface CacheApiMiddlewareOptions {
   readonly cache?: ICacheApi;
   /**
    * Builds the cache key from the request. Omitted uses the full request URL,
-   * which is what the platform's own cache keys on.
+   * which is what the platform's own cache keys on — plus, when the request
+   * carries a resolved `ctx.request.locale` (the localization plugin), a
+   * `setu-cache-locale` query parameter naming it, so one locale's cached
+   * response is never served to another. The key is a URL STRING, so the
+   * platform matches it with no request headers and `Vary` cannot separate
+   * entries here. A custom `key` replaces all of this and must include the
+   * locale itself on a localized route.
    */
   readonly key?: (ctx: IRequestContext) => string;
   /** Returning `true` skips the cache entirely for this request. */
@@ -70,6 +76,28 @@ export interface CacheApiMiddlewareOptions {
    * and is of little use. The client's response is left untouched.
    */
   readonly ttlSeconds?: number;
+}
+
+/**
+ * The query parameter the default key adds for a localized request. `set`,
+ * not `append`, so a client sending the parameter itself cannot address
+ * another locale's entry.
+ */
+const LOCALE_KEY_PARAM = 'setu-cache-locale';
+
+/**
+ * The default cache key: the request URL, carrying the resolved locale when
+ * there is one (M103). Without a locale the key is the URL unchanged, so an
+ * application without the localization plugin keeps byte-identical keys.
+ */
+function defaultKey(ctx: IRequestContext): string {
+  const locale = ctx.request.locale;
+  if (locale === undefined) {
+    return ctx.request.url;
+  }
+  const url = new URL(ctx.request.url);
+  url.searchParams.set(LOCALE_KEY_PARAM, locale);
+  return url.href;
 }
 
 /**
@@ -136,7 +164,7 @@ export function cacheApiMiddleware(options?: CacheApiMiddlewareOptions): Middlew
       return;
     }
 
-    const key = keyFn !== undefined ? keyFn(ctx) : ctx.request.url;
+    const key = keyFn !== undefined ? keyFn(ctx) : defaultKey(ctx);
 
     const hit = await cache.match(key);
     if (hit !== undefined) {

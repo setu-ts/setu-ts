@@ -50,7 +50,8 @@ All notable changes to this project are documented here. The format follows
   the cookie source is on, a stated CDN cost that `middleware.cookie: false` removes) and a
   `Content-Language` written after the handler from the final locale. `localizerFor(ctx)` binds the
   localizer to the request; `localeMiddleware` registers the resolution per route group;
-  `exposeCatalogues` serves `GET <basePath>/:locale` for browsers; `MissingMessageError`,
+  `exposeCatalogues` serves `GET <basePath>/:locale` for browsers, `private, max-age=3600` by
+  default (a session refreshing its cookie must never reach a shared cache); `MissingMessageError`,
   `MissingPluralCountError` and `UnsupportedLocaleError` are exported, with the option types
   `LocalizationPluginOptions` (exactly one of `catalogues` and `source`, a compile error otherwise),
   `LocaleMiddlewareOptions` and `IMessageSource` (catalogues loaded once at `register()`). The
@@ -76,6 +77,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`cloudflare-plugin`'s `cacheApiMiddleware` keys a localized request on its locale (M103).** Its
+  key is a URL string, which the Cache API matches with no request headers, so `Vary` could never
+  separate locales there and one locale's page was served to everyone for the TTL. When
+  `ctx.request.locale` is set, the default key is the URL with a `setu-cache-locale` parameter (on
+  the key only; a client-supplied one is overwritten). Without a locale the key is unchanged. A
+  custom `key` is untouched and must include the locale itself.
 - **`cache-plugin` keys on the resolved locale (M103).** The cache key gains a length-prefixed
   locale segment from `ctx.request.locale`, between the tenant and `vary` segments, so one locale's
   cached body is never served to another. An application without the localization plugin has no
