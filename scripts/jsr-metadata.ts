@@ -161,8 +161,11 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
   'localization-plugin': {
     description:
       'Localization: message catalogues, request locale resolution, a formatter shared with the browser',
-    // `Intl` only, no runtime services; the `/format` subpath has no runtime
-    // dependency outside itself, so a browser bundle can import it (M103 §3.13).
+    // `browser: true` describes the `/format` subpath, which has no runtime
+    // dependency outside itself so a browser bundle can import it (M103 §3.13).
+    // JSR carries one flag per package; the root export is a server plugin
+    // (its only runtime import is the UNIVERSAL `common`) and is of no use in a
+    // browser, which the README says.
     runtimeCompat: UNIVERSAL,
   },
   'view-plugin': {

@@ -144,11 +144,26 @@ function defaultKey(ctx: IRequestContext): string | undefined {
   if (locale === undefined) {
     return url.includes(`${LOCALE_KEY_PARAM}=`) ? undefined : url;
   }
-  if (!locale.isWellFormed()) {
+  const encoded = encodeLocale(locale);
+  if (encoded === undefined) {
     return undefined;
   }
   const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}${LOCALE_KEY_PARAM}=${encodeURIComponent(locale)}`;
+  return `${url}${separator}${LOCALE_KEY_PARAM}=${encoded}`;
+}
+
+/**
+ * Percent-encodes a locale for the key, or `undefined` when it is not
+ * well-formed UTF-16 (`encodeURIComponent` throws `URIError` on a lone
+ * surrogate). A `try` rather than `String.prototype.isWellFormed`, which Node
+ * 18 lacks.
+ */
+function encodeLocale(locale: string): string | undefined {
+  try {
+    return encodeURIComponent(locale);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Reports whether `url` is exactly its own WHATWG serialization. */

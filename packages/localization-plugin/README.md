@@ -14,7 +14,8 @@ the browser.
   without importing this package.
 - The formatter and locale negotiation also ship as the import-free subpath
   `@setu-ts/localization-plugin/format`, so a hydrated component or an SDK client formats with the
-  same code the server used.
+  same code the server used. A browser imports that subpath only; the package root is the server
+  plugin.
 
 Zero npm dependencies: plurals, numbers and dates come from the platform's `Intl`.
 
