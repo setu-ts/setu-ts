@@ -39,8 +39,47 @@ All notable changes to this project are documented here. The format follows
   and the component arm performs no missing-key check — an absent key renders as `undefined`. The
   committed `IMailer` contract is unchanged, so every holder calling `sendTemplate` gets the arm
   with no code change.
+- **`@setu-ts/localization-plugin` (M103).** A new package: `LocalizationPlugin` registers an
+  `ILocalizer` under the new `CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()`
+  (a malformed or `Intl`-unknown tag, a catalogue for an unlisted locale, a malformed message, and a
+  locale missing default keys are refused by name; `allowPartialCatalogues` downgrades the last to
+  one warning per locale), and resolves each request's locale at middleware priority 45 — query
+  parameter, cookie, `Accept-Language` (bounded parse, q-values, `de-AT` → `de`, `q=0` honoured
+  under `*`), a `tenantLocale` default, then the default — matching every candidate against the
+  supported set only. Every governed response carries `Vary: Accept-Language` (plus `Cookie` while
+  the cookie source is on, a stated CDN cost that `middleware.cookie: false` removes) and a
+  `Content-Language` written after the handler from the final locale. `localizerFor(ctx)` binds the
+  localizer to the request; `localeMiddleware` registers the resolution per route group;
+  `exposeCatalogues` serves `GET <basePath>/:locale` for browsers; `MissingMessageError`,
+  `MissingPluralCountError` and `UnsupportedLocaleError` are exported. The formatter and locale
+  negotiation ship as the import-free subpath `@setu-ts/localization-plugin/format` (`format`,
+  `negotiateLocale`, `parseAcceptLanguage`), whose runtime graph a test confines to its own modules.
+  It escapes nothing — escaping is the renderer's — and promises one implementation, not identical
+  output across runtimes: `Intl` data differs, so dates take an explicit `timeZone`. Zero npm
+  dependencies.
+- **Localization contracts in `common` (M103).** `CAPABILITIES.LOCALIZATION`, `ILocalizer`,
+  `LocalizationMessage`, `PluralForms` and `MessageCatalogue`, so a plugin formatting text for a
+  person resolves the localizer without importing the localization plugin.
+- **`IRequest.locale` and `replaceLocale` in `common` (M103).** The request's resolved BCP 47 tag is
+  a first-class optional field on the `tenant` precedent, sealed by the same one-implicit-write
+  guard (a second plain assignment throws naming `replaceLocale`), with
+  `replaceLocale(request,
+  tag)` as the deliberate escape — for example, to apply a signed-in
+  user's saved preference once authentication has run. Optional and source-compatible: no `IRequest`
+  implementor breaks. A reader running below priority 45 sees `undefined`, exactly as one below 40
+  sees no `tenant`.
+- **`@setu-ts/testing`'s `createTestContext` carries a seeded `request.locale` (M103)**, sealed as
+  the kernel seals a request, so a test seeding a locale gets it — and the same one-write guard.
 
 ### Changed
+
+- **`cache-plugin` keys on the resolved locale (M103).** The cache key gains a length-prefixed
+  locale segment from `ctx.request.locale`, between the tenant and `vary` segments, so one locale's
+  cached body is never served to another. An application without the localization plugin has no
+  locale on its requests and keeps byte-identical keys. The segment is read when `cacheMiddleware`
+  runs, so a GLOBAL `cacheMiddleware` must be registered above priority 45 (as it must already sit
+  above 40 for the tenant), and a `replaceLocale` override is reflected only when it runs before the
+  lookup.
 
 - **Every backend call M101a covers is now bounded by default, and an expired bound is a recorded
   failure.** A paused or partitioned Redis keeps its socket open, so a cache, queue or

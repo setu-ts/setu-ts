@@ -48,6 +48,7 @@
     "./packages/graphql-plugin",
     "./packages/static-plugin",
     "./packages/view-plugin",
+    "./packages/localization-plugin",
     "./packages/diagnostics-plugin"
   ],
   "tasks": {

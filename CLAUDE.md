@@ -5633,6 +5633,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   MongoDB, DynamoDB and cursor-paging surfaces of `database-plugin` tagged `0.1.0` while shipping in
   `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
   registry rather than guessed) — complete (PR #400)
+- **Milestone 103** (`packages/localization-plugin` (new), `packages/common`,
+  `packages/cache-plugin`, `packages/testing`, and one `packages/cli` claim-table line —
+  localization): `LocalizationPlugin` registers an `ILocalizer` under the new
+  `CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()` (unknown or malformed tags,
+  unlisted locales, malformed messages, and locales missing default keys refused by name;
+  `allowPartialCatalogues` downgrades the last to one warning per locale), and resolves each
+  request's locale at priority 45 — query, cookie, a bounded `Accept-Language` parse with `q=0`
+  honoured under `*`, a `tenantLocale` default, then the default — matching every candidate against
+  the supported set only. The resolved tag is a first-class `IRequest.locale` on the `tenant`
+  precedent, sealed by the same one-write guard with `replaceLocale` as the deliberate escape; it
+  costs about 170 ns per request (measured against `develop`, inside the plan's 1 µs threshold).
+  `Vary: Accept-Language` (plus `Cookie` while the cookie source is on, a stated CDN cost) is
+  written before the handler and `Content-Language` after it, from the final locale. `cache-plugin`
+  keys on the locale by default; the plan's review found the ordering condition that governs it — a
+  global `cacheMiddleware` must sit above 45 and an override must precede the lookup — and both
+  limitations are pinned by tests rather than claimed. The formatter and negotiation ship as the
+  import-free subpath `/format`, whose runtime graph a `deno info --json` walk confines to its own
+  modules, with a planted `common` value import as a permanent negative control; it promises one
+  implementation, not identical output (`Intl` data and time zones differ, so dates take an explicit
+  `timeZone`). PR review of the plan caught four defects before any code: `*` ignoring `q=0`, `Vary`
+  missing `Cookie`, a cross-runtime parity claim no test could make, and a date cache keyed by
+  locale alone. Implementation found `@setu-ts/testing` dropping a seeded locale. All `src` files at
+  100% branch/function/line; ten negative controls observed failing — complete (PR pending)
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

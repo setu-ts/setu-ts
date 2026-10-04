@@ -30,6 +30,12 @@ building production-ready applications with our plugin-first, runtime-independen
   - Dependency injection
   - Custom decorators
 
+- [Localization](./localization.md)
+  - Choosing how users pick a language
+  - Catalogues and plural forms
+  - Server views, React Router and browser clients
+  - Caching localized responses
+
 ## Tooling
 
 - [CLI Guide](./cli.md)

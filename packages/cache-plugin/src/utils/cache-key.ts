@@ -48,6 +48,31 @@ export function tenantSegment(ctx: IRequestContext): string {
 }
 
 /**
+ * The locale discriminator segment, length-prefixed like the tenant segment.
+ *
+ * Reads `ctx.request.locale` — the field the localization plugin's middleware
+ * writes at priority 45 — and is the empty string when no locale is resolved,
+ * so an application without that plugin keeps byte-identical keys. The value
+ * is a configured tag, never raw request text, but it is length-prefixed
+ * anyway so the encoding has one rule for every segment.
+ *
+ * The segment reflects the locale present WHEN THE CACHE MIDDLEWARE RUNS: a
+ * route-level `cacheMiddleware` runs after every global middleware, but a
+ * global one must sit above priority 45, and a `replaceLocale` override is
+ * reflected only when it runs before the lookup.
+ *
+ * @param ctx - The request context
+ * @returns `l:<len>:<tag>|` when a locale is resolved, `''` otherwise
+ */
+export function localeSegment(ctx: IRequestContext): string {
+  const locale = ctx.request.locale;
+  if (locale === undefined) {
+    return '';
+  }
+  return `l:${locale.length}:${locale}|`;
+}
+
+/**
  * The per-request `vary` discriminator segment, each value length-prefixed.
  *
  * Omitted (no `vary` function) yields the empty string, leaving the key
@@ -74,10 +99,11 @@ export function varySegment(
 }
 
 /**
- * Composes the full cache key as `tenantSegment + varySegment + baseKey`.
+ * Composes the full cache key as
+ * `tenantSegment + localeSegment + varySegment + baseKey`.
  *
  * `baseKey` is the caller's `key` function's output when supplied and
- * `defaultCacheKey` otherwise. The tenant and vary segments are applied
+ * `defaultCacheKey` otherwise. The tenant, locale and vary segments are applied
  * around a custom key too, not only around the default — a caller who
  * supplies `key` in a tenant application would otherwise reproduce the
  * cross-tenant disclosure this exists to prevent.
@@ -93,5 +119,5 @@ export function composeCacheKey(
   vary?: (ctx: IRequestContext) => readonly string[],
 ): string {
   const base = baseKey !== undefined ? baseKey : defaultCacheKey(ctx);
-  return tenantSegment(ctx) + varySegment(ctx, vary) + base;
+  return tenantSegment(ctx) + localeSegment(ctx) + varySegment(ctx, vary) + base;
 }

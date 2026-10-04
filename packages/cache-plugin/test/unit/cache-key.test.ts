@@ -7,6 +7,7 @@ import type { HandlerResult, IRequestContext, ITenant } from '@setu-ts/common';
 import {
   composeCacheKey,
   defaultCacheKey,
+  localeSegment,
   tenantSegment,
   varySegment,
 } from '../../src/utils/cache-key.ts';
@@ -72,6 +73,18 @@ describe('tenantSegment', () => {
   });
 });
 
+describe('localeSegment (M103)', () => {
+  it('is empty when no locale is resolved', () => {
+    const ctx = fakeContext({ method: 'GET', url: 'http://localhost/x' });
+    expect(localeSegment(ctx)).toBe('');
+  });
+
+  it('is length-prefixed when a locale is resolved', () => {
+    const ctx = fakeContext({ method: 'GET', url: 'http://localhost/x', locale: 'de-AT' });
+    expect(localeSegment(ctx)).toBe('l:5:de-AT|');
+  });
+});
+
 describe('varySegment', () => {
   it('is empty when no vary function is supplied', () => {
     const ctx = fakeContext({ method: 'GET', url: 'http://localhost/api/users' });
@@ -124,6 +137,43 @@ describe('composeCacheKey', () => {
     expect(key).toBe('t:4:acme|v:2:en|GET:http://localhost/api/users');
   });
 
+  it('keeps a pre-M103 key byte-identical when no locale is resolved', () => {
+    // The fixture is the literal key this route produced before the locale
+    // segment existed — an application without the localization plugin must
+    // not see a single key change.
+    const ctx = fakeContext({
+      method: 'GET',
+      url: 'http://localhost/api/users',
+      tenant: { id: 'acme' },
+    });
+    expect(composeCacheKey(ctx, undefined, () => ['x'])).toBe(
+      't:4:acme|v:1:x|GET:http://localhost/api/users',
+    );
+  });
+
+  it('orders tenant, locale, vary, then base', () => {
+    const ctx = fakeContext({
+      method: 'GET',
+      url: 'http://localhost/api/users',
+      tenant: { id: 'acme' },
+      locale: 'de',
+    });
+    expect(composeCacheKey(ctx, undefined, () => ['x'])).toBe(
+      't:4:acme|l:2:de|v:1:x|GET:http://localhost/api/users',
+    );
+  });
+
+  it('applies the locale segment around a custom base key too', () => {
+    const ctx = fakeContext({ method: 'GET', url: 'http://localhost/x', locale: 'fr' });
+    expect(composeCacheKey(ctx, 'custom')).toBe('l:2:fr|custom');
+  });
+
+  it('separates two locales on the same route', () => {
+    const de = fakeContext({ method: 'GET', url: 'http://localhost/x', locale: 'de' });
+    const en = fakeContext({ method: 'GET', url: 'http://localhost/x', locale: 'en' });
+    expect(composeCacheKey(de)).not.toBe(composeCacheKey(en));
+  });
+
   it('separates two tenants on the same route', () => {
     const acme = fakeContext({
       method: 'GET',
@@ -162,6 +212,7 @@ function fakeContext(opts: {
   method: string;
   url: string;
   tenant?: ITenant;
+  locale?: string;
 }): IRequestContext {
   const hr: HandlerResult = { __handlerResult: true };
 
@@ -194,6 +245,7 @@ function fakeContext(opts: {
       path: new URL(opts.url).pathname,
       headers: new Headers(),
       ...(opts.tenant !== undefined ? { tenant: opts.tenant } : {}),
+      ...(opts.locale !== undefined ? { locale: opts.locale } : {}),
       json: async <T = unknown>() => ({} as T),
       text: async () => '',
       bytes: async () => new Uint8Array(0),

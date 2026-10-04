@@ -158,6 +158,13 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     // serve assets through Workers Assets or R2 via `cloudflare-plugin`.
     runtimeCompat: NO_EDGE,
   },
+  'localization-plugin': {
+    description:
+      'Localization: message catalogues, request locale resolution, a formatter shared with the browser',
+    // `Intl` only, no runtime services; the `/format` subpath has no runtime
+    // dependency outside itself, so a browser bundle can import it (M103 §3.13).
+    runtimeCompat: UNIVERSAL,
+  },
   'view-plugin': {
     description:
       'Server-rendered HTML: view engines for JSX and html-tag components, named by reference',

@@ -1,9 +1,8 @@
 # Milestone 103 — Localization (`@setu-ts/localization-plugin`)
 
-> **Status:** Planning. Written on `docs/m103-localization-roadmap` beside the ROADMAP section that
-> opens the milestone; implementation happens on `feat/m103-localization-plugin`. `develop` and
-> `main` are protected — all work (implementation + fixes) stays on that one branch until it merges
-> via a single PR.
+> **Status:** Complete (PR pending). Planned on `docs/m103-localization-roadmap` (PR #402),
+> implemented on `feat/m103-localization-plugin`. §11 records where the implementation corrected the
+> plan.
 
 ## 0. Objective & scope
 
@@ -548,3 +547,69 @@ parameter (any client), the `setu_locale` cookie (any client), and the `:locale`
 **Not a control, stated so it is not mistaken for one:** the cookie and query sources are preference
 channels, not authentication — anyone can set them, and all they can select is one of the configured
 locales.
+
+## 11. Corrections recorded during implementation
+
+Each item is a place where the plan above did not survive the source, a probe, or a test. The plan
+text is left as written; this section is authoritative where they disagree.
+
+- **`@setu-ts/testing` joined the package list.** `createTestContext` built its `MockRequest` from
+  an explicit field list that dropped a seeded `request.locale`, so a test seeding one got nothing —
+  the contract-violating-double class. `MockRequest` now carries `locale` and the seal guards it as
+  the kernel's does; two tests pin it.
+- **The plugin declares `optionalDependencies: [CAPABILITIES.LOGGER]`.** §3.9 said "no
+  `optionalDependencies`"; that remains true for tenancy, but a partial-catalogue warning is raised
+  DURING `register()`, so the logger must register first or the warning is lost. The edge has a
+  reader at registration, unlike the tenancy edge §3.9 rejected.
+- **`localizerFor` negotiates an unsupported `request.locale` instead of throwing.** §3.11 left this
+  case unspecified. An application can `replaceLocale` any stored preference, and calling
+  `forLocale` with it would turn a stale profile value into a `500` on every request; the value is
+  negotiated (`de-CH` → `de`) and falls back to the default.
+- **`MissingPluralCountError` lives in `format/format.ts`** and is exported from the package root,
+  not the subpath. The subpath may value-import nothing outside `src/format/` (§3.13), and the
+  subpath barrel keeps exactly three functions; a browser caller recognizes it by `name`.
+- **The deleted-`Deno` probe asserts only that `Deno` is gone.** §3.13 planned
+  `typeof process === 'undefined'` as well; on Deno `process` is a lazy global whose getter reads
+  `Deno`, so reading it after the deletion throws. The structural `deno info` gate was already the
+  discriminating check.
+- **The React Router recipe hands the loader the request's localizer**, through an
+  application-declared context key set in `populateLoadContext`, and the loader returns formatted
+  strings. §3.14 had the loader return `{ locale, messages }`, but `ILocalizer` exposes no
+  catalogue; a hydrated component that formats runtime values fetches the catalogue route instead.
+- **The catalogue route serves each locale overlaid on the default locale's messages.** Not in the
+  plan; without it a browser served a partial locale would lack the keys `t()` falls back for on the
+  server — two implementations of one fallback. A negative control pins it.
+- **The `404` body carries the responder's standard `instance`** — the request path, percent-encoded
+  as received — like every Problem Details response in the application. §10's "no echo" claim is
+  scoped to what the route controls: a fixed `detail` and no raw `<` in the body.
+- **Seal cost measured (§8).** `sealRequestIdentity` on a freshly built request object, three runs
+  of `deno bench` against `develop`'s two-field seal: 395–405 ns before, 562–586 ns after — about
+  +170 ns per request, inside the 1 µs threshold, so the field stays sealed. It is paid by every
+  request, with or without the localization plugin, and the PR body states the number.
+- **`docs/localization.md` is prose.** Its code lives in the package README, where the fence gate
+  compiles it, rather than in a guide that would need its own inventory in the guide gate.
+- **`packages/cli` gained one data line, against §0's scope rule.** The CLI keeps a static table of
+  the health-indicator names each plugin registers (`utils/plugin-claims.ts`, M70g A1) so
+  `setu generate health-indicator` refuses a name a plugin already claims, and a root gate fails
+  when a plugin's registration site is missing from it. Adding
+  `['localization-plugin',
+  ['localization']]` is that table's maintenance, not template wiring; no
+  CLI behaviour or generated output changes.
+- **Unplanned doc sites the gates required:** a `PACKAGE_METADATA` entry in
+  `scripts/jsr-metadata.ts`, a `docs/plugins.md` catalog entry, the health-indicator site count (28
+  → 29), and the `docs/README.md` index line; the `IRequest` listing in `docs/programmatic-api.md`
+  (an exact-contract gate compares it with the source); and the API-docs target count (51 → 53, the
+  package plus its `/format` subpath).
+- **Stale cells in §6:** the plugin unit test asserts the six-path exclusion list literally (not
+  "equal to the tenancy list by value"), and the tenancy integration test proves ordering by
+  middleware PRIORITY (not "by edge"), as §1 and §3.9 already say.
+- **Header test inputs are split by source.** A header value cannot carry NUL or CR/LF — the
+  platform refuses it before any middleware runs — so the hostile-input test drives those through
+  the query parameter and drives header-legal hostile values through `Accept-Language`.
+
+Ten negative controls were each observed failing and reverted: the locale segment dropped from the
+cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
+ignoring `q=0`, the header split before slicing, `Content-Language` written from the initial locale,
+a prototype lookup in the formatter, the warned-key cap removed, `Cookie` dropped from `Vary`, and
+the catalogue route's default overlay dropped. The planted `@setu-ts/common` value import is a
+permanent negative control inside the e2e suite.

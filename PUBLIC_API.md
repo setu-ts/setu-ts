@@ -67,8 +67,9 @@
 58. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
 59. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
 60. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
-61. [Boundary-Type Compatibility](#boundary-type-compatibility)
-62. [Summary](#summary)
+61. [Localization Plugin (`@setu-ts/localization-plugin`)](#localization-plugin-setu-tslocalization-plugin)
+62. [Boundary-Type Compatibility](#boundary-type-compatibility)
+63. [Summary](#summary)
 
 ---
 
@@ -3100,14 +3101,27 @@ app.router.get('/users/:id', {
 
 #### Options
 
-| Option              | Type                         | Default              | Behavior                                                                                                                                                                                                                                  |
-| ------------------- | ---------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ttlSeconds`        | `number`                     | store default        | Per-route TTL override in seconds; when omitted the store's `defaultTtl` applies                                                                                                                                                          |
-| `key`               | `(ctx) => string`            | `${method}:${url}`   | Custom cache key generator. The tenant discriminator segment is composed around this key too, so a tenant-aware application stores one entry per tenant even when a custom key is supplied                                                |
-| `vary`              | `(ctx) => readonly string[]` | —                    | Per-request discriminator values appended to the key after the tenant segment. Each returned string is length-prefixed and joined in order, so two requests differing in any value never share an entry; omitted leaves the key unchanged |
-| `bypass`            | `(ctx) => boolean`           | —                    | When `true`, skip caching entirely for this request and pass through to the handler                                                                                                                                                       |
-| `store`             | `string`                     | `CAPABILITIES.CACHE` | Capability token for the cache store to use                                                                                                                                                                                               |
-| `cacheableStatuses` | `number[]`                   | `[200]`              | HTTP status codes eligible for caching                                                                                                                                                                                                    |
+| Option              | Type                         | Default              | Behavior                                                                                                                                                                                                                                              |
+| ------------------- | ---------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttlSeconds`        | `number`                     | store default        | Per-route TTL override in seconds; when omitted the store's `defaultTtl` applies                                                                                                                                                                      |
+| `key`               | `(ctx) => string`            | `${method}:${url}`   | Custom cache key generator. The tenant and locale discriminator segments are composed around this key too, so a tenant-aware application stores one entry per tenant even when a custom key is supplied                                               |
+| `vary`              | `(ctx) => readonly string[]` | —                    | Per-request discriminator values appended to the key after the tenant and locale segments. Each returned string is length-prefixed and joined in order, so two requests differing in any value never share an entry; omitted leaves the key unchanged |
+| `bypass`            | `(ctx) => boolean`           | —                    | When `true`, skip caching entirely for this request and pass through to the handler                                                                                                                                                                   |
+| `store`             | `string`                     | `CAPABILITIES.CACHE` | Capability token for the cache store to use                                                                                                                                                                                                           |
+| `cacheableStatuses` | `number[]`                   | `[200]`              | HTTP status codes eligible for caching                                                                                                                                                                                                                |
+
+#### Key composition
+
+The key is `tenant segment + locale segment + vary segment + base key`. The tenant segment comes
+from `ctx.request.tenant?.id` and the locale segment (M103) from `ctx.request.locale`, each
+length-prefixed and empty when absent — so an application with neither multi-tenancy nor
+localization keeps byte-identical keys. Both segments are read **when `cacheMiddleware` runs**: a
+route-level `cacheMiddleware` runs after every global middleware and always sees them, while a
+GLOBAL registration must sit above priority 40 for the tenant and above 45 for the locale. A
+`replaceLocale` override is reflected only when it runs before the cache lookup; a route that
+changes the locale inside its handler must not be response-cached. The segments protect this
+plugin's own store only — a shared cache or CDN relies on the `Vary` header the localization
+middleware writes.
 
 ### ICacheStore Interface
 
@@ -10269,7 +10283,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 
 | Export                                                 | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `createCapabilityToken(name)`                          | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `encodeFrameData(data)`                                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `decodeFrameData(payload)`                             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -10313,9 +10327,10 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | `validatedStateKey(target)`                            | function | Returns `` `validation-plugin:validated-${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `Body()`/`Query()`/`Param()` sources read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `CLIENT_IP_STATE_KEY`                                  | const    | `http-security-plugin:client-ip`, the cross-package key `ipSecurityMiddleware` writes and `rateLimitMiddleware` reads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `createPathMatcher(patterns)`                          | function | Builds a path-exclusion predicate from `readonly PathPattern[]`; strings match exactly and regular expressions are tested against the path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `sealRequestIdentity(request)`                         | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `sealRequestIdentity(request)`                         | function | Installs the one-implicit-write request identity guard for `user`, `tenant` and `locale`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `replacePrincipal(request, principal)`                 | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `replaceTenant(request, tenant)`                       | function | Deliberately replaces `request.tenant` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `replaceLocale(request, locale)`                       | function | Deliberately replaces `request.locale` after it has been guarded — the localization middleware's write, and the application's way to apply a signed-in user's saved preference once authentication has run (M103)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `isPromiseLike(value)`                                 | function | Duck-typed thenable test (M87) — see the note below the Types table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ### Types
@@ -10365,6 +10380,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | View rendering      | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Localization        | `ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue` — the localization port (`t(key, values?)`, `locale`, `locales`, `forLocale(tag)`) served under `CAPABILITIES.LOCALIZATION`, and the catalogue shape: a string with `{name}` placeholders or a CLDR plural record with `other` required (M103)                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
@@ -10529,10 +10545,17 @@ Contract notes:
   is severed (client disconnect, timeout). Populated by the HTTP adapter from the native
   `Request.signal`; optional because injected / test requests may not carry one. Added in
   Milestone 42.
-- `IRequest.user` and `IRequest.tenant` each allow one implicit assignment per request; a later
-  assignment throws. `replacePrincipal` and `replaceTenant` are the explicit escapes for an
-  intentional replacement. This catches late accidental overwrites, not authorization bypasses: a
-  write before authentication is still the permitted first write.
+- `IRequest.user`, `IRequest.tenant` and `IRequest.locale` each allow one implicit assignment per
+  request; a later assignment throws. `replacePrincipal`, `replaceTenant` and `replaceLocale` are
+  the explicit escapes for an intentional replacement. This catches late accidental overwrites, not
+  authorization bypasses: a write before authentication is still the permitted first write.
+- `IRequest.locale?: string` (M103) — the request's resolved BCP 47 tag, written by the localization
+  plugin's middleware at priority 45 and absent without that plugin or on a path it excludes. It is
+  a flagged, optional, source-compatible widening on the `tenant` precedent. Three things to keep in
+  mind: a reader running BELOW priority 45 sees `undefined` (the priority table orders it, exactly
+  as for `tenant` at 40); a response cache keys on the value present when the cache runs, so an
+  override must happen before the lookup to be reflected there; and it is a preference, never an
+  authorization input — any client can select any supported locale.
 - The application service registry seals after `runBootstrap()`. Its `register`, `registerFactory`,
   and `unregister` methods then throw; request-scoped child registries remain mutable. Startup-time
   `override: true` mutations log at `info`, and successful unregisters log at `warn` through the
@@ -13095,6 +13118,100 @@ rather than a deliberate empty render.
 - **Layouts are components.** A layout is an ordinary component taking `children`. There is no
   plugin-level `layout` option: it would wrap every render, including fragment responses where a
   full document is wrong.
+
+## Localization Plugin (`@setu-ts/localization-plugin`)
+
+Message catalogues per locale, request locale resolution, and a formatter shared with the browser,
+shipped in **Milestone 103**. The plugin registers an `ILocalizer` under
+`CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()`, and resolves each request's
+locale into `IRequest.locale`. Zero npm dependencies: plurals, numbers and dates come from `Intl`.
+
+### Registration
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LocalizationPlugin, localizerFor } from '@setu-ts/localization-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    LocalizationPlugin({
+      supportedLocales: ['en', 'de'],
+      catalogues: { en: { greeting: 'Hello {name}' }, de: { greeting: 'Hallo {name}' } },
+    }),
+  ],
+});
+
+app.router.get('/', (ctx) => ctx.response.text(localizerFor(ctx).t('greeting', { name: 'Ada' })));
+```
+
+### Options
+
+`LocalizationPluginOptions` requires exactly one of `catalogues` and `source` — supplying both or
+neither is a compile error, and a JavaScript caller is refused at construction.
+
+| Option                   | Type                                       | Default         | Behavior                                                                                                                                         |
+| ------------------------ | ------------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `supportedLocales`       | `readonly string[]`                        | —               | BCP 47 tags, canonicalized; the first is the default. Refused when empty, malformed, duplicated, or unknown to the runtime's `Intl`.             |
+| `catalogues`             | `Record<string, MessageCatalogue>`         | —               | Static catalogues keyed by tag, validated at `register()`.                                                                                       |
+| `source`                 | `IMessageSource`                           | —               | Loaded once at `register()` (a rejection fails startup), validated identically; the health indicator reports `injected[:name]`.                  |
+| `allowPartialCatalogues` | `boolean`                                  | `false`         | Accept a locale missing keys the default defines: one warning per locale at `register()`, the default's message served for the gap.              |
+| `onMissing`              | `'key' \| 'throw'`                         | `'key'`         | A key no catalogue defines answers the key (warned once per key, at most 256 tracked), or throws `MissingMessageError`.                          |
+| `timeZone`               | `string`                                   | runtime zone    | IANA zone `Date` values are formatted in; refused at construction when `Intl` does not recognize it.                                             |
+| `tenantLocale`           | `(tenant: ITenant) => string \| undefined` | —               | The tenant's default, consulted after `Accept-Language`; matched like any candidate. A throw propagates (application code, not client input).    |
+| `middleware.enabled`     | `boolean`                                  | `true`          | `false` registers no global middleware; attach `localeMiddleware(...)` yourself.                                                                 |
+| `middleware.priority`    | `number`                                   | `45`            | After tenant resolution (40), before logging (50). Must be an integer.                                                                           |
+| `middleware.query`       | `string \| false`                          | `'locale'`      | The query parameter source; `false` disables it.                                                                                                 |
+| `middleware.cookie`      | `string \| false`                          | `'setu_locale'` | The cookie source; `false` disables it and drops `Cookie` from `Vary`.                                                                           |
+| `middleware.exclude`     | `readonly PathPattern[]`                   | six probe paths | Skipped entirely — no resolution, no headers. Default `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`; `[]` disables.         |
+| `exposeCatalogues`       | `{ basePath; cacheControl? }`              | off             | Registers `GET <basePath>/:locale`. `basePath` must start with `/` and contain no `:` or `*`; `cacheControl` defaults to `public, max-age=3600`. |
+
+### Exports
+
+| Export                      | Kind     | Purpose                                                                                                                        |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `LocalizationPlugin`        | function | Plugin factory — registers the localizer, the resolution middleware, the opt-in catalogue route and a `localization` indicator |
+| `localizerFor`              | function | `localizerFor(ctx)` — the localizer for `ctx.request.locale`; the default locale when absent, negotiated when unsupported      |
+| `localeMiddleware`          | function | The resolution middleware, for an application registering it per route group under `middleware.enabled: false`                 |
+| `MissingMessageError`       | class    | `t()` under `onMissing: 'throw'` for a key no catalogue defines; carries `key` and `locale`                                    |
+| `MissingPluralCountError`   | class    | A plural message formatted without a finite numeric `count`; carries `key` when known                                          |
+| `UnsupportedLocaleError`    | class    | `forLocale(tag)` for a tag outside the supported set — callers pass configuration there, never client text                     |
+| `IMessageSource`            | type     | `{ name?; load(): Promise<Record<string, MessageCatalogue>> }`                                                                 |
+| `LocaleMiddlewareOptions`   | type     | `localeMiddleware`'s options                                                                                                   |
+| `LocalizationPluginOptions` | type     | The options above                                                                                                              |
+
+The subpath **`@setu-ts/localization-plugin/format`** exports
+`format(message, values, locale,
+options?)`, `negotiateLocale(candidates, supported, excluded?)`,
+`parseAcceptLanguage(value)` and the types `FormatValues`, `FormatOptions` and `AcceptLanguage`. Its
+runtime graph is confined to its own modules — a test walks `deno info --json` to enforce it — so it
+is safe in a browser bundle.
+
+### Behavior notes
+
+- **Resolution order:** query parameter, cookie, `Accept-Language`, `tenantLocale`, then the
+  default. Every candidate is canonicalized inside a guard (a malformed tag is "no match") and
+  matched against `supportedLocales` only, exactly, then with subtags stripped right to left
+  (`de-Latn-AT` → `de-Latn` → `de`). A `*` range selects the first supported locale no `q=0` range
+  excludes; exclusion applies to `*` only, and the plugin never answers `406`.
+- **Bounded header parse:** `Accept-Language` is cut to 1024 characters before splitting, at most 16
+  ranges are read, and a range over 35 characters is dropped.
+- **Headers:** `Vary: Accept-Language` (plus `Cookie` while the cookie source is on) is appended
+  before the handler on every governed response. `Content-Language` is written after the handler
+  from the FINAL `ctx.request.locale`, only when that is a supported tag and the response has none;
+  a rejected `next()` writes none. `Vary: Cookie` makes most CDN caching ineffective — the
+  documented cost of the cookie source.
+- **Missing keys never fail a request** by default; a partial locale falls back to the default
+  locale. The catalogue route serves each locale overlaid on the default, so a browser falls back
+  the same way.
+- **The formatter escapes nothing**; escaping belongs to the renderer, as for `IViewEngine.render`.
+  In English `count: 0` selects the `other` plural form.
+- **Shared code, not identical output across runtimes:** `Intl` data differs between runtimes, and a
+  `Date` formats in the runtime's zone unless `timeZone` is set on both sides.
+- **No `optionalDependencies` on tenancy:** the tenant default is read per request, which middleware
+  priority (40 < 45) orders. The plugin declares `CAPABILITIES.LOGGER` only, so a partial-catalogue
+  warning raised during `register()` reaches the logger.
 
 ## Boundary-Type Compatibility
 

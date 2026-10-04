@@ -261,6 +261,12 @@ export const CAPABILITIES = {
    */
   VIEW: 'view',
   /**
+   * Localization — an `ILocalizer` holding the application's message
+   * catalogues per locale, bound to a request's resolved `IRequest.locale`
+   * through the localization plugin's `localizerFor(ctx)`.
+   */
+  LOCALIZATION: 'localization',
+  /**
    * Runtime-owned local diagnostics listener — the single IPv4-loopback port
    * the RuntimePlugin can bind for the local diagnostics connector
    * (`ILocalDiagnosticsListenerFactory`). Provided by the RuntimePlugin;
