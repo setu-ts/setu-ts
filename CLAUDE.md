@@ -5578,7 +5578,21 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (`jsr:@setu-ts/common@<version>`) is a bump site a `^`-only sweep misses (see
   `docs/releasing.md`), and an in-place edit to the published `[0.7.0]` CHANGELOG section (the M99c
   Blob default) was reverted to its tag text, since 0.7.0 did not have that behaviour.
-- **Next milestone** — none open; see ROADMAP.md.
+- **Milestone 101c** (`packages/session-plugin` + `packages/common` +
+  `packages/multi-tenancy-plugin` + `packages/database-plugin` + `packages/http-security-plugin` +
+  `packages/auth-plugin` — tenancy and identity features that do not compose; V8-7, V8-8, V8-9,
+  V8-25): a session's tenant binding now compares on whichever side sees the tenant second — the
+  session middleware's load-time compare and a new tenant-side compare in the multi-tenancy
+  middleware share one pure helper (`tenantBindingMismatch`), and the seal is narrowed to unbound
+  sessions so a bound session is never rebound (V8-7). The tenant repository's `ITenantDataStore`
+  port moves to `common` and a shipped `DatabaseTenantDataStore` bridge in `database-plugin`
+  (factory arm `createDatabaseTenantDataStore()`, resolved at `onInit`) makes the tenant repository
+  read and write through the application's real database (V8-8). `csrfMiddleware` gains an `exclude`
+  list and the SAML recipe stops trusting an `Origin: null` (V8-9), and the SAML ACS checks the
+  pending-request binding before consuming it, so a foreign browser's post cannot burn the victim's
+  login (V8-25). — complete (PR pending).
+- **Next milestone** — the M101 `v0.8.0` smoke closeout; M101a is the first open letter (see
+  ROADMAP.md).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
