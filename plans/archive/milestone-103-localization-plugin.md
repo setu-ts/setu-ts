@@ -708,6 +708,10 @@ text is left as written; this section is authoritative where they disagree.
   Workers; the ill-formed locale does. Both now say the first two do not.
 - **N11 (Low)** — the ROADMAP still counted two bypassed requests.
 
+**Found by the round-7 re-audit (fresh agent, `f2b7597c`), fixed on this branch:** N12 (Low) — the
+`cacheApiMiddleware` JSDoc's list of skip reasons, which jsr.io renders, omitted the locale-less
+reserved-parameter case; it now names it, including that it applies without the localization plugin.
+
 Twenty negative controls were each observed failing and reverted: the locale segment dropped from
 the cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
 ignoring `q=0`, the header split before slicing, `Content-Language` written from the initial locale,

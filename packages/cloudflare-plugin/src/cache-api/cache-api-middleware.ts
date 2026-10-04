@@ -174,8 +174,10 @@ function isParsedForm(url: string): boolean {
  *
  * - `bypass` returned `true`;
  * - with the default key, the URL is not in its parsed form, carries a
- *   fragment, or the locale is not well-formed, so no key could keep the
- *   request apart from another;
+ *   fragment, or the locale is not well-formed, or the request has no locale
+ *   and its URL contains `setu-cache-locale=` — in each case no key could keep
+ *   the request apart from another (this last one applies to an application
+ *   without the localization plugin too);
  * - no cache handle is available (not running on Cloudflare Workers);
  * - the response is a live stream — teeing it would double the memory the
  *   stream exists to avoid and change its flush timing (the M42 guard
