@@ -5,7 +5,8 @@ concepts.
 
 ## Prerequisites
 
-- **Deno 2.x** or **Node.js 18+** or **Bun 1.x**
+- **Deno 2.x** or **Node.js 22+** or **Bun 1.x** — the framework uses `Promise.withResolvers`, which
+  Node 22 was the first to ship; CI verifies Node 24
 - Basic familiarity with TypeScript
 - Understanding of web frameworks (optional but helpful)
 
