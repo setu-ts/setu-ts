@@ -12648,9 +12648,9 @@ are corrected to the version the registry shows first shipping each symbol.
 optional `IRequest` member); `packages/cache-plugin` (a default locale segment in the cache key)
 
 **Objective:** Give an application one place to keep its user-facing strings per locale, one way to
-learn which locale a request wants, and one formatter that produces the same text on the server and
-in the browser — so a server-rendered page, a React Router loader, a mail body and an SPA client all
-read the same catalogue and never disagree about how a message is spelled.
+learn which locale a request wants, and one formatter implementation shared by the server and the
+browser — so a server-rendered page, a React Router loader, a mail body and an SPA client all read
+the same catalogue and never disagree about how a message is spelled.
 
 **The gap is total, not partial.** `grep -rn "Accept-Language\|Intl\.\|locale" packages/*/src`
 returns no framework-owned localization of any kind; the M97 comparison recorded it as "a real gap
@@ -12786,13 +12786,13 @@ pattern rather than built as a mechanism.
 **Verification bar.** Beyond the four gates, both publish gates (a new package: `release:verify`
 moves to 50 and the first-publish runbook step applies) and the per-file bar: a real kernel app
 drives the resolution chain end to end for all five sources with a negative control per source; the
-`Vary`/cache test produces two entries for two locales; the formatter's output is asserted
-byte-identical on the server and under a browser-shaped import (a `deno info --json` gate refusing
-any runtime dependency outside the subpath's own modules, plus a subprocess with `Deno` deleted);
-and the bounded header parse is driven with a 64 KiB header and a malformed tag, each observed
-refused without a throw escaping the middleware. The plan records a design security review (its
-§10), since `Accept-Language`, the cookie and the query parameter are all network input reaching
-`Intl`.
+`Vary`/cache test produces two entries for two locales; a `deno info --json` gate refuses any
+runtime dependency outside the formatter subpath's own modules, and a subprocess with `Deno` deleted
+checks import independence (output parity across runtimes is NOT claimed: `Intl` data and time zones
+differ, so dates take an explicit `timeZone`); and the bounded header parse is driven with a 64 KiB
+header and a malformed tag, each observed refused without a throw escaping the middleware. The plan
+records a design security review (its §10), since `Accept-Language`, the cookie and the query
+parameter are all network input reaching `Intl`.
 
 ---
 

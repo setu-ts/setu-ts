@@ -8,13 +8,15 @@
 ## 0. Objective & scope
 
 One place for an application's user-facing strings per locale, one way to learn which locale a
-request wants, and one formatter that produces identical text on the server and in a browser. A new
-`@setu-ts/localization-plugin` registers an `ILocalizer` under a new `CAPABILITIES.LOCALIZATION`,
-resolves the request locale in middleware and writes it to a new first-class `IRequest.locale` (the
-`tenant` precedent), validates every catalogue at `register()`, and ships its formatter and locale
-negotiation as a zero-import subpath export (`@setu-ts/localization-plugin/format`) so a hydrated
-React Router component or an SDK client formats with the same code the server used. `cache-plugin`
-keys on the resolved locale by default, the way it keys on the tenant since M70b.
+request wants, and one formatter IMPLEMENTATION shared by the server and the browser. Shared code,
+not guaranteed byte-identical output: the text also depends on each runtime's ICU data and, for
+dates, its time zone, which §3.6 makes explicit. A new `@setu-ts/localization-plugin` registers an
+`ILocalizer` under a new `CAPABILITIES.LOCALIZATION`, resolves the request locale in middleware and
+writes it to a new first-class `IRequest.locale` (the `tenant` precedent), validates every catalogue
+at `register()`, and ships its formatter and locale negotiation as a zero-import subpath export
+(`@setu-ts/localization-plugin/format`) so a hydrated React Router component or an SDK client
+formats with the same code the server used. `cache-plugin` keys on the resolved locale by default,
+the way it keys on the tenant since M70b.
 
 - **In scope:** `common` — `CAPABILITIES.LOCALIZATION`, `common/src/services/localization.ts`
   (`ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue`), `IRequest.locale?`, the
@@ -192,27 +194,35 @@ keys on the resolved locale by default, the way it keys on the tenant since M70b
 
 ### 3.6 The formatter: `{name}` placeholders, plural records, `Intl` for numbers and dates
 
-- **Decision:** `format(message, values, locale)` in the zero-import `/format` subpath. A string
-  message has `{name}` placeholders replaced by `values[name]`; a `number` is rendered with
-  `new Intl.NumberFormat(locale)`, a `Date` with `new Intl.DateTimeFormat(locale)`, a string
-  verbatim, `null`/`undefined` as the empty string, anything else via `String()`. A placeholder
-  whose name is absent from `values` is left VERBATIM (`{name}`), never thrown. A `PluralForms`
-  record requires `values.count` to be a finite number — absent or non-finite throws
-  `MissingPluralCountError` naming the key — selects the form with
-  `new Intl.PluralRules(locale).select(count)` falling back to `other`, then formats the chosen
+- **Decision:** `format(message, values, locale, options?)` in the zero-import `/format` subpath,
+  where `options` is `FormatOptions { timeZone?: string }`. A string message has `{name}`
+  placeholders replaced by `values[name]`; a `number` is rendered with
+  `new Intl.NumberFormat(locale)`, a `Date` with `new Intl.DateTimeFormat(locale, { timeZone })`
+  (omitted → the runtime's own time zone), a string verbatim, `null`/`undefined` as the empty
+  string, anything else via `String()`. A placeholder whose name is absent from `values` is left
+  VERBATIM (`{name}`), never thrown. A `PluralForms` record requires `values.count` to be a finite
+  number — absent or non-finite throws `MissingPluralCountError` naming the key — selects the form
+  with `new Intl.PluralRules(locale).select(count)` falling back to `other`, then formats the chosen
   string as above. `Intl` instances are cached per locale in a module-level `Map` capped at the
   supported set's size (the formatter is handed only configured tags). The formatter escapes
-  nothing. A `zero` form is selected only where the locale's CLDR rules produce `zero` (`ar`, `lv`,
-  …); `en` with `count: 0` selects `other`, which the docs state because it is the commonest
-  surprise. The message and value types are imported from `@setu-ts/common` with `import type`, so
-  there is ONE declaration of each and the runtime graph stays empty (§3.13).
+  nothing. **Output parity is not promised across runtimes**: the same code runs on both sides, but
+  `Intl` output depends on each implementation's ICU data, and a `Date` formats in the runtime's
+  time zone unless `timeZone` is passed. The plugin's `timeZone` option is handed to `format` by
+  `t()`, and the README tells a browser caller to pass the same value; without it, a server in UTC
+  and a browser in `Asia/Kolkata` legitimately print different dates. The docs state this rather
+  than the stronger claim. A `zero` form is selected only where the locale's CLDR rules produce
+  `zero` (`ar`, `lv`, …); `en` with `count: 0` selects `other`, which the docs state because it is
+  the commonest surprise. The message and value types are imported from `@setu-ts/common` with
+  `import type`, so there is ONE declaration of each and the runtime graph stays empty (§3.13).
 - **Why:** this is the smallest grammar that handles "3 items" correctly in every CLDR language
   without a parser; ICU's `select`/nested/offset grammar is the named follow-on. Escaping is the
   rendering runtime's job — the M92/M102 rule — and the docs say so in three sites.
 - **Test home:** `test/unit/format.test.ts` (placeholders; verbatim unknown placeholder; number and
-  Date per locale with literal expected strings from §1's probes; plural selection for `en` and
-  `ar`; `en` with `count: 0` selects `other`; missing count throws; the escaping NON-guarantee
-  pinned: `format('{x}', { x: '<b>' })` is `<b>`).
+  Date per locale with literal expected strings from §1's probes, every Date case passing
+  `timeZone: 'UTC'` so the expectation does not depend on the test host's zone (and one case proving
+  `timeZone` is honoured: epoch zero in `America/New_York` is `31/12/1969` under `en-GB`); plural
+  selection for `en` and `ar`; `en` with `count: 0` selects `other`; missing count throws; the
+  escaping NON-guarantee pinned: `format('{x}', { x: '<b>' })` is `<b>`).
 
 ### 3.7 `Vary: Accept-Language` and `Content-Language`
 
@@ -336,8 +346,9 @@ keys on the resolved locale by default, the way it keys on the tenant since M70b
   the RUNTIME graph (reached through a dependency carrying a `code` specifier, §1 probe) lies
   outside `src/format/`; (2) a behavioural check spawns a subprocess whose probe deletes
   `globalThis.Deno`, asserts `typeof process === 'undefined'`, imports the subpath and compares
-  `format(...)` output byte-for-byte with the in-process result. `deno.json` `exports` gains
-  `"./format": "./src/format/index.ts"`.
+  `format(...)` output byte-for-byte with the in-process result under the SAME Deno `Intl` — this
+  checks import and runtime independence, NOT server-versus-browser output parity, which §3.6
+  deliberately does not claim. `deno.json` `exports` gains `"./format": "./src/format/index.ts"`.
 - **Why:** the formatter's reason to exist is one implementation on both sides. A stray value import
   of `common` would type-check, pass a Deno-only behaviour test (nothing in `common` touches `Deno`
   at module scope), and ship a browser bundle pulling a server contract module. The structural gate
@@ -367,10 +378,11 @@ keys on the resolved locale by default, the way it keys on the tenant since M70b
 | `MissingPluralCountError`                                           | class          | Thrown by `format` for a plural record with no finite `count` (§3.6).                                        |
 | `UnsupportedLocaleError`                                            | class          | Thrown by `forLocale` (§3.11).                                                                               |
 | `LocaleMiddlewareOptions`                                           | type           | The `middleware` option's type and `localeMiddleware`'s parameter.                                           |
-| `/format` → `format(message, values, locale)`                       | fn (subpath)   | The server's `t()` AND the browser (§3.6, §3.13).                                                            |
+| `/format` → `format(message, values, locale, options?)`             | fn (subpath)   | The server's `t()` AND the browser (§3.6, §3.13).                                                            |
 | `/format` → `negotiateLocale(candidates, supported, excluded?)`     | fn (subpath)   | The middleware (§3.2) AND an SDK client over `navigator.languages`.                                          |
 | `/format` → `parseAcceptLanguage(value)`                            | fn (subpath)   | The middleware (§3.3); exported so a client-side proxy or test can reuse the same parser.                    |
 | `/format` → `AcceptLanguage`                                        | type (subpath) | `parseAcceptLanguage`'s return; read by the middleware to pass `excluded` to `negotiateLocale`.              |
+| `/format` → `FormatOptions`                                         | type (subpath) | `format`'s fourth parameter; `t()` fills it from the plugin's `timeZone` option.                             |
 | `/format` → `FormatValues`                                          | type (subpath) | `format`'s `values` parameter.                                                                               |
 | `common` → `CAPABILITIES.LOCALIZATION`                              | token          | `LocalizationPlugin.provides`; every resolver of the service.                                                |
 | `common` → `ILocalizer`                                             | type           | The registered service's contract; `mail-plugin`/`notification-plugin` consumers resolve it (M102's shape).  |
@@ -381,21 +393,22 @@ keys on the resolved locale by default, the way it keys on the tenant since M70b
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                    | Consumer                          | Behavior (per implementation)                                                                                           |
-| --------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `supportedLocales: readonly string[]`                     | `register()`, negotiation, health | Non-empty; `[0]` is the default; each canonicalizes and is `Intl`-supported, else refused (§3.4).                       |
-| `catalogues?`                                             | `register()`                      | Static catalogues; validated per §3.4. Exactly one of `catalogues`/`source` is required.                                |
-| `source?: IMessageSource`                                 | `register()`                      | `await source.load()` once; validated identically; health `data.source: 'injected'`.                                    |
-| `allowPartialCatalogues?: boolean`                        | validation, lookup                | Default `false`. `true`: one warn per incomplete locale at `register()`, default-locale fallback at lookup (§3.4/§3.5). |
-| `onMissing?: 'key' \| 'throw'`                            | `t()`                             | Default `'key'` (§3.5).                                                                                                 |
-| `tenantLocale?: (tenant: ITenant) => string \| undefined` | middleware                        | Step 4 of the chain (§3.2); its return is negotiated against the supported set like any candidate.                      |
-| `middleware.enabled?`                                     | `register()`                      | Default `true`; `false` registers no global middleware (§3.9).                                                          |
-| `middleware.priority?`                                    | `register()`                      | Default `45`; a non-integer is refused at construction.                                                                 |
-| `middleware.exclude?`                                     | middleware                        | Default the six operational paths; `[]` disables (§3.9).                                                                |
-| `middleware.query?: string \| false`                      | middleware                        | Default `'locale'`; `false` skips the source (§3.2).                                                                    |
-| `middleware.cookie?: string \| false`                     | middleware                        | Default `'setu_locale'`; `false` skips the source (§3.2).                                                               |
-| `exposeCatalogues?.basePath`                              | `register()`                      | Registers the route (§3.8); refused unless it starts with `/` and has no `:`/`*`.                                       |
-| `exposeCatalogues?.cacheControl?`                         | catalogue route                   | Default `public, max-age=3600`.                                                                                         |
+| Option                                                    | Consumer                          | Behavior (per implementation)                                                                                                                                                                                 |
+| --------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `supportedLocales: readonly string[]`                     | `register()`, negotiation, health | Non-empty; `[0]` is the default; each canonicalizes and is `Intl`-supported, else refused (§3.4).                                                                                                             |
+| `catalogues?`                                             | `register()`                      | Static catalogues; validated per §3.4. Exactly one of `catalogues`/`source` is required.                                                                                                                      |
+| `source?: IMessageSource`                                 | `register()`                      | `await source.load()` once; validated identically; health `data.source: 'injected'`.                                                                                                                          |
+| `allowPartialCatalogues?: boolean`                        | validation, lookup                | Default `false`. `true`: one warn per incomplete locale at `register()`, default-locale fallback at lookup (§3.4/§3.5).                                                                                       |
+| `onMissing?: 'key' \| 'throw'`                            | `t()`                             | Default `'key'` (§3.5).                                                                                                                                                                                       |
+| `timeZone?: string`                                       | `t()` → `format`                  | Passed to `Intl.DateTimeFormat` for `Date` values; omitted → the runtime's zone. Validated at construction with `new Intl.DateTimeFormat('en', { timeZone })` inside a guard, refused by name when it throws. |
+| `tenantLocale?: (tenant: ITenant) => string \| undefined` | middleware                        | Step 4 of the chain (§3.2); its return is negotiated against the supported set like any candidate.                                                                                                            |
+| `middleware.enabled?`                                     | `register()`                      | Default `true`; `false` registers no global middleware (§3.9).                                                                                                                                                |
+| `middleware.priority?`                                    | `register()`                      | Default `45`; a non-integer is refused at construction.                                                                                                                                                       |
+| `middleware.exclude?`                                     | middleware                        | Default the six operational paths; `[]` disables (§3.9).                                                                                                                                                      |
+| `middleware.query?: string \| false`                      | middleware                        | Default `'locale'`; `false` skips the source (§3.2).                                                                                                                                                          |
+| `middleware.cookie?: string \| false`                     | middleware                        | Default `'setu_locale'`; `false` skips the source (§3.2).                                                                                                                                                     |
+| `exposeCatalogues?.basePath`                              | `register()`                      | Registers the route (§3.8); refused unless it starts with `/` and has no `:`/`*`.                                                                                                                             |
+| `exposeCatalogues?.cacheControl?`                         | catalogue route                   | Default `public, max-age=3600`.                                                                                                                                                                               |
 
 ## 5. Implementation files
 
@@ -428,26 +441,26 @@ keys on the resolved locale by default, the way it keys on the tenant since M70b
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                     | src covered                                                                              | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                   |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `common/test/unit/request-identity.test.ts` (extended)        | `request-identity.ts`, `http.ts`                                                         | §3.1 cases against `sealRequestIdentity(request: IRequest)` and `replaceLocale(request: IRequest, tag: string)`; enumeration unchanged.                                                                                                                            |
-| `common/test/unit/barrel-exports.test.ts` (extended)          | `index.ts`, `tokens.ts`, `services/localization.ts`                                      | `CAPABILITIES.LOCALIZATION === 'localization'`; compile-time pins for the three types and `replaceLocale`.                                                                                                                                                         |
-| `cache-plugin/test/unit/cache-key.test.ts` (extended)         | `utils/cache-key.ts`                                                                     | §3.10 against `composeCacheKey(ctx, baseKey?, vary?)`; pre-change key fixture byte-identical when `locale` is undefined.                                                                                                                                           |
-| `localization-plugin/test/unit/format.test.ts`                | `format/format.ts`, `format/types.ts`                                                    | §3.6 against `format(message: LocalizationMessage, values: FormatValues, locale: string): string`.                                                                                                                                                                 |
-| `test/unit/negotiate.test.ts`                                 | `format/negotiate.ts`                                                                    | §3.2 against `negotiateLocale(candidates: readonly string[], supported: readonly string[], excluded?: readonly string[]): string \| undefined`.                                                                                                                    |
-| `test/unit/accept-language.test.ts`                           | `format/negotiate.ts`                                                                    | §3.3 against `parseAcceptLanguage(value: string \| null): AcceptLanguage` (`{ preferred, excluded }`).                                                                                                                                                             |
-| `test/unit/catalogue-validation.test.ts`                      | `catalogue/validate.ts`, `errors.ts`                                                     | §3.4 refusals by message; partial warn count.                                                                                                                                                                                                                      |
-| `test/unit/localizer.test.ts`                                 | `service/localizer.ts`, `errors.ts`                                                      | §3.5, §3.11 against `ILocalizer.t(key: string, values?: FormatValues): string`, `forLocale(tag: string): ILocalizer`, `localizerFor(ctx: IRequestContext): ILocalizer`; the two-entry-point identity case.                                                         |
-| `test/unit/locale-middleware.test.ts`                         | `middleware/locale-middleware.ts`                                                        | §3.2 precedence with a negative control per source; §3.9 exclusion; writes via `replaceLocale`; uses `createTestContext` from `@setu-ts/testing` so the request is sealed as the kernel seals it.                                                                  |
-| `test/unit/localization-plugin.test.ts`                       | `plugin/localization-plugin.ts`, `interfaces/index.ts`                                   | Option refusals (§4.1); `provides`/`optionalDependencies`; health payload (§3.12); exclusion list equals the tenancy list by value; `enabled: false`.                                                                                                              |
-| `test/unit/barrel-exports.test.ts`                            | `index.ts`, `format/index.ts`                                                            | Both barrels pinned at compile time (the M56 class); the `/format` barrel exports exactly three functions and two types.                                                                                                                                           |
-| `test/integration/headers.test.ts`                            | middleware, plugin                                                                       | §3.7 through a real kernel app and `app.fetch`.                                                                                                                                                                                                                    |
-| `test/integration/catalogue-route.test.ts`                    | `routes/catalogue-route.ts`                                                              | §3.8, including the responder-formatted `404` under `errorHandler({ format: 'rfc9457' })` asserted field by field.                                                                                                                                                 |
-| `test/integration/cache-vary.test.ts`                         | plugin + the real `cacheMiddleware`                                                      | §3.10 end to end: two locales, two entries.                                                                                                                                                                                                                        |
-| `test/integration/with-tenancy.test.ts`                       | plugin + the real `MultiTenancyPlugin`                                                   | §3.9 ordering by edge; `tenantLocale` participates.                                                                                                                                                                                                                |
-| `test/integration/render.test.ts`                             | plugin + the real `ViewPlugin({ engine: 'hono-html' })` (no JSX compiler options needed) | A route resolves `localizerFor(ctx)`, passes `t('greeting', { name })` as a prop, and the rendered HTML carries the `de` string under `Accept-Language: de`; a negative control under `en`.                                                                        |
-| `test/e2e/format-browser-safe.test.ts`                        | `format/*`                                                                               | §3.13 both checks: the `deno info --json` runtime graph stays inside `src/format/`, with a negative control that adds a value import of `@setu-ts/common` to a scratch copy and is observed failing; and the deleted-`Deno` subprocess with byte-identical output. |
-| `test/package-readme-fence-compiler.test.ts` (root, extended) | README                                                                                   | Fence count row; the loader, hydration and SDK recipes compile.                                                                                                                                                                                                    |
+| Test file                                                     | src covered                                                                              | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common/test/unit/request-identity.test.ts` (extended)        | `request-identity.ts`, `http.ts`                                                         | §3.1 cases against `sealRequestIdentity(request: IRequest)` and `replaceLocale(request: IRequest, tag: string)`; enumeration unchanged.                                                                                                                                                                                      |
+| `common/test/unit/barrel-exports.test.ts` (extended)          | `index.ts`, `tokens.ts`, `services/localization.ts`                                      | `CAPABILITIES.LOCALIZATION === 'localization'`; compile-time pins for the three types and `replaceLocale`.                                                                                                                                                                                                                   |
+| `cache-plugin/test/unit/cache-key.test.ts` (extended)         | `utils/cache-key.ts`                                                                     | §3.10 against `composeCacheKey(ctx, baseKey?, vary?)`; pre-change key fixture byte-identical when `locale` is undefined.                                                                                                                                                                                                     |
+| `localization-plugin/test/unit/format.test.ts`                | `format/format.ts`, `format/types.ts`                                                    | §3.6 against `format(message: LocalizationMessage, values: FormatValues, locale: string, options?: FormatOptions): string`.                                                                                                                                                                                                  |
+| `test/unit/negotiate.test.ts`                                 | `format/negotiate.ts`                                                                    | §3.2 against `negotiateLocale(candidates: readonly string[], supported: readonly string[], excluded?: readonly string[]): string \| undefined`.                                                                                                                                                                              |
+| `test/unit/accept-language.test.ts`                           | `format/negotiate.ts`                                                                    | §3.3 against `parseAcceptLanguage(value: string \| null): AcceptLanguage` (`{ preferred, excluded }`).                                                                                                                                                                                                                       |
+| `test/unit/catalogue-validation.test.ts`                      | `catalogue/validate.ts`, `errors.ts`                                                     | §3.4 refusals by message; partial warn count.                                                                                                                                                                                                                                                                                |
+| `test/unit/localizer.test.ts`                                 | `service/localizer.ts`, `errors.ts`                                                      | §3.5, §3.11 against `ILocalizer.t(key: string, values?: FormatValues): string`, `forLocale(tag: string): ILocalizer`, `localizerFor(ctx: IRequestContext): ILocalizer`; the two-entry-point identity case.                                                                                                                   |
+| `test/unit/locale-middleware.test.ts`                         | `middleware/locale-middleware.ts`                                                        | §3.2 precedence with a negative control per source; §3.9 exclusion; writes via `replaceLocale`; uses `createTestContext` from `@setu-ts/testing` so the request is sealed as the kernel seals it.                                                                                                                            |
+| `test/unit/localization-plugin.test.ts`                       | `plugin/localization-plugin.ts`, `interfaces/index.ts`                                   | Option refusals (§4.1); `provides`/`optionalDependencies`; health payload (§3.12); exclusion list equals the tenancy list by value; `enabled: false`.                                                                                                                                                                        |
+| `test/unit/barrel-exports.test.ts`                            | `index.ts`, `format/index.ts`                                                            | Both barrels pinned at compile time (the M56 class); the `/format` barrel exports exactly three functions and three types.                                                                                                                                                                                                   |
+| `test/integration/headers.test.ts`                            | middleware, plugin                                                                       | §3.7 through a real kernel app and `app.fetch`.                                                                                                                                                                                                                                                                              |
+| `test/integration/catalogue-route.test.ts`                    | `routes/catalogue-route.ts`                                                              | §3.8, including the responder-formatted `404` under `errorHandler({ format: 'rfc9457' })` asserted field by field.                                                                                                                                                                                                           |
+| `test/integration/cache-vary.test.ts`                         | plugin + the real `cacheMiddleware`                                                      | §3.10 end to end: two locales, two entries.                                                                                                                                                                                                                                                                                  |
+| `test/integration/with-tenancy.test.ts`                       | plugin + the real `MultiTenancyPlugin`                                                   | §3.9 ordering by edge; `tenantLocale` participates.                                                                                                                                                                                                                                                                          |
+| `test/integration/render.test.ts`                             | plugin + the real `ViewPlugin({ engine: 'hono-html' })` (no JSX compiler options needed) | A route resolves `localizerFor(ctx)`, passes `t('greeting', { name })` as a prop, and the rendered HTML carries the `de` string under `Accept-Language: de`; a negative control under `en`.                                                                                                                                  |
+| `test/e2e/format-browser-safe.test.ts`                        | `format/*`                                                                               | §3.13 both checks: the `deno info --json` runtime graph stays inside `src/format/`, with a negative control that adds a value import of `@setu-ts/common` to a scratch copy and is observed failing; and the deleted-`Deno` subprocess checking same-runtime consistency and import independence (not cross-runtime parity). |
+| `test/package-readme-fence-compiler.test.ts` (root, extended) | README                                                                                   | Fence count row; the loader, hydration and SDK recipes compile.                                                                                                                                                                                                                                                              |
 
 ## 7. Verification gates
 
