@@ -5,6 +5,7 @@ import { OpenApiCodegenError } from '../../src/errors.ts';
 import { paramsDocument } from '../fixtures/params-document.ts';
 import { usersDocument } from '../fixtures/users-document.ts';
 import { inlineShapesDocument } from '../fixtures/inline-shapes-document.ts';
+import { redirectDocument } from '../fixtures/redirect-document.ts';
 import type {
   SdkOpenApiDocument,
   SdkOpenApiOperation,
@@ -1510,6 +1511,79 @@ describe('typed error responses (X11-7)', () => {
 
     expect(out).not.toContain('GetUserByIdError');
     expect(out).not.toContain('import { HttpClientError }');
+  });
+
+  it('keeps a redirect error arm and uses unknown for a redirect-only operation', () => {
+    // Fetch returns a 303 without `Location` unfollowed, and `HttpClient` throws
+    // `HttpClientError` for it, so the arm must stay narrowable.
+    const out = generateOpenApiClient(errDoc({
+      '303': { description: 'See other' },
+    }));
+
+    expect(out).toContain(
+      'export type GetUserByIdError = HttpClientError<unknown> & { readonly status: 303 };',
+    );
+    expect(out).toContain('export function isGetUserByIdError(');
+    expect(out).toContain('Promise<ClientResponse<unknown>>');
+    expect(out).toContain(
+      'Followed redirect target bodies are not described here and are typed as unknown.',
+    );
+  });
+
+  it('uses unknown when an operation has both a 2xx response and a redirect', () => {
+    const out = generateOpenApiClient(errDoc({
+      '200': {
+        description: 'OK',
+        content: { 'application/json': { schema: { type: 'string' } } },
+      },
+      '303': { description: 'See other' },
+    }));
+
+    expect(out).toContain('Promise<ClientResponse<unknown>>');
+    expect(out).toContain(
+      'export type GetUserByIdError = HttpClientError<unknown> & { readonly status: 303 };',
+    );
+  });
+
+  it('keeps an arm for every auto-follow redirect status', () => {
+    for (const status of ['301', '302', '303', '307', '308']) {
+      const out = generateOpenApiClient(errDoc({ [status]: { description: 'Redirect' } }));
+      expect(out).toContain(`{ readonly status: ${status} }`);
+    }
+  });
+
+  it('retains an observable 304 response as an error arm', () => {
+    const out = generateOpenApiClient(errDoc({
+      '304': { description: 'Not modified' },
+    }));
+
+    expect(out).toContain(
+      'export type GetUserByIdError = HttpClientError<unknown> & { readonly status: 304 };',
+    );
+    expect(out).toContain('export function isGetUserByIdError(');
+    expect(out).not.toContain('Followed redirect target bodies');
+  });
+
+  it('uses unknown for an OpenAPI 3XX range response', () => {
+    const out = generateOpenApiClient(errDoc({
+      '3XX': { description: 'Redirect' },
+    }));
+
+    expect(out).toContain('Promise<ClientResponse<unknown>>');
+    expect(out).not.toContain('GetUserByIdError');
+    expect(out).toContain(
+      'Followed redirect target bodies are not described here and are typed as unknown.',
+    );
+  });
+
+  it('emits the committed redirect fixture byte-for-byte', () => {
+    const generated = generateOpenApiClient(redirectDocument, {
+      sdkImport: '../../src/index.ts',
+    });
+    const fixture = Deno.readTextFileSync(
+      new URL('../fixtures/redirect-client.ts', import.meta.url),
+    );
+    expect(generated).toBe(fixture);
   });
 
   it('ignores a `default` response, which names no single status', () => {

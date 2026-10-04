@@ -9,6 +9,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { HttpClient } from '../../src/http/http-client.ts';
+import { createClient } from '../../src/sdk.ts';
 import { ClientCircuitOpenError, HttpClientError } from '../../src/errors.ts';
 import type { ClientOptions, IClientTiming, IHttpClient } from '../../src/http/contracts.ts';
 
@@ -51,6 +52,57 @@ function buildClient(overrides: Partial<ClientOptions> = {}): {
 }
 
 describe('HttpClient', () => {
+  it('rejects non-finite and negative Retry-After caps at construction', () => {
+    for (const maxRetryAfterMs of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(() =>
+        createClient({
+          baseUrl: 'https://api.example.com',
+          retry: { limit: 2, delay: 10, backoff: 'fixed', maxRetryAfterMs },
+        })
+      ).toThrow('retry.maxRetryAfterMs must be a finite non-negative number');
+    }
+  });
+
+  it('rejects a Retry-After cap above the portable timer maximum', () => {
+    expect(() =>
+      createClient({
+        baseUrl: 'https://api.example.com',
+        retry: {
+          limit: 2,
+          delay: 10,
+          backoff: 'fixed',
+          maxRetryAfterMs: 2_147_483_648,
+        },
+      })
+    ).toThrow('retry.maxRetryAfterMs exceeds the maximum timer delay');
+  });
+
+  it('wires a valid Retry-After cap into the retry strategy', async () => {
+    const sleeps: number[] = [];
+    let attempts = 0;
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      timing: {
+        now: () => 0,
+        sleep: (ms) => {
+          sleeps.push(ms);
+          return Promise.resolve();
+        },
+      },
+      retry: { limit: 2, delay: 10, backoff: 'fixed', maxRetryAfterMs: 1_000 },
+      fetch: () => {
+        attempts++;
+        return Promise.resolve(
+          new Response('', { status: 503, headers: { 'Retry-After': '2' } }),
+        );
+      },
+    });
+
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(HttpClientError);
+    expect(attempts).toBe(1);
+    expect(sleeps).toEqual([]);
+  });
+
   it('builds correct URL from baseUrl + path', async () => {
     const { client, calls } = buildClient();
     await client.request({ method: 'GET', path: 'users' });

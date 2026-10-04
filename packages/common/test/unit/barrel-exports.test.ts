@@ -30,8 +30,18 @@ import type {
   IngressKind,
 } from '../../src/index.ts';
 import type { WebSocketGuardDecision, WebSocketUpgradeGuard } from '../../src/index.ts';
+import type { TraceparentSource } from '../../src/index.ts';
 
 describe('@setu-ts/common barrel — registry factory arm', () => {
+  it('exports TraceparentSource as a type', () => {
+    const source: TraceparentSource = {
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: '01',
+    };
+    expect(source.traceFlags).toBe('01');
+  });
+
   it('exports resolveRegistryEntry as a function', () => {
     expect(common.resolveRegistryEntry).toBeDefined();
     expect(typeof common.resolveRegistryEntry).toBe('function');

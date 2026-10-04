@@ -436,6 +436,7 @@ package fits the plugin architecture.
 | `SubscribeOptions`                   | interface |
 | `TaskPoolStats`                      | interface |
 | `TelemetryContext`                   | interface |
+| `TraceparentSource`                  | interface |
 | `TraceDiagnosticsBatch`              | interface |
 | `TraceLinkRelationship`              | interface |
 | `TraceObservation`                   | interface |

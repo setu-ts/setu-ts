@@ -183,7 +183,7 @@ describe('version sweep — sweepTrackedFiles', () => {
   // needed and for a reason that has nothing to do with the gate.
   it('reads the real tree and reports both vacuity guards', async () => {
     const result = await sweepTrackedFiles(await workspaceVersion(), [
-      'packages/sdk/src/retry/retry-strategy.ts',
+      'packages/sdk/src/http/contracts.ts',
       'packages/sdk/deno.json', // filtered out by isSweptPath
     ]);
     expect(result.filesScanned).toBe(1);
@@ -216,7 +216,7 @@ describe('version sweep — sweepTrackedFiles', () => {
 
   it('reports a stale reference found in a real file', async () => {
     const result = await sweepTrackedFiles('9.9.9', [
-      'packages/sdk/src/retry/retry-strategy.ts',
+      'packages/sdk/src/http/contracts.ts',
     ]);
     expect(result.findings.length).toBeGreaterThan(0);
     expect(result.findings[0]?.pkg).toBe('common');

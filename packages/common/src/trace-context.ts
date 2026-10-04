@@ -21,6 +21,22 @@ const SPAN_ID_RE = /^[0-9a-f]{16}$/;
 const TRACE_FLAGS_RE = /^[0-9a-f]{2}$/;
 
 /**
+ * The span identity fields accepted by {@linkcode contextToTraceparent}.
+ *
+ * Both `TelemetryContext` and `SpanContext` satisfy this structural contract.
+ *
+ * @since 0.9.0
+ */
+export interface TraceparentSource {
+  /** Lowercase 32-hex-digit W3C trace identifier. */
+  readonly traceId?: string;
+  /** Lowercase 16-hex-digit W3C span identifier. */
+  readonly spanId?: string;
+  /** Lowercase two-hex-digit W3C trace flags. */
+  readonly traceFlags?: string;
+}
+
+/**
  * Parses a W3C `traceparent` value.
  *
  * @param header - Header value, or `null` when it is absent
@@ -48,7 +64,12 @@ export function parseTraceparentToContext(header: string | null): TelemetryConte
  * @returns A header value, or `null` when the context has no span identity
  * @since 0.2.0
  */
-export function contextToTraceparent(context: TelemetryContext): string | null {
+export function contextToTraceparent(context: TraceparentSource): string | null;
+/** @internal Compatibility overload for existing opaque-context object literals. */
+export function contextToTraceparent(context: TelemetryContext): string | null;
+export function contextToTraceparent(
+  context: TraceparentSource | TelemetryContext,
+): string | null {
   const traceId = context.traceId;
   const spanId = context.spanId;
   const traceFlags = context.traceFlags ?? '01';
