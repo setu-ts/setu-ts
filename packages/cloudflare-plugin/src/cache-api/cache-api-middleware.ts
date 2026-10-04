@@ -187,6 +187,8 @@ function isParsedForm(url: string): boolean {
  *
  * Skipped without error, each reported as `X-Cache-Api: BYPASS` or `MISS`:
  *
+ * - the request is not a `GET` — the key is a URL string the Cache API resolves
+ *   as a GET, so a `POST` could otherwise be answered from a cached `GET`;
  * - `bypass` returned `true`;
  * - with the default key, the URL is not in its parsed form, carries a
  *   fragment, or the locale is not well-formed, or the request has no locale

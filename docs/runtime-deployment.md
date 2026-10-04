@@ -98,7 +98,8 @@ app.router.get('/events', async (ctx) => {
 
 ### Prerequisites
 
-- Node.js 18+ or 20+
+- Node.js 22+ (`Promise.withResolvers` is used in five packages and shipped in Node 22; CI verifies
+  on Node 24)
 - npm, pnpm, or yarn
 
 ### Setup

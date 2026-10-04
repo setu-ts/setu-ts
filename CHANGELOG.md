@@ -220,6 +220,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The documented Node.js floor is 22, not 18.** `docs/getting-started.md`,
+  `docs/runtime-deployment.md` and the runtime README claimed Node 18+; five packages use
+  `Promise.withResolvers`, which Node 22 was the first to ship, and `globalThis.crypto` alone
+  needs 19. CI verifies on Node 24. The `cacheApiMiddleware` JSDoc's list of skip reasons also names
+  the non-`GET` pass-through it had omitted since M52b.
 - **A Kafka `subscribe()` racing `disconnect()` no longer leaves a consumer running.** When
   `disconnect()` landed while `subscribe()` was still connecting its consumer, or during a first
   attempt that then succeeded, the subscription completed anyway — a consumer ran after shutdown,
