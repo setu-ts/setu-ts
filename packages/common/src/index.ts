@@ -91,7 +91,12 @@ export type {
 } from './registry.ts';
 
 // Request identity and cross-package state keys
-export { replacePrincipal, replaceTenant, sealRequestIdentity } from './request-identity.ts';
+export {
+  replaceLocale,
+  replacePrincipal,
+  replaceTenant,
+  sealRequestIdentity,
+} from './request-identity.ts';
 export { CLIENT_IP_STATE_KEY } from './state-keys.ts';
 
 // Path-exclusion matcher (M90a) — the one matcher four middlewares share
@@ -536,6 +541,14 @@ export type { ISsrService } from './services/ssr.ts';
 
 // View rendering contracts
 export type { Component, IViewEngine } from './services/view.ts';
+
+// Localization contracts
+export type {
+  ILocalizer,
+  LocalizationMessage,
+  MessageCatalogue,
+  PluralForms,
+} from './services/localization.ts';
 
 // Session contracts
 export type {

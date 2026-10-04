@@ -12820,7 +12820,20 @@ header and a malformed tag, each observed refused without a throw escaping the m
 records a design security review (its §10), since `Accept-Language`, the cookie and the query
 parameter are all network input reaching `Intl`.
 
----
+**Shipped.** As planned, with four corrections recorded in the plan's §11: `@setu-ts/testing` joined
+the package list (its mock request dropped a seeded `locale`); the plugin declares
+`optionalDependencies: [CAPABILITIES.LOGGER]`, because a partial-catalogue warning is raised during
+`register()`; `localizerFor` negotiates an unsupported `request.locale` instead of throwing; and the
+React Router recipe hands the loader the request's localizer through `populateLoadContext` rather
+than a catalogue. One `packages/cli` data line was required despite the scope rule: the CLI's static
+table of plugin health-indicator names, which a root gate keeps complete. The security audit found
+the Cloudflare Cache API middleware keyed on a bare URL — which the platform matches with no request
+headers, so `Vary` could not separate locales — and its default key now carries the locale; five
+re-audit rounds then tightened that key until no two URL-and-locale pairs can share an entry,
+serving uncached the requests no key can separate. The catalogue route serves each locale overlaid
+on the default, so a browser falls back exactly as `t()` does. The third sealed `IRequest` field
+costs about 170 ns per request (measured against `develop`), inside the 1 µs threshold. Twenty
+negative controls were observed failing and reverted.
 
 ## Progress Tracking
 
@@ -13014,4 +13027,4 @@ parameter are all network input reaching `Intl`.
 | 101g      | ⬜     | cli + testing + full-stack template — scaffolds that are not wired                                                                                                                                                                            |
 | 101h      | ⬜     | common + docs — documentation, plus redaction setup that takes extra work                                                                                                                                                                     |
 | 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |
-| 103       | ⬜     | localization-plugin (new) + common — message catalogues, request locale resolution, a browser-safe shared formatter                                                                                                                           |
+| 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |

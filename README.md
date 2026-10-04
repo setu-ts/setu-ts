@@ -150,13 +150,14 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Real-time and rendering
 
-| Feature               | Status | Package                     | Description                                                   |
-| --------------------- | ------ | --------------------------- | ------------------------------------------------------------- |
-| Server-Sent Events    | ✅     | `sse-plugin`                | One-way streaming, named channels, heartbeat, `Last-Event-ID` |
-| WebSocket             | ✅     | `websocket-plugin`          | Full-duplex on all four runtimes; rooms, heartbeat, limits    |
-| Cross-replica fan-out | ✅     | `realtime-backplane-plugin` | Rooms and channels reach clients on other replicas            |
-| React SSR             | ✅     | `react-router-plugin`       | React Router v7 framework mode with file-based routing        |
-| Server-rendered views | ✅     | `view-plugin`               | `@Render` + `renderView` over hono-jsx / hono-html engines    |
+| Feature               | Status | Package                     | Description                                                                        |
+| --------------------- | ------ | --------------------------- | ---------------------------------------------------------------------------------- |
+| Server-Sent Events    | ✅     | `sse-plugin`                | One-way streaming, named channels, heartbeat, `Last-Event-ID`                      |
+| WebSocket             | ✅     | `websocket-plugin`          | Full-duplex on all four runtimes; rooms, heartbeat, limits                         |
+| Cross-replica fan-out | ✅     | `realtime-backplane-plugin` | Rooms and channels reach clients on other replicas                                 |
+| React SSR             | ✅     | `react-router-plugin`       | React Router v7 framework mode with file-based routing                             |
+| Server-rendered views | ✅     | `view-plugin`               | `@Render` + `renderView` over hono-jsx / hono-html engines                         |
+| Localization          | ✅     | `localization-plugin`       | Message catalogues, request locale resolution, a formatter shared with the browser |
 
 ### Operations
 

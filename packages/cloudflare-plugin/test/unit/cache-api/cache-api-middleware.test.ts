@@ -51,10 +51,18 @@ function bindingsWithWaitUntil(sink: Promise<unknown>[]): ICloudflareBindings {
 /** A context for one request, optionally carrying the bindings capability. */
 function contextFor(
   url: string,
-  options?: { readonly method?: string; readonly services?: IServiceRegistry },
+  options?: {
+    readonly method?: string;
+    readonly services?: IServiceRegistry;
+    readonly locale?: string;
+  },
 ): IRequestContext {
   return createTestContext({
-    request: { url, method: (options?.method ?? 'GET') as 'GET' },
+    request: {
+      url,
+      method: (options?.method ?? 'GET') as 'GET',
+      ...(options?.locale === undefined ? {} : { locale: options.locale }),
+    },
     ...(options?.services === undefined ? {} : { services: options.services }),
   });
 }
@@ -95,6 +103,196 @@ describe('cacheApiMiddleware — miss', () => {
 
     expect(cache.matches).toEqual(['https://example.test/search?q=hono&page=2']);
     expect(cache.puts.at(0)?.key).toBe('https://example.test/search?q=hono&page=2');
+  });
+
+  it('keys a localized request on its locale, so two locales never share an entry (M103)', async () => {
+    const cache = new FakeCacheApi();
+    for (const locale of ['de', 'en']) {
+      const ctx = contextFor('https://example.test/cart?page=1', { locale });
+      await cacheApiMiddleware({ cache })(ctx, () => {
+        ctx.response.json({ locale });
+        return Promise.resolve();
+      });
+    }
+    expect(cache.puts.map((put) => put.key)).toEqual([
+      'https://example.test/cart?page=1&setu-cache-locale=de',
+      'https://example.test/cart?page=1&setu-cache-locale=en',
+    ]);
+  });
+
+  it('keeps a client-supplied locale parameter IN the key, so it cannot poison or steer', async () => {
+    // `set` would strip the client's copy from the key while the handler still
+    // sees it, so `/cart?setu-cache-locale=x` would fill the canonical `/cart`
+    // entry with a response reflecting the attacker's input.
+    const cache = new FakeCacheApi();
+    const attacker = contextFor('https://example.test/cart?setu-cache-locale=en', { locale: 'de' });
+    await cacheApiMiddleware({ cache })(attacker, () => {
+      attacker.response.json({ link: attacker.request.url });
+      return Promise.resolve();
+    });
+    const key = 'https://example.test/cart?setu-cache-locale=en&setu-cache-locale=de';
+    expect(cache.matches).toEqual([key]);
+    // Neither the canonical German entry nor the English one.
+    expect(key).not.toBe('https://example.test/cart?setu-cache-locale=de');
+    expect(key).not.toBe('https://example.test/cart?setu-cache-locale=en');
+  });
+
+  it('keys on the URL text as sent, so encoding variants never share an entry (M103)', async () => {
+    // A re-serialized query folds these together, letting a client choose the
+    // exact text a cached reflection of `ctx.request.url` carries.
+    const urls = [
+      'https://example.test/page',
+      'https://example.test/page?',
+      'https://example.test/page?&&&',
+      'https://example.test/page?p=2',
+      'https://example.test/page?p=%32',
+      'https://example.test/page?q=a+b',
+      'https://example.test/page?q=a%20b',
+    ];
+    const cache = new FakeCacheApi();
+    for (const url of urls) {
+      const ctx = contextFor(url, { locale: 'de' });
+      await cacheApiMiddleware({ cache })(ctx, () => {
+        ctx.response.json({ ok: true });
+        return Promise.resolve();
+      });
+    }
+    expect(cache.matches).toEqual([
+      'https://example.test/page?setu-cache-locale=de',
+      'https://example.test/page?&setu-cache-locale=de',
+      'https://example.test/page?&&&&setu-cache-locale=de',
+      'https://example.test/page?p=2&setu-cache-locale=de',
+      'https://example.test/page?p=%32&setu-cache-locale=de',
+      'https://example.test/page?q=a+b&setu-cache-locale=de',
+      'https://example.test/page?q=a%20b&setu-cache-locale=de',
+    ]);
+  });
+
+  it("encodes the locale, so the key always ends in the request's own locale", async () => {
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/page?a=1', {
+      locale: 'en&setu-cache-locale=de',
+    });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([
+      'https://example.test/page?a=1&setu-cache-locale=en%26setu-cache-locale%3Dde',
+    ]);
+  });
+
+  it('serves a URL carrying a fragment uncached, with or without a locale', async () => {
+    // The Cache API ignores fragments when matching, while Deno and Node hand
+    // the fragment to the handler — `/page#x` would fill `/page`'s entry.
+    for (const locale of [undefined, 'de']) {
+      const cache = new FakeCacheApi();
+      const ctx = contextFor(
+        'https://example.test/page#<x>',
+        locale === undefined ? {} : { locale },
+      );
+      let ran = false;
+      await cacheApiMiddleware({ cache })(ctx, () => {
+        ran = true;
+        ctx.response.json({ link: ctx.request.url });
+        return Promise.resolve();
+      });
+      expect(ran).toBe(true);
+      expect(cache.matches).toEqual([]);
+      expect(cache.puts).toEqual([]);
+      expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
+    }
+  });
+
+  it('serves URL text that is not in its parsed form uncached, with or without a locale', async () => {
+    // Deno hands the handler the request target as sent; the Cache API parses
+    // a key before matching, so each of these would share its normalized
+    // sibling's entry while the handler reflected its own text.
+    const unparsed = [
+      'https://example.test/page/./x',
+      'https://example.test/page\\x',
+      'https://EXAMPLE.test/page',
+      'https://example.test/page?q="><b>',
+    ];
+    for (const url of unparsed) {
+      for (const locale of [undefined, 'de']) {
+        const cache = new FakeCacheApi();
+        const ctx = contextFor(url, locale === undefined ? {} : { locale });
+        let ran = false;
+        await cacheApiMiddleware({ cache })(ctx, () => {
+          ran = true;
+          ctx.response.json({ link: ctx.request.url });
+          return Promise.resolve();
+        });
+        expect(ran).toBe(true);
+        expect(cache.matches).toEqual([]);
+        expect(cache.puts).toEqual([]);
+        expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
+      }
+    }
+    // A URL that does not parse at all (the kernel refuses one with a 400
+    // before any middleware, so this is the guard's last line, not a path a
+    // served request takes).
+    const odd = contextFor('https://example.test/page');
+    Object.defineProperty(odd.request, 'url', { value: 'not a url' });
+    const oddCache = new FakeCacheApi();
+    await cacheApiMiddleware({ cache: oddCache })(odd, () => {
+      odd.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(oddCache.matches).toEqual([]);
+    // Control: the parsed form of the same request is cached.
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/page?q=%22%3E%3Cb%3E', { locale: 'de' });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([
+      'https://example.test/page?q=%22%3E%3Cb%3E&setu-cache-locale=de',
+    ]);
+  });
+
+  it('serves a locale-less request carrying the reserved parameter uncached', async () => {
+    // Its key would be the URL itself — exactly `/page`'s key in `de` — so an
+    // app that sets the locale only sometimes would let it fill that entry.
+    const cache = new FakeCacheApi();
+    const anonymous = contextFor('https://example.test/page?setu-cache-locale=de');
+    await cacheApiMiddleware({ cache })(anonymous, () => {
+      anonymous.response.json({ link: anonymous.request.url });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([]);
+    expect(cache.puts).toEqual([]);
+    expect(anonymous.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
+
+    // Control: the same request with the locale resolved is keyed and cached.
+    const localized = contextFor('https://example.test/page?setu-cache-locale=de', {
+      locale: 'de',
+    });
+    await cacheApiMiddleware({ cache })(localized, () => {
+      localized.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([
+      'https://example.test/page?setu-cache-locale=de&setu-cache-locale=de',
+    ]);
+  });
+
+  it('serves a request whose locale is not well-formed uncached, never a 500', async () => {
+    // A lone surrogate, as `replaceLocale` may restore from stored data:
+    // `encodeURIComponent` throws `URIError` on it.
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/page', {
+      locale: JSON.parse('"\\ud800"') as string,
+    });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([]);
+    expect(cache.puts).toEqual([]);
+    expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
   });
 
   it('honours a custom key function on BOTH the read and the write', async () => {

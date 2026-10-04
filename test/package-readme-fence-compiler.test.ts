@@ -94,6 +94,10 @@ const READMES: Readonly<Record<string, number>> = {
   // M92: the new package's README is born gated — usage, functional renderView,
   // the @Render decorator and the raw() opt-out.
   'packages/view-plugin/README.md': 6,
+  // M103: the new package's README is born gated — usage, a catalogue source,
+  // the view-rendering path, the React Router loader recipe, and both halves
+  // of the browser recipe (the exposing plugin and the `/format` client).
+  'packages/localization-plugin/README.md': 6,
   'packages/validation-plugin/README.md': 2,
   'packages/sse-plugin/README.md': 6,
   'packages/websocket-plugin/README.md': 10,
@@ -198,7 +202,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(40);
+    expect(Object.keys(READMES)).toHaveLength(41);
 
     // And pin the COVERAGE: every package README is gated or explicitly named
     // as a known gap. Half of them were in neither before v0.6.0, which is how

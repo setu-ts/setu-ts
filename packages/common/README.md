@@ -153,6 +153,7 @@ package fits the plugin architecture.
 | `parseFormBody`                      | function  |
 | `parseJsonBody`                      | function  |
 | `parseTraceparentToContext`          | function  |
+| `replaceLocale`                      | function  |
 | `replacePrincipal`                   | function  |
 | `replaceTenant`                      | function  |
 | `resolveKeysetSort`                  | function  |
@@ -295,6 +296,7 @@ package fits the plugin architecture.
 | `ILifecycleApi`                      | interface |
 | `ILocalDiagnosticsListener`          | interface |
 | `ILocalDiagnosticsListenerFactory`   | interface |
+| `ILocalizer`                         | interface |
 | `ILogger`                            | interface |
 | `IMailer`                            | interface |
 | `IMessageBroker`                     | interface |
@@ -377,6 +379,7 @@ package fits the plugin architecture.
 | `PageResult`                         | interface |
 | `PendingSignIn`                      | interface |
 | `PickOptions`                        | interface |
+| `PluralForms`                        | interface |
 | `ProbeTiming`                        | interface |
 | `ProcessOptions`                     | interface |
 | `ProviderOptions`                    | interface |
@@ -507,8 +510,10 @@ package fits the plugin architecture.
 | `JsonValue`                          | type      |
 | `LifecyclePhase`                     | type      |
 | `LoadBalanceStrategy`                | type      |
+| `LocalizationMessage`                | type      |
 | `LogLevel`                           | type      |
 | `LogMetadata`                        | type      |
+| `MessageCatalogue`                   | type      |
 | `MessageHandler`                     | type      |
 | `MetricType`                         | type      |
 | `MiddlewareFunction`                 | type      |

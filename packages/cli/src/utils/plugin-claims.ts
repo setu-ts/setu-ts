@@ -43,6 +43,7 @@ export const PLUGIN_HEALTH_INDICATORS: ReadonlyMap<string, readonly string[]> = 
   ['feature-flags-plugin', ['feature-flags']],
   ['graphql-plugin', ['graphql']],
   ['grpc-plugin', ['grpc']],
+  ['localization-plugin', ['localization']],
   ['mail-plugin', ['mail']],
   ['messaging-plugin', ['messaging']],
   ['multi-tenancy-plugin', ['multi-tenancy']],

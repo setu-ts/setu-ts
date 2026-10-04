@@ -469,3 +469,32 @@ describe('@setu-ts/common barrel — bounded backend call (M101a)', () => {
     await expect(common.withDeadline(() => Promise.resolve(7), options)).resolves.toBe(7);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M103 — the localization contract
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M103 localization contract', () => {
+  it('exposes CAPABILITIES.LOCALIZATION, resolved through the localization plugin', () => {
+    expect(common.CAPABILITIES.LOCALIZATION).toBe('localization');
+  });
+
+  it('exports replaceLocale beside the other two replacers', () => {
+    expect(typeof common.replaceLocale).toBe('function');
+  });
+
+  it('exports the four localization types (declared against the barrel)', () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class).
+    const plural: common.PluralForms = { one: '{count} item', other: '{count} items' };
+    const message: common.LocalizationMessage = plural;
+    const catalogue: common.MessageCatalogue = { items: message, title: 'Cart' };
+    const localizer: common.ILocalizer = {
+      locale: 'en',
+      locales: ['en'],
+      t: (key) => String(catalogue[key]),
+      forLocale: () => localizer,
+    };
+    expect(localizer.t('title')).toBe('Cart');
+    expect(localizer.forLocale('en')).toBe(localizer);
+  });
+});

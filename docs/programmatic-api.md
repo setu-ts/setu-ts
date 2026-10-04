@@ -337,6 +337,7 @@ interface IRequest {
   readonly ip?: string;
   user?: IPrincipal; // populated by auth middleware
   tenant?: ITenant; // populated by multi-tenancy middleware
+  locale?: string; // populated by the localization middleware (M103); replaceLocale() to override
   signal?: AbortSignal; // fires on client disconnect
   readonly raw?: Request; // The undisturbed web-standard Request, preserved for WebSocket upgrade and gRPC dispatch after the middleware pipeline.
 

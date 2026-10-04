@@ -473,6 +473,16 @@ error[private-type-ref]: public type references private type
       }
     });
 
+    it('includes the localization /format subpath target (M103)', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      expect(result.targets).toContain('packages/localization-plugin/src/format/index.ts');
+    });
+
     it('includes runtime worker subpath target', async () => {
       const fs = {
         readTextFile: async (path: string) => await Deno.readTextFile(path),
@@ -548,10 +558,11 @@ error[private-type-ref]: public type references private type
         stat: (path: string) => Deno.stat(path),
       };
       const result = await collectApiEntrypoints(fs);
-      // 49 published packages, runtime has 2 exports (./src/index.ts + ./worker),
-      // cli has 2 exports (./src/index.ts + ./main), rest have 1 each
-      // = 49 + 1 (extra runtime) + 1 (extra cli) = 51
-      expect(result.targets).toHaveLength(51);
+      // 50 published packages, runtime has 2 exports (./src/index.ts + ./worker),
+      // cli has 2 exports (./src/index.ts + ./main), localization-plugin has 2
+      // (./src/index.ts + ./format, M103), rest have 1 each
+      // = 50 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 53
+      expect(result.targets).toHaveLength(53);
     });
 
     it('maps each target to its correct package name', async () => {

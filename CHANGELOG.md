@@ -43,6 +43,41 @@ All notable changes to this project are documented here. The format follows
   and the component arm performs no missing-key check — an absent key renders as `undefined`. The
   committed `IMailer` contract is unchanged, so every holder calling `sendTemplate` gets the arm
   with no code change.
+- **`@setu-ts/localization-plugin` (M103).** A new package: `LocalizationPlugin` registers an
+  `ILocalizer` under the new `CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()`
+  (a malformed or `Intl`-unknown tag, a catalogue for an unlisted locale, a malformed message, and a
+  locale missing default keys are refused by name; `allowPartialCatalogues` downgrades the last to
+  one warning per locale), and resolves each request's locale at middleware priority 45 — query
+  parameter, cookie, `Accept-Language` (bounded parse, q-values, `de-AT` → `de`, `q=0` honoured
+  under `*`), a `tenantLocale` default, then the default — matching every candidate against the
+  supported set only. Every governed response carries `Vary: Accept-Language` (plus `Cookie` while
+  the cookie source is on, a stated CDN cost that `middleware.cookie: false` removes) and a
+  `Content-Language` written after the handler from the final locale. `localizerFor(ctx)` binds the
+  localizer to the request; `localeMiddleware` registers the resolution per route group;
+  `exposeCatalogues` serves `GET <basePath>/:locale` for browsers, `private, max-age=3600` by
+  default (a session refreshing its cookie must never reach a shared cache); `MissingMessageError`,
+  `MissingPluralCountError` and `UnsupportedLocaleError` are exported, with the option types
+  `LocalizationPluginOptions` (exactly one of `catalogues` and `source`, a compile error otherwise),
+  `LocaleMiddlewareOptions` and `IMessageSource` (catalogues loaded once at `register()`). The
+  formatter and locale negotiation ship as the import-free subpath
+  `@setu-ts/localization-plugin/format` (`format`, `negotiateLocale`, `parseAcceptLanguage`, and the
+  types `FormatValues`, `FormatOptions` and `AcceptLanguage`), whose runtime graph a test confines
+  to its own modules. It escapes nothing — escaping is the renderer's — and promises one
+  implementation, not identical output across runtimes: `Intl` data differs, so dates take an
+  explicit `timeZone`. Zero npm dependencies.
+- **Localization contracts in `common` (M103).** `CAPABILITIES.LOCALIZATION`, `ILocalizer`,
+  `LocalizationMessage`, `PluralForms` and `MessageCatalogue`, so a plugin formatting text for a
+  person resolves the localizer without importing the localization plugin.
+- **`IRequest.locale` and `replaceLocale` in `common` (M103).** The request's resolved BCP 47 tag is
+  a first-class optional field on the `tenant` precedent, sealed by the same one-implicit-write
+  guard (a second plain assignment throws naming `replaceLocale`), with
+  `replaceLocale(request,
+  tag)` as the deliberate escape — for example, to apply a signed-in
+  user's saved preference once authentication has run. Optional and source-compatible: no `IRequest`
+  implementor breaks. A reader running below priority 45 sees `undefined`, exactly as one below 40
+  sees no `tenant`.
+- **`@setu-ts/testing`'s `createTestContext` carries a seeded `request.locale` (M103)**, sealed as
+  the kernel seals a request, so a test seeding a locale gets it — and the same one-write guard.
 
 - **Three named real-broker errors in `@setu-ts/messaging-plugin` (M101b).**
   `PubSubSubscriptionBoundElsewhereError`, `NatsConsumerNameCollisionError` and
@@ -54,6 +89,31 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`cloudflare-plugin`'s `cacheApiMiddleware` keys a localized request on its locale (M103).** Its
+  key is a URL string, which the Cache API matches with no request headers, so `Vary` could never
+  separate locales there and one locale's page was served to everyone for the TTL. When
+  `ctx.request.locale` is set, the default key is the URL text as sent with a `setu-cache-locale`
+  parameter naming the locale concatenated after it (on the key only; a client-supplied copy and
+  every encoding variant stay distinct in the key, so a client can reach neither another locale's
+  entry nor an entry another URL is served from). Without a locale the key is unchanged, except in
+  the last case below. Four kinds of request are now served uncached, because no key can keep them
+  apart from another: a URL whose text is not in its parsed form (Deno, and Node for some targets,
+  hand the handler the request target as sent — `/a/./b`, a raw `"` in the query — while the Cache
+  API parses a key before matching, so such a request could fill its normalized sibling's entry), a
+  URL carrying a fragment (Deno, Node and Bun hand it to the handler, while the Cache API ignores it
+  when matching), a locale that is not well-formed UTF-16, and a request with no locale whose URL
+  already contains `setu-cache-locale=` (its key would equal a localized request's). Workers
+  normalizes the URL and strips the fragment, so the first two do not arise there. As for
+  `cache-plugin`, the middleware must run after the locale middleware, and a handler-time
+  `replaceLocale` is not reflected. A custom `key` is untouched and must include the locale itself.
+- **`cache-plugin` keys on the resolved locale (M103).** The cache key gains a length-prefixed
+  locale segment from `ctx.request.locale`, between the tenant and `vary` segments, so one locale's
+  cached body is never served to another. An application without the localization plugin has no
+  locale on its requests and keeps byte-identical keys. The segment is read when `cacheMiddleware`
+  runs, so it must run after the locale middleware: a GLOBAL `cacheMiddleware` needs a higher
+  priority number than that middleware's (45 by default, or the configured `middleware.priority`),
+  and where the locale middleware is applied per route, the cache must be on that route after it. A
+  `replaceLocale` override is reflected only when it runs before the lookup.
 - SDK-generated clients keep an error arm for every declared `3xx`, the auto-follow statuses (`301`,
   `302`, `303`, `307`, and `308`) included, since Fetch returns one unfollowed when it carries no
   `Location`. Operations that may follow a redirect return `unknown`. Retry policies now cap

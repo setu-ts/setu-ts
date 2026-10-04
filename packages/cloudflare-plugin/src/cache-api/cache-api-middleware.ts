@@ -53,7 +53,18 @@ export interface CacheApiMiddlewareOptions {
   readonly cache?: ICacheApi;
   /**
    * Builds the cache key from the request. Omitted uses the full request URL,
-   * which is what the platform's own cache keys on.
+   * which is what the platform's own cache keys on — plus, when the request
+   * carries a resolved `ctx.request.locale` (the localization plugin), a
+   * `setu-cache-locale` query parameter naming it, appended last. The key is a
+   * URL STRING, so the platform matches it with no request headers and `Vary`
+   * cannot separate entries here. The locale in the key is the one present
+   * when this middleware runs, so it must run AFTER the locale middleware: a
+   * GLOBAL registration needs a higher priority number than that middleware's
+   * (45 by default, or the configured `middleware.priority`); where the locale
+   * middleware is applied per route instead, this one must be too, listed
+   * after it; and a `replaceLocale` made inside the handler is not reflected —
+   * such a route must not be cached here. A custom `key` replaces all of this
+   * and must include the locale itself on a localized route.
    */
   readonly key?: (ctx: IRequestContext) => string;
   /** Returning `true` skips the cache entirely for this request. */
@@ -73,6 +84,100 @@ export interface CacheApiMiddlewareOptions {
 }
 
 /**
+ * The query parameter the default key adds for a localized request.
+ *
+ * The key is the request URL's own TEXT with `setu-cache-locale=<locale>`
+ * concatenated after it — never a re-serialized query, and never a `set`.
+ * `set` would delete a client-supplied copy from the key while the handler
+ * still sees it, letting any client fill the canonical entry with a response
+ * reflecting its own input (web cache poisoning); re-serializing the query
+ * would fold encoding variants together (`?p=%32` with `?p=2`, `/page?&&` with
+ * `/page`), letting a client choose the exact text a cached reflection of
+ * `ctx.request.url` carries. Concatenation keeps every byte the client sent,
+ * and since the encoded locale can contain neither `&` nor `=`, the LAST
+ * occurrence of the parameter in a key always names the request's own
+ * resolved locale: two different URL-and-locale pairs never share a key.
+ */
+const LOCALE_KEY_PARAM = 'setu-cache-locale';
+
+/**
+ * The default cache key: the request URL, carrying the resolved locale when
+ * there is one (M103). Without a locale the key is the URL unchanged, so an
+ * application without the localization plugin keeps byte-identical keys.
+ *
+ * Answers `undefined` — the request is then served uncached — whenever no
+ * key can keep that request apart from another:
+ *
+ * - **the URL text is not in its parsed form.** Workers and Bun normalize the
+ *   URL before the handler sees it, but Deno (and Node, for some targets)
+ *   hand the handler the request target as sent — `/a/./b`, `/a\b`, a raw
+ *   `"` or `<` in the query, an upper-case host — while the Cache API parses
+ *   a key before it matches, so such a request would fill the entry its
+ *   normalized sibling is served from with a response reflecting its own
+ *   text. Comparing the text with its own serialization costs one URL parse.
+ * - **the URL carries a fragment.** Deno, Node and Bun deliver one to the
+ *   handler when a client sends it, while the Cache API ignores fragments when
+ *   it matches, so `/page#x` would fill `/page`'s entry. A browser never
+ *   sends a fragment, so nothing legitimate is lost; workerd strips it before
+ *   the handler.
+ * - **the locale is not well-formed UTF-16** (a lone surrogate), which
+ *   `encodeURIComponent` cannot encode. The localization plugin only ever
+ *   resolves supported tags; this guards a value an application restores
+ *   with `replaceLocale`.
+ * - **the request has no locale, but its URL already contains
+ *   `setu-cache-locale=`.** Its key would be the URL itself, which is exactly
+ *   a localized request's key (`/page?setu-cache-locale=de` is `/page` in
+ *   `de`). Every localized key contains that text, so a locale-less key that
+ *   does not cannot match one. This arises only where an application sets the
+ *   locale on some requests and not others; the plugin's own middleware
+ *   always sets one.
+ *
+ * With those excluded, a key is the parsed URL's own text plus at most the
+ * encoded locale, so two keys match only when the URL and locale both do.
+ */
+function defaultKey(ctx: IRequestContext): string | undefined {
+  const url = ctx.request.url;
+  if (url.includes('#') || !isParsedForm(url)) {
+    return undefined;
+  }
+  const locale = ctx.request.locale;
+  if (locale === undefined) {
+    return url.includes(`${LOCALE_KEY_PARAM}=`) ? undefined : url;
+  }
+  const encoded = encodeLocale(locale);
+  if (encoded === undefined) {
+    return undefined;
+  }
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}${LOCALE_KEY_PARAM}=${encoded}`;
+}
+
+/**
+ * Percent-encodes a locale for the key, or `undefined` when it is not
+ * well-formed UTF-16 (`encodeURIComponent` throws `URIError` on a lone
+ * surrogate). A `try` rather than `String.prototype.isWellFormed`, which Node
+ * 18 lacks.
+ */
+function encodeLocale(locale: string): string | undefined {
+  try {
+    return encodeURIComponent(locale);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reports whether `url` is exactly its own WHATWG serialization. */
+function isParsedForm(url: string): boolean {
+  // `new URL` + `try` rather than `URL.parse`, which is newer than some of the
+  // runtimes this package supports.
+  try {
+    return new URL(url).href === url;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Caches responses in the Cloudflare edge cache.
  *
  * On a hit the cached response is replayed and the handler chain is **not**
@@ -83,6 +188,11 @@ export interface CacheApiMiddlewareOptions {
  * Skipped without error, each reported as `X-Cache-Api: BYPASS` or `MISS`:
  *
  * - `bypass` returned `true`;
+ * - with the default key, the URL is not in its parsed form, carries a
+ *   fragment, or the locale is not well-formed, or the request has no locale
+ *   and its URL contains `setu-cache-locale=` — in each case no key could keep
+ *   the request apart from another (this last one applies to an application
+ *   without the localization plugin too);
  * - no cache handle is available (not running on Cloudflare Workers);
  * - the response is a live stream — teeing it would double the memory the
  *   stream exists to avoid and change its flush timing (the M42 guard
@@ -136,7 +246,12 @@ export function cacheApiMiddleware(options?: CacheApiMiddlewareOptions): Middlew
       return;
     }
 
-    const key = keyFn !== undefined ? keyFn(ctx) : ctx.request.url;
+    const key = keyFn !== undefined ? keyFn(ctx) : defaultKey(ctx);
+    if (key === undefined) {
+      await next();
+      ctx.response.header(STATUS_HEADER, 'BYPASS');
+      return;
+    }
 
     const hit = await cache.match(key);
     if (hit !== undefined) {
