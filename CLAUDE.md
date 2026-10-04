@@ -5665,8 +5665,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   failed on a missing design security review — now recorded as plan §10 after the fact (the M101a
   precedent) — and a doc claim that every `retry` field was validated while `factor` was forwarded
   unchecked (now held to [0, 1]); its pre-existing observation that a `disconnect()` racing
-  `subscribe()`'s connect or first attempt left a consumer running was folded in and fixed —
-  complete (PR pending).
+  `subscribe()`'s connect or first attempt left a consumer running was folded in and fixed. Round 2
+  (on `1b6c741d`) found the same class one window later (F3): a consumer whose group JOIN was in
+  flight survived `app.stop()`, because kafkajs's `stop()` is a no-op mid-join and closing the
+  connections under the join is a retriable crash it RESTARTS — so release now waits for the join
+  (bounded 10 s) and a released consumer refuses the restart; on a real broker each half was shown
+  load-bearing on its own (without the wait a stale member lingers; without either the process
+  hangs) — complete (PR pending).
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

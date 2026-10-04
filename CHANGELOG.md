@@ -151,8 +151,14 @@ All notable changes to this project are documented here. The format follows
   `disconnect()` landed while `subscribe()` was still connecting its consumer, or during a first
   attempt that then succeeded, the subscription completed anyway — a consumer ran after shutdown,
   holding the process open and consuming messages. It now rejects with
-  `KafkaBroker was disconnected while subscribing` and releases the consumer. Found by the M101b
-  security audit; it predates M101b.
+  `KafkaBroker was disconnected while subscribing` and releases the consumer. The same held for a
+  consumer whose group JOIN was still in flight (about 3 s on a broker with Kafka's default
+  `group.initial.rebalance.delay.ms`): kafkajs's `stop()` is a no-op until the join completes, so
+  disconnecting closed the connections under it, which kafkajs treats as a retriable crash and
+  restarts — the consumer rejoined after `app.stop()`. Releasing a consumer now waits for its join
+  to settle (bounded at 10 s, so `app.stop()` can take that long for a just-started consumer) and
+  each consumer refuses kafkajs's crash-restart once released. Found by the M101b security audit;
+  both predate M101b.
 
 - **A Kafka application exits after `app.stop()`.** `KafkaBroker.disconnect()` and a subscription's
   `unsubscribe()` called the kafkajs consumer's `stop()`, which halts fetching but leaves the

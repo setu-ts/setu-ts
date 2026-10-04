@@ -118,6 +118,15 @@ const UNKNOWN_TOPIC_TYPE = 'UNKNOWN_TOPIC_OR_PARTITION';
 const MAX_CAUSE_DEPTH = 5;
 
 /**
+ * How long releasing a consumer waits for an in-flight group join to settle
+ * before disconnecting it anyway (M101b security audit F3). A join is a few ms
+ * on a broker with `group.initial.rebalance.delay.ms=0` and about 3 s with
+ * Kafka's default; the bound only stops a join that never settles from holding
+ * shutdown open for good.
+ */
+const JOIN_SETTLE_TIMEOUT_MS = 10_000;
+
+/**
  * The subscribe-retry budget when {@link KafkaOptions.retry} leaves a field
  * out — kafkajs's own defaults (`src/retry/defaults.js`), so one set of
  * numbers means the same thing to both.
@@ -209,6 +218,11 @@ interface ActiveConsumer {
   id: string;
   consumer: unknown;
   running: boolean;
+  /**
+   * Settles once the consumer's `run()` has — that is, once kafkajs has
+   * finished its group join or run its crash handler. Never rejects.
+   */
+  started: Promise<void>;
 }
 
 /**
@@ -383,16 +397,12 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // Disconnect every active consumer. kafkajs's `stop()` only halts fetching
     // and leaves the consumer's cluster connection open, which kept the process
     // alive after `app.stop()` (measured on a real broker); `disconnect()` stops
-    // AND closes it (M101b review).
-    for (const consumer of this.#activeConsumers.values()) {
-      try {
-        const realConsumer = consumer.consumer as unknown as { disconnect(): Promise<void> };
-        consumer.running = false;
-        await realConsumer.disconnect();
-      } catch {
-        // Ignore errors during shutdown
-      }
-    }
+    // AND closes it (M101b review). Released CONCURRENTLY: each release may
+    // wait for an in-flight join, and waiting in turn would let N stalled joins
+    // hold shutdown for N times the bound. A failed release is ignored.
+    await Promise.allSettled(
+      [...this.#activeConsumers.values()].map((consumer) => this.#releaseConsumer(consumer)),
+    );
     this.#activeConsumers.clear();
 
     if (this.#producer) {
@@ -548,9 +558,28 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
     // Create consumer unconditionally from the resolved factory
     const realFactory = this.#factory as unknown as {
-      consumer(options: { groupId: string }): unknown;
+      consumer(
+        options: {
+          groupId: string;
+          retry: { restartOnFailure(error: Error): Promise<boolean> };
+        },
+      ): unknown;
     };
-    const realConsumer = realFactory.consumer({ groupId });
+    // Set once the entry exists, below. kafkajs consults `restartOnFailure`
+    // before restarting a crashed consumer; refusing once this consumer has
+    // been released (or the broker disconnected) stops a disconnect that
+    // closed the connections under an in-flight join from REJOINING after
+    // shutdown (M101b security audit F3). kafkajs merges consumer `retry`
+    // over the client's, so the forwarded `KafkaOptions.retry` is kept; an
+    // injected factory may ignore the field.
+    let entry: ActiveConsumer | undefined;
+    const realConsumer = realFactory.consumer({
+      groupId,
+      retry: {
+        restartOnFailure: () =>
+          Promise.resolve(entry?.running === true && generation === this.#generation),
+      },
+    });
 
     const consumerTyped = realConsumer as unknown as {
       connect(): Promise<void>;
@@ -594,7 +623,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
       id: subscriptionId,
       consumer: realConsumer,
       running: true,
+      started: Promise.resolve(),
     };
+    entry = activeConsumer;
     this.#activeConsumers.set(subscriptionId, activeConsumer);
 
     // Run consumer with eachMessage handler.
@@ -610,7 +641,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // that promise, so an unread rejection would be an unhandled rejection
     // that terminates the process; it is reported and the consumer marked
     // stopped instead.
-    consumerTyped.run({
+    const runPromise = consumerTyped.run({
       eachMessage: async ({ partition, message }) => {
         const msgTyped = message as unknown as {
           key: Uint8Array | null;
@@ -641,7 +672,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
         // Handler success triggers auto-commit; failure prevents commit
         await handler(deserialized, metadata);
       },
-    }).catch((err: unknown) => {
+    });
+    activeConsumer.started = runPromise.then(() => {}, () => {});
+    runPromise.catch((err: unknown) => {
       activeConsumer.running = false;
       try {
         this.#logger?.error(
@@ -658,13 +691,11 @@ export class KafkaBroker implements MessageBrokerAdapter {
       unsubscribe: async (): Promise<void> => {
         const consumer = this.#activeConsumers.get(subscriptionId);
         if (consumer) {
-          consumer.running = false;
           try {
-            // `disconnect()`, not `stop()`: each subscription owns its consumer,
-            // so unsubscribing must release its connection too — this is also
-            // the path the RPC reply inbox closes through (M101b review).
-            const realSub = consumer.consumer as unknown as { disconnect(): Promise<void> };
-            await realSub.disconnect();
+            // Each subscription owns its consumer, so unsubscribing must
+            // release its connection too — this is also the path the RPC
+            // reply inbox closes through (M101b review).
+            await this.#releaseConsumer(consumer);
           } catch {
             // Ignore errors
           }
@@ -672,6 +703,33 @@ export class KafkaBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  /**
+   * Releases a consumer: waits for an in-flight group join to settle, bounded
+   * by {@link JOIN_SETTLE_TIMEOUT_MS}, then disconnects it (M101b security
+   * audit F3).
+   *
+   * kafkajs's `stop()` is a no-op until the join completes, so disconnecting
+   * mid-join closed the connections under the join instead — a retriable
+   * crash kafkajs then RESTARTS, and the consumer rejoined after shutdown,
+   * consuming messages and holding the process open. Once `run()` has
+   * settled, `stop()` really stops the runner and cancels any pending
+   * restart. `disconnect()`, not `stop()`: it also closes the connection.
+   *
+   * @param consumer - The consumer entry to release
+   */
+  async #releaseConsumer(consumer: ActiveConsumer): Promise<void> {
+    consumer.running = false;
+    let handle: unknown;
+    await Promise.race([
+      consumer.started,
+      new Promise<void>((resolve) => {
+        handle = this.#runtime.setTimeout(resolve, JOIN_SETTLE_TIMEOUT_MS);
+      }),
+    ]);
+    this.#runtime.clearTimeout(handle);
+    await (consumer.consumer as { disconnect(): Promise<void> }).disconnect();
   }
 
   /**

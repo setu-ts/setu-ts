@@ -250,6 +250,12 @@ topic, or enable auto-creation.
 injected. A consumer crash kafkajs declines to restart rejects its `run()` promise; the broker
 reports it through the logger instead of letting it become an unhandled rejection.
 
+Stopping releases every consumer cleanly: `disconnect()` and `unsubscribe()` wait for an in-flight
+group join to settle (bounded at 10 s) before disconnecting the consumer, and a released consumer
+refuses kafkajs's crash-restart — otherwise a consumer stopped mid-join rejoined after `app.stop()`
+and held the process open. On a broker with Kafka's default `group.initial.rebalance.delay.ms` (3
+s), stopping an application moments after it started therefore takes a few seconds.
+
 ## Request-reply
 
 `request()` / `respond()` carry correlation inside a message envelope over each broker's ordinary
