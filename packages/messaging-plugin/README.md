@@ -252,9 +252,10 @@ injected. A consumer's `run()` can reject — kafkajs's crash handler rethrows a
 rejection.
 
 A consumer that crashes with an error kafkajs would retry is restarted by the broker, after the
-crash's own `retryTime` (else `retry.initialRetryTime`) — the delay kafkajs's own restart uses. The
-broker declines kafkajs's restart in favour of its own so that stopping can always reach the
-restarted consumer.
+crash's own `retryTime`, else `retry.initialRetryTime`, else 300 ms — read the way kafkajs's own
+restart reads them, so `initialRetryTime: 0` waits 300 ms rather than restarting at once. The
+`retry` read is `KafkaOptions.retry`, not an injected client's own. The broker declines kafkajs's
+restart in favour of its own so that stopping can always reach the restarted consumer.
 
 Stopping releases every consumer: `disconnect()` and `unsubscribe()` cancel a scheduled restart,
 wait up to 10 s for an in-flight group join to settle, then disconnect the consumer. A join still

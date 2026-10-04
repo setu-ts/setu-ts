@@ -1296,6 +1296,34 @@ describe('KafkaBroker owns crash restarts (M101b security audit N2, O5)', () => 
     await broker.disconnect(); // clears the one restart still pending
   });
 
+  it('reads initialRetryTime: 0 as kafkajs does — 300 ms, never at once (N3)', async () => {
+    // kafkajs: `e.retryTime || retry.initialRetryTime || 300`. Taking the 0
+    // literally restarted ~70 times a second against a stopped broker.
+    const factory = new FakeKafkaFactory();
+    const real = createFakeRuntime();
+    const delays: number[] = [];
+    const runtime = {
+      ...real,
+      setTimeout: (fn: () => void, ms: number) => {
+        delays.push(ms);
+        return real.setTimeout(fn, ms);
+      },
+    };
+    const broker = new KafkaBroker(runtime, new JsonSerializer(), {
+      client: factory,
+      retry: { initialRetryTime: 0 },
+    });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    const { restartOnFailure } = retryFor(factory, 'messaging-consumers:orders');
+
+    await restartOnFailure(crash());
+    await restartOnFailure(crash(0));
+
+    expect(delays).toEqual([300, 300]);
+    await broker.disconnect();
+  });
+
   it('keeps at most one restart pending, so a replaced timer never runs', async () => {
     const factory = new FakeKafkaFactory();
     const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });

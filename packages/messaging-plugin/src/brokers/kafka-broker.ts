@@ -137,9 +137,12 @@ const JOIN_SETTLE_TIMEOUT_MS = 10_000;
 const KAFKAJS_CONSUMER_RETRIES = 5;
 
 /**
- * The delay before restarting a crashed consumer: the crash's own `retryTime`
- * when it carries a positive one, as kafkajs's restart reads it
- * (`kafkajs/src/consumer/index.js:293`), else `fallback`.
+ * The delay before restarting a crashed consumer, read the way kafkajs's own
+ * restart reads it (`kafkajs/src/consumer/index.js:293`,
+ * `e.retryTime || retry.initialRetryTime || 300`): the crash's own positive
+ * `retryTime`, else a positive `fallback`, else kafkajs's 300 ms default. A
+ * configured `initialRetryTime: 0` therefore never means "restart at once" —
+ * against a broker that is down that would spin (M101b security audit N3).
  *
  * @param error - The crash kafkajs reported
  * @param fallback - The configured initial retry time
@@ -152,11 +155,12 @@ function restartDelay(error: unknown, fallback: number): number {
   } catch {
     // A throwing getter must not escape kafkajs's crash handler, where it
     // would become an unhandled rejection (plan §10 obligation 6).
-    return fallback;
+    retryTime = undefined;
   }
-  return typeof retryTime === 'number' && Number.isFinite(retryTime) && retryTime > 0
-    ? retryTime
-    : fallback;
+  if (typeof retryTime === 'number' && Number.isFinite(retryTime) && retryTime > 0) {
+    return retryTime;
+  }
+  return fallback > 0 ? fallback : DEFAULT_SUBSCRIBE_RETRY.initialRetryTime;
 }
 
 /**

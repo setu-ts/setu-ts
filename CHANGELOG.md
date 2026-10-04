@@ -168,8 +168,9 @@ All notable changes to this project are documented here. The format follows
   drops a runner that is still joining — so the restarted consumer joined the group after shutdown,
   consumed and committed messages with the stopped application's handler, and held the process open
   (measured on Kafka 4.0). The broker now declines kafkajs's restart and restarts the consumer
-  itself after the same delay, so a stop cancels a pending restart and waits for one in progress.
-  Found by the M101b security audit; predates M101b.
+  itself — after the crash's `retryTime`, else `KafkaOptions.retry.initialRetryTime`, else 300 ms,
+  as kafkajs reads them — so a stop cancels a pending restart and waits for one in progress. Found
+  by the M101b security audit; predates M101b.
 
 - **A Kafka application exits after `app.stop()`.** `KafkaBroker.disconnect()` and a subscription's
   `unsubscribe()` called the kafkajs consumer's `stop()`, which halts fetching but leaves the
