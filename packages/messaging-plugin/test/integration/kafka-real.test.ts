@@ -16,11 +16,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
+import type { IKafkaFactory } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { MessagingPlugin } from '../../src/index.ts';
+import { KafkaTopicUnavailableError, MessagingPlugin } from '../../src/index.ts';
 
 const kafkaBrokers = Deno.env.get('KAFKA_BROKERS');
 
@@ -162,6 +163,143 @@ describe({
         expect(reply).toEqual({ doubled: 42 });
       } finally {
         await app.stop();
+      }
+    });
+    it('boots against topics that do not exist yet: two topics and RPC in ONE app (M101b, V8-26)', async () => {
+      // The case above pre-creates every wire topic, which is exactly the
+      // shape under which V8-26 was invisible. Measured on Kafka 4.0 (KRaft)
+      // with auto-creation on: the metadata request that CREATES a topic
+      // answers UNKNOWN_TOPIC_OR_PARTITION, and kafkajs does not retry that,
+      // so a subscription to a fresh topic died at boot. Nothing is
+      // pre-created here — the declared subscriptions, the derived
+      // `rr.req.<topic>` channel and the reply topic are all new.
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const ordersTopic = `m101b.orders.${suffix}`;
+      const paymentsTopic = `m101b.payments.${suffix}`;
+      const rpcTopic = `m101b.rpc.${suffix}`;
+      const replyTopic = `m101b.replies.${suffix}`;
+      const orders: Array<{ id: number }> = [];
+      const payments: Array<{ id: number }> = [];
+
+      let broker: IMessageBroker | undefined;
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({
+            broker: 'kafka',
+            brokers,
+            replyTopic,
+            subscriptions: [
+              {
+                topic: ordersTopic,
+                handler: (message) => {
+                  orders.push(message as { id: number });
+                },
+              },
+              {
+                topic: paymentsTopic,
+                handler: (message) => {
+                  payments.push(message as { id: number });
+                },
+              },
+            ],
+          }),
+          brokerProbe((b) => {
+            broker = b;
+          }),
+        ],
+      });
+
+      try {
+        // THE regression guard: start() resolves with both declared
+        // subscriptions on topics that did not exist a moment ago.
+        await app.start();
+
+        // Same rebalance timing as above: retry each publish until delivered.
+        for (
+          let attempt = 1;
+          attempt <= 8 && (orders.length === 0 || payments.length === 0);
+          attempt++
+        ) {
+          if (orders.length === 0) await broker!.publish(ordersTopic, { id: attempt });
+          if (payments.length === 0) await broker!.publish(paymentsTopic, { id: 100 + attempt });
+          await new Promise((r) => setTimeout(r, 2_000));
+        }
+        await waitFor(() => orders.length > 0 && payments.length > 0, 'two-topic delivery');
+        // Each topic's handler sees only its own topic's messages.
+        expect(orders.every((m) => m.id < 100)).toBe(true);
+        expect(payments.every((m) => m.id > 100)).toBe(true);
+
+        await broker!.respond<{ n: number }, { doubled: number }>(
+          rpcTopic,
+          (req) => ({ doubled: req.n * 2 }),
+        );
+        await new Promise((r) => setTimeout(r, 3_000)); // let the responder join
+        let reply: { doubled: number } | undefined;
+        for (let attempt = 0; attempt < 3 && reply === undefined; attempt++) {
+          try {
+            reply = await broker!.request<{ n: number }, { doubled: number }>(
+              rpcTopic,
+              { n: 21 },
+              { timeoutMs: 15_000 },
+            );
+          } catch (error) {
+            if (attempt === 2) throw error;
+          }
+        }
+        expect(reply).toEqual({ doubled: 42 });
+      } finally {
+        await app.stop();
+      }
+    });
+
+    it('refuses a topic the broker will not create with a named error from start() (M101b, V8-26)', async () => {
+      // CI's broker auto-creates, so the refusal is produced by the REAL
+      // broker through a real kafkajs consumer that asks it NOT to create:
+      // `allowAutoTopicCreation: false` makes the metadata answer an honest
+      // UNKNOWN_TOPIC_OR_PARTITION every time — no fabricated error. The
+      // subscribe retry applies to an injected client too.
+      const kafkajs = await import('npm:kafkajs@2.x');
+      const kafka = new kafkajs.Kafka({
+        clientId: 'm101b-no-autocreate',
+        brokers,
+        logLevel: kafkajs.logLevel.NOTHING,
+      });
+      const factory = {
+        producer: () => kafka.producer(),
+        consumer: ({ groupId }: { groupId: string }) =>
+          kafka.consumer({ groupId, allowAutoTopicCreation: false }),
+      } as unknown as IKafkaFactory;
+      const topic = `m101b.never.${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`;
+
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({
+            broker: 'kafka',
+            client: factory,
+            retry: { retries: 1, initialRetryTime: 50 },
+            subscriptions: [{ topic, handler: () => {} }],
+          }),
+        ],
+      });
+
+      const err = await app.start().then(() => null, (e: unknown) => e);
+      try {
+        expect(err).toBeInstanceOf(KafkaTopicUnavailableError);
+        const named = err as KafkaTopicUnavailableError;
+        expect(named.topic).toBe(topic);
+        expect(named.groupId).toBe(`messaging-consumers:${topic}`);
+        expect((named.cause as { type?: string }).type).toBe('UNKNOWN_TOPIC_OR_PARTITION');
+
+        // And the broker really did not create it — the refusal was genuine.
+        const admin = kafka.admin();
+        await admin.connect();
+        const topics = await admin.listTopics();
+        await admin.disconnect();
+        expect(topics).not.toContain(topic);
+      } finally {
+        await app.stop().catch(() => {});
       }
     });
   },

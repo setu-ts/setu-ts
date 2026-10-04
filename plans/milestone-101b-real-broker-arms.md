@@ -1,6 +1,7 @@
 # Milestone 101b — message transports that fail against the real broker
 
-> **Status:** Planning. Branch: `feat/m101b-real-broker-arms`. `main` is protected — all work
+> **Status:** Implemented — §1, §3.3, §4.1 and §8 carry measured corrections (marked
+> **Correction**). Branch: `feat/m101b-real-broker-arms`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR. **Sequence:**
 > lands AFTER M101a (same package; this branch is cut from `main` once M101a has merged and reuses
 > the kernel-app outage-suite shape M101a §3.8 establishes). It does not depend on M101c–M101h.
@@ -55,6 +56,20 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 | Package test net grant                         | `packages/messaging-plugin/deno.json:9-21`                                                                                                    | `127.0.0.1:8085`, `127.0.0.1:4222`, `127.0.0.1:9092` already granted; no manifest change                                                                                                                                                                                                                                                     |
 | CI backend inventory                           | `.github/workflows/ci.yml:78-82,264-300`; `test/apps-gate.test.ts:498-534`; `docs/messaging-emulators.md:162-170`                             | NATS and Kafka run in CI (pinned); the Pub/Sub emulator is local-only by decision ("Why not CI")                                                                                                                                                                                                                                             |
 | M101a dependency                               | `plans/milestone-101a-bounded-health.md` §3.2, §3.8                                                                                           | the kernel-app `/health`+`/ready` outage-suite shape and the `service-bus-broker.ts` change this branch rebases over; nothing in this plan touches that file                                                                                                                                                                                 |
+
+**Correction (measured during implementation).** Two §1 rows did not survive the source and a real
+broker. Row "kafkajs already retries metadata": `brokerPool.refreshMetadata`
+(`brokerPool.js:208-213`) rethrows only `LEADER_NOT_AVAILABLE` into the retrier and `bail()`s every
+other error, so an `UNKNOWN_TOPIC_OR_PARTITION` rejects at once, unwrapped (measured: 5 ms on a
+non-auto-creating `apache/kafka:4.0.0`, whatever `retry` says). Row "CI broker auto-creates, so a
+fresh topic resolves": on Kafka 4.0 (KRaft) with `auto.create.topics.enable=true` the metadata
+request that creates the topic answers `UNKNOWN_TOPIC_OR_PARTITION` itself — the topic exists, the
+subscribe failed, and a second subscribe on the same consumer succeeds (measured 3/3 on 4.0.0; 6/6
+topics created by failed subscribes on 4.3.1). V8-26 is therefore the ordinary auto-creating broker
+with nothing retrying. Also measured: the NATS server answers ANY config difference under an
+existing consumer name with `err_code 10148 "consumer already exists"` and an identical one
+idempotently, and adds its own `_nats.*` metadata keys, so "no metadata" in §3.2 reads as "no
+`setu.queue` key".
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -166,6 +181,14 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 
 ### 3.3 V8-26 — a Kafka topic that cannot be subscribed is named, and the consumer never crashes the process
 
+- **Correction:** the "no broker-owned retry loop" half below rests on the falsified §1 row. As
+  built, `subscribe` retries `UNKNOWN_TOPIC_OR_PARTITION` (found anywhere on a bounded `cause`
+  chain) with exponential backoff read from `KafkaOptions.retry` — kafkajs's own defaults, 5 / 300
+  ms / 2 / 30 s — then throws `KafkaTopicUnavailableError`. The budget is validated at construction
+  (`NaN` would loop forever), applies to an injected client too, and a disconnect during the wait
+  ends it. The real-Kafka named-error case uses a real kafkajs consumer with
+  `allowAutoTopicCreation: false` rather than a fabricated error, so the refusal comes from the
+  broker.
 - **Decision:** in `KafkaBroker.subscribe`, the `await consumer.subscribe(...)` is wrapped: an error
   whose `type === 'UNKNOWN_TOPIC_OR_PARTITION'` disconnects that consumer and throws a new exported
   `KafkaTopicUnavailableError(topic, groupId, cause)` whose message names the topic, the group, and
@@ -223,13 +246,13 @@ a real-backend case per arm that exercises RPC and a SECOND topic, not one topic
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                       | Consumer                    | Behavior (per implementation)                                                                                             |
-| -------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `PubSubOptions.defaultQueue` (existing)      | `GcpPubSubBroker.subscribe` | now the PREFIX of `<defaultQueue>.<topic>`; default `'messaging-consumers'` unchanged                                     |
-| `SubscribeOptions.queue` (existing, Pub/Sub) | the real adapter's `open()` | used verbatim, and ALSO binding-checked on `ALREADY_EXISTS`                                                               |
-| `SubscribeOptions.queue` (existing, NATS)    | `NatsBroker.subscribe`      | encoded through `toJetStreamConsumerName` before reaching `jsm.consumers.add`                                             |
-| `KafkaOptions.retry` (new)                   | `resolveClient`             | forwarded to kafkajs; absent → kafkajs defaults; ignored for an injected `client`, documented                             |
-| `KafkaOptions.logger` (existing)             | the `run()` `.catch`        | first reader; absent → the rejection is swallowed after marking the consumer stopped (no console fallback — `no-console`) |
+| Option                                       | Consumer                     | Behavior (per implementation)                                                                                             |
+| -------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `PubSubOptions.defaultQueue` (existing)      | `GcpPubSubBroker.subscribe`  | now the PREFIX of `<defaultQueue>.<topic>`; default `'messaging-consumers'` unchanged                                     |
+| `SubscribeOptions.queue` (existing, Pub/Sub) | the real adapter's `open()`  | used verbatim, and ALSO binding-checked on `ALREADY_EXISTS`                                                               |
+| `SubscribeOptions.queue` (existing, NATS)    | `NatsBroker.subscribe`       | encoded through `toJetStreamConsumerName` before reaching `jsm.consumers.add`                                             |
+| `KafkaOptions.retry` (new)                   | `resolveClient`, `subscribe` | forwarded to kafkajs unless a `client` is injected; also the subscribe unknown-topic retry budget (**Correction**)        |
+| `KafkaOptions.logger` (existing)             | the `run()` `.catch`         | first reader; absent → the rejection is swallowed after marking the consumer stopped (no console fallback — `no-console`) |
 
 ## 5. Implementation files
 
@@ -287,6 +310,9 @@ suite is run twice against one instance to prove C1's advice is no longer needed
 - **Sequence.** Cut from `main` after M101a merges; the only shared file is none — M101a touches
   `service-bus-broker.ts` and `messaging-plugin.ts`, this plan does not — so the rebase is trivial,
   but the branch still waits so the CHANGELOG `Unreleased` section is edited in one order.
+- **Correction:** the probe below was run. On a non-auto-creating `apache/kafka:4.0.0` the error is
+  the bare `KafkaJSProtocolError` with `type: 'UNKNOWN_TOPIC_OR_PARTITION'` (no retry wrapper), so
+  the match needed no widening; the CI broker DOES produce the error, on the creating request.
 - **The real Kafka path cannot exhaust the budget.** The CI broker auto-creates, so the named error
   is proven with an injected factory; the raw escape the run saw came from a broker that did not
   auto-create (its image is not recorded in `smoke/ENVIRONMENT.md`). Before merging, the error path
