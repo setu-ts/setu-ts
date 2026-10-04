@@ -83,13 +83,16 @@ All notable changes to this project are documented here. The format follows
   `ctx.request.locale` is set, the default key is the URL text as sent with a `setu-cache-locale`
   parameter naming the locale concatenated after it (on the key only; a client-supplied copy and
   every encoding variant stay distinct in the key, so a client can reach neither another locale's
-  entry nor an entry another URL is served from). Without a locale the key is unchanged. Two
+  entry nor an entry another URL is served from). Without a locale the key is unchanged. Three
   requests are now served uncached, with or without a locale, because no key can keep them apart
-  from another: a URL carrying a fragment (Deno and Node hand it to the handler, while the Cache API
-  ignores it when matching, so `/page#x` could fill `/page`'s entry), and a locale that is not
-  well-formed UTF-16. As for `cache-plugin`, the middleware must run after the locale middleware,
-  and a handler-time `replaceLocale` is not reflected. A custom `key` is untouched and must include
-  the locale itself.
+  from another: a URL whose text is not in its parsed form (Deno, and Node for some targets, hand
+  the handler the request target as sent — `/a/./b`, a raw `"` in the query — while the Cache API
+  parses a key before matching, so such a request could fill its normalized sibling's entry), a URL
+  carrying a fragment (Deno, Node and Bun hand it to the handler, while the Cache API ignores it
+  when matching), and a locale that is not well-formed UTF-16. Workers normalizes the URL and strips
+  the fragment, so none of the three arises there. As for `cache-plugin`, the middleware must run
+  after the locale middleware, and a handler-time `replaceLocale` is not reflected. A custom `key`
+  is untouched and must include the locale itself.
 - **`cache-plugin` keys on the resolved locale (M103).** The cache key gains a length-prefixed
   locale segment from `ctx.request.locale`, between the tenant and `vary` segments, so one locale's
   cached body is never served to another. An application without the localization plugin has no

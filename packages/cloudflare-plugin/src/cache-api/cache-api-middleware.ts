@@ -105,22 +105,32 @@ const LOCALE_KEY_PARAM = 'setu-cache-locale';
  * there is one (M103). Without a locale the key is the URL unchanged, so an
  * application without the localization plugin keeps byte-identical keys.
  *
- * Answers `undefined` — the request is then served uncached — in the two
- * cases where no key can keep that request apart from another:
+ * Answers `undefined` — the request is then served uncached — whenever no
+ * key can keep that request apart from another:
  *
- * - **the URL carries a fragment.** Deno and Node deliver one to the handler
- *   when a client sends it, while the Cache API ignores fragments when it
- *   matches, so `/page#x` would fill the entry `/page` is served from with a
- *   response reflecting `x`. A browser never sends a fragment, so nothing
- *   legitimate is lost; workerd strips it before the handler.
+ * - **the URL text is not in its parsed form.** Workers and Bun normalize the
+ *   URL before the handler sees it, but Deno (and Node, for some targets)
+ *   hand the handler the request target as sent — `/a/./b`, `/a\b`, a raw
+ *   `"` or `<` in the query, an upper-case host — while the Cache API parses
+ *   a key before it matches, so such a request would fill the entry its
+ *   normalized sibling is served from with a response reflecting its own
+ *   text. Comparing the text with its own serialization costs one URL parse.
+ * - **the URL carries a fragment.** Deno, Node and Bun deliver one to the
+ *   handler when a client sends it, while the Cache API ignores fragments when
+ *   it matches, so `/page#x` would fill `/page`'s entry. A browser never
+ *   sends a fragment, so nothing legitimate is lost; workerd strips it before
+ *   the handler.
  * - **the locale is not well-formed UTF-16** (a lone surrogate), which
  *   `encodeURIComponent` cannot encode. The localization plugin only ever
  *   resolves supported tags; this guards a value an application restores
  *   with `replaceLocale`.
+ *
+ * With those excluded, a key is the parsed URL's own text plus at most the
+ * encoded locale, so two keys match only when the URL and locale both do.
  */
 function defaultKey(ctx: IRequestContext): string | undefined {
   const url = ctx.request.url;
-  if (url.includes('#')) {
+  if (url.includes('#') || !isParsedForm(url)) {
     return undefined;
   }
   const locale = ctx.request.locale;
@@ -134,6 +144,17 @@ function defaultKey(ctx: IRequestContext): string | undefined {
   return `${url}${separator}${LOCALE_KEY_PARAM}=${encodeURIComponent(locale)}`;
 }
 
+/** Reports whether `url` is exactly its own WHATWG serialization. */
+function isParsedForm(url: string): boolean {
+  // `new URL` + `try` rather than `URL.parse`, which is newer than some of the
+  // runtimes this package supports.
+  try {
+    return new URL(url).href === url;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Caches responses in the Cloudflare edge cache.
  *
@@ -145,8 +166,9 @@ function defaultKey(ctx: IRequestContext): string | undefined {
  * Skipped without error, each reported as `X-Cache-Api: BYPASS` or `MISS`:
  *
  * - `bypass` returned `true`;
- * - with the default key, the URL carries a fragment or the locale is not
- *   well-formed, so no key could keep the request apart from another;
+ * - with the default key, the URL is not in its parsed form, carries a
+ *   fragment, or the locale is not well-formed, so no key could keep the
+ *   request apart from another;
  * - no cache handle is available (not running on Cloudflare Workers);
  * - the response is a live stream — teeing it would double the memory the
  *   stream exists to avoid and change its flush timing (the M42 guard

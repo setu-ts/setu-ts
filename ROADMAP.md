@@ -12802,12 +12802,12 @@ React Router recipe hands the loader the request's localizer through `populateLo
 than a catalogue. One `packages/cli` data line was required despite the scope rule: the CLI's static
 table of plugin health-indicator names, which a root gate keeps complete. The security audit found
 the Cloudflare Cache API middleware keyed on a bare URL — which the platform matches with no request
-headers, so `Vary` could not separate locales — and its default key now carries the locale; three
+headers, so `Vary` could not separate locales — and its default key now carries the locale; four
 re-audit rounds then tightened that key until no two URL-and-locale pairs can share an entry,
 serving uncached the two requests no key can separate. The catalogue route serves each locale
 overlaid on the default, so a browser falls back exactly as `t()` does. The third sealed `IRequest`
 field costs about 170 ns per request (measured against `develop`), inside the 1 µs threshold.
-Eighteen negative controls were observed failing and reverted.
+Nineteen negative controls were observed failing and reverted.
 
 ## Progress Tracking
 

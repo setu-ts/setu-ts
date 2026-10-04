@@ -685,12 +685,23 @@ text is left as written; this section is authoritative where they disagree.
   application restoring a stored preference through `replaceLocale` could reach. Such a request is
   now served uncached.
 
-Eighteen negative controls were each observed failing and reverted: the locale segment dropped from
+**Found by the round-5 re-audit (fresh agent, `4840f7d1`), fixed on this branch:**
+
+- **N8 (Low) — fragments were not the only unseparable request.** The docs said the fragment and the
+  ill-formed locale were the only cases no key can separate. Deno (and Node for some targets) hand
+  the handler un-normalized URL text (`/page/./x`, `/page\x`, a raw `"` or `<`, an upper-case host),
+  and a spec cache parses a key before matching, so each variant shared its normalized sibling's
+  entry: a victim following the encoded link was served the attacker's raw markup. Not a regression
+  (identical at `07d5b528` and with the pre-M103 bare-URL key), but the claim was false. A URL whose
+  text is not its own WHATWG serialization is now served uncached too, which makes the claim true
+  rather than narrowing it.
+
+Nineteen negative controls were each observed failing and reverted: the locale segment dropped from
 the cache key, the date cache keyed by locale alone, the seal's `locale` descriptor removed, `*`
 ignoring `q=0`, the header split before slicing, `Content-Language` written from the initial locale,
 a prototype lookup in the formatter, the warned-key cap removed, `Cookie` dropped from `Vary`, and
 the catalogue route's default overlay dropped, the `cacheControl` probe removed, and the candidate
 length cap removed; and, after the audits, the Cloudflare locale key reverted to the bare URL,
 `append` reverted to `set`, the dot-segment guard removed, the key re-serialized from the parsed
-query, and each of the two bypass guards (fragment, ill-formed locale) removed. The planted
-`@setu-ts/common` value import is a permanent negative control inside the e2e suite.
+query, and each of the three bypass guards (parsed form, fragment, ill-formed locale) removed. The
+planted `@setu-ts/common` value import is a permanent negative control inside the e2e suite.

@@ -204,6 +204,55 @@ describe('cacheApiMiddleware — miss', () => {
     }
   });
 
+  it('serves URL text that is not in its parsed form uncached, with or without a locale', async () => {
+    // Deno hands the handler the request target as sent; the Cache API parses
+    // a key before matching, so each of these would share its normalized
+    // sibling's entry while the handler reflected its own text.
+    const unparsed = [
+      'https://example.test/page/./x',
+      'https://example.test/page\\x',
+      'https://EXAMPLE.test/page',
+      'https://example.test/page?q="><b>',
+    ];
+    for (const url of unparsed) {
+      for (const locale of [undefined, 'de']) {
+        const cache = new FakeCacheApi();
+        const ctx = contextFor(url, locale === undefined ? {} : { locale });
+        let ran = false;
+        await cacheApiMiddleware({ cache })(ctx, () => {
+          ran = true;
+          ctx.response.json({ link: ctx.request.url });
+          return Promise.resolve();
+        });
+        expect(ran).toBe(true);
+        expect(cache.matches).toEqual([]);
+        expect(cache.puts).toEqual([]);
+        expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('BYPASS');
+      }
+    }
+    // A URL that does not parse at all (the kernel refuses one with a 400
+    // before any middleware, so this is the guard's last line, not a path a
+    // served request takes).
+    const odd = contextFor('https://example.test/page');
+    Object.defineProperty(odd.request, 'url', { value: 'not a url' });
+    const oddCache = new FakeCacheApi();
+    await cacheApiMiddleware({ cache: oddCache })(odd, () => {
+      odd.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(oddCache.matches).toEqual([]);
+    // Control: the parsed form of the same request is cached.
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/page?q=%22%3E%3Cb%3E', { locale: 'de' });
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+    expect(cache.matches).toEqual([
+      'https://example.test/page?q=%22%3E%3Cb%3E&setu-cache-locale=de',
+    ]);
+  });
+
   it('serves a request whose locale is not well-formed uncached, never a 500', async () => {
     // A lone surrogate, as `replaceLocale` may restore from stored data:
     // `encodeURIComponent` throws `URIError` on it.

@@ -12663,9 +12663,12 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   the parameter never `set`: `set` would strip a client-supplied copy from the key while the handler
   still saw it, and re-serializing would fold encoding variants (`?p=%32` and `?p=2`) into one
   entry, either way letting one client choose what another is served. Without a locale the key is
-  the URL unchanged. A URL carrying a fragment, and a locale that is not well-formed UTF-16, are
-  served uncached (`X-Cache-Api: BYPASS`): the Cache API ignores fragments when matching while Deno
-  and Node deliver them to the handler, and `encodeURIComponent` cannot encode a lone surrogate. The
+  the URL unchanged. Three requests are served uncached (`X-Cache-Api: BYPASS`) because no key could
+  keep them apart from another: a URL whose text is not its own WHATWG serialization (Deno, and Node
+  for some targets, deliver the request target as sent, while the Cache API parses a key before
+  matching), a URL carrying a fragment (delivered by Deno, Node and Bun, ignored by the Cache API
+  when matching), and a locale that is not well-formed UTF-16 (`encodeURIComponent` cannot encode a
+  lone surrogate). Workers normalizes the URL and strips the fragment, so none arises there. The
   locale is the one present when the middleware runs, so the same conditions as `cache-plugin`
   apply: the middleware must run after the locale middleware (globally, at a higher priority number
   than it; per route, listed after it), and a `replaceLocale` made inside the handler is not
