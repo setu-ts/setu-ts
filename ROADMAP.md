@@ -10648,7 +10648,7 @@ merging beyond what the schema itself expresses.
   plugin covers it, and the part applications get wrong — cancelling the loop on shutdown — is an
   `AbortSignal` threading question that belongs with the runtime lifecycle, not here.
 - **Localization.** `IStringLocalizer` has no counterpart here and the framework has no i18n of any
-  kind. That is a real gap and a milestone in its own right, not an ergonomic.
+  kind. That is a real gap and a milestone in its own right, not an ergonomic — opened as M103.
 
 ---
 
@@ -12642,6 +12642,160 @@ the `@since` gate, which skipped every `@since 0.1.0` tag because that line ship
 prereleases, now checks such a tag against the line's last prerelease; the 62 wrong tags it surfaced
 are corrected to the version the registry shows first shipping each symbol.
 
+## Milestone 103: Localization — Messages, Locale Resolution and a Shared Formatter
+
+**Package(s):** new `@setu-ts/localization-plugin`; `packages/common` (one token, one contract, one
+optional `IRequest` member); `packages/cache-plugin` (a default locale segment in the cache key)
+
+**Objective:** Give an application one place to keep its user-facing strings per locale, one way to
+learn which locale a request wants, and one formatter implementation shared by the server and the
+browser — so a server-rendered page, a React Router loader, a mail body and an SPA client all read
+the same catalogue and never disagree about how a message is spelled.
+
+**The gap is total, not partial.** `grep -rn "Accept-Language\|Intl\.\|locale" packages/*/src`
+returns no framework-owned localization of any kind; the M97 comparison recorded it as "a real gap
+and a milestone in its own right" and stopped there. Today a client application that must answer in
+two languages writes its own `Accept-Language` parser (which is harder than it looks — q-values,
+wildcards, `de-AT` → `de` fallback), its own message lookup, and, if it hydrates in a browser, a
+second formatter whose output drifts from the first. Every piece of that is the kind of code this
+framework exists to own once.
+
+**Backend capability, browser-safe formatter.** The plugin is a backend capability and reaches the
+browser through the three rendering paths the framework already has, each a different story:
+
+- **Server-rendered views** (`view-plugin`, `@Render`, M102 mail bodies) are fully covered with no
+  client code: the handler resolves `t()` for the request's locale and passes strings into component
+  props. The browser receives finished HTML. This is where most of the value lands cheapest.
+- **React Router full-stack** (SSR + hydration): a loader resolves the localizer through the
+  `servicesContext` M44 already populates (`react-router-plugin/src/handler/load-context.ts:28`),
+  and returns formatted strings or the locale plus its bundle as loader data. Client-side navigation
+  still calls loaders on the server, so resolution never moves to the browser. What DOES need client
+  code is formatting a runtime value after hydration, which needs the catalogue in the browser and a
+  formatter that runs there.
+- **SPA clients using `@setu-ts/sdk`**: the same need, without SSR — a resource route serving one
+  locale's catalogue and the client-side formatter.
+
+So the frontend half is one decision, and it is taken: **ship the formatter as a pure, zero-import
+subpath export** (`@setu-ts/localization-plugin/format`, the `@setu-ts/runtime/worker` subpath
+precedent at `runtime/deno.json:7`) that the server's `t()` and a browser both call. The alternative
+— letting each application write its own client formatter — is two implementations of one behaviour
+that pass every gate while drifting (the M70f/M56 class). `Intl.PluralRules`, `Intl.NumberFormat`
+and `Intl.DateTimeFormat` exist in every browser and on all four runtimes, so neither side needs an
+npm dependency.
+
+**Deliverables.**
+
+- **`common`: `CAPABILITIES.LOCALIZATION = 'localization'`** (passes the `createCapabilityToken`
+  grammar) **and `common/src/services/localization.ts`** carrying `ILocalizer` — `t(key, values?)`,
+  `locale`, `locales` (the supported set), `forLocale(tag)` returning a bound `ILocalizer` — plus
+  `LocalizationMessage` (a string, or a plural-form record keyed by the CLDR categories
+  `zero`/`one`/`two`/`few`/`many`/`other`) and `MessageCatalogue`. The contract lives in `common` so
+  a plugin that formats text (mail, notification, a future error-page renderer) can resolve it
+  without importing this plugin (§2.2).
+- **`IRequest.locale?: string` is a first-class request field, the `tenant` precedent exactly** — a
+  BCP 47 tag, optional, populated by this plugin's middleware, absent when the plugin is not
+  registered or nothing resolved, and read STRUCTURALLY by any plugin holding a request context. It
+  is a field rather than a `ctx.state` key because the second reader already exists: a state key
+  read by another package must live as a constant in `common` anyway (`common/src/state-keys.ts:5`),
+  so the "no widening" alternative was the same `common` change in a less discoverable place. It
+  gets the M71 one-implicit-write seal and a `replaceLocale(request, tag)` beside `replaceTenant`
+  (`common/src/request-identity.ts:161`), so two independent writers fail loudly and an intentional
+  override — a user preference loaded after authentication — has a named spelling. **Three things to
+  watch, none of them a reason not to do it:** (1) it is a flagged `common` widening, so it ships
+  with its `PUBLIC_API.md` entry and CHANGELOG line; additive and optional, so no implementor or
+  test double breaks. (2) The seal is per request — M87 measured the existing two-field seal at ~0.5
+  µs, and a third field adds to it; consistency with `user`/`tenant` is worth that, and the plan
+  records the measurement rather than assuming it. (3) A reader at a LOWER priority than 45 sees
+  `undefined` on every request — the same hazard `tenant` has at 40, with the same answer: the
+  priority table says who runs first, and the field's JSDoc says so.
+- **`cache-plugin` keys on the locale by default.** `cacheMiddleware` already composes a
+  length-prefixed tenant segment from `ctx.request.tenant?.id`
+  (`cache-plugin/src/utils/cache-key.ts:42`), which is how M70b closed X4-1; it gains a locale
+  segment from `ctx.request.locale` the same way, so one locale's cached body is never served to
+  another WITHOUT the application remembering a `vary` callback. Absent locale → empty segment →
+  every existing key is byte-identical (pinned by a test), so nothing released changes.
+- **Catalogues are validated at `register()`, never at the first request.** `supportedLocales` (at
+  least one; the first is the default) and a `catalogues` record, or an injected `IMessageSource`
+  that loads them once at `register()` — the inject-or-static shape, no filesystem convention, so
+  the plugin stays Workers-portable by construction (M92's rule for views). Every supported locale's
+  catalogue must carry every key of the default locale's, or `register()` refuses naming the locale
+  and the missing keys; `allowPartialCatalogues: true` downgrades that to a warning per locale and
+  the default locale's message fills the gap. A key absent EVERYWHERE answers the key itself and
+  warns ONCE per key through `ctx.logger` (read at call time — the M52b lesson), because a request
+  must never `500` over a missing translation; `onMissing: 'throw'` is the strict arm for tests.
+- **Locale resolution is middleware at priority 45** — after `TenantMiddleware` (40), so a tenant
+  default can participate, and before `LoggingMiddleware` (50), so a log line can carry the locale
+  (ARCHITECTURE §10 table gains the row). The chain is fixed and documented: an explicit query
+  parameter, a cookie, `Accept-Language` (RFC 9110 §12.5.4 — q-values, `*`, and BCP 47 fallback
+  `de-AT` → `de`), a `tenantLocale(tenant)` callback, then the default. Every candidate is matched
+  ONLY against `supportedLocales`; a tag is canonicalized with `Intl.getCanonicalLocales` inside a
+  guard, because that call THROWS `RangeError` on a malformed tag and the header is attacker-
+  controlled. The header parse is bounded — at most 16 language ranges, each at most 35 bytes (the
+  BCP 47 practical maximum) — so a 64 KiB `Accept-Language` costs one slice, not one parse per range
+  (the M90a `maxBodyBytes` class: a bound applied after the cost is paid is not a bound).
+- **Two response headers, both load-bearing for caches.** The middleware appends
+  `Vary: Accept-Language` (plus `Cookie` while the cookie source is enabled, a stated cost for CDN
+  cacheability that `cookie: false` removes) on every governed response, whether or not the header
+  won (through `appendHeader`, which never consults `#ended` — M48 verified this in source), and
+  every governed response carries `Content-Language` with the FINAL tag, written after `next()` so a
+  later `replaceLocale` wins. Without `Vary`, `cache-plugin`'s middleware and any CDN serve one
+  locale's body to another: `cacheMiddleware` keys on method, URL, tenant and a caller-supplied
+  `vary` (`cache-plugin/src/interfaces/index.ts:165`) — the locale segment above makes that
+  automatic, and a test through the REAL `cacheMiddleware` proves two locales produce two entries.
+- **The catalogue resource route is opt-in.** `exposeCatalogues: { basePath }` registers
+  `GET <basePath>/:locale` serving one SUPPORTED locale's catalogue (anything else is a 404, never a
+  lookup) under a configurable `Cache-Control`, so a browser can fetch exactly what the formatter
+  needs. Off by default: an application whose strings never leave the server exposes nothing.
+- **The formatter is one module with no imports.** `format(message, values, locale)` substitutes
+  `{name}` placeholders, selects a plural form through `Intl.PluralRules(locale).select(count)` when
+  the message is a plural record (the `count` value is required for one, refused by name when
+  absent), and renders a `number` through `Intl.NumberFormat` and a `Date` through
+  `Intl.DateTimeFormat` for the locale. **It escapes nothing** — a value is substituted as text and
+  the RENDERING runtime owns escaping, the same rule M92 states for `IViewEngine.render` and M102
+  restates for mail; the docs say so in three sites rather than imply the formatter is a sanitizer.
+  There is no ICU message grammar (`select`, nested plurals, offsets); that is named below as the
+  follow-on, and the plural record is chosen precisely because it needs no grammar to parse.
+- **A `localization` health indicator** reporting `up` with the supported locale count and the
+  catalogue source (`'static'` or the injected source's name); no `onClose` (stateless after
+  `register()`).
+- **Docs.** A package README whose fences compile under the fence-compiler gate, covering all three
+  rendering paths — a `view-plugin` page, a React Router loader reading `servicesContext`, and an
+  SDK client fetching the catalogue and calling the shared formatter; `PUBLIC_API.md` sections for
+  the `common` additions and the plugin; the ARCHITECTURE priority-table row and package row; a
+  `docs/localization.md` guide; CHANGELOG `Added`.
+
+**Scope rules, each the reason this can run beside the open M101 letters.** No `src` change in
+`react-router-plugin`, `full-stack-starter` or `cli` — the React Router half is loader code over a
+seam that exists, and wiring localization into the scaffolded full-stack template is **M101g's
+deliverable (or a later CLI milestone)**, since M101g owns that template and M101d is editing
+`react-router-plugin` underneath it. No change to `view-plugin`, `mail-plugin` or
+`decorator-plugin`: a component receives strings as props, and a `@Params(Custom('locale'))`
+resolver is the application's two lines, shown in the README rather than shipped as a decorator
+(`decorator-plugin` may not import this plugin). `cache-plugin`'s change is one segment in one
+function and a test, nothing on its options surface.
+
+**Not a deliverable, named rather than implied.** ICU MessageFormat syntax (`select`, nested plural,
+`offset`) — a follow-on once the catalogue shape has a consumer. Translation-file tooling
+(extraction of keys from source, `.po`/`.xliff` import) — a CLI concern, and the CLI is M101e–g's.
+Right-to-left layout, locale-aware sorting (`Intl.Collator` is one line an application can call),
+and database- stored translations beyond what an injected `IMessageSource` already permits.
+Per-tenant catalogue OVERRIDES (tenant A spells "cart" as "basket") — expressible today as a
+tenant-selected locale tag such as `en-GB-x-acme`, which BCP 47 permits, and documented as the
+pattern rather than built as a mechanism.
+
+**Verification bar.** Beyond the four gates, both publish gates (a new package: `release:verify`
+moves to 50 and the first-publish runbook step applies) and the per-file bar: a real kernel app
+drives the resolution chain end to end for all five sources with a negative control per source; the
+`Vary`/cache test produces two entries for two locales; a `deno info --json` gate refuses any
+runtime dependency outside the formatter subpath's own modules, and a subprocess with `Deno` deleted
+checks import independence (output parity across runtimes is NOT claimed: `Intl` data and time zones
+differ, so dates take an explicit `timeZone`); and the bounded header parse is driven with a 64 KiB
+header and a malformed tag, each observed refused without a throw escaping the middleware. The plan
+records a design security review (its §10), since `Accept-Language`, the cookie and the query
+parameter are all network input reaching `Intl`.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                       |
@@ -12834,3 +12988,4 @@ are corrected to the version the registry shows first shipping each symbol.
 | 101g      | ⬜     | cli + testing + full-stack template — scaffolds that are not wired                                                                                                                                                                            |
 | 101h      | ⬜     | common + docs — documentation, plus redaction setup that takes extra work                                                                                                                                                                     |
 | 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |
+| 103       | ⬜     | localization-plugin (new) + common — message catalogues, request locale resolution, a browser-safe shared formatter                                                                                                                           |
