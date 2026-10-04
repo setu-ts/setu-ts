@@ -500,7 +500,103 @@ describe('GcpPubSubBroker', () => {
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
-      expect(openedSub).toBe('my-queue');
+      // M101b: `defaultQueue` is the PREFIX of the per-topic default.
+      expect(openedSub).toBe('my-queue.topic');
+    });
+
+    it('opens one subscription per topic by default (M101b, V8-2)', async () => {
+      const opened: Array<{ topic: string; subscription: string }> = [];
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: (topic: string, subscription: string) => {
+          opened.push({ topic, subscription });
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+
+      await broker.connect();
+      await broker.subscribe('orders', () => {});
+      await broker.subscribe('payments', () => {});
+      await broker.subscribe('audit', () => {}, { queue: 'shared-audit' });
+
+      // Two topics never share the project-global default subscription, and a
+      // caller-supplied queue is used verbatim.
+      expect(opened).toEqual([
+        { topic: 'orders', subscription: 'messaging-consumers.orders' },
+        { topic: 'payments', subscription: 'messaging-consumers.payments' },
+        { topic: 'audit', subscription: 'shared-audit' },
+      ]);
+    });
+
+    it('derives the default from the topic ID when the topic is fully qualified', async () => {
+      // `/` is illegal in a subscription ID: the emulator answers
+      // INVALID_ARGUMENT for `messaging-consumers.projects/p/topics/orders`.
+      const opened: string[] = [];
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: (_topic: string, subscription: string) => {
+          opened.push(subscription);
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+      await broker.connect();
+
+      await broker.subscribe('projects/p/topics/orders', () => {});
+      await broker.subscribe('orders', () => {});
+
+      // Both spellings of one topic share its one default subscription.
+      expect(opened).toEqual(['messaging-consumers.orders', 'messaging-consumers.orders']);
+    });
+
+    it('refuses a subscription name over the 255-character limit before opening', async () => {
+      let openCalls = 0;
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: () => {
+          openCalls++;
+          return Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription);
+        },
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const broker = new GcpPubSubBroker(createRuntime(), {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      }, { client: transport });
+      await broker.connect();
+
+      // 'messaging-consumers.' is 20 characters, so a 236-character topic
+      // derives a 256-character name; 235 derives exactly 255 and is allowed.
+      const tooLong = 't'.repeat(236);
+      const err = await broker.subscribe(tooLong, () => {}).then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+      expect(err?.message).toContain('256 characters');
+      expect(err?.message).toContain('at most 255');
+      expect(err?.message).toContain('SubscribeOptions.queue');
+      await broker.subscribe('t'.repeat(235), () => {});
+      const explicit = await broker.subscribe('x', () => {}, { queue: 'q'.repeat(256) }).then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+      expect(explicit?.message).toContain('256 characters');
+      expect(openCalls).toBe(1);
     });
   });
 
@@ -787,10 +883,14 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
       };
     const mod = {} as FakeMod;
     mod.topics = new Map();
+    let fakeProjectId = '';
     mod.subscriptions = new Map();
 
     mod.PubSub = class {
-      constructor(_options: { projectId: string; credentials?: unknown }) {}
+      constructor(options: { projectId: string; credentials?: unknown }) {
+        // The real SDK reports topics under the project it was built for.
+        fakeProjectId = options.projectId;
+      }
       topic(name: string) {
         if (!mod.topics.has(name)) {
           mod.topics.set(name, { messages: [], subscriptions: new Map() });
@@ -802,7 +902,26 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
             return Promise.resolve('msg-id');
           },
           createSubscription(subName: string) {
+            // M101b: names are project-global, as on the real service — an
+            // existing subscription answers ALREADY_EXISTS whichever topic it
+            // is bound to. The pre-M101b fake accepted every create.
+            const known = mod.subscriptions.get(subName);
+            if (known !== undefined && known.topic !== '') {
+              return Promise.reject({ code: 6, message: 'ALREADY_EXISTS' });
+            }
             td.subscriptions.set(subName, { onMessage: null });
+            // Bind the entry a `subscription()` handle may already hold, so
+            // that handle's `getMetadata` reads the binding.
+            if (known !== undefined) {
+              known.topic = name;
+            } else {
+              mod.subscriptions.set(subName, {
+                topic: name,
+                name: subName,
+                closed: false,
+                deleted: false,
+              });
+            }
             return Promise.resolve([]);
           },
         };
@@ -837,6 +956,10 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
             entry.deleted = true;
             return Promise.resolve();
           },
+          getMetadata(): Promise<[{ topic?: string | null }]> {
+            // The service reports the fully-qualified topic name.
+            return Promise.resolve([{ topic: `projects/${fakeProjectId}/topics/${entry.topic}` }]);
+          },
         };
       }
       close() {
@@ -866,7 +989,7 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
 
     // Deliver a message through the fake SDK's onMessage callback
     const td = sdk.topics.get('orders');
-    const cb = td!.subscriptions.get('messaging-consumers')!.onMessage!;
+    const cb = td!.subscriptions.get('messaging-consumers.orders')!.onMessage!;
     cb({
       data: new TextEncoder().encode(JSON.stringify({ item: 'widget' })),
       ack: () => {},
@@ -944,7 +1067,7 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
 
     // Deliver a message — triggers nack path
     const td = sdk.topics.get('fail-topic');
-    const cb = td!.subscriptions.get('messaging-consumers')!.onMessage!;
+    const cb = td!.subscriptions.get('messaging-consumers.fail-topic')!.onMessage!;
     cb({
       data: new TextEncoder().encode(JSON.stringify({ fail: true })),
       ack: () => {},
@@ -996,6 +1119,8 @@ describe('C6: createSubscription error discrimination', () => {
       on: () => {},
       close: () => Promise.resolve(),
       delete: () => Promise.resolve(),
+      // M101b: ALREADY_EXISTS is followed by a binding read; same topic attaches.
+      getMetadata: () => Promise.resolve([{ topic: 'projects/test/topics/topic' }]),
     };
     const mod = {
       PubSub: class {

@@ -5639,6 +5639,54 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   MongoDB, DynamoDB and cursor-paging surfaces of `database-plugin` tagged `0.1.0` while shipping in
   `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
   registry rather than guessed) — complete (PR #400)
+- **Milestone 101b** (`packages/messaging-plugin` — message transports that fail against the real
+  broker): three arms that passed every fake-backed test and failed on first contact with the real
+  server. **V8-2:** a Pub/Sub subscription with no `queue` is named per topic,
+  `<defaultQueue>.<topic ID>` (breaking), and an existing subscription bound to another topic — read
+  through a new `getMetadata` facade member — is refused with
+  `PubSubSubscriptionBoundElsewhereError` rather than attached to. **V8-6:** a NATS queue is encoded
+  into a legal JetStream consumer name (`.` → `_2e`, the nine characters the client refuses held as
+  data; a legal queue is unchanged), the raw queue is recorded as `setu.queue` consumer metadata
+  (NATS 2.10+), and an encoding collision or a queue reused across topics rejects with
+  `NatsConsumerNameCollisionError` — in process, and across processes on the server's
+  `10148 consumer already exists`, which the old `'consumer name already exists'`/`'duplicate'`
+  match never saw. **V8-26:** **the plan's premise was falsified by measurement** — kafkajs retries
+  only `LEADER_NOT_AVAILABLE`, and a KRaft broker WITH auto-creation answers
+  `UNKNOWN_TOPIC_OR_PARTITION` to the request that creates the topic, so `subscribe()` now retries
+  that one error within a validated, forwarded `KafkaOptions.retry` (kafkajs's defaults), then
+  throws `KafkaTopicUnavailableError`; a `run()` rejection reaches the logger. Real suites drive two
+  topics and RPC in one app on real NATS, Kafka 4.0.0 and the Pub/Sub emulator (run twice on one
+  instance, striking the doc's restart advice that masked V8-2); every negative control reproduced
+  the run's own signature. **Verification then found three defects the gates passed.** The headline
+  one made the milestone's own named errors hang the process: `register()` connected the broker and
+  subscribed the declared entries BEFORE registering its close hook, so a declared subscription
+  rejecting `start()` — now the documented outcome — left the connected broker open and the process
+  never exited (measured on real Kafka); the hook now follows `connect()`. A fully-qualified Pub/Sub
+  topic derived a default name containing `/`, which the emulator refused with `INVALID_ARGUMENT`
+  (the topic ID is used now), and a Kafka retry wait held its timer through `disconnect()`. A
+  pre-existing leak, folded in at the maintainer's direction (the M58 precedent): `KafkaBroker`
+  `stop()`ped consumers on `disconnect()` and `unsubscribe()` but never `disconnect()`ed them, so
+  every Kafka app hung after `app.stop()` on `develop` too, and every RPC reply-inbox close leaked a
+  connection; both now `disconnect()` . The independent security audit (round 1, on `0d3da3da`)
+  failed on a missing design security review — now recorded as plan §10 after the fact (the M101a
+  precedent) — and a doc claim that every `retry` field was validated while `factor` was forwarded
+  unchecked (now held to [0, 1]); its pre-existing observation that a `disconnect()` racing
+  `subscribe()`'s connect or first attempt left a consumer running was folded in and fixed. Round 2
+  (on `1b6c741d`) found the same class one window later (F3): a consumer whose group JOIN was in
+  flight survived `app.stop()`, because kafkajs's `stop()` is a no-op mid-join and closing the
+  connections under the join is a retriable crash it RESTARTS — so release now waits for the join
+  (bounded 10 s) and a released consumer refuses the restart; on a real broker each half was shown
+  load-bearing on its own (without the wait a stale member lingers; without either the process
+  hangs). Round 3 (on `3a8dbccf`) found both claims one window short: a stop after kafkajs's own
+  restart timer fired still left the restarted consumer joining — kafkajs's `stop()` drops a runner
+  that is not yet running, so nothing could stop it, and it consumed after `app.stop()` (N2) — and
+  the 10 s bound covered only the wait, not the disconnect under a pending JoinGroup (N1: 45 s, 64
+  s). The broker now owns crash restarts (`restartOnFailure` always declines and schedules its own),
+  and a join outlasting the bound is disconnected the moment it settles rather than under it:
+  measured on Kafka 4.0, `app.stop()` 10.0 s in both N1 cases and every N2 window, 0 delivered, exit
+  0. Round 4 (on `ab9598e6`) found that fix taking `initialRetryTime: 0` literally where kafkajs
+  reads `|| 300` — 1393 restarts in a 20 s outage, now 64, fixed on `d015a9b4`; the maintainer
+  waived a fifth round — complete (PR #404).
 - **Milestone 103** (`packages/localization-plugin` (new), `packages/common`,
   `packages/cache-plugin`, `packages/cloudflare-plugin`, `packages/testing`, and one `packages/cli`
   claim-table line — localization): `LocalizationPlugin` registers an `ILocalizer` under the new

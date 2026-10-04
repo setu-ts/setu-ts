@@ -3,8 +3,16 @@ import { expect } from '@std/expect';
 import { KafkaBroker, validateClient } from '../../src/brokers/kafka-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
-import { FakeKafkaFactory } from '../fixtures/fake-kafkajs-client.ts';
-import { RemoteHandlerError, RequestTimeoutError } from '../../src/errors.ts';
+import {
+  FakeKafkaFactory,
+  FakeKafkaMessage,
+  unknownTopicError,
+} from '../fixtures/fake-kafkajs-client.ts';
+import {
+  KafkaTopicUnavailableError,
+  RemoteHandlerError,
+  RequestTimeoutError,
+} from '../../src/errors.ts';
 
 /**
  * KafkaBroker unit tests.
@@ -447,7 +455,7 @@ describe('KafkaBroker', () => {
   });
 
   // K2: unsubscribe closure
-  it('unsubscribe stops the consumer and removes the active subscription', async () => {
+  it('unsubscribe disconnects the consumer and removes the active subscription', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
     const fakeFactory = new FakeKafkaFactory();
@@ -458,12 +466,12 @@ describe('KafkaBroker', () => {
 
     await sub.unsubscribe();
 
-    // Verify stop was called on the consumer. The default group is derived
-    // per topic (M90d): `messaging-consumers:<topic>`.
+    // Verify the consumer was DISCONNECTED (kafkajs's `disconnect()` stops it
+    // first); `stop()` alone left its connection open (M101b review). The
+    // default group is derived per topic (M90d): `messaging-consumers:<topic>`.
     const consumer = fakeFactory.consumer({ groupId: 'messaging-consumers:test.topic' });
     const calls = consumer.calls;
-    const stopCall = calls.find((c) => c.method === 'stop');
-    expect(stopCall).toBeDefined();
+    expect(calls.some((c) => c.method === 'disconnect')).toBe(true);
 
     await broker.disconnect();
   });
@@ -765,5 +773,677 @@ describe('KafkaBroker request-reply', () => {
     await broker.disconnect();
 
     await expect(pending).rejects.toThrow('disconnected');
+  });
+});
+
+describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () => {
+  const FAST = { retries: 2, initialRetryTime: 1 } as const;
+
+  async function rejection(promise: Promise<unknown>): Promise<unknown> {
+    return await promise.then(() => null, (e: unknown) => e);
+  }
+
+  function subscribeCalls(factory: FakeKafkaFactory, groupId: string): number {
+    return factory.consumer({ groupId }).calls.filter((c) => c.method === 'subscribe').length;
+  }
+
+  it('names a topic still unknown after the retry budget, naming topic and group', async () => {
+    const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: FAST,
+    });
+    await broker.connect();
+
+    const err = await rejection(broker.subscribe('orders', () => {}));
+
+    expect(err).toBeInstanceOf(KafkaTopicUnavailableError);
+    const named = err as KafkaTopicUnavailableError;
+    expect(named.topic).toBe('orders');
+    expect(named.groupId).toBe('messaging-consumers:orders');
+    expect(named.message).toContain('"orders"');
+    expect(named.message).toContain('"messaging-consumers:orders"');
+    expect(named.message).toContain('auto.create.topics.enable');
+    expect((named.cause as { type?: string }).type).toBe('UNKNOWN_TOPIC_OR_PARTITION');
+    // One attempt plus `retries`, and the consumer is released, not leaked.
+    const consumer = factory.consumer({ groupId: 'messaging-consumers:orders' });
+    expect(subscribeCalls(factory, 'messaging-consumers:orders')).toBe(3);
+    expect(consumer.calls.at(-1)?.method).toBe('disconnect');
+    await broker.disconnect();
+  });
+
+  it('names the topic at once with retries: 0', async () => {
+    const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 0 },
+    });
+    await broker.connect();
+
+    expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'g1' })))
+      .toBeInstanceOf(KafkaTopicUnavailableError);
+    expect(subscribeCalls(factory, 'g1')).toBe(1);
+    await broker.disconnect();
+  });
+
+  it('subscribes once a topic an auto-creating broker just created becomes known', async () => {
+    // A KRaft broker answers UNKNOWN_TOPIC_OR_PARTITION to the request that
+    // auto-creates the topic; the next attempt finds it (measured, Kafka 4.0).
+    const unknown = ['orders'];
+    const factory = new FakeKafkaFactory({ unknownTopics: unknown });
+    const consumer = factory.consumer({ groupId: 'messaging-consumers:orders' });
+    const original = consumer.subscribe.bind(consumer);
+    consumer.subscribe = (options) => {
+      const result = original(options);
+      unknown.length = 0; // created by the first (rejected) request
+      return result;
+    };
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: FAST,
+    });
+    await broker.connect();
+
+    const received: unknown[] = [];
+    await broker.subscribe('orders', (m) => {
+      received.push(m);
+    });
+    await broker.publish('orders', { n: 1 });
+
+    expect(subscribeCalls(factory, 'messaging-consumers:orders')).toBe(2);
+    expect(received).toEqual([{ n: 1 }]);
+    await broker.disconnect();
+  });
+
+  it('recognises an unknown topic wrapped in a retry-exhaustion cause chain', async () => {
+    const factory = new FakeKafkaFactory();
+    const consumer = factory.consumer({ groupId: 'g' });
+    const wrapped = Object.assign(new Error('retries exceeded'), {
+      name: 'KafkaJSNumberOfRetriesExceeded',
+      cause: unknownTopicError(),
+    });
+    consumer.subscribe = () => Promise.reject(wrapped);
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 0 },
+    });
+    await broker.connect();
+
+    const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'g' }));
+    expect(err).toBeInstanceOf(KafkaTopicUnavailableError);
+    expect((err as Error).cause).toBe(wrapped);
+    await broker.disconnect();
+  });
+
+  it('rethrows any other subscribe failure unchanged, without retrying', async () => {
+    const factory = new FakeKafkaFactory();
+    const consumer = factory.consumer({ groupId: 'g' });
+    const failures: unknown[] = [
+      Object.assign(new Error('not authorized'), { type: 'TOPIC_AUTHORIZATION_FAILED' }),
+      'a bare string',
+      // A cause chain longer than the walk, and one ending in a non-object.
+      { cause: { cause: { cause: { cause: { cause: { type: 'UNKNOWN_TOPIC_OR_PARTITION' } } } } } },
+      { cause: 'not an object' },
+    ];
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: FAST,
+    });
+    await broker.connect();
+
+    for (const failure of failures) {
+      let calls = 0;
+      consumer.subscribe = () => {
+        calls++;
+        return Promise.reject(failure);
+      };
+      expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'g' }))).toBe(failure);
+      expect(calls).toBe(1);
+    }
+    await broker.disconnect();
+  });
+
+  it('stops retrying when the broker is disconnected mid-wait, cancelling the wait', async () => {
+    // A one-minute backoff: the wait must be CANCELLED by disconnect(), not
+    // merely abandoned — a pending timer would hold this test (and a real
+    // process) open for the whole minute, and Deno's sanitizer reports it.
+    const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 5, initialRetryTime: 60_000 },
+    });
+    await broker.connect();
+
+    const started = performance.now();
+    const pending = rejection(broker.subscribe('orders', () => {}));
+    await new Promise((resolve) => setTimeout(resolve, 10)); // let it enter the wait
+    await broker.disconnect();
+    const err = await pending;
+
+    expect((err as Error).message).toContain('disconnected while subscribing');
+    expect(subscribeCalls(factory, 'messaging-consumers:orders')).toBe(1);
+    expect(performance.now() - started).toBeLessThan(5_000);
+  });
+
+  it('stops retrying when disconnect() lands before the first attempt', async () => {
+    const factory = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 5, initialRetryTime: 1 },
+    });
+    await broker.connect();
+
+    const pending = rejection(broker.subscribe('orders', () => {}));
+    await broker.disconnect(); // before the consumer has even connected
+    const err = await pending;
+
+    expect((err as Error).message).toContain('disconnected while subscribing');
+    expect(subscribeCalls(factory, 'messaging-consumers:orders')).toBe(1);
+  });
+
+  it('refuses an out-of-range retry budget at construction', () => {
+    const cases: Array<[Record<string, number>, string]> = [
+      [{ retries: Number.NaN }, 'retries'],
+      [{ retries: -1 }, 'retries'],
+      [{ retries: 1.5 }, 'retries'],
+      [{ initialRetryTime: -1 }, 'initialRetryTime'],
+      [{ initialRetryTime: Number.NaN }, 'initialRetryTime'],
+      [{ multiplier: 0.5 }, 'multiplier'],
+      [{ multiplier: Number.POSITIVE_INFINITY }, 'multiplier'],
+      [{ maxRetryTime: Number.POSITIVE_INFINITY }, 'maxRetryTime'],
+      [{ maxRetryTime: -5 }, 'maxRetryTime'],
+      // `factor` is forwarded to kafkajs as its jitter: a NaN, non-finite or
+      // negative factor, or one above 1 (which draws negative delays), made
+      // kafkajs's own retries run back to back (security audit F2).
+      [{ factor: Number.NaN }, 'factor'],
+      [{ factor: Number.POSITIVE_INFINITY }, 'factor'],
+      [{ factor: -0.1 }, 'factor'],
+      [{ factor: 1.5 }, 'factor'],
+    ];
+    for (const [retry, field] of cases) {
+      expect(() =>
+        new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+          client: new FakeKafkaFactory(),
+          retry,
+        })
+      ).toThrow(`KafkaOptions.retry.${field}`);
+    }
+  });
+
+  it('reports a run() rejection through the logger and stays ready', async () => {
+    const crash = new Error('consumer crashed and was not restarted');
+    const errors: string[] = [];
+    const factory = new FakeKafkaFactory({ runRejection: crash });
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      logger: { error: (m) => errors.push(m) },
+    });
+    await broker.connect();
+
+    await broker.subscribe('orders', () => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('"orders"');
+    expect(errors[0]).toContain('"messaging-consumers:orders"');
+    expect(errors[0]).toContain('consumer crashed and was not restarted');
+    expect(broker.isReady()).toBe(true);
+    await broker.disconnect();
+  });
+
+  it('contains a run() rejection with no logger, or a logger that throws', async () => {
+    // Either would otherwise be an unhandled rejection, which fails this test.
+    for (
+      const logger of [undefined, {
+        error: () => {
+          throw new Error('logger down');
+        },
+      }]
+    ) {
+      const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: new FakeKafkaFactory({ runRejection: new Error('crash') }),
+        ...(logger !== undefined ? { logger } : {}),
+      });
+      await broker.connect();
+      await broker.subscribe('orders', () => {});
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(broker.isReady()).toBe(true);
+      await broker.disconnect();
+    }
+  });
+});
+
+describe('KafkaBroker releases consumer connections (M101b review)', () => {
+  // `stop()` only halts fetching; the consumer's cluster connection stays open
+  // and keeps the process alive after `app.stop()` (measured on real Kafka:
+  // the process never exited, on develop too). kafkajs's `disconnect()` stops
+  // AND closes the connection.
+  it('disconnect() disconnects every active consumer', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    await broker.subscribe('payments', () => {});
+
+    await broker.disconnect();
+
+    for (const groupId of ['messaging-consumers:orders', 'messaging-consumers:payments']) {
+      const methods = factory.consumer({ groupId }).calls.map((c) => c.method);
+      expect(methods).toContain('disconnect');
+    }
+  });
+
+  it('unsubscribe() disconnects that consumer — including the RPC reply inbox', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    const sub = await broker.subscribe('orders', () => {}, { queue: 'g-orders' });
+
+    await sub.unsubscribe();
+
+    expect(factory.consumer({ groupId: 'g-orders' }).calls.map((c) => c.method)).toContain(
+      'disconnect',
+    );
+    await broker.disconnect();
+  });
+});
+
+describe('KafkaBroker disconnect during a subscribe (M101b security audit O1)', () => {
+  // A disconnect() that lands while subscribe() is still connecting or making
+  // its first attempt used to let the subscription complete — a consumer then
+  // ran after shutdown, holding the process open and consuming messages.
+  async function race(gate: 'connect' | 'subscribe') {
+    const factory = new FakeKafkaFactory();
+    const consumer = factory.consumer({ groupId: 'messaging-consumers:orders' });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const original = consumer[gate].bind(consumer) as (o?: unknown) => Promise<void>;
+    (consumer as unknown as Record<string, unknown>)[gate] = async (o?: unknown) => {
+      await held;
+      return await original(o);
+    };
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+
+    const pending = broker.subscribe('orders', () => {}).then(
+      () => 'resolved',
+      (e: Error) => e.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await broker.disconnect();
+    release();
+
+    const outcome = await pending;
+    const methods = consumer.calls.map((c) => c.method);
+    return { outcome, methods };
+  }
+
+  for (const gate of ['connect', 'subscribe'] as const) {
+    it(`refuses and releases the consumer when disconnect() lands during ${gate}`, async () => {
+      const { outcome, methods } = await race(gate);
+      expect(outcome).toBe('KafkaBroker was disconnected while subscribing');
+      expect(methods).toContain('disconnect');
+      expect(methods).not.toContain('run');
+    });
+  }
+});
+
+describe('KafkaBroker disconnect during a group join (M101b security audit F3)', () => {
+  // kafkajs's consumer.run() settles only once the group join completes (or its
+  // crash handler has run). Disconnecting before that is a no-op stop followed
+  // by closing the connections under the join, which kafkajs treats as a
+  // retriable crash and RESTARTS — the consumer rejoins after shutdown. So the
+  // broker waits for run() to settle, bounded, before disconnecting.
+  function joiningConsumer(factory: FakeKafkaFactory, groupId: string) {
+    const consumer = factory.consumer({ groupId });
+    let join!: () => void;
+    const joined = new Promise<void>((resolve) => (join = resolve));
+    const order: string[] = [];
+    const run = consumer.run.bind(consumer);
+    (consumer as unknown as Record<string, unknown>).run = (o: Parameters<typeof run>[0]) => {
+      void run(o);
+      return joined.then(() => void order.push('joined'));
+    };
+    const disconnect = consumer.disconnect.bind(consumer);
+    (consumer as unknown as Record<string, unknown>).disconnect = () => {
+      order.push('disconnect');
+      return disconnect();
+    };
+    return { join, order };
+  }
+
+  it('disconnect() waits for an in-flight join before disconnecting the consumer', async () => {
+    const factory = new FakeKafkaFactory();
+    const { join, order } = joiningConsumer(factory, 'messaging-consumers:orders');
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+
+    const stopping = broker.disconnect();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(order).toEqual([]); // not disconnected mid-join
+    join();
+    await stopping;
+
+    expect(order).toEqual(['joined', 'disconnect']);
+  });
+
+  it('unsubscribe() waits for an in-flight join the same way', async () => {
+    const factory = new FakeKafkaFactory();
+    const { join, order } = joiningConsumer(factory, 'g');
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    const sub = await broker.subscribe('orders', () => {}, { queue: 'g' });
+
+    const leaving = sub.unsubscribe();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(order).toEqual([]);
+    join();
+    await leaving;
+
+    expect(order).toEqual(['joined', 'disconnect']);
+    await broker.disconnect();
+  });
+
+  it('releases consumers concurrently, so stalled joins do not add up', async () => {
+    // Three joins that never settle and a bound of 50 ms: released in turn,
+    // shutdown would take ~150 ms; concurrently, ~50 ms.
+    const factory = new FakeKafkaFactory();
+    for (const topic of ['a', 'b', 'c']) joiningConsumer(factory, `messaging-consumers:${topic}`);
+    const real = createFakeRuntime();
+    const runtime = { ...real, setTimeout: (fn: () => void) => real.setTimeout(fn, 50) };
+    const broker = new KafkaBroker(runtime, new JsonSerializer(), { client: factory });
+    await broker.connect();
+    for (const topic of ['a', 'b', 'c']) await broker.subscribe(topic, () => {});
+
+    const started = performance.now();
+    await broker.disconnect();
+
+    expect(performance.now() - started).toBeLessThan(120);
+  });
+
+  it('releases the reply inbox alongside the other consumers, disconnecting it once', async () => {
+    // PR #404 review: the inbox's close awaited its own release BEFORE the
+    // sweep began, so a stalled inbox join plus any other stalled join held
+    // shutdown for twice the bound (~100 ms here); concurrently, ~50 ms.
+    const factory = new FakeKafkaFactory();
+    joiningConsumer(factory, 'messaging-consumers:orders');
+    // The inbox's group is `rr-inbox-<uuid>`, so stall it as it is created.
+    const create = factory.consumer.bind(factory);
+    let inbox: ReturnType<typeof joiningConsumer> | null = null;
+    (factory as unknown as Record<string, unknown>).consumer = (o: { groupId: string }) => {
+      if (o.groupId.startsWith('rr-inbox-') && inbox === null) {
+        (factory as unknown as Record<string, unknown>).consumer = create;
+        inbox = joiningConsumer(factory, o.groupId);
+      }
+      return create(o);
+    };
+    const real = createFakeRuntime();
+    const runtime = {
+      ...real,
+      // Only the release bound is shortened; RPC timeouts keep their value.
+      setTimeout: (fn: () => void, ms: number) => real.setTimeout(fn, ms === 10_000 ? 50 : ms),
+    };
+    const broker = new KafkaBroker(runtime, new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    await broker.respond('t', () => 'ok');
+    await broker.request('t', {});
+    const stalled = inbox as ReturnType<typeof joiningConsumer> | null;
+    if (stalled === null) throw new Error('the reply inbox was never opened');
+
+    const started = performance.now();
+    await broker.disconnect();
+
+    expect(performance.now() - started).toBeLessThan(90);
+    // Released through unsubscribe() AND the sweep; once its join settles,
+    // the deferred disconnect runs exactly once.
+    expect(stalled.order).toEqual([]);
+    stalled.join();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stalled.order).toEqual(['joined', 'disconnect']);
+  });
+
+  it('defers the disconnect to the join when the join outlasts the bound (N1, N2)', async () => {
+    // Disconnecting under a join neither stops a join that later succeeds —
+    // kafkajs drops its runner while it is still joining — nor returns before
+    // the pending JoinGroup is answered. So the release returns at the bound
+    // and disconnects the consumer the moment its join settles.
+    const factory = new FakeKafkaFactory();
+    const { join, order } = joiningConsumer(factory, 'messaging-consumers:orders');
+    // A runtime whose timers fire at once stands in for the bound elapsing.
+    const real = createFakeRuntime();
+    const runtime = { ...real, setTimeout: (fn: () => void) => real.setTimeout(fn, 0) };
+    const broker = new KafkaBroker(runtime, new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+
+    await broker.disconnect();
+    expect(order).toEqual([]); // returned at the bound, not disconnected mid-join
+
+    join();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual(['joined', 'disconnect']);
+  });
+
+  it('leaves a record delivered after the release uncommitted', async () => {
+    const factory = new FakeKafkaFactory();
+    joiningConsumer(factory, 'messaging-consumers:orders'); // still joining
+    const real = createFakeRuntime();
+    const runtime = { ...real, setTimeout: (fn: () => void) => real.setTimeout(fn, 0) };
+    const broker = new KafkaBroker(runtime, new JsonSerializer(), { client: factory });
+    await broker.connect();
+    const handled: unknown[] = [];
+    await broker.subscribe('orders', (m) => void handled.push(m));
+    await broker.disconnect();
+
+    // The join settles and delivers before the deferred disconnect lands.
+    const consumer = factory.consumer({ groupId: 'messaging-consumers:orders' });
+    await consumer.deliver('orders', new FakeKafkaMessage('{"n":1}', '7', '0', {}));
+
+    expect(handled).toEqual([]);
+    expect(consumer.committedOffsets).toEqual([]);
+  });
+});
+
+describe('KafkaBroker owns crash restarts (M101b security audit N2, O5)', () => {
+  // kafkajs runs its own crash restart behind a timer and a group join the
+  // broker cannot see, so a release during that join could neither stop nor
+  // cancel it: the consumer rejoined after app.stop(). The broker's
+  // `restartOnFailure` therefore always declines, and restarts the consumer
+  // itself — through a timer a release clears and a run() a release waits on.
+  type RetryOptions = {
+    retries: number;
+    restartOnFailure: (e: Error) => Promise<boolean>;
+  };
+  // The LAST consumer() call for the group: a test may pre-create the
+  // consumer itself to instrument it, before the broker passes its options.
+  function retryFor(factory: FakeKafkaFactory, groupId: string): RetryOptions {
+    const call = factory.calls.findLast((c) =>
+      c.method === 'consumer' && (c.args[0] as { groupId: string }).groupId === groupId
+    );
+    const options = call?.args[0] as { retry?: RetryOptions } | undefined;
+    if (!options?.retry) throw new Error('no retry was passed');
+    return options.retry;
+  }
+  function crash(retryTime?: number): Error {
+    return Object.assign(
+      new Error('connection closed'),
+      retryTime === undefined ? {} : {
+        retryTime,
+      },
+    );
+  }
+  function runs(factory: FakeKafkaFactory, groupId: string): number {
+    return factory.consumer({ groupId }).calls.filter((c) => c.method === 'run').length;
+  }
+  const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it("keeps kafkajs's consumer retry count beside the hook (O5)", async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 0 },
+    });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+
+    expect(retryFor(factory, 'messaging-consumers:orders').retries).toBe(5);
+    await broker.disconnect();
+  });
+
+  it("declines kafkajs's restart and restarts the consumer itself", async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    const { restartOnFailure } = retryFor(factory, 'messaging-consumers:orders');
+
+    expect(await restartOnFailure(crash(5))).toBe(false);
+    expect(runs(factory, 'messaging-consumers:orders')).toBe(1);
+    await tick(30);
+    expect(runs(factory, 'messaging-consumers:orders')).toBe(2);
+    await broker.disconnect();
+  });
+
+  it("waits the crash's retryTime, else the configured initialRetryTime", async () => {
+    const factory = new FakeKafkaFactory();
+    const real = createFakeRuntime();
+    const delays: number[] = [];
+    const runtime = {
+      ...real,
+      setTimeout: (fn: () => void, ms: number) => {
+        delays.push(ms);
+        return real.setTimeout(fn, ms);
+      },
+    };
+    const broker = new KafkaBroker(runtime, new JsonSerializer(), {
+      client: factory,
+      retry: { initialRetryTime: 77 },
+    });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    const { restartOnFailure } = retryFor(factory, 'messaging-consumers:orders');
+
+    const hostile = Object.defineProperty(new Error('hostile'), 'retryTime', {
+      get() {
+        throw new Error('getter');
+      },
+    });
+    for (const error of [crash(1234), crash(), crash(0), crash(Number.NaN), hostile]) {
+      expect(await restartOnFailure(error)).toBe(false);
+    }
+
+    expect(delays).toEqual([1234, 77, 77, 77, 77]);
+    await broker.disconnect(); // clears the one restart still pending
+  });
+
+  it('reads initialRetryTime: 0 as kafkajs does — 300 ms, never at once (N3)', async () => {
+    // kafkajs: `e.retryTime || retry.initialRetryTime || 300`. Taking the 0
+    // literally restarted ~70 times a second against a stopped broker.
+    const factory = new FakeKafkaFactory();
+    const real = createFakeRuntime();
+    const delays: number[] = [];
+    const runtime = {
+      ...real,
+      setTimeout: (fn: () => void, ms: number) => {
+        delays.push(ms);
+        return real.setTimeout(fn, ms);
+      },
+    };
+    const broker = new KafkaBroker(runtime, new JsonSerializer(), {
+      client: factory,
+      retry: { initialRetryTime: 0 },
+    });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    const { restartOnFailure } = retryFor(factory, 'messaging-consumers:orders');
+
+    await restartOnFailure(crash());
+    await restartOnFailure(crash(0));
+
+    expect(delays).toEqual([300, 300]);
+    await broker.disconnect();
+  });
+
+  it('keeps at most one restart pending, so a replaced timer never runs', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    const { restartOnFailure } = retryFor(factory, 'messaging-consumers:orders');
+
+    await restartOnFailure(crash(5));
+    await restartOnFailure(crash(40)); // replaces the 5 ms restart
+    await tick(20);
+    expect(runs(factory, 'messaging-consumers:orders')).toBe(1);
+    await tick(40);
+    expect(runs(factory, 'messaging-consumers:orders')).toBe(2);
+    await broker.disconnect();
+  });
+
+  it('a release clears a scheduled restart, so the consumer is not run again', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    const { restartOnFailure } = retryFor(factory, 'messaging-consumers:orders');
+
+    await restartOnFailure(crash(20));
+    await broker.disconnect();
+    await tick(50);
+
+    expect(runs(factory, 'messaging-consumers:orders')).toBe(1);
+  });
+
+  it('a crash after unsubscribe() schedules no restart', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    const sub = await broker.subscribe('orders', () => {}, { queue: 'g' });
+    const { restartOnFailure } = retryFor(factory, 'g');
+
+    await sub.unsubscribe();
+    expect(await restartOnFailure(crash(1))).toBe(false);
+    await tick(20);
+
+    expect(runs(factory, 'g')).toBe(1);
+    await broker.disconnect();
+  });
+
+  it("a release during the restart's join waits for that join, not the first run", async () => {
+    // The N2 window: the first run() settled long ago, the restart is joining.
+    const factory = new FakeKafkaFactory();
+    const consumer = factory.consumer({ groupId: 'messaging-consumers:orders' });
+    let join!: () => void;
+    const restartJoined = new Promise<void>((resolve) => (join = resolve));
+    const order: string[] = [];
+    const run = consumer.run.bind(consumer);
+    let calls = 0;
+    (consumer as unknown as Record<string, unknown>).run = (o: Parameters<typeof run>[0]) => {
+      void run(o);
+      return ++calls === 1
+        ? Promise.resolve()
+        : restartJoined.then(() => void order.push('joined'));
+    };
+    const disconnect = consumer.disconnect.bind(consumer);
+    (consumer as unknown as Record<string, unknown>).disconnect = () => {
+      order.push('disconnect');
+      return disconnect();
+    };
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    await retryFor(factory, 'messaging-consumers:orders').restartOnFailure(crash(1));
+    await tick(20); // the restart has begun and is joining
+    expect(calls).toBe(2);
+
+    const stopping = broker.disconnect();
+    await tick(10);
+    expect(order).toEqual([]);
+    join();
+    await stopping;
+
+    expect(order).toEqual(['joined', 'disconnect']);
   });
 });

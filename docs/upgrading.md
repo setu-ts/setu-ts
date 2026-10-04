@@ -14,7 +14,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, the `database` and
 `queue` health data, `commandTimeoutMs`) do not fail to compile; each is a default that now applies
-to a running application. The three M102 mail entries can.
+to a running application. The three M102 mail entries can. The three M101b messaging entries do not
+fail to compile; each changes what a running broker names or refuses.
 
 ### Regenerate clients whose OpenAPI document declares `3xx` responses
 
@@ -81,6 +82,28 @@ value needs no change.
 matching the SMTP and SES providers. Through `MailPlugin` nothing changes, because the plugin
 connects the provider during `register()`. A test that constructs `new LogProvider()` and sends on
 it without connecting must add `await provider.connect()` first.
+
+### Drain the old shared `messaging-consumers` Pub/Sub subscription
+
+A Pub/Sub subscription with no `queue` is now named per topic, `messaging-consumers.<topic>`
+(M101b). On upgrade every topic gets a new subscription, and an existing `messaging-consumers`
+subscription keeps any backlog with no consumer. Pass
+`SubscribeOptions.queue: 'messaging-consumers'` on the ONE topic that owns it until its backlog is
+drained, then delete it. A subscription whose name is already bound to another topic now rejects
+`subscribe()` with `PubSubSubscriptionBoundElsewhereError` instead of being attached to.
+
+### Run NATS 2.10 or later for `setu.queue` consumer metadata
+
+A NATS consumer now records its raw queue as `setu.queue` metadata (M101b), which the server accepts
+from 2.10. On an older server every `subscribe()` rejects. If you use request-reply, the JetStream
+stream must also cover `rr.req.<topic>` and `rr.inbox.>`.
+
+### Pre-create Kafka topics, or expect `KafkaTopicUnavailableError`
+
+A subscription to an unknown Kafka topic now retries for about 9 s (`retry`), then rejects with
+`KafkaTopicUnavailableError` (M101b) — so on a broker without `auto.create.topics.enable`, `start()`
+for a declared subscription to a missing topic fails after that budget rather than at once. Create
+the topic first, or set `retry: { retries: 0 }` to fail immediately.
 
 ## 0.8.0
 
