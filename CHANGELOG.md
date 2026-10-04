@@ -220,6 +220,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`cloudflare-plugin`'s `cacheApiMiddleware` keys on the resolved tenant.** The default key
+  carried the locale (M103) and not the tenant, so with multi-tenancy tenant A's cached page was
+  served to tenant B for the TTL — the exact gap the M103 audit recorded as pre-existing. When
+  `ctx.request.tenant` is set the key appends `setu-cache-tenant=<encoded id>` before the locale
+  parameter, under the same rules: the URL text is never re-serialized, a tenant-less request whose
+  URL already carries the parameter is served uncached (its key would equal a tenant's), as is an
+  unencodable id, and an application without the plugin keeps byte-identical keys. A global
+  registration must run after the tenant middleware (40). A custom `key` must include the tenant
+  itself.
 - **The documented Node.js floor is 22, not 18.** `docs/getting-started.md`,
   `docs/runtime-deployment.md` and the runtime README claimed Node 18+; five packages use
   `Promise.withResolvers`, which Node 22 was the first to ship, and `globalThis.crypto` alone

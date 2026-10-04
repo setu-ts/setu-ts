@@ -12747,26 +12747,29 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   **`X-Cache-Api`** (`HIT`/`MISS`/`BYPASS`), never `X-Cache`, so an operator can tell which layer
   answered. `caches.default` is **per-datacenter**: a hit rate measured in one location says nothing
   about another, and a `delete` does not evict globally.
-- **The default key carries the resolved locale (M103).** The key is a URL string, which the
-  platform matches with no request headers, so `Vary` cannot separate entries in this cache. When
-  `ctx.request.locale` is set, the default key is the request URL's own text with
-  `setu-cache-locale=<encoded locale>` concatenated after it. The query is never re-serialized and
-  the parameter never `set`: `set` would strip a client-supplied copy from the key while the handler
-  still saw it, and re-serializing would fold encoding variants (`?p=%32` and `?p=2`) into one
-  entry, either way letting one client choose what another is served. Without a locale the key is
-  the URL unchanged, except as below. Four kinds of request are served uncached
-  (`X-Cache-Api: BYPASS`) because no key could keep them apart from another: a URL whose text is not
-  its own WHATWG serialization (Deno, and Node for some targets, deliver the request target as sent,
-  while the Cache API parses a key before matching), a URL carrying a fragment (delivered by Deno,
-  Node and Bun, ignored by the Cache API when matching), a locale that is not well-formed UTF-16
-  (`encodeURIComponent` cannot encode a lone surrogate), and a request with no locale whose URL
-  already contains `setu-cache-locale=` (its key would equal a localized request's). Workers
-  normalizes the URL and strips the fragment, so the first two do not arise there. The locale is the
-  one present when the middleware runs, so the same conditions as `cache-plugin` apply: the
-  middleware must run after the locale middleware (globally, at a higher priority number than it;
-  per route, listed after it), and a `replaceLocale` made inside the handler is not reflected — such
-  a route must not be cached here. A custom `key` replaces this and must include the locale itself
-  on a localized route.
+- **The default key carries the resolved tenant and locale.** The key is a URL string, which the
+  platform matches with no request headers, so `Vary` cannot separate entries in this cache — and
+  before the tenant was keyed, tenant A's cached page was served to tenant B for the TTL. When
+  `ctx.request.tenant` and/or `ctx.request.locale` is set, the default key is the request URL's own
+  text with `setu-cache-tenant=<encoded id>` and then `setu-cache-locale=<encoded locale>`
+  concatenated after it, in that order. The query is never re-serialized and the parameter never
+  `set`: `set` would strip a client-supplied copy from the key while the handler still saw it, and
+  re-serializing would fold encoding variants (`?p=%32` and `?p=2`) into one entry, either way
+  letting one client choose what another is served. Without a tenant or locale the key is the URL
+  unchanged, except as below. Four kinds of request are served uncached (`X-Cache-Api: BYPASS`)
+  because no key could keep them apart from another: a URL whose text is not its own WHATWG
+  serialization (Deno, and Node for some targets, deliver the request target as sent, while the
+  Cache API parses a key before matching), a URL carrying a fragment (delivered by Deno, Node and
+  Bun, ignored by the Cache API when matching), a tenant id or locale that is not well-formed UTF-16
+  (`encodeURIComponent` cannot encode a lone surrogate), and a request lacking a tenant or locale
+  whose URL already contains `setu-cache-tenant=` or `setu-cache-locale=` (its key would equal a
+  tenanted or localized request's). Workers normalizes the URL and strips the fragment, so the first
+  two do not arise there. The tenant and locale are the ones present when the middleware runs, so
+  the same conditions as `cache-plugin` apply: the middleware must run after the tenant (40) and
+  locale (45) middleware (globally, at a higher priority number than theirs; per route, listed after
+  them), and a `replaceTenant` or `replaceLocale` made inside the handler is not reflected — such a
+  route must not be cached here. A custom `key` replaces this and must include the tenant and locale
+  itself.
 - **The platform's cache refusals are checked before the write, not discovered by it.**
   `caches.default.put` throws for a non-GET request, status 206, `Vary: *`, and an uncleared
   `Set-Cookie`; `assessCacheability` reports each as a `CacheRefusal` and the middleware skips the
