@@ -1,8 +1,7 @@
 # Milestone 103 — Localization (`@setu-ts/localization-plugin`)
 
-> **Status:** Complete (PR #405). Planned on `docs/m103-localization-roadmap` (PR #402),
-> implemented on `feat/m103-localization-plugin`. §11 records where the implementation corrected the
-> plan.
+> **Status:** Complete (PR #405). Planned on `docs/m103-localization-roadmap` (PR #402), implemented
+> on `feat/m103-localization-plugin`. §11 records where the implementation corrected the plan.
 
 ## 0. Objective & scope
 
