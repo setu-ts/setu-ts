@@ -12367,6 +12367,10 @@ instance. Every negative control reproduced the run's own signature —
 named, and with both Pub/Sub halves reverted a cross-topic misdelivery on run 1 and the second run's
 `RequestTimeoutError`. Two deployment facts surfaced and are documented rather than fixed: a NATS
 account admits only ONE stream owning `rr.inbox.>`, and the consumer metadata needs NATS 2.10+.
+Verification then found a failed-start leak (the close hook registered after the declared
+subscriptions), a fully-qualified Pub/Sub topic deriving an illegal default name, a cross-project
+binding the suffix match accepted, and a pre-existing Kafka shutdown leak (`stop()` without
+`disconnect()`, which hung every Kafka app after `app.stop()`) — all fixed on this branch.
 
 ---
 

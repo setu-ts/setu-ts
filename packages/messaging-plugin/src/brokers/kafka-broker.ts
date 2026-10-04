@@ -371,12 +371,15 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // goes away, so no timer or subscription outlives the connection.
     await this.#rr.close();
 
-    // Stop all active consumers
+    // Disconnect every active consumer. kafkajs's `stop()` only halts fetching
+    // and leaves the consumer's cluster connection open, which kept the process
+    // alive after `app.stop()` (measured on a real broker); `disconnect()` stops
+    // AND closes it (M101b review).
     for (const consumer of this.#activeConsumers.values()) {
       try {
-        const realConsumer = consumer.consumer as unknown as { stop(): Promise<void> };
+        const realConsumer = consumer.consumer as unknown as { disconnect(): Promise<void> };
         consumer.running = false;
-        await realConsumer.stop();
+        await realConsumer.disconnect();
       } catch {
         // Ignore errors during shutdown
       }
@@ -642,8 +645,11 @@ export class KafkaBroker implements MessageBrokerAdapter {
         if (consumer) {
           consumer.running = false;
           try {
-            const realSub = consumer.consumer as unknown as { stop(): Promise<void> };
-            await realSub.stop();
+            // `disconnect()`, not `stop()`: each subscription owns its consumer,
+            // so unsubscribing must release its connection too — this is also
+            // the path the RPC reply inbox closes through (M101b review).
+            const realSub = consumer.consumer as unknown as { disconnect(): Promise<void> };
+            await realSub.disconnect();
           } catch {
             // Ignore errors
           }

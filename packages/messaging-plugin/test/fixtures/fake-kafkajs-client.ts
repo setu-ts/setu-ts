@@ -257,9 +257,16 @@ export class FakeKafkaConsumer {
     return Promise.resolve();
   }
 
+  /**
+   * Mirrors real kafkajs: `disconnect()` runs `stop()` first and rethrows its
+   * failure, so a consumer whose stop rejects also fails to disconnect.
+   */
   disconnect(): Promise<void> {
     this.#record('disconnect', []);
     this.#running = false;
+    if (this.#rejectStop) {
+      return Promise.reject(new Error('Stop rejected'));
+    }
     return Promise.resolve();
   }
 

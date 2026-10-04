@@ -451,7 +451,7 @@ describe('KafkaBroker', () => {
   });
 
   // K2: unsubscribe closure
-  it('unsubscribe stops the consumer and removes the active subscription', async () => {
+  it('unsubscribe disconnects the consumer and removes the active subscription', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
     const fakeFactory = new FakeKafkaFactory();
@@ -462,12 +462,12 @@ describe('KafkaBroker', () => {
 
     await sub.unsubscribe();
 
-    // Verify stop was called on the consumer. The default group is derived
-    // per topic (M90d): `messaging-consumers:<topic>`.
+    // Verify the consumer was DISCONNECTED (kafkajs's `disconnect()` stops it
+    // first); `stop()` alone left its connection open (M101b review). The
+    // default group is derived per topic (M90d): `messaging-consumers:<topic>`.
     const consumer = fakeFactory.consumer({ groupId: 'messaging-consumers:test.topic' });
     const calls = consumer.calls;
-    const stopCall = calls.find((c) => c.method === 'stop');
-    expect(stopCall).toBeDefined();
+    expect(calls.some((c) => c.method === 'disconnect')).toBe(true);
 
     await broker.disconnect();
   });
@@ -999,5 +999,40 @@ describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () =>
       expect(broker.isReady()).toBe(true);
       await broker.disconnect();
     }
+  });
+});
+
+describe('KafkaBroker releases consumer connections (M101b review)', () => {
+  // `stop()` only halts fetching; the consumer's cluster connection stays open
+  // and keeps the process alive after `app.stop()` (measured on real Kafka:
+  // the process never exited, on develop too). kafkajs's `disconnect()` stops
+  // AND closes the connection.
+  it('disconnect() disconnects every active consumer', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    await broker.subscribe('payments', () => {});
+
+    await broker.disconnect();
+
+    for (const groupId of ['messaging-consumers:orders', 'messaging-consumers:payments']) {
+      const methods = factory.consumer({ groupId }).calls.map((c) => c.method);
+      expect(methods).toContain('disconnect');
+    }
+  });
+
+  it('unsubscribe() disconnects that consumer — including the RPC reply inbox', async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    const sub = await broker.subscribe('orders', () => {}, { queue: 'g-orders' });
+
+    await sub.unsubscribe();
+
+    expect(factory.consumer({ groupId: 'g-orders' }).calls.map((c) => c.method)).toContain(
+      'disconnect',
+    );
+    await broker.disconnect();
   });
 });

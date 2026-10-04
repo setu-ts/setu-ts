@@ -5658,9 +5658,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   never exited (measured on real Kafka); the hook now follows `connect()`. A fully-qualified Pub/Sub
   topic derived a default name containing `/`, which the emulator refused with `INVALID_ARGUMENT`
   (the topic ID is used now), and a Kafka retry wait held its timer through `disconnect()`. A
-  pre-existing leak was found and NOT fixed here: `KafkaBroker` `stop()`s consumers but never
-  `disconnect()`s them, so every Kafka app hangs after `app.stop()` on `develop` too — complete (PR
-  pending).
+  pre-existing leak, folded in at the maintainer's direction (the M58 precedent): `KafkaBroker`
+  `stop()`ped consumers on `disconnect()` and `unsubscribe()` but never `disconnect()`ed them, so
+  every Kafka app hung after `app.stop()` on `develop` too, and every RPC reply-inbox close leaked a
+  connection; both now `disconnect()` — complete (PR pending).
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

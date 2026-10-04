@@ -147,6 +147,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A Kafka application exits after `app.stop()`.** `KafkaBroker.disconnect()` and a subscription's
+  `unsubscribe()` called the kafkajs consumer's `stop()`, which halts fetching but leaves the
+  consumer's cluster connection open — so every Kafka application with a subscription hung after a
+  clean `app.stop()` until it was killed, and each RPC request's reply inbox leaked a connection
+  when it closed. Both now call `disconnect()`, which stops the consumer and closes its connection.
+  Found while verifying M101b; it predates M101b.
+
 - **A `MessagingPlugin` whose declared subscription rejects no longer leaks its broker (M101b).**
   `register()` connected the broker, subscribed the declared entries, and only then registered the
   close hook — so when a declared subscription rejected `start()`, the kernel's failed-start cleanup
