@@ -107,7 +107,8 @@ published separately by `CloudflarePlugin`.
 ## Architecture
 
 Cross-runtime operations (UUID, random bytes, SubtleCrypto, `now`, `hrtime`, timers) are identical
-across Node 18+, Deno, and Bun because they rely on web-standard APIs on `globalThis`. They are
+across Node 22+, Deno, and Bun because they rely on web-standard APIs on `globalThis` (the
+framework's floor is Node 22; `globalThis.crypto` alone would have put it at 19). They are
 implemented once in `src/services/cross-runtime.ts`.
 
 Divergent operations (platform, version, hostname, env, exit, fs, workers, dns) are implemented
