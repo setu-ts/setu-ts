@@ -12734,13 +12734,14 @@ npm dependency.
   BCP 47 practical maximum) — so a 64 KiB `Accept-Language` costs one slice, not one parse per range
   (the M90a `maxBodyBytes` class: a bound applied after the cost is paid is not a bound).
 - **Two response headers, both load-bearing for caches.** The middleware appends
-  `Vary: Accept-Language` on every governed response, whether or not the header won (through
-  `appendHeader`, which never consults `#ended` — M48 verified this in source), and every governed
-  response carries `Content-Language` with the FINAL tag, written after `next()` so a later
-  `replaceLocale` wins. Without `Vary`, `cache-plugin`'s middleware and any CDN serve one locale's
-  body to another: `cacheMiddleware` keys on method, URL, tenant and a caller-supplied `vary`
-  (`cache-plugin/src/interfaces/index.ts:165`) — the locale segment above makes that automatic, and
-  a test through the REAL `cacheMiddleware` proves two locales produce two entries.
+  `Vary: Accept-Language` (plus `Cookie` while the cookie source is enabled, a stated cost for CDN
+  cacheability that `cookie: false` removes) on every governed response, whether or not the header
+  won (through `appendHeader`, which never consults `#ended` — M48 verified this in source), and
+  every governed response carries `Content-Language` with the FINAL tag, written after `next()` so a
+  later `replaceLocale` wins. Without `Vary`, `cache-plugin`'s middleware and any CDN serve one
+  locale's body to another: `cacheMiddleware` keys on method, URL, tenant and a caller-supplied
+  `vary` (`cache-plugin/src/interfaces/index.ts:165`) — the locale segment above makes that
+  automatic, and a test through the REAL `cacheMiddleware` proves two locales produce two entries.
 - **The catalogue resource route is opt-in.** `exposeCatalogues: { basePath }` registers
   `GET <basePath>/:locale` serving one SUPPORTED locale's catalogue (anything else is a 404, never a
   lookup) under a configurable `Cache-Control`, so a browser can fetch exactly what the formatter
