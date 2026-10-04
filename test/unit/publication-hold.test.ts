@@ -79,9 +79,13 @@ describe('the release scripts after M98o', () => {
     const version = (JSON.parse(
       await Deno.readTextFile(new URL('packages/kernel/deno.json', ROOT)),
     ) as { version: string }).version;
+    // The same grants as the `release:verify` task: check 9 reads the merge
+    // log through git, and a narrower copy here would fail that check rather
+    // than this test's subject.
     const { code, out } = await run([
       'run',
       '--allow-read',
+      '--allow-run=git',
       'scripts/verify-release.ts',
       version,
     ]);

@@ -67,8 +67,14 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
 }
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly eleven canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(11);
+  it('has exactly fourteen canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(14);
+    expect(SCRIPT_TARGETS).toContain('scripts/release-shape.ts');
+    // The release bump and the changelog PR check: each has a thin I/O seam
+    // (`main`'s injected deps; `mergedPullRequests`'s git runner) and a
+    // decidable core that carries the bar.
+    expect(SCRIPT_TARGETS).toContain('scripts/bump-version.ts');
+    expect(SCRIPT_TARGETS).toContain('scripts/changelog-prs.ts');
     // The publication hold's decision; `publish-packages.ts` is its process seam.
     expect(SCRIPT_TARGETS).toContain('scripts/publication-hold.ts');
     expect(SCRIPT_TARGETS).not.toContain('scripts/publish-packages.ts');

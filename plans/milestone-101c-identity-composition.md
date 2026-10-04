@@ -265,6 +265,9 @@ M101h, which documents the final shapes this letter ships and must NOT re-docume
 
 ## 4. Exported surface — every symbol names its consumer
 
+**Breaking for implementors:** none — `ITenantDataStore` and `ITenantIsolationStrategy` are promoted
+into `common` and the plugin re-exports them; no published interface gains a required member.
+
 | Exported symbol                            | Kind                 | Consumer / real code path that READS it                                                                                                   |
 | ------------------------------------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `SESSION_STATE_KEY` (`common`)             | const                | `session-plugin` middleware writes it (`session-middleware.ts:66`); `multi-tenancy-plugin` tenant middleware reads it (§3.1)              |

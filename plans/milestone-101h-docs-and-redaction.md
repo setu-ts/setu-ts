@@ -182,6 +182,9 @@ documents the option by hand for a reader who writes it by hand).
 
 ## 4. Exported surface — every symbol names its consumer
 
+**Breaking for implementors:** none — `RedactionPolicy.fields` widens to a union that still accepts
+every existing policy.
+
 | Exported symbol             | Kind | Consumer / real code path that READS it                                                                                    |
 | --------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
 | `FieldRedaction` (`common`) | type | the value arm of `RedactionPolicy.fields`; read by `createFieldMatcher` (compile) and `createRedactionService` (selection) |

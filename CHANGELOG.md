@@ -12,7 +12,24 @@ All notable changes to this project are documented here. The format follows
   batches, interactive cancellation exits `130`, generation refuses non-project directories and
   workspace roots, JSONC manifests are read safely, and `setu add` refuses runtime-incompatible
   plugins. `Prompter.select` now returns the discriminated `PromptSelection` type.
-
+- **Versioning policy from `0.9.0`, with two gates.** A patch is the normal release and breaking
+  changes are batched into an occasional minor (README "Versioning", ROADMAP "Versioning Policy From
+  `0.9.0`"). `release:verify` gains check 10 (`scripts/release-shape.ts`): it classifies the bump
+  from the previous tag and refuses a patch whose shipping changelog section carries a `BREAKING`
+  entry, and a minor whose section carries none unless `--allow-quiet-minor` is passed.
+  `deno task check:plan` requires every plan's "Exported surface" section to carry a
+  `**Breaking for implementors:**` statement — `none`, or the break and the minor that carries it.
+  No package source changed.
+- **Release tooling: `release:bump` and `release:verify` check 9.**
+  `deno task release:bump <version>` moves every site a version bump has to touch — discovered by
+  package name wherever a reference carries one, enumerated with its reason where it does not — and
+  re-sweeps the result with `check:versions`' own reader; `--dry-run` prints the plan.
+  `release:verify` gains check 9 (`scripts/changelog-prs.ts`): every pull request merged since the
+  previous tag is represented in the shipping changelog section, and no milestone PR's entry sits
+  under an already-published heading — the two manual release-cutting checks that each saved a
+  release. CI's publish-dry-run job checks out full history so the merge log is reachable, and the
+  release workflow calls the `release:verify` task rather than an inline copy. No package source
+  changed.
 - **Service-call agreement (M101d).** The SDK adds `createTraceContextInterceptor` and
   `ClientRetryPolicy`; the full-stack starter adds `fullStackConfigOf` and
   `FullStackConfigUnavailableError` for the exact composition snapshot; and `contextToTraceparent`
@@ -225,7 +242,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **`cloudflare-plugin`'s `cacheApiMiddleware` keys on the resolved tenant.** The default key
+- **`cloudflare-plugin`'s `cacheApiMiddleware` keys on the resolved tenant (#407).** The default key
   carried the locale (M103) and not the tenant, so with multi-tenancy tenant A's cached page was
   served to tenant B for the TTL — the exact gap the M103 audit recorded as pre-existing. When
   `ctx.request.tenant` is set the key appends `setu-cache-tenant=<encoded id>` before the locale
@@ -234,7 +251,7 @@ All notable changes to this project are documented here. The format follows
   unencodable id, and an application without the plugin keeps byte-identical keys. A global
   registration must run after the tenant middleware (40). A custom `key` must include the tenant
   itself.
-- **The documented Node.js floor is 22, not 18.** `docs/getting-started.md`,
+- **The documented Node.js floor is 22, not 18 (#406).** `docs/getting-started.md`,
   `docs/runtime-deployment.md` and the runtime README claimed Node 18+; five packages use
   `Promise.withResolvers`, which Node 22 was the first to ship, and `globalThis.crypto` alone
   needs 19. CI verifies on Node 24. The `cacheApiMiddleware` JSDoc's list of skip reasons also names

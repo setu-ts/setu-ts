@@ -78,6 +78,19 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // is a SILENT PASS — an export ships unannounced and the gate says it did
   // not — so the comparison itself carries the bar, with its I/O injected.
   'scripts/check-changelog-coverage.ts',
+  // The changelog PR-coverage check (verify-release check 9): merged PRs since
+  // the previous tag against the shipping section. `mergedPullRequests` is the
+  // git seam; `checkChangelogPrs`, `requiredToken` and `splitSections` carry
+  // the bar. Its failure mode is a SILENT PASS — a release ships without a
+  // PR's notes and the check says every PR is represented.
+  'scripts/changelog-prs.ts',
+  // The release bump. `main` is the filesystem seam; `planBump` and
+  // `rewriteReferences` are the decidable core, and a wrong edit here is a
+  // published package depending on the previous release.
+  'scripts/bump-version.ts',
+  // Check 10's pure core: the bump kind against the section's BREAKING count.
+  // Its failure mode is a patch that breaks a caret pin's reader.
+  'scripts/release-shape.ts',
   // The suite partition's classifier. Its runner (`test-partition.ts`) is
   // deliberately NOT a target — it is the process seam the decidable logic was
   // extracted out of, and a test cannot drive it without spawning the whole

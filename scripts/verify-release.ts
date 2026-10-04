@@ -45,15 +45,30 @@
  * failing on it. CI runs this on every pull request, so failing would turn
  * every unrelated PR red; `scripts/publish-packages.ts` is where a hold
  * refuses.
+ * 9. Every pull request merged since the previous `v*` tag is represented in the
+ *    shipping changelog section, and no milestone PR's entry sits under an
+ *    already-published heading (`scripts/changelog-prs.ts`).
+ * 10. The version number agrees with the shipping section: a patch carries no
+ *    `BREAKING` entry, and a minor carries at least one unless
+ *    `--allow-quiet-minor` says the quiet minor is deliberate
+ *    (`scripts/release-shape.ts`).
  */
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
 import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
 import { extractReleaseNotes } from './release-notes.ts';
+import {
+  checkChangelogPrs,
+  describeFindings,
+  mergedPullRequests,
+  shippingSection,
+} from './changelog-prs.ts';
+import { bumpKind, countBreaking, shapeProblems } from './release-shape.ts';
 
-const expected = Deno.args[0];
+const expected = Deno.args.find((arg) => !arg.startsWith('--'));
+const allowQuietMinor = Deno.args.includes('--allow-quiet-minor');
 if (!expected) {
-  console.error('usage: verify-release.ts <version>   (e.g. 0.2.0)');
+  console.error('usage: verify-release.ts <version> [--allow-quiet-minor]   (e.g. 0.2.0)');
   Deno.exit(2);
 }
 
@@ -245,6 +260,47 @@ if (changelog === null) {
       `Release body is built from it, and that step runs after the publish, ` +
       `which cannot be repeated.`,
   );
+}
+
+// ── 9: every PR merged since the previous tag has an entry, in the right place ─
+
+// The three manual release-cutting checks that each saved a release (alpha.10,
+// v0.3.0, v0.4.0 — see scripts/changelog-prs.ts), run against the merge log.
+// Needs the tag reachable: a shallow clone fails loudly here rather than
+// passing over an empty list.
+if (changelog !== null) {
+  try {
+    const { previousTag, merged } = await mergedPullRequests();
+    const prs = checkChangelogPrs(changelog, expected, merged);
+    for (const line of describeFindings(prs)) problems.push(line);
+    console.log(
+      `changelog PR coverage: ${merged.length} pull request(s) merged since ${previousTag}, ` +
+        `${prs.represented} represented in ${prs.shippingSection}, ${prs.exempt} exempt.`,
+    );
+
+    // ── 10: the version number agrees with what the section carries ─────────
+    //
+    // README's Versioning table: a 0.x PATCH carries no breaking change, a
+    // MINOR carries them. From 0.9.0 a patch is the norm and breaks are
+    // batched (ROADMAP "Versioning policy from 0.9.0"); this refuses the two
+    // mistakes that policy depends on — see scripts/release-shape.ts.
+    const bump = bumpKind(previousTag.replace(/^v/, ''), expected);
+    const breaking = countBreaking(shippingSection(changelog, expected).body);
+    for (const line of shapeProblems({ bump, breaking, allowQuietMinor, version: expected })) {
+      problems.push(line);
+    }
+    console.log(
+      `release shape: ${bump} from ${previousTag}, ${breaking} BREAKING entr${
+        breaking === 1 ? 'y' : 'ies'
+      } in the shipping section.`,
+    );
+  } catch (error: unknown) {
+    problems.push(
+      `changelog PR coverage could not run: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 // ── 8: the GitHub Release must carry the lockfile resolved-set artifact ────
