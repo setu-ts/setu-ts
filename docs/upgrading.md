@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Change the SAML CSRF recipe to exclude the ACS instead of trusting the IdP origin (M101c)
+### Change the SAML CSRF recipe to use `CsrfOptions.exclude` instead of trusting the IdP origin (M101c)
 
 If you run a SAML provider behind both CSRF defences, the documented recipe now exempts the ACS path
 on **both** plugins rather than trusting the IdP's origin on `http-security-plugin`:
