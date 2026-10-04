@@ -5651,7 +5651,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   throws `KafkaTopicUnavailableError`; a `run()` rejection reaches the logger. Real suites drive two
   topics and RPC in one app on real NATS, Kafka 4.0.0 and the Pub/Sub emulator (run twice on one
   instance, striking the doc's restart advice that masked V8-2); every negative control reproduced
-  the run's own signature — complete (PR pending).
+  the run's own signature. **Verification then found three defects the gates passed.** The headline
+  one made the milestone's own named errors hang the process: `register()` connected the broker and
+  subscribed the declared entries BEFORE registering its close hook, so a declared subscription
+  rejecting `start()` — now the documented outcome — left the connected broker open and the process
+  never exited (measured on real Kafka); the hook now follows `connect()`. A fully-qualified Pub/Sub
+  topic derived a default name containing `/`, which the emulator refused with `INVALID_ARGUMENT`
+  (the topic ID is used now), and a Kafka retry wait held its timer through `disconnect()`. A
+  pre-existing leak was found and NOT fixed here: `KafkaBroker` `stop()`s consumers but never
+  `disconnect()`s them, so every Kafka app hangs after `app.stop()` on `develop` too — complete (PR
+  pending).
 - **Next milestone** — none open; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
