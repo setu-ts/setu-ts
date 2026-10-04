@@ -264,6 +264,13 @@ interface ActiveConsumer {
   run: () => void;
   /** The restart scheduled after a crash, while it has not begun. */
   restartTimer: { handle: unknown } | null;
+  /**
+   * The release in progress, once one has begun. `disconnect()` releases the
+   * reply-inbox consumer through `unsubscribe()` AND through its own sweep at
+   * the same time, so a second release returns the first rather than
+   * disconnecting the consumer twice.
+   */
+  release: Promise<void> | null;
 }
 
 /**
@@ -433,17 +440,21 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#retryWaits.clear();
     // Reject in-flight requests and close the reply inbox before the transport
     // goes away, so no timer or subscription outlives the connection.
-    await this.#rr.close();
-
+    //
     // Disconnect every active consumer. kafkajs's `stop()` only halts fetching
     // and leaves the consumer's cluster connection open, which kept the process
     // alive after `app.stop()` (measured on a real broker); `disconnect()` stops
-    // AND closes it (M101b review). Released CONCURRENTLY: each release may
-    // wait for an in-flight join, and waiting in turn would let N stalled joins
-    // hold shutdown for N times the bound. A failed release is ignored.
-    await Promise.allSettled(
-      [...this.#activeConsumers.values()].map((consumer) => this.#releaseConsumer(consumer)),
-    );
+    // AND closes it (M101b review). Released CONCURRENTLY — with each other AND
+    // with the reply inbox's close, which releases the inbox consumer through
+    // `unsubscribe()`: each release may wait for an in-flight join, and waiting
+    // in turn would let N stalled joins hold shutdown for N times the bound
+    // (PR #404 review). The inbox consumer is in both sets; `#releaseConsumer`
+    // is memoized, so it is still disconnected once. Neither `rr.close()` nor
+    // a release rejects into here: both swallow their own failures.
+    await Promise.allSettled([
+      this.#rr.close(),
+      ...[...this.#activeConsumers.values()].map((consumer) => this.#releaseConsumer(consumer)),
+    ]);
     this.#activeConsumers.clear();
 
     if (this.#producer) {
@@ -718,6 +729,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
       running: true,
       started: Promise.resolve(),
       restartTimer: null,
+      release: null,
       // `run()` can REJECT — kafkajs's crash handler rethrows a disconnect
       // that fails — and nothing else holds that promise, so an unread
       // rejection would be an unhandled rejection that terminates the
@@ -801,9 +813,23 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * disconnect is deferred to that moment and this returns. `disconnect()`,
    * not `stop()`: it also closes the connection.
    *
+   * Memoized per consumer: a second call returns the first release, so the
+   * consumer is disconnected once however many paths release it.
+   *
+   * @param consumer - The consumer entry to release
+   * @returns Resolves when the consumer is disconnected or the bound passes
+   */
+  #releaseConsumer(consumer: ActiveConsumer): Promise<void> {
+    consumer.release ??= this.#release(consumer);
+    return consumer.release;
+  }
+
+  /**
+   * The single release of a consumer; see {@link KafkaBroker.#releaseConsumer}.
+   *
    * @param consumer - The consumer entry to release
    */
-  async #releaseConsumer(consumer: ActiveConsumer): Promise<void> {
+  async #release(consumer: ActiveConsumer): Promise<void> {
     consumer.running = false;
     if (consumer.restartTimer !== null) {
       this.#runtime.clearTimeout(consumer.restartTimer.handle);

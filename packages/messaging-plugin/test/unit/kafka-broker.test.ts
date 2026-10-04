@@ -1162,6 +1162,48 @@ describe('KafkaBroker disconnect during a group join (M101b security audit F3)',
     expect(performance.now() - started).toBeLessThan(120);
   });
 
+  it('releases the reply inbox alongside the other consumers, disconnecting it once', async () => {
+    // PR #404 review: the inbox's close awaited its own release BEFORE the
+    // sweep began, so a stalled inbox join plus any other stalled join held
+    // shutdown for twice the bound (~100 ms here); concurrently, ~50 ms.
+    const factory = new FakeKafkaFactory();
+    joiningConsumer(factory, 'messaging-consumers:orders');
+    // The inbox's group is `rr-inbox-<uuid>`, so stall it as it is created.
+    const create = factory.consumer.bind(factory);
+    let inbox: ReturnType<typeof joiningConsumer> | null = null;
+    (factory as unknown as Record<string, unknown>).consumer = (o: { groupId: string }) => {
+      if (o.groupId.startsWith('rr-inbox-') && inbox === null) {
+        (factory as unknown as Record<string, unknown>).consumer = create;
+        inbox = joiningConsumer(factory, o.groupId);
+      }
+      return create(o);
+    };
+    const real = createFakeRuntime();
+    const runtime = {
+      ...real,
+      // Only the release bound is shortened; RPC timeouts keep their value.
+      setTimeout: (fn: () => void, ms: number) => real.setTimeout(fn, ms === 10_000 ? 50 : ms),
+    };
+    const broker = new KafkaBroker(runtime, new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    await broker.respond('t', () => 'ok');
+    await broker.request('t', {});
+    const stalled = inbox as ReturnType<typeof joiningConsumer> | null;
+    if (stalled === null) throw new Error('the reply inbox was never opened');
+
+    const started = performance.now();
+    await broker.disconnect();
+
+    expect(performance.now() - started).toBeLessThan(90);
+    // Released through unsubscribe() AND the sweep; once its join settles,
+    // the deferred disconnect runs exactly once.
+    expect(stalled.order).toEqual([]);
+    stalled.join();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stalled.order).toEqual(['joined', 'disconnect']);
+  });
+
   it('defers the disconnect to the join when the join outlasts the bound (N1, N2)', async () => {
     // Disconnecting under a join neither stops a join that later succeeds —
     // kafkajs drops its runner while it is still joining — nor returns before
