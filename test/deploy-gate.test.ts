@@ -5,6 +5,8 @@ import {
   buildGeneratedImage,
   type DriftReport,
   EXCLUDED_EXAMPLES,
+  GENERATED_LAYOUTS,
+  GENERATED_MEMBER_ARGS,
   generatedResources,
   hardenScaffoldLock,
   isClean,
@@ -12,6 +14,7 @@ import {
   nativeFilePath,
   parseModes,
   pathCandidates,
+  PRODUCTION_DEVTOOL_PROBE,
   renderDrift,
   SKIP_EXIT_CODE,
   stripFrameworkNpmEdges,
@@ -613,5 +616,30 @@ describe('generated deployment lock hardening', () => {
     expect(result.success).toBe(false);
     expect(result.stderr).toContain('records no @setu-ts npm edges');
     expect(commands).toHaveLength(2);
+  });
+});
+
+describe('the generated deployment gate proves the devtool is excluded (M101f V8-21)', () => {
+  it('scaffolds its member WITH the devtool, so the exclusion check cannot pass vacuously', () => {
+    expect(GENERATED_MEMBER_ARGS).toContain('--devtool');
+    expect(GENERATED_MEMBER_ARGS.slice(0, 2)).toEqual(['g', 'app']);
+  });
+
+  it('builds every manifest layout the import pruning must handle', () => {
+    expect([...GENERATED_LAYOUTS]).toEqual(['commented-json', 'jsonc', 'inherited-imports']);
+  });
+
+  it('checks the image for the development entry AND the cached connector source', () => {
+    expect(PRODUCTION_DEVTOOL_PROBE).toContain(
+      `test ! -e /srv/apps/${GENERATED_MEMBER_ARGS[2]}/main.dev.ts`,
+    );
+    expect(PRODUCTION_DEVTOOL_PROBE).toContain('! grep -rl diagnostics-plugin /deno-dir');
+  });
+
+  it('runs that probe on the --generated path, once per layout', () => {
+    const source = read('scripts/check-deploy.ts');
+    expect(source).toContain('await cli([...GENERATED_MEMBER_ARGS,');
+    expect(source).toContain('for (const layout of GENERATED_LAYOUTS)');
+    expect(source).toContain('PRODUCTION_DEVTOOL_PROBE,');
   });
 });

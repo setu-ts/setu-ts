@@ -479,6 +479,14 @@ export function renderWorkspaceManifest(manifest: WorkspaceManifest): string {
  * every member sorting after a newly inserted name, silently moving a running
  * service.
  *
+ * Connector ports live in their own range ({@linkcode allocateDevtoolPort}), so
+ * the maximum is taken over APPLICATION ports only — walking `devtoolPort` too
+ * would drag every later application past the first connector and into the
+ * connector range (`basePort + 1000` onward), interleaving the two kinds again.
+ * A candidate equal to a recorded connector port, which a hand-edited or
+ * overlapping range can produce, is skipped instead, so neither allocator ever
+ * hands out the other's number.
+ *
  * Returns `undefined` rather than a number past {@linkcode MAX_PORT}: a
  * workspace based at 65535 has exactly one member's worth of room, and handing
  * out 65536 would write a `main.ts` that throws `Invalid port (out of range)`
@@ -489,18 +497,14 @@ export function renderWorkspaceManifest(manifest: WorkspaceManifest): string {
  */
 export function allocatePort(manifest: WorkspaceManifest): number | undefined {
   let highest = manifest.basePort - 1;
+  const connectorPorts = new Set<number>();
   for (const member of manifest.members) {
     if (member.port > highest) highest = member.port;
-    // Walked alongside `port`, so the allocator's whole contract — it never
-    // hands out a port already in use — holds over the 2N-value space a
-    // devtool-enabled workspace occupies. Reading `port` alone would hand the
-    // next member a port this member's connector already holds.
-    if (member.devtoolPort !== undefined && member.devtoolPort > highest) {
-      highest = member.devtoolPort;
-    }
+    if (member.devtoolPort !== undefined) connectorPorts.add(member.devtoolPort);
   }
-  const next = highest + 1;
-  return isUsablePort(next) ? next : undefined;
+  let candidate = highest + 1;
+  while (candidate <= MAX_PORT && connectorPorts.has(candidate)) candidate++;
+  return isUsablePort(candidate) ? candidate : undefined;
 }
 
 /** Returns the recorded connector range or its bounded default. */

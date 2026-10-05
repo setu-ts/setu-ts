@@ -423,6 +423,16 @@ development-only diagnostics-plugin pin from the member import map before instal
 full-map install/frozen pair to complete lazy production edges, and runs both planned entrypoint
 checks afterwards. The cache exclusion and read-only broker boot are still mandatory.
 
+## Verification correction: application allocation
+
+Verification found §3.4's "`allocatePort` keeps walking BOTH kinds" defeated the separate range: a
+maximum over `devtoolPort` moved every application added after the first connector to
+`basePort + 1001` onward, inside the connector range. `allocatePort` now takes the maximum over
+application ports only and SKIPS a candidate a connector holds — the mirror of `allocateDevtoolPort`
+— so neither allocator hands out the other's number and neither sequence moves the other. Pinned by
+`allocate-port.test.ts` and a `generate app` sequence in `devtool-lifecycle.test.ts`, both observed
+failing against the previous implementation.
+
 ## 10. Design security review (recorded after implementation)
 
 **Completed corrective review, 2026-10-05.** The maintainer requested the security audit and then

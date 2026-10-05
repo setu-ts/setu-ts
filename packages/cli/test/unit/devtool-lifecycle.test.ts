@@ -5,6 +5,7 @@ import { parseArgs } from '../../src/args.ts';
 import { runDevtoolCommand } from '../../src/commands/devtool.ts';
 import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
+import { runAppCommand } from '../../src/commands/app.ts';
 import { factoryRefusal, standaloneDevtoolPort } from '../../src/devtool/planner.ts';
 import { devEntryVariants } from '../../src/devtool/dev-entry.ts';
 import {
@@ -249,6 +250,31 @@ describe('M101f lifecycle refusals and allocation', () => {
     }
   });
 
+  it('keeps application ports in their own sequence across devtool members', async () => {
+    // F1: `generate app` after a devtool member used to land at basePort + 1001,
+    // inside the connector range, because allocatePort walked devtool ports.
+    const fs = createFakeFs();
+    const deps = { fs, log: () => {}, error: () => {} };
+    expect(
+      await runNewCommand(parseArgs(['ws', '--workspace', '--port', '3000']), {
+        ...deps,
+        cwd: '/',
+      }),
+    ).toBe(0);
+    for (
+      const argv of [['app', 'alpha', '--devtool'], ['app', 'beta'], ['app', 'gamma', '--devtool']]
+    ) {
+      expect(await runAppCommand(parseArgs(argv), { ...deps, dir: '/ws' })).toBe(0);
+    }
+    const members = (JSON.parse(fs.read('/ws/setu.workspace.json')) as WorkspaceManifest).members
+      .map((member) => [member.name, member.port, member.devtoolPort]);
+    expect(members).toEqual([
+      ['alpha', 3000, 4000],
+      ['beta', 3001, undefined],
+      ['gamma', 3002, 4001],
+    ]);
+  });
+
   it('refuses edited and missing entries before any write', async () => {
     for (const source of ['edited', undefined]) {
       const fs = createFakeFs({
@@ -268,7 +294,10 @@ describe('M101f lifecycle refusals and allocation', () => {
           error: error.sink,
         }),
       ).toBe(1);
-      expect(error.text()).toContain('launcher accepts only');
+      expect(error.text()).toContain(
+        source === undefined ? 'this entry is missing' : 'launcher accepts only',
+      );
+      expect(error.text().split('\n')).toHaveLength(1);
       expect(fs.writes).toEqual([]);
     }
   });

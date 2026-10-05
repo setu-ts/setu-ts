@@ -148,7 +148,17 @@ export async function runWorkspaceCommand(
     } catch {
       source = undefined;
     }
-    if (source === undefined || !devEntryVariants(member.devtoolPort).includes(source)) {
+    if (source === undefined) {
+      deps.error(
+        `${
+          escapeName(path)
+        }: the member records devtool port ${member.devtoolPort} but this entry is missing, so the launcher has nothing to start; recreate it with setu devtool enable ${
+          escapeName(member.name)
+        }, then run this again.`,
+      );
+      return EXIT_ERROR;
+    }
+    if (!devEntryVariants(member.devtoolPort).includes(source)) {
       deps.error(
         `${
           escapeName(path)

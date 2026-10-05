@@ -501,6 +501,37 @@ const GENERATED_PROBE_ATTEMPTS = 120;
 const GENERATED_PROBE_INTERVAL_MS = 1_000;
 
 /**
+ * The `setu` arguments that add the generated gate's member: a microservice WITH the devtool, so
+ * every built image is proved to exclude what `--devtool` adds (M101f V8-21) — a member without it
+ * would make the exclusion check below pass vacuously.
+ */
+export const GENERATED_MEMBER_ARGS: readonly string[] = [
+  'g',
+  'app',
+  GENERATED_MEMBER,
+  '--devtool',
+  '--template',
+  'microservice',
+];
+
+/**
+ * The manifest layouts each built: a commented `deno.json`, a `deno.jsonc`, and a member whose
+ * imports are inherited from the workspace root — the import pruning must hold in all three.
+ */
+export const GENERATED_LAYOUTS: readonly string[] = [
+  'commented-json',
+  'jsonc',
+  'inherited-imports',
+];
+
+/**
+ * The shell check run inside the built image: no development entry, and no cached connector
+ * source anywhere in the module cache.
+ */
+export const PRODUCTION_DEVTOOL_PROBE: string =
+  `test ! -e /srv/apps/${GENERATED_MEMBER}/main.dev.ts && ! grep -rl diagnostics-plugin /deno-dir`;
+
+/**
  * Converts a file URL into the native path `Deno.Command` expects.
  *
  * `URL.pathname` deliberately retains percent encoding, which makes a checkout path containing a
@@ -839,16 +870,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       '--port',
       String(GENERATED_PORT),
     ]);
-    const member = await cli([
-      'g',
-      'app',
-      GENERATED_MEMBER,
-      '--devtool',
-      '--template',
-      'microservice',
-      '--dir',
-      root,
-    ]);
+    const member = await cli([...GENERATED_MEMBER_ARGS, '--dir', root]);
     if (!created.success || !member.success) {
       console.error('  ✗ scaffolding the workspace failed');
       if (!created.success) console.error(created.stderr);
@@ -876,7 +898,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
     const memberManifest = `${root}/apps/${GENERATED_MEMBER}/deno.json`;
     const memberJsonc = `${memberManifest}c`;
     const memberSource = await Deno.readTextFile(memberManifest);
-    for (const layout of ['commented-json', 'jsonc', 'inherited-imports']) {
+    for (const layout of GENERATED_LAYOUTS) {
       if (layout === 'commented-json') {
         await Deno.writeTextFile(memberManifest, `// Member configuration\n${memberSource}`);
       } else if (layout === 'jsonc') {
@@ -913,7 +935,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
         'sh',
         resources.image,
         '-c',
-        'test ! -e /srv/apps/orders/main.dev.ts && ! grep -rl diagnostics-plugin /deno-dir',
+        PRODUCTION_DEVTOOL_PROBE,
       ], { quiet: true });
       if (!connectorCache.success) {
         console.error(`  ✗ production carries a devtool entry or cached connector (${layout})`);

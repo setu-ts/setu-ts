@@ -18,28 +18,29 @@ describe('allocatePort', () => {
     expect(allocatePort(manifest([{ name: 'a', port: 3000 }]))).toBe(3001);
   });
 
-  it('walks a member devtool port, so allocation never hands out a held port', () => {
-    // A devtool port HIGHER than every application port would otherwise be
-    // invisible to the allocator, and the next member would be handed it.
-    const port = allocatePort(manifest([
-      { name: 'a', port: 3000, devtoolPort: 4919 },
-    ]));
-    expect(port).toBe(4920);
-  });
-
-  it('walks a devtool port that is the highest value in the workspace', () => {
-    // The widening is a MAXIMUM over the whole 2N-value space, not an offset:
-    // the next allocation lands above whatever any member holds, application
-    // or devtool alike.
+  it('keeps applications in their own sequence after a connector port is allocated', () => {
+    // The M101f F1 regression: a connector at basePort + 1000 must not drag
+    // the next application up past it — walking `devtoolPort` as part of the
+    // maximum put every later member inside the connector range.
     const port = allocatePort(manifest([
       { name: 'a', port: 3000, devtoolPort: 4000 },
-      { name: 'b', port: 3100 },
+      { name: 'b', port: 3001 },
     ]));
-    expect(port).toBe(4001);
+    expect(port).toBe(3002);
   });
 
-  it('returns undefined when a devtool port has spent the range', () => {
-    expect(allocatePort(manifest([{ name: 'a', port: 65535, devtoolPort: 65534 }])))
+  it('skips a candidate a connector already holds, so allocation never hands out a held port', () => {
+    // An overlapping or hand-edited connector range can sit directly above the
+    // application ports; the next application must step over it, not onto it.
+    const port = allocatePort(manifest([
+      { name: 'a', port: 3000, devtoolPort: 3001 },
+      { name: 'b', port: 3100, devtoolPort: 3101 },
+    ]));
+    expect(port).toBe(3102);
+  });
+
+  it('returns undefined when skipping connector ports exhausts the range', () => {
+    expect(allocatePort(manifest([{ name: 'a', port: 65534, devtoolPort: 65535 }])))
       .toBeUndefined();
   });
 
