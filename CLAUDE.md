@@ -5760,7 +5760,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   connector ports use a recorded range, and reallocation updates CLI-rendered entries before
   rewriting the manifest. Production images exclude the development entry and connector cache, while
   completing lazy broker lockfile edges. All diagnostics aliases refuse Cc and Cf characters through
-  the shared common predicate (SDK keeps its type-only import policy) — complete (PR pending).
+  the shared common predicate (SDK keeps its type-only import policy) — complete (PR #414).
 - **Next milestone** — M101g (now carrying the full-stack browser gate, §3.10 of its plan), M101h;
   M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
 
