@@ -433,6 +433,16 @@ application ports only and SKIPS a candidate a connector holds — the mirror of
 `allocate-port.test.ts` and a `generate app` sequence in `devtool-lifecycle.test.ts`, both observed
 failing against the previous implementation.
 
+## Code-review correction: alias policy and re-enabling
+
+At the maintainer's direction (code review, 2026-10-05), §3.6's predicate also refuses the line
+separator (Zl, U+2028) and paragraph separator (Zp, U+2029): neither is Cc or Cf, yet both can break
+the line an alias is displayed on, which is the spoofing class V8-22 closes. The twelve refusals now
+read "contains a control, format or line-separator character", since a Cf or separator alias is not
+a control character. The same review found that an unedited 0.8.0 `main.dev.ts` was refused as
+edited; it is now an accepted rendering that reallocation and re-enabling rewrite, while the compact
+rendering an intermediate commit produced, which no release emitted, is no longer accepted.
+
 ## 10. Design security review (recorded after implementation)
 
 **Completed corrective review, 2026-10-05.** The maintainer requested the security audit and then

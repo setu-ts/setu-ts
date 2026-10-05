@@ -144,7 +144,8 @@ export const REALTIME_DIAGNOSTICS_ERRORS = {
   enabled: 'Realtime diagnostics: enabled must be the literal true; omit diagnostics instead.',
   aliasType: 'Realtime diagnostics: alias must be a string.',
   aliasBytes: 'Realtime diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Realtime diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Realtime diagnostics: an alias contains a control, format or line-separator character.',
   extraKey: 'Realtime diagnostics: options accept only enabled and alias.',
   gauges: 'Realtime diagnostics: a websocket or sse collector needs a gauge reader.',
 } as const;

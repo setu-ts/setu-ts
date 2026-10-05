@@ -326,6 +326,8 @@ describe('compileOutboundAlias — agrees with the common realtime alias rule', 
     ['tab\talias', false],
     ['bad\u202Ealias', false],
     ['bad\u200Balias', false],
+    ['bad\u2028alias', false],
+    ['bad\u2029alias', false],
   ];
   for (const [alias, accepted] of table) {
     it(`${accepted ? 'accepts' : 'refuses'} ${JSON.stringify(alias).slice(0, 20)}`, () => {

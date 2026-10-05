@@ -62,7 +62,8 @@ export const STORAGE_DIAGNOSTICS_ERRORS = {
   enabled: 'Storage diagnostics: enabled must be the literal true; omit diagnostics instead.',
   aliasType: 'Storage diagnostics: alias must be a string.',
   aliasBytes: 'Storage diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Storage diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Storage diagnostics: an alias contains a control, format or line-separator character.',
   extraKey: 'Storage diagnostics: options accept only enabled and alias.',
 } as const;
 

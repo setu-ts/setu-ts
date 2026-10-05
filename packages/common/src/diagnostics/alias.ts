@@ -5,7 +5,8 @@
  */
 
 /**
- * Reports control (Cc) and format (Cf) characters that can spoof display aliases.
+ * Reports control (Cc), format (Cf), line separator (Zl) and paragraph separator (Zp)
+ * characters — each can reorder, hide or break the line an alias is displayed on.
  * Byte limits and error messages belong to each consumer.
  *
  * @param value - The alias to scan
@@ -13,5 +14,5 @@
  * @since 0.9.0
  */
 export function hasForbiddenAliasCharacter(value: string): boolean {
-  return /[\p{Cc}\p{Cf}]/u.test(value);
+  return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
 }

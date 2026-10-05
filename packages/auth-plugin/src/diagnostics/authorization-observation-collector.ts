@@ -57,10 +57,11 @@ const COLLECTOR_ERRORS = {
     'Authorization diagnostics: roles and permissions must be objects of exact name to alias.',
   tooManyRules: 'Authorization diagnostics: more than 128 approved rules in one map.',
   aliasBytes: 'Authorization diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Authorization diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Authorization diagnostics: an alias contains a control, format or line-separator character.',
   duplicateAlias: 'Authorization diagnostics: an alias is not unique within its map.',
   badRevision:
-    'Authorization diagnostics: policyRevision must be 1 to 64 UTF-8 bytes with no control character.',
+    'Authorization diagnostics: policyRevision must be 1 to 64 UTF-8 bytes with no control, format or line-separator character.',
   badInstanceId: 'Authorization diagnostics: read requires a non-empty instance identifier.',
   badCursor: 'Authorization diagnostics: after must be a non-negative safe integer.',
   badLimit: 'Authorization diagnostics: limit must be an integer from 1 to 128.',

@@ -116,7 +116,7 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
         roles: { admin: 'a\u202eb' },
         permissions: {},
       })
-    ).toThrow('control character');
+    ).toThrow('control, format or line-separator character');
   });
 
   it('refuses a duplicate alias within a map', () => {

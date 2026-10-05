@@ -61,6 +61,8 @@ describe('all diagnostics alias boundaries agree', () => {
           0x202c,
           0x202d,
           0x202e,
+          0x2028,
+          0x2029,
           0x2066,
           0x2067,
           0x2068,

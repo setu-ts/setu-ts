@@ -165,24 +165,16 @@ const PROBE_CHECK = `if (!devtoolRegistered || app.diagnostics === undefined) {
 export { DEVTOOL_ENTRY_MODULE };
 
 /**
- * Every rendering of a CLI-owned entry at this port: the current one, its earlier
- * compact form, and the 0.8.0 rendering that predates the composition probe — the
- * shape every workspace created before this release carries.
+ * Every rendering of a CLI-owned entry at this port: the current one, and the 0.8.0
+ * rendering that predates the composition probe — the shape every workspace created
+ * before this release carries. No released CLI has produced any other.
  */
 export function devEntryVariants(devtoolPort: number, member = true): readonly string[] {
   const input: DevEntryInput = {
     devtoolPort,
     ...(member ? { port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER } } : {}),
   };
-  const raw = renderEntry(input, true);
-  return [
-    raw,
-    renderEntry(input, false),
-    raw.replace(
-      '  register() {\n    devtoolRegistered = true;\n  },',
-      '  register() { devtoolRegistered = true; },',
-    ),
-  ];
+  return [renderEntry(input, true), renderEntry(input, false)];
 }
 
 /** Reads the port only from a complete, unedited CLI-owned entry. */

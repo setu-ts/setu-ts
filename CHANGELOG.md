@@ -20,11 +20,14 @@ All notable changes to this project are documented here. The format follows
   CLI-owned, so reallocation and re-enabling upgrade it instead of refusing it as edited. Production
   images exclude `main.dev.ts` and remove the development connector pin before installing the
   remaining import map, including JSONC and inherited-import layouts. Diagnostics aliases now refuse
-  Unicode format (Cf) characters through `hasForbiddenAliasCharacter` in common, in addition to
-  controls (Cc); replace bidi and zero-width aliases with printable names. **Launcher dependency:**
-  the `setu-ts-devtool` framework pin must be updated to the merge commit and its recipe catalog
-  must retain the previous entry renderings, because the probe changes the generated entry text.
-  This repository does not change that pin.
+  Unicode format (Cf), line separator (U+2028) and paragraph separator (U+2029) characters through
+  `hasForbiddenAliasCharacter` in common, in addition to controls (Cc), and the twelve refusal
+  messages now read "contains a control, format or line-separator character"; replace bidi,
+  zero-width and separator aliases with printable names. Re-enabling an unchanged workspace member
+  now reports that nothing changed rather than "Enabled the devtool". **Launcher dependency:** the
+  `setu-ts-devtool` framework pin must be updated to the merge commit and its recipe catalog must
+  retain the previous entry renderings, because the probe changes the generated entry text. This
+  repository does not change that pin.
 
 - **CLI write safety (M101e).** Writing commands now cooperate with SIGINT and roll back partial
   batches, interactive cancellation exits `130`, generation refuses non-project directories and

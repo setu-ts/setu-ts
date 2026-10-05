@@ -103,7 +103,7 @@ export function compileLabelAllowlist(
     }
     if (hasForbiddenAliasCharacter(entry)) {
       throw new RangeError(
-        `Invalid diagnostics labels.${listName}: an entry contains a control character.`,
+        `Invalid diagnostics labels.${listName}: an entry contains a control, format or line-separator character.`,
       );
     }
     compiled.add(entry);

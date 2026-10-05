@@ -71,7 +71,8 @@ export const TRACE_COLLECTOR_ERRORS = {
   notEnabled: 'Trace diagnostics: enabled must be the literal true.',
   badServiceAlias: 'Trace diagnostics: serviceAlias must be a string.',
   aliasBytes: 'Trace diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Trace diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Trace diagnostics: an alias contains a control, format or line-separator character.',
   badOperations: 'Trace diagnostics: operations must map exact span names to aliases.',
   tooManyOperations: 'Trace diagnostics: more than 128 approved operations.',
   duplicateAlias: 'Trace diagnostics: an operation alias is not unique.',

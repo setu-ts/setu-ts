@@ -66,7 +66,8 @@ export const EVENT_COLLECTOR_ERRORS = {
   notEnabled: 'Event diagnostics: enabled must be the literal true.',
   badAlias: 'Event diagnostics: alias must be a string.',
   aliasBytes: 'Event diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Event diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Event diagnostics: an alias contains a control, format or line-separator character.',
   badEvents: 'Event diagnostics: events must map event types to aliases.',
   tooManyEvents: 'Event diagnostics: more than 64 approved event types.',
   duplicateAlias: 'Event diagnostics: an event alias is not unique.',

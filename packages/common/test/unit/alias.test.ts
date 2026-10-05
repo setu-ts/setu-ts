@@ -3,7 +3,7 @@ import { expect } from '@std/expect';
 import { hasForbiddenAliasCharacter } from '../../src/index.ts';
 
 describe('diagnostics alias characters', () => {
-  it('accepts printable Unicode and rejects every C0/C1 and format boundary', () => {
+  it('accepts printable Unicode and rejects every C0/C1, format and line/paragraph separator boundary', () => {
     for (const value of ['ascii', 'é'.repeat(20), ' ', '~', '😀']) {
       expect(hasForbiddenAliasCharacter(value)).toBe(false);
     }
@@ -21,6 +21,8 @@ describe('diagnostics alias characters', () => {
         0x202c,
         0x202d,
         0x202e,
+        0x2028,
+        0x2029,
         0x2066,
         0x2067,
         0x2068,

@@ -86,7 +86,8 @@ export const QUEUE_COLLECTOR_ERRORS = {
   badQueues: 'Queue diagnostics: queues must map job names to aliases.',
   tooManyQueues: 'Queue diagnostics: more than 64 approved queues.',
   aliasBytes: 'Queue diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Queue diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Queue diagnostics: an alias contains a control, format or line-separator character.',
   duplicateAlias: 'Queue diagnostics: a queue alias is not unique.',
   badDepths: 'Queue diagnostics: depths must be an object.',
   badInterval: 'Queue diagnostics: depths.intervalMs must be an integer from 1000 to 300000.',

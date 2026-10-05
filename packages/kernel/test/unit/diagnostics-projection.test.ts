@@ -58,7 +58,7 @@ describe('compileLabelAllowlist', () => {
       throw new Error('unreachable');
     } catch (error) {
       expect(error).toBeInstanceOf(RangeError);
-      expect((error as Error).message).toContain('control character');
+      expect((error as Error).message).toContain('control, format or line-separator character');
       expect((error as Error).message).not.toContain('bad');
     }
   });

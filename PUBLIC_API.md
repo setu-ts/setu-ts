@@ -10388,11 +10388,13 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Diagnostics alias character policy
 
-`hasForbiddenAliasCharacter(value: string): boolean` returns true for any Unicode control (Cc) or
-format (Cf) character, including bidi overrides and zero-width format characters. Diagnostics
-sources, kernel labels and the connector wire validation share this pure predicate; each keeps its
-byte limit and fixed error message. Printable Unicode such as `é` remains accepted. The browser SDK
-maintains the same policy locally to preserve its type-only common imports.
+`hasForbiddenAliasCharacter(value: string): boolean` returns true for any Unicode control (Cc),
+format (Cf), line separator (Zl, U+2028) or paragraph separator (Zp, U+2029) character, including
+bidi overrides and zero-width format characters. Each refusal reads "contains a control, format or
+line-separator character". Diagnostics sources, kernel labels and the connector wire validation
+share this pure predicate; each keeps its byte limit and fixed error message. Printable Unicode such
+as `é` remains accepted. The browser SDK maintains the same policy locally to preserve its type-only
+common imports.
 
 ### Redaction
 

@@ -58,7 +58,8 @@ export const SCHEDULER_DIAGNOSTICS_ERRORS = {
   enabled: 'Scheduler diagnostics: enabled must be the literal true; omit diagnostics instead.',
   aliasType: 'Scheduler diagnostics: alias must be a string.',
   aliasBytes: 'Scheduler diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Scheduler diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Scheduler diagnostics: an alias contains a control, format or line-separator character.',
   jobsRequired: 'Scheduler diagnostics: jobs is required when diagnostics is enabled.',
   jobsShape: 'Scheduler diagnostics: jobs must be a plain object mapping job names to aliases.',
   jobsCount: 'Scheduler diagnostics: jobs approves at most 64 entries.',

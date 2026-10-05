@@ -70,11 +70,80 @@ describe('M101f lifecycle refusals and allocation', () => {
             },
           }),
         ).toBe(0);
-        expect(log.text()).toContain('already enabled');
-        expect(fs.read('/ws/shop/main.dev.ts')).toBe(entry);
-        expect(fs.writes.length).toBe(before);
+        const current = renderDevEntry({ devtoolPort: port });
+        // Either way the recorded port is kept and the file ends up current: an
+        // unchanged current entry is left alone, a 0.8.0 entry is upgraded in place.
+        expect(fs.read('/ws/shop/main.dev.ts')).toBe(current);
+        if (entry === current) {
+          expect(log.text()).toContain('already enabled');
+          expect(fs.writes.length).toBe(before);
+        } else {
+          expect(log.text()).toContain('updated /ws/shop/main.dev.ts');
+        }
       }
     }
+  });
+
+  it('upgrades a 0.8.0 member entry when the devtool is re-enabled', async () => {
+    const fs = createFakeFs();
+    const deps = { fs, log: () => {}, error: () => {} };
+    expect(
+      await runNewCommand(parseArgs(['ws', '--workspace', '--port', '3000']), {
+        ...deps,
+        cwd: '/',
+      }),
+    ).toBe(0);
+    expect(
+      await runAppCommand(parseArgs(['app', 'orders', '--devtool', '--devtool-port', '5123']), {
+        ...deps,
+        dir: '/ws',
+      }),
+    ).toBe(0);
+    const legacy = await Deno.readTextFile(
+      new URL('../fixtures/dev-entry-0.8.0-member.txt', import.meta.url),
+    );
+    await fs.writeFile('/ws/apps/orders/main.dev.ts', new TextEncoder().encode(legacy));
+    const log = createRecorder();
+    expect(
+      await runDevtoolCommand(parseArgs(['enable', 'orders']), {
+        fs,
+        cwd: '/ws',
+        log: log.sink,
+        error: () => {},
+      }),
+    ).toBe(0);
+    expect(fs.read('/ws/apps/orders/main.dev.ts')).toBe(
+      renderDevEntry({
+        devtoolPort: 5123,
+        port: { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
+      }),
+    );
+    expect(log.text()).toContain('updated /ws/apps/orders/main.dev.ts');
+  });
+
+  it('says a re-enabled workspace member needs nothing, instead of reporting it enabled', async () => {
+    const fs = createFakeFs();
+    const deps = { fs, log: () => {}, error: () => {} };
+    expect(
+      await runNewCommand(parseArgs(['ws', '--workspace', '--port', '3000']), {
+        ...deps,
+        cwd: '/',
+      }),
+    ).toBe(0);
+    expect(await runAppCommand(parseArgs(['app', 'orders', '--devtool']), { ...deps, dir: '/ws' }))
+      .toBe(0);
+    const before = fs.writes.length;
+    const log = createRecorder();
+    expect(
+      await runDevtoolCommand(parseArgs(['enable', 'orders']), {
+        fs,
+        cwd: '/ws',
+        log: log.sink,
+        error: () => {},
+      }),
+    ).toBe(0);
+    expect(log.text()).toBe('The devtool is already enabled for orders; nothing to change.');
+    expect(fs.writes.length).toBe(before);
   });
   it('requires the signature and both usage fragments and prints their locations', () => {
     const legacy = factoryRefusal('export function createApp(): IApplication {');
@@ -226,7 +295,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     );
   });
 
-  it('reallocates both raw and formatted CLI entries and reports updated', async () => {
+  it('reallocates the current and the 0.8.0 CLI entry and reports updated', async () => {
     for (const entry of devEntryVariants(4919)) {
       const fs = createFakeFs({
         ...seed,

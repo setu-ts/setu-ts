@@ -46,7 +46,8 @@ export const CONFIG_DIAGNOSTICS_ERRORS = {
   tooManyKeys: 'Config diagnostics: more than 128 approved keys.',
   tooManyFiles: 'Config diagnostics: more than eight approved files.',
   aliasBytes: 'Config diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Config diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Config diagnostics: an alias contains a control, format or line-separator character.',
   duplicateAlias: 'Config diagnostics: an alias is not unique.',
   badInstanceId: 'Config diagnostics: snapshot requires a non-empty instance identifier.',
 } as const;

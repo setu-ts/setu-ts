@@ -69,7 +69,8 @@ export const CACHE_DIAGNOSTICS_ERRORS = {
   enabled: 'Cache diagnostics: enabled must be the literal true; omit diagnostics instead.',
   aliasType: 'Cache diagnostics: alias must be a string.',
   aliasBytes: 'Cache diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Cache diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Cache diagnostics: an alias contains a control, format or line-separator character.',
   extraKey: 'Cache diagnostics: options accept only enabled and alias.',
 } as const;
 

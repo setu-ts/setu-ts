@@ -24,8 +24,10 @@ defaults probe 4919–5019; read the reported port or pass `--devtool-port`.
 
 Regenerate managed deployment files with `generate app`, `devtool enable`, or `ports --reallocate`
 and rebuild production images to exclude the development entry and connector cache. Replace aliases
-containing Unicode format characters (bidi controls, zero-width format characters) with printable
-ones; these now fail at construction and wire validation.
+containing Unicode format characters (bidi controls, zero-width format characters) or the line and
+paragraph separators U+2028/U+2029 with printable ones; these now fail at construction and wire
+validation. Code matching the old "contains a control character" refusal text should match "contains
+a control, format or line-separator character".
 
 The devtool extension release must re-pin the framework to this milestone merge commit and retain
 previous recipe renderings in its catalog. Until that cross-repository update, an older launcher may

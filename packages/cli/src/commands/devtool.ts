@@ -596,8 +596,9 @@ async function enableInWorkspace(
   if (existingRunner === undefined) {
     planned.push({ path: runnerPath, contents: runner.contents, creating: true });
   }
-  if (existingEntry === undefined) {
-    planned.push({ path: entryPath, contents: entry, creating: true });
+  // An accepted older rendering (the 0.8.0 entry) is rewritten to the current one.
+  if (existingEntry !== entry) {
+    planned.push({ path: entryPath, contents: entry, creating: existingEntry === undefined });
   }
   planned.push({
     path: joinPath(dir, WORKSPACE_MANIFEST),
@@ -618,6 +619,11 @@ async function enableInWorkspace(
     for (const write of planned) {
       deps.log(`${write.creating ? 'would create' : 'would update'} ${write.path}`);
     }
+    return EXIT_OK;
+  }
+
+  if (planned.length === 0) {
+    deps.log(`The devtool is already enabled for ${escapeName(member.name)}; nothing to change.`);
     return EXIT_OK;
   }
 
@@ -773,8 +779,9 @@ async function enableStandalone(
   }
 
   planManifestWrites(planned, [handle]);
-  if (existingEntry === undefined) {
-    planned.push({ path: entryPath, contents: entry, creating: true });
+  // An accepted older rendering (the 0.8.0 entry) is rewritten to the current one.
+  if (existingEntry !== entry) {
+    planned.push({ path: entryPath, contents: entry, creating: existingEntry === undefined });
   }
 
   if (args.flags['dry-run'] === true) {
