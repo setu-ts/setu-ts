@@ -4,6 +4,12 @@ import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { detectPlugins } from '../../src/utils/plugin-detector.ts';
 
 describe('detectPlugins', () => {
+  it('reads comments, trailing commas, and deno.jsonc', async () => {
+    const fs = createFakeFs({
+      '/app/deno.jsonc': '{ "imports": { // plugin\n "@setu-ts/auth-plugin": "jsr:x", }, }',
+    });
+    expect([...await detectPlugins(fs, '/app')]).toEqual(['auth-plugin']);
+  });
   it('reads the imports map of a Deno project', async () => {
     const fs = createFakeFs({
       '/app/deno.json': JSON.stringify({

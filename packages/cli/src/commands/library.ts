@@ -12,7 +12,15 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
-import { EXIT_ERROR, EXIT_OK, EXIT_USAGE, LIBRARY_VERB, PROGRAM_NAME } from '../constants.ts';
+import {
+  EXIT_ERROR,
+  EXIT_INTERRUPTED,
+  EXIT_OK,
+  EXIT_USAGE,
+  LIBRARY_VERB,
+  PROGRAM_NAME,
+} from '../constants.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 import {
   deriveNames,
   escapeName,
@@ -42,6 +50,8 @@ export interface LibraryDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -196,13 +206,22 @@ export async function runLibraryCommand(
   }
 
   try {
-    await writeFiles(deps.fs, planned);
+    const outcomes = await writeFiles(
+      deps.fs,
+      planned,
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
     return EXIT_ERROR;
   }
 
-  for (const file of planned) deps.log(`created ${file.path}`);
   deps.log('');
   deps.log(`Added the ${librarySpecifier(scope, names.kebab)} library. Import it anywhere:`);
   deps.log(`  import { ${names.camel} } from '${librarySpecifier(scope, names.kebab)}';`);

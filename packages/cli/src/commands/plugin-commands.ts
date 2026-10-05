@@ -19,11 +19,13 @@ import {
   CONFIG_EXPORT,
   CONFIG_MODULE,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   PROGRAM_NAME,
 } from '../constants.ts';
 import { resolveDir } from '../utils/file-writer.ts';
+import { awaitInterruptibly, InterruptedError, throwIfInterrupted } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
 import { type AppLoader, configModuleExists, configModulePath, loadApp } from '../app-loader.ts';
 
@@ -54,6 +56,8 @@ export interface PluginCommandDependencies {
   readonly error: (message: string) => void;
   /** Loads the config module; defaults to a real dynamic `import()`. */
   readonly loadApp?: AppLoader;
+  /** Interrupts dispatch and runs application teardown before returning 130. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -77,9 +81,12 @@ async function withPluginCommands(
   config: string | undefined,
   use: (commands: readonly RegisteredCommand[]) => Promise<number> | number,
 ): Promise<number> {
+  throwIfInterrupted(deps.interrupt);
   const app = await loadApp(dir, config, deps.loadApp);
   try {
+    throwIfInterrupted(deps.interrupt);
     await app.start();
+    throwIfInterrupted(deps.interrupt);
     const commands = app.services.getAll<RegisteredCommand>(CAPABILITIES.CLI_COMMAND);
 
     // Detected here rather than in each caller: both refuse identically, and
@@ -208,6 +215,10 @@ export async function runCommandsListing(
       return EXIT_OK;
     });
   } catch (cause) {
+    if (cause instanceof InterruptedError) {
+      deps.error('Interrupted; plugin command stopped.');
+      return EXIT_INTERRUPTED;
+    }
     deps.error(cause instanceof Error ? cause.message : String(cause));
     return EXIT_ERROR;
   }
@@ -267,10 +278,14 @@ export async function dispatchPluginCommand(
         return EXIT_USAGE;
       }
 
-      await match.handler(args.positionals);
+      await awaitInterruptibly(() => match.handler(args.positionals), deps.interrupt);
       return EXIT_OK;
     });
   } catch (cause) {
+    if (cause instanceof InterruptedError) {
+      deps.error('Interrupted; plugin command stopped.');
+      return EXIT_INTERRUPTED;
+    }
     deps.error(cause instanceof Error ? cause.message : String(cause));
     return EXIT_ERROR;
   }

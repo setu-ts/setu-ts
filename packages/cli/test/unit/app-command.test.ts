@@ -87,6 +87,9 @@ function harness(
         2,
       )
     }\n`;
+    for (const member of members) {
+      seed[`/ws/apps/${member.name}/.setu-member`] = '';
+    }
   }
   const fs = createFakeFs(seed);
   const out = createRecorder();
@@ -465,6 +468,16 @@ describe('runAppCommand', () => {
   });
 
   describe('the workspace gate', () => {
+    it('refuses a manifest member whose directory was deleted', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      await h.fs.rm('/ws/apps/orders/.setu-member');
+      expect(await h.run(['app', 'billing'])).toBe(1);
+      expect(h.err.text()).toContain('Member "orders"');
+      expect(h.err.text()).toContain('Remove its entry');
+      expect(h.err.text()).toContain('restore the directory');
+      expect(h.fs.writes).toEqual([]);
+    });
+
     it('refuses outside a workspace, naming how to make one', async () => {
       const h = harness(undefined);
       expect(await h.run(['app', 'orders'])).toBe(1);

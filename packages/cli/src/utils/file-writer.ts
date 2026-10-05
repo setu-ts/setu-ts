@@ -6,6 +6,7 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 import { isMissingPath } from './filesystem-errors.ts';
+import { InterruptedError, throwIfInterrupted } from './interruption.ts';
 
 /**
  * One file a schematic asks the command layer to create.
@@ -182,10 +183,49 @@ export async function findExisting(
   return existing;
 }
 
+/**
+ * Builds recovery guidance when every collision is debris beneath one directory
+ * the current command intended to create.
+ *
+ * The caller supplies that directory explicitly: deriving it from a common
+ * path prefix could recommend deleting an established source directory.
+ */
+export function interruptedRunRetryHint(
+  existing: readonly string[],
+  wouldCreateDirectory: string,
+): string | undefined {
+  if (existing.length === 0) return undefined;
+  const directory = wouldCreateDirectory.replace(/\/+$/, '');
+  const prefix = `${directory}/`;
+  if (!existing.every((path) => path.startsWith(prefix))) return undefined;
+  return `If an earlier run was interrupted before this change, delete ${directory} and run this again.`;
+}
+
 /** One attempted write, recorded before the filesystem can partially modify it. */
 interface FileUndo {
   readonly path: string;
   readonly before: Uint8Array | undefined;
+}
+
+/** The observable result of one planned file write. */
+export interface WriteOutcome {
+  readonly path: string;
+  readonly outcome: 'created' | 'updated' | 'unchanged';
+}
+
+function outcomeFor(
+  path: string,
+  before: Uint8Array | undefined,
+  after: Uint8Array,
+): WriteOutcome {
+  return {
+    path,
+    outcome: before === undefined
+      ? 'created'
+      : before.length === after.length && before.every((byte, index) => byte === after[index])
+      ? 'unchanged'
+      : 'updated',
+  };
 }
 
 /** Creates missing parents individually so only directories we created are removed. */
@@ -194,7 +234,9 @@ async function ensureDirectory(
   path: string,
   created: string[],
   known: Set<string>,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfInterrupted(signal);
   if (path === '' || path === '/' || known.has(path)) return;
   try {
     await fs.stat(path);
@@ -203,7 +245,8 @@ async function ensureDirectory(
   } catch (cause) {
     if (!isMissingPath(cause)) throw cause;
   }
-  await ensureDirectory(fs, dirName(path), created, known);
+  await ensureDirectory(fs, dirName(path), created, known, signal);
+  throwIfInterrupted(signal);
   await fs.mkdir(path);
   created.push(path);
   known.add(path);
@@ -217,6 +260,21 @@ async function previousBytes(fs: IFileSystem, path: string): Promise<Uint8Array 
     if (!isMissingPath(cause)) throw cause;
     return undefined;
   }
+}
+
+/** Classifies a write plan without mutating the filesystem. */
+export async function classifyFiles(
+  fs: IFileSystem,
+  files: readonly GeneratedFile[],
+): Promise<readonly WriteOutcome[]> {
+  const encoder = new TextEncoder();
+  const outcomes: WriteOutcome[] = [];
+  for (const file of files) {
+    outcomes.push(
+      outcomeFor(file.path, await previousBytes(fs, file.path), encoder.encode(file.contents)),
+    );
+  }
+  return outcomes;
 }
 
 /** Restores even a write that rejected after truncating its target. */
@@ -251,27 +309,35 @@ function failureMessage(cause: unknown): string {
  * The caller owns the overwrite preflight. Each attempted write captures its
  * prior bytes; failure restores them, removes new files, and removes only this
  * batch's empty directories. This is not crash-atomic storage or a lock against
- * concurrent editors: process termination cannot execute asynchronous rollback.
+ * concurrent editors. A handled interruption signal reaches the same rollback;
+ * SIGKILL, power loss, and other unhandled termination cannot execute it.
  *
  * @param fs - The filesystem to write through
  * @param files - The files to create
+ * @param options - Cooperative interruption signal checked between writes
  * @throws The original failure, or an AggregateError naming incomplete recovery
  */
 export async function writeFiles(
   fs: IFileSystem,
   files: readonly GeneratedFile[],
-): Promise<void> {
+  options: { readonly signal?: AbortSignal } = {},
+): Promise<readonly WriteOutcome[]> {
   const encoder = new TextEncoder();
   const directories: string[] = [];
   const known = new Set<string>();
   const attempted: FileUndo[] = [];
+  const outcomes: WriteOutcome[] = [];
   try {
     for (const file of files) {
-      await ensureDirectory(fs, dirName(file.path), directories, known);
+      throwIfInterrupted(options.signal);
+      await ensureDirectory(fs, dirName(file.path), directories, known, options.signal);
       const before = await previousBytes(fs, file.path);
       attempted.push({ path: file.path, before });
       await fs.writeFile(file.path, encoder.encode(file.contents));
+      throwIfInterrupted(options.signal);
+      outcomes.push(outcomeFor(file.path, before, encoder.encode(file.contents)));
     }
+    return outcomes;
   } catch (cause) {
     const failures: Error[] = [];
     const recover = async (path: string, action: () => Promise<void>): Promise<void> => {
@@ -295,5 +361,124 @@ export async function writeFiles(
       );
     }
     throw cause;
+  }
+}
+
+/**
+ * Journals a relocation and its write batches as one interruption recovery unit.
+ *
+ * Only paths mutated by the operation are restored. Directory removal is limited
+ * to empty directories: callers must never recursively delete populated trees.
+ * Ordinary returned refusals retain the caller's existing recovery policy.
+ *
+ * @param fs - The underlying filesystem
+ * @param operation - Performs relocation and writes through the journaled filesystem
+ * @param signal - Interruption observed before and after each mutation
+ * @returns The operation's result after its final interruption check
+ */
+export async function withFileTransaction<T>(
+  fs: IFileSystem,
+  operation: (journaled: IFileSystem) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const files = new Map<string, FileUndo>();
+  const created: string[] = [];
+  const removed: string[] = [];
+  const known = new Set<string>();
+  const remember = async (path: string): Promise<void> => {
+    if (!files.has(path)) files.set(path, { path, before: await previousBytes(fs, path) });
+  };
+  const journaled: IFileSystem = {
+    // Adapters may implement their methods on a prototype and rely on `this`.
+    readFile: fs.readFile.bind(fs),
+    stat: fs.stat.bind(fs),
+    readdir: fs.readdir.bind(fs),
+    ...(fs.realPath === undefined ? {} : { realPath: fs.realPath.bind(fs) }),
+    ...(fs.readStream === undefined ? {} : { readStream: fs.readStream.bind(fs) }),
+    async writeFile(path, data) {
+      throwIfInterrupted(signal);
+      await remember(path);
+      await fs.writeFile(path, data);
+      throwIfInterrupted(signal);
+    },
+    async mkdir(path, options) {
+      throwIfInterrupted(signal);
+      if (options?.recursive === true) {
+        await ensureDirectory(fs, path, created, known, signal);
+      } else {
+        await fs.mkdir(path, options);
+        created.push(path);
+      }
+      throwIfInterrupted(signal);
+    },
+    async rm(path, options) {
+      throwIfInterrupted(signal);
+      const stat = await fs.stat(path);
+      if (stat.isDirectory) {
+        // Never let the journal remove unrecorded file contents.
+        const directories: string[] = [];
+        const collect = async (directory: string): Promise<void> => {
+          for (const name of await fs.readdir(directory)) {
+            const child = joinPath(directory, name);
+            if (!(await fs.stat(child)).isDirectory) {
+              throw new Error(`Refusing to remove unrecorded file ${child}`);
+            }
+            await collect(child);
+          }
+          directories.push(directory);
+        };
+        await collect(path);
+        await fs.rm(path, options);
+        removed.push(...directories);
+        known.delete(path);
+      } else {
+        await remember(path);
+        await fs.rm(path, options);
+      }
+      throwIfInterrupted(signal);
+    },
+  };
+  try {
+    throwIfInterrupted(signal);
+    const result = await operation(journaled);
+    throwIfInterrupted(signal);
+    return result;
+  } catch (cause) {
+    const failures: Error[] = [];
+    const recover = async (path: string, action: () => Promise<void>): Promise<void> => {
+      try {
+        await action();
+      } catch (error) {
+        failures.push(new Error(`${path}: ${failureMessage(error)}`, { cause: error }));
+      }
+    };
+    for (const path of [...removed].reverse()) {
+      await recover(path, () => fs.mkdir(path, { recursive: true }));
+    }
+    for (const undo of [...files.values()].reverse()) {
+      await recover(undo.path, () => restoreFile(fs, undo));
+    }
+    for (const path of [...created].reverse()) {
+      await recover(path, async () => {
+        try {
+          await fs.rm(path);
+        } catch (error) {
+          if (!isMissingPath(error)) throw error;
+        }
+      });
+    }
+    // A nested write batch rolls back through this abort-aware journal, so its
+    // aggregate can wrap the interruption even when outer recovery also fails.
+    const originalCause = cause instanceof AggregateError && cause.cause instanceof InterruptedError
+      ? cause.cause
+      : cause;
+    if (failures.length > 0) {
+      throw new AggregateError(
+        [cause, ...failures],
+        `${failureMessage(cause)}; rollback incomplete: ${failures.map(failureMessage).join('; ')}`,
+        { cause: originalCause },
+      );
+    }
+    throw originalCause;
   }
 }

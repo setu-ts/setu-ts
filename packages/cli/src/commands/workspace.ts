@@ -4,7 +4,8 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
+import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import { DISCOVERY_MODULE, renderDiscoveryModule } from '../workspace/discovery-module.ts';
@@ -19,6 +20,7 @@ import {
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { transportSpec } from '../workspace/transport.ts';
+import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 
 /** Dependencies reached by workspace maintenance commands. */
 export interface WorkspaceCommandDependencies {
@@ -27,6 +29,7 @@ export interface WorkspaceCommandDependencies {
   readonly log: (message: string) => void;
   readonly error: (message: string) => void;
   readonly portAvailable?: PortProbe;
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -101,6 +104,11 @@ export async function runWorkspaceCommand(
     deps.error(`No usable ${WORKSPACE_MANIFEST} in ${dir}, so this is not a Setu workspace.`);
     return EXIT_ERROR;
   }
+  const reconciliation = await reconcileMembers(deps.fs, dir, read.manifest);
+  if (!reconciliation.ok) {
+    deps.error(describeReconcileFailure(reconciliation));
+    return EXIT_ERROR;
+  }
   const next = await reallocate(read.manifest, deps.portAvailable ?? assumePortAvailable);
   if (next === undefined) {
     deps.error(`No bindable ports remain between ${read.manifest.basePort} and ${MAX_PORT}.`);
@@ -112,8 +120,17 @@ export async function runWorkspaceCommand(
     return EXIT_OK;
   }
   try {
-    await writeFiles(deps.fs, files);
+    await writeFiles(
+      deps.fs,
+      files,
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(
       `Failed to update workspace ports: ${cause instanceof Error ? cause.message : String(cause)}`,
     );

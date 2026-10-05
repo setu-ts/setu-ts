@@ -2,9 +2,110 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IFileSystem } from '@setu-ts/common';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
-import { findExisting, writeFiles } from '../../src/utils/file-writer.ts';
+import { findExisting, withFileTransaction, writeFiles } from '../../src/utils/file-writer.ts';
+import { InterruptedError } from '../../src/utils/interruption.ts';
+
+describe('relocation interruption journal', () => {
+  it('forwards optional filesystem capabilities with their original receiver', async () => {
+    const backing = createFakeFs({ '/project/a.ts': 'original' });
+    const fs = {
+      ...backing,
+      realPath(path: string): Promise<string> {
+        return Promise.resolve(this.read(path) === 'original' ? '/canonical/a.ts' : path);
+      },
+      async readStream(path: string, options?: { readonly start?: number; readonly end?: number }) {
+        const data = await this.readFile(path);
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(data.slice(options?.start, (options?.end ?? data.length - 1) + 1));
+            controller.close();
+          },
+        });
+      },
+    };
+    await withFileTransaction(fs, async (journal) => {
+      expect(await journal.realPath!('/project/a.ts')).toBe('/canonical/a.ts');
+      expect(
+        await new Response(await journal.readStream!('/project/a.ts', { start: 1, end: 3 })).text(),
+      )
+        .toBe('rig');
+    });
+    await withFileTransaction(backing, async (journal) => {
+      expect(journal.realPath).toBeUndefined();
+      expect(journal.readStream).toBeUndefined();
+      expect(await journal.readFile('/project/a.ts')).toEqual(new TextEncoder().encode('original'));
+    });
+  });
+
+  it('restores only mutated files and leaves an unrelated concurrent write intact', async () => {
+    const fs = createFakeFs({ '/project/a.ts': 'original' });
+    const controller = new AbortController();
+    await expect(withFileTransaction(fs, async (journal) => {
+      await journal.mkdir('/project/moved', { recursive: true });
+      await journal.writeFile('/project/moved/a.ts', await journal.readFile('/project/a.ts'));
+      await journal.rm('/project/a.ts');
+      await fs.writeFile('/project/unrelated.ts', new TextEncoder().encode('concurrent'));
+      controller.abort();
+    }, controller.signal)).rejects.toBeInstanceOf(InterruptedError);
+    expect(fs.read('/project/a.ts')).toBe('original');
+    expect(fs.read('/project/unrelated.ts')).toBe('concurrent');
+    expect(fs.has('/project/moved/a.ts')).toBe(false);
+  });
+
+  it('refuses recursive removal of an unrecorded file', async () => {
+    const fs = createFakeFs({ '/project/src/a.ts': 'keep' });
+    await expect(
+      withFileTransaction(fs, (journal) => journal.rm('/project/src', { recursive: true })),
+    )
+      .rejects.toThrow('Refusing to remove unrecorded file');
+    expect(fs.read('/project/src/a.ts')).toBe('keep');
+  });
+
+  it('reports paths whose recovery fails instead of claiming complete rollback', async () => {
+    const fs = createFakeFs();
+    const controller = new AbortController();
+    const broken: IFileSystem = {
+      ...fs,
+      rm: (path, options) =>
+        path.endsWith('a.ts') ? Promise.reject(new Error('cannot remove')) : fs.rm(path, options),
+    };
+    await expect(withFileTransaction(broken, async (journal) => {
+      await journal.mkdir('/project');
+      await journal.writeFile('/project/a.ts', new TextEncoder().encode('new'));
+      controller.abort();
+    }, controller.signal)).rejects.toThrow('rollback incomplete: /project/a.ts');
+  });
+});
 
 describe('writeFiles rollback', () => {
+  it('writes nothing when already interrupted', async () => {
+    const fs = createFakeFs();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(writeFiles(fs, [{ path: 'a.ts', contents: 'A' }], {
+      signal: controller.signal,
+    })).rejects.toBeInstanceOf(InterruptedError);
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('rolls back when interruption arrives during the final write', async () => {
+    const fs = createFakeFs({ 'project/existing.ts': 'before' });
+    const controller = new AbortController();
+    const wrapped: IFileSystem = {
+      ...fs,
+      async writeFile(path, data) {
+        await fs.writeFile(path, data);
+        if (path.endsWith('last.ts')) controller.abort();
+      },
+    };
+    await expect(writeFiles(wrapped, [
+      { path: 'project/existing.ts', contents: 'after', managed: true },
+      { path: 'project/last.ts', contents: 'last' },
+    ], { signal: controller.signal })).rejects.toBeInstanceOf(InterruptedError);
+    expect(fs.read('project/existing.ts')).toBe('before');
+    expect(fs.has('project/last.ts')).toBe(false);
+  });
+
   it('removes new files and nested directories after a partially written file rejects', async () => {
     const fs = createFakeFs();
     await fs.mkdir('project');

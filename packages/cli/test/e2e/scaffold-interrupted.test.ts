@@ -33,7 +33,7 @@ async function fixture(work: (root: string, fs: IFileSystem) => Promise<void>): 
   }
 }
 
-function cli(root: string, fs: IFileSystem) {
+function cli(root: string, fs: IFileSystem, interrupt?: AbortSignal) {
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -47,11 +47,89 @@ function cli(root: string, fs: IFileSystem) {
         log: out.sink,
         error: err.sink,
         portAvailable: () => Promise.resolve(true),
+        ...(interrupt === undefined ? {} : { interrupt }),
       }),
   };
 }
 
 describe('interrupted scaffolding on the real filesystem', () => {
+  for (const phase of ['copy', 'delete', 'root-write', 'entry-rewrite'] as const) {
+    it(`restores adopted files and directories after interruption during ${phase}`, async () => {
+      await fixture(async (root, fs) => {
+        expect(await cli(root, fs).run(['new', 'svc', '--template', 'rest'])).toBe(0);
+        const project = `${root}/svc`;
+        // The entry rewrite targets the pre-runtime-port scaffold shape.
+        await Deno.writeTextFile(`${project}/main.ts`, 'await app.start({ port: 3000 });\n');
+        await Deno.mkdir(`${project}/src/empty/nested`, { recursive: true });
+        const before = await snapshot(project);
+        const controller = new AbortController();
+        let triggered = false;
+        let mainWrites = 0;
+        const interrupted = cli(project, {
+          ...fs,
+          async writeFile(path, data) {
+            await fs.writeFile(path, data);
+            if (path.endsWith('/apps/svc/main.ts')) mainWrites += 1;
+            const trigger = phase === 'copy'
+              ? path.includes('/apps/svc/')
+              : phase === 'root-write'
+              ? path === `${project}/setu.workspace.json`
+              : phase === 'entry-rewrite' && mainWrites === 2;
+            if (!triggered && trigger) {
+              triggered = true;
+              controller.abort();
+            }
+          },
+          async rm(path, options) {
+            await fs.rm(path, options);
+            if (!triggered && phase === 'delete' && path === `${project}/main.ts`) {
+              triggered = true;
+              controller.abort();
+            }
+          },
+        }, controller.signal);
+        expect(await interrupted.run(['adopt'])).toBe(130);
+        expect(triggered).toBe(true);
+        expect(interrupted.err.lines).toEqual([
+          'Interrupted; the files this run wrote were removed.',
+        ]);
+        expect(await snapshot(project)).toEqual(before);
+        expect(await cli(project, fs).run(['adopt'])).toBe(0);
+      });
+    });
+  }
+
+  it('removes a new full-stack tree when interruption arrives during its write batch', async () => {
+    await fixture(async (root, fs) => {
+      const controller = new AbortController();
+      let writes = 0;
+      const interrupted = cli(root, {
+        ...fs,
+        async writeFile(path, data) {
+          await fs.writeFile(path, data);
+          writes += 1;
+          if (writes === 17) controller.abort();
+        },
+      }, controller.signal);
+
+      expect(await interrupted.run(['new', 'app', '--template', 'full-stack'])).toBe(130);
+      expect(interrupted.err.text()).toContain('Interrupted;');
+      await expect(Deno.stat(`${root}/app`)).rejects.toThrow();
+    });
+  });
+
+  it('identifies a pre-existing partial scaffold as interruption debris', async () => {
+    await fixture(async (root, fs) => {
+      await Deno.mkdir(`${root}/app`, { recursive: true });
+      await Deno.writeTextFile(`${root}/app/deno.json`, '{ "partial": true }\n');
+      const retry = cli(root, fs);
+
+      expect(await retry.run(['new', 'app', '--template', 'rest'])).toBe(1);
+      expect(retry.err.text()).toContain(`delete ${root}/app and run this again`);
+      expect(await Deno.readTextFile(`${root}/app/deno.json`)).toBe('{ "partial": true }\n');
+    });
+  });
+
   it('restores the starting tree when a nested write is refused and retries successfully', async () => {
     await fixture(async (root, fs) => {
       await Deno.mkdir(`${root}/app/src`, { recursive: true });
@@ -112,6 +190,47 @@ describe('interrupted scaffolding on the real filesystem', () => {
       expect(await ordinary.run(args)).toBe(0);
       expect(await Deno.readTextFile(`${workspace}/apps/first/src/discovery/services.ts`))
         .toContain('third');
+    });
+  });
+
+  it('restores a workspace when interruption arrives during generate app and permits retry', async () => {
+    await fixture(async (root, fs) => {
+      const setup = cli(root, fs);
+      expect(await setup.run(['new', 'acme', '--workspace'])).toBe(0);
+      const workspace = `${root}/acme`;
+      expect(
+        await cli(workspace, fs).run([
+          'generate',
+          'app',
+          'first',
+          '--template',
+          'microservice',
+        ]),
+      ).toBe(0);
+      expect(
+        await cli(workspace, fs).run([
+          'generate',
+          'app',
+          'second',
+          '--template',
+          'microservice',
+        ]),
+      ).toBe(0);
+      const before = await snapshot(workspace);
+      const controller = new AbortController();
+      let writes = 0;
+      const interrupted = cli(workspace, {
+        ...fs,
+        async writeFile(path, data) {
+          await fs.writeFile(path, data);
+          writes += 1;
+          if (writes === 3) controller.abort();
+        },
+      }, controller.signal);
+      const args = ['generate', 'app', 'third', '--template', 'microservice'];
+      expect(await interrupted.run(args)).toBe(130);
+      expect(await snapshot(workspace)).toEqual(before);
+      expect(await cli(workspace, fs).run(args)).toBe(0);
     });
   });
 

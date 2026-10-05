@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **CLI write safety (M101e).** Writing commands now cooperate with SIGINT and roll back partial
+  batches, interactive cancellation exits `130`, generation refuses non-project directories and
+  workspace roots, JSONC manifests are read safely, and `setu add` refuses runtime-incompatible
+  plugins. Interrupted adoption restores relocated project files as well as workspace writes; plugin
+  commands stop awaiting their handler and run application shutdown before returning `130`. Adoption
+  supports prototype-based filesystem adapters and retains exit `130` when nested recovery fails.
+  JSONC reads preserve comment token boundaries instead of accepting malformed literals.
+- **BREAKING: Programmatic CLI prompts (M101e).** `Prompter.select` now returns the discriminated
+  `PromptSelection` type instead of a string or `undefined`. Implementors must wrap answers as
+  `{ kind: 'answer', value }` and return `unavailable` or `cancelled` for the two no-answer cases.
+  This change ships in the `0.9.0` minor.
 - **Tenant data-store bridge (M101c, V8-8).** `@setu-ts/database-plugin` now ships the one
   `ITenantDataStore` over a real backend: `createDatabaseTenantDataStore()` returns a
   `RegistryFactory` the multi-tenancy plugin resolves in `onInit`, so `DatabasePlugin` may be

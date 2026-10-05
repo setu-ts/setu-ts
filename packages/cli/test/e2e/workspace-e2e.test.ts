@@ -249,6 +249,21 @@ describe('workspace scaffolding — end to end', () => {
     ]);
   });
 
+  it('refuses to add a member while the manifest names a deleted member', async () => {
+    const ws = await twoMembers();
+    await Deno.remove(`${ws}/apps/billing`, { recursive: true });
+    const manifestBefore = await Deno.readTextFile(`${ws}/${WORKSPACE_MANIFEST}`);
+
+    expect(
+      await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws]),
+    ).toBe(1);
+    await expect(Deno.stat(`${ws}/apps/billing`)).rejects.toThrow();
+    await expect(Deno.stat(`${ws}/apps/shipping`)).rejects.toThrow();
+    expect(await Deno.readTextFile(`${ws}/${WORKSPACE_MANIFEST}`)).toBe(manifestBefore);
+    expect(err.join('\n')).toContain('billing');
+    expect(err.join('\n')).toContain('Remove');
+  });
+
   it('gives each member the other address', async () => {
     const ws = await twoMembers();
     const orders = await Deno.readTextFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`);

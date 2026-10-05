@@ -20,15 +20,19 @@ import { escapeName } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
 import {
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   PROGRAM_NAME,
   type TargetRuntime,
   VERSION,
 } from '../constants.ts';
-import { joinPath, resolveDir } from '../utils/file-writer.ts';
+import { joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { stringFlag } from '../args.ts';
-import { detectTargetRuntime } from '../utils/runtime-detector.ts';
+import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
+import { findWorkspaceMarker } from '../utils/project-detector.ts';
+import { readJsonManifest } from '../utils/manifest-reader.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 
 /** What `runAddCommand` reaches the outside world through. */
 export interface AddCommandDependencies {
@@ -40,6 +44,8 @@ export interface AddCommandDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -93,6 +99,26 @@ const ADDABLE: ReadonlyMap<string, string> = new Map([
   ['validation', 'validation-plugin'],
   ['websocket', 'websocket-plugin'],
   ['worker-pool', 'worker-pool-plugin'],
+]);
+
+const RUNTIME_RESTRICTIONS: ReadonlyMap<
+  string,
+  { readonly runtimes: readonly TargetRuntime[]; readonly reason: string }
+> = new Map([
+  [
+    'cloudflare-plugin',
+    {
+      runtimes: ['cloudflare-workers'],
+      reason: 'it requires Cloudflare Workers environment bindings at registration',
+    },
+  ],
+  [
+    'scheduler-plugin',
+    {
+      runtimes: ['deno', 'node', 'bun'],
+      reason: 'the scheduler is unavailable on Cloudflare Workers',
+    },
+  ],
 ]);
 
 /** One provider a decorated ingress class can resolve from the application. */
@@ -307,6 +333,20 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
 
+  let runtime: TargetRuntime;
+  try {
+    runtime = await detectTargetRuntime(deps.fs, dir);
+  } catch (cause) {
+    if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
+    deps.error(cause.message);
+    return EXIT_ERROR;
+  }
+  const restriction = RUNTIME_RESTRICTIONS.get(bare);
+  if (restriction !== undefined && !restriction.runtimes.includes(runtime)) {
+    deps.error(`Cannot add ${specifier} to a ${runtime} project: ${restriction.reason}.`);
+    return EXIT_USAGE;
+  }
+
   // Both manifests are updated when both exist, because a Workers or Node
   // project carries a `package.json` for its toolchain AND a `deno.json` that
   // `setu generate` reads for plugin gating — writing only one would leave the
@@ -317,6 +357,7 @@ export async function runAddCommand(
     readonly range: string;
   }[] = [
     { file: 'deno.json', section: 'imports', range: `jsr:${specifier}@^${VERSION}` },
+    { file: 'deno.jsonc', section: 'imports', range: `jsr:${specifier}@^${VERSION}` },
     {
       file: 'package.json',
       section: 'dependencies',
@@ -342,7 +383,16 @@ export async function runAddCommand(
     try {
       updated = withDependency(source, target.section, specifier, target.range);
     } catch {
-      deps.error(`Cannot read ${path} as JSON; fix it and run this again.`);
+      const read = await readJsonManifest(deps.fs, path);
+      if (read.kind === 'ok' && read.format === 'jsonc') {
+        deps.error(
+          `${path} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+            `Add this line under "${target.section}" yourself: ` +
+            `"${specifier}": "${target.range}"`,
+        );
+      } else {
+        deps.error(`Cannot read ${path} as JSON; fix it and run this again.`);
+      }
       return EXIT_ERROR;
     }
 
@@ -383,12 +433,25 @@ export async function runAddCommand(
     return EXIT_OK;
   }
 
-  for (const edit of edits) {
-    await deps.fs.writeFile(edit.path, new TextEncoder().encode(edit.contents));
-    deps.log(`updated ${edit.path}`);
+  let outcomes: Awaited<ReturnType<typeof writeFiles>>;
+  try {
+    outcomes = await writeFiles(
+      deps.fs,
+      edits.map((edit) => ({ ...edit, managed: true })),
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
+  } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
+    deps.error(
+      `Failed to update the manifest: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    return EXIT_ERROR;
   }
-
-  const runtime = await detectTargetRuntime(deps.fs, dir);
+  for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
@@ -416,32 +479,6 @@ export async function runAddCommand(
  * @param dir - The target directory
  * @returns The marker found, for the refusal to name
  */
-async function findWorkspaceMarker(fs: IFileSystem, dir: string): Promise<string | undefined> {
-  try {
-    await fs.stat(joinPath(dir, 'setu.workspace.json'));
-    return 'it has a setu.workspace.json';
-  } catch {
-    // Not a CLI-created workspace; the manifests may still say it is one.
-  }
-  const markers = [
-    { file: 'deno.json', key: 'workspace' },
-    { file: 'package.json', key: 'workspaces' },
-  ] as const;
-  for (const { file, key } of markers) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(new TextDecoder().decode(await fs.readFile(joinPath(dir, file))));
-    } catch {
-      // Absent or unparseable: the edit loop reports an unparseable manifest.
-      continue;
-    }
-    if (parsed !== null && typeof parsed === 'object' && key in parsed) {
-      return `its ${file} declares "${key}"`;
-    }
-  }
-  return undefined;
-}
-
 /**
  * The install command for a project's toolchain.
  *

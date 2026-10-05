@@ -6,6 +6,7 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 import { joinPath } from './file-writer.ts';
+import { readJsonManifest } from './manifest-reader.ts';
 
 const SCOPE = '@setu-ts/';
 
@@ -20,21 +21,10 @@ async function readManifest(
   fs: IFileSystem,
   path: string,
 ): Promise<Record<string, unknown> | undefined> {
-  let raw: Uint8Array;
-  try {
-    raw = await fs.readFile(path);
-  } catch {
-    return undefined;
-  }
-  try {
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(raw));
-    return typeof parsed === 'object' && parsed !== null
-      ? parsed as Record<string, unknown>
-      : undefined;
-  } catch {
-    // Malformed manifest: treated as "no plugins detected", never a throw.
-    return undefined;
-  }
+  const read = await readJsonManifest(fs, path);
+  return read.kind === 'ok' && typeof read.value === 'object' && read.value !== null
+    ? read.value as Record<string, unknown>
+    : undefined;
 }
 
 /**
@@ -60,9 +50,9 @@ function collectScoped(source: unknown, into: Set<string>): void {
  * scoped entries, `package.json` (`dependencies` + `devDependencies`).
  * Detection never boots or imports the target project.
  *
- * A missing or malformed manifest yields an empty set rather than a throw, so
- * running the CLI outside a project is a plain "plugin not installed" gate
- * rather than a crash.
+ * JSONC comments and trailing commas are accepted for reads. Writing commands
+ * classify the project first and report malformed manifests by path, so an
+ * unreadable manifest never turns into a misleading plugin-not-installed gate.
  *
  * @param fs - The filesystem to read through
  * @param dir - The project directory to scan
@@ -74,7 +64,8 @@ export async function detectPlugins(
 ): Promise<ReadonlySet<string>> {
   const plugins = new Set<string>();
 
-  const denoJson = await readManifest(fs, joinPath(dir, 'deno.json'));
+  const denoJson = await readManifest(fs, joinPath(dir, 'deno.json')) ??
+    await readManifest(fs, joinPath(dir, 'deno.jsonc'));
   if (denoJson !== undefined) {
     collectScoped(denoJson['imports'], plugins);
     if (plugins.size > 0) return plugins;

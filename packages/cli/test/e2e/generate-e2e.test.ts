@@ -69,6 +69,37 @@ describe('setu end-to-end on a real filesystem', () => {
     expect(written).toContain("return 'user-profile';");
   });
 
+  it('refuses generation in an empty directory without creating src', async () => {
+    expect(await run(['generate', 'controller', 'orders'])).toBe(1);
+    await expect(Deno.stat(`${root}/src`)).rejects.toThrow();
+    expect(err.join('\n')).toContain('holds no deno.json');
+  });
+
+  it('refuses generation at a workspace root without creating src', async () => {
+    expect(await run(['new', 'acme', '--workspace'])).toBe(0);
+    const workspace = `${root}/acme`;
+
+    expect(await run(['generate', 'controller', 'orders', '--dir', workspace])).not.toBe(0);
+    await expect(Deno.stat(`${workspace}/src`)).rejects.toThrow();
+    expect(err.join('\n')).toContain('workspace root');
+  });
+
+  it('reads a commented manifest when enforcing a schematic plugin gate', async () => {
+    await Deno.writeTextFile(
+      `${root}/deno.json`,
+      `{
+  // The plugin gate must read JSONC without rewriting it.
+  "imports": {
+    "@setu-ts/auth-plugin": "jsr:@setu-ts/auth-plugin@^0.8.0",
+  },
+}
+`,
+    );
+
+    expect(await run(['generate', 'guard', 'admin'])).toBe(0);
+    expect((await Deno.stat(`${root}/src/guards/admin.guard.ts`)).isFile).toBe(true);
+  });
+
   it('creates nested directories that did not exist', async () => {
     await run(['new', 'shop-api']);
     // `src/jobs` rather than `src` itself: a scaffolded project now carries the
@@ -137,6 +168,7 @@ describe('setu end-to-end on a real filesystem', () => {
   });
 
   it('loads a custom schematic from disk through the real import path', async () => {
+    await Deno.writeTextFile(`${root}/deno.json`, '{}');
     await Deno.mkdir(`${root}/${CUSTOM_SCHEMATIC_DIR}`, { recursive: true });
     await Deno.writeTextFile(
       `${root}/${CUSTOM_SCHEMATIC_DIR}/readme.ts`,

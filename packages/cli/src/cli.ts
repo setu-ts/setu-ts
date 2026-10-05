@@ -11,6 +11,7 @@ import { builtInFlagRefusal, builtInPositionalRefusal } from './flags.ts';
 import {
   APP_VERB,
   CONFIG_MODULE,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   PROGRAM_NAME,
@@ -33,6 +34,7 @@ import {
   type PluginCommandDependencies,
   runCommandsListing,
 } from './commands/plugin-commands.ts';
+import { InterruptedError } from './utils/interruption.ts';
 
 /**
  * Everything the CLI reaches the outside world through.
@@ -71,6 +73,8 @@ export interface CliDependencies {
    * terminal implementation only behind `Deno.stdin.isTerminal()`.
    */
   readonly ask?: Prompter;
+  /** Cooperative interruption signal supplied by the process boundary. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -205,78 +209,92 @@ export async function runCli(
     flags: args.flags,
   };
 
-  switch (command) {
-    case 'new':
-    case 'n':
-      return await runNewCommand(rest, {
-        fs: deps.fs,
-        cwd: deps.cwd,
-        log: deps.log,
-        error: deps.error,
-        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
-        ...(deps.ask === undefined ? {} : { ask: deps.ask }),
-      });
+  try {
+    switch (command) {
+      case 'new':
+      case 'n':
+        return await runNewCommand(rest, {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+          ...(deps.ask === undefined ? {} : { ask: deps.ask }),
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+        });
 
-    case 'generate':
-    case 'g':
-      return await runGenerateCommand(rest, {
-        fs: deps.fs,
-        cwd: deps.cwd,
-        now: deps.now,
-        log: deps.log,
-        error: deps.error,
-        ...(deps.load === undefined ? {} : { load: deps.load }),
-        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
-      });
+      case 'generate':
+      case 'g':
+        return await runGenerateCommand(rest, {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          now: deps.now,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+          ...(deps.load === undefined ? {} : { load: deps.load }),
+          ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+        });
 
-    case 'add':
-      return await runAddCommand(rest, {
-        fs: deps.fs,
-        cwd: deps.cwd,
-        log: deps.log,
-        error: deps.error,
-      });
+      case 'add':
+        return await runAddCommand(rest, {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+        });
 
-    case 'devtool':
-      return await runDevtoolCommand(rest, {
-        fs: deps.fs,
-        cwd: deps.cwd,
-        log: deps.log,
-        error: deps.error,
-        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
-      });
+      case 'devtool':
+        return await runDevtoolCommand(rest, {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+        });
 
-    case 'adopt':
-      return await runAdoptCommand(rest, {
-        fs: deps.fs,
-        cwd: deps.cwd,
-        log: deps.log,
-        error: deps.error,
-        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
-      });
+      case 'adopt':
+        return await runAdoptCommand(rest, {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+        });
 
-    case 'workspace':
-      return await runWorkspaceCommand(rest, {
-        fs: deps.fs,
-        cwd: deps.cwd,
-        log: deps.log,
-        error: deps.error,
-        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
-      });
+      case 'workspace':
+        return await runWorkspaceCommand(rest, {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+        });
 
-    case 'commands':
-      return await runCommandsListing(rest, pluginCommandDeps(deps));
+      case 'commands':
+        return await runCommandsListing(rest, pluginCommandDeps(deps));
 
-    case 'help':
-      printHelp(deps.log);
-      return EXIT_OK;
+      case 'help':
+        printHelp(deps.log);
+        return EXIT_OK;
 
-    default:
-      // Not a built-in: the only remaining possibility is a command one of the
-      // application's plugins registered. Built-ins are matched first and
-      // always win, so a plugin can never shadow `new` or `generate`, and the
-      // common path never boots the user's application.
-      return await dispatchPluginCommand(command, rest, pluginCommandDeps(deps));
+      default:
+        // Not a built-in: the only remaining possibility is a command one of the
+        // application's plugins registered. Built-ins are matched first and
+        // always win, so a plugin can never shadow `new` or `generate`, and the
+        // common path never boots the user's application.
+        return await dispatchPluginCommand(command, rest, pluginCommandDeps(deps));
+    }
+  } catch (cause) {
+    if (cause instanceof InterruptedError) {
+      deps.error('Interrupted; the files this run wrote were removed.');
+      return EXIT_INTERRUPTED;
+    }
+    throw cause;
   }
 }
 
@@ -293,5 +311,6 @@ function pluginCommandDeps(deps: CliDependencies): PluginCommandDependencies {
     log: deps.log,
     error: deps.error,
     ...(deps.loadApp === undefined ? {} : { loadApp: deps.loadApp }),
+    ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
   };
 }

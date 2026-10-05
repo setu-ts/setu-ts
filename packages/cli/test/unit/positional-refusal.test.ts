@@ -31,7 +31,7 @@ interface IHarnessOptions {
 }
 
 function harness(options: IHarnessOptions = {}): IHarness {
-  const fs = createFakeFs(options.seed ?? {});
+  const fs = createFakeFs({ '/work/deno.json': '{}', ...(options.seed ?? {}) });
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -61,6 +61,7 @@ const WORKSPACE_SEED = {
     members: [{ name: 'orders', port: 3000 }],
   }),
   '/work/deno.json': '{"workspace": ["./apps/*"]}',
+  '/work/apps/orders/.setu-member': '',
 };
 
 describe('extra-positional refusal', () => {

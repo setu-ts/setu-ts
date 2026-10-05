@@ -19,6 +19,7 @@ import { stringFlag, stringFlags } from '../args.ts';
 import {
   APP_VERB,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   isTargetRuntime,
@@ -40,9 +41,11 @@ import { readEnvFilePath } from '../templates/env-file.ts';
 import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
+  classifyFiles,
   findExisting,
   firstDuplicatePath,
   type GeneratedFile,
+  interruptedRunRetryHint,
   joinPath,
   writeFiles,
 } from '../utils/file-writer.ts';
@@ -72,6 +75,8 @@ import {
   type WorkspaceManifest,
   type WorkspaceManifestProblem,
 } from '../workspace/manifest.ts';
+import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 
 /**
  * Everything `runAppCommand` reaches the outside world through.
@@ -87,6 +92,8 @@ export interface AppDependencies {
   readonly error: (message: string) => void;
   /** Checks whether a candidate port is currently bindable. */
   readonly portAvailable?: PortProbe;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -416,6 +423,11 @@ export async function runAppCommand(
 
   const read = await readWorkspaceManifest(deps.fs, deps.dir);
   if (!read.ok) return reportNoWorkspace(deps.dir, read.problem, deps.error);
+  const reconciliation = await reconcileMembers(deps.fs, deps.dir, read.manifest);
+  if (!reconciliation.ok) {
+    deps.error(describeReconcileFailure(reconciliation));
+    return EXIT_ERROR;
+  }
 
   // A member's runtime is the WORKSPACE's. The flag is accepted when it agrees
   // and refused when it does not, rather than silently scaffolding a member the
@@ -697,7 +709,13 @@ export async function runAppCommand(
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${file.path}`);
+    for (const outcome of await classifyFiles(deps.fs, files)) {
+      deps.log(
+        outcome.outcome === 'unchanged'
+          ? `unchanged ${outcome.path}`
+          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${outcome.path}`,
+      );
+    }
     return EXIT_OK;
   }
 
@@ -705,17 +723,28 @@ export async function runAppCommand(
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
     for (const path of existing) deps.error(`  ${path}`);
+    const retryHint = interruptedRunRetryHint(existing, joinPath(deps.dir, MEMBERS_DIR, name));
+    if (retryHint !== undefined) deps.error(retryHint);
     return EXIT_ERROR;
   }
 
   try {
-    await writeFiles(deps.fs, files);
+    const outcomes = await writeFiles(
+      deps.fs,
+      files,
+      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+    );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
     return EXIT_ERROR;
   }
 
-  for (const file of files) deps.log(`created ${file.path}`);
   deps.log('');
   deps.log(`Added ${name} on port ${port}. Next:`);
   // From the profile, and from `runScript` rather than `manifestKind`: a Node

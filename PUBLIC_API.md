@@ -8421,11 +8421,17 @@ manifest cannot be parsed, `2` for an unknown package name, a missing argument, 
 
 ### Exit codes
 
-| Code | Meaning                                                                                                                                                                                                                                                     |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success (including `--help` and `--version`).                                                                                                                                                                                                               |
-| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.                                                         |
-| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| Code  | Meaning                                                                                                                                                                                                                                                     |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`   | Success (including `--help` and `--version`).                                                                                                                                                                                                               |
+| `1`   | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.                                                         |
+| `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| `130` | Interrupted or cancelled; built-in writes are rolled back, or plugin application shutdown was attempted. Incomplete recovery is reported.                                                                                                                   |
+
+For plugin commands, an already-aborted `CliDependencies.interrupt` prevents boot. Aborting during a
+handler stops awaiting its result and awaits `app.stop()` before returning `130`. The CLI cannot
+cancel arbitrary handler code or undo external side effects; the application's shutdown hooks must
+release its resources. Startup is allowed to settle before checking interruption and shutting down.
 
 ### Interactive scaffolding
 
@@ -8443,10 +8449,11 @@ terminal implementation only behind `Deno.stdin.isTerminal()`; and Deno's own `p
 
 The two exported types:
 
-| Export         | Kind      | Members                                                                                                         |
-| -------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
-| `Prompter`     | interface | `select(question, choices): Promise<string \| undefined>` — undefined means "no answer could be taken".         |
-| `PromptChoice` | interface | `{ value, label }` — the value written into the flag record, and one descriptive line shown above the question. |
+| Export            | Kind      | Members                                                                                                         |
+| ----------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
+| `Prompter`        | interface | Since 0.9.0, `select(question, choices): Promise<PromptSelection>` — answer, unavailable, or cancelled.         |
+| `PromptChoice`    | interface | `{ value, label }` — the value written into the flag record, and one descriptive line shown above the question. |
+| `PromptSelection` | type      | Since 0.9.0, `{ kind: 'answer', value } \| { kind: 'unavailable' } \| { kind: 'cancelled' }`.                   |
 
 `createTerminalPrompter` is deliberately NOT exported: its only consumer is the executable entry
 point, which imports it directly.
@@ -9130,20 +9137,23 @@ always supplies it. `GeneratedFile` carries an optional `managed` flag — see "
 
 ### Programmatic API
 
-| Export             | Kind     | Purpose                                                                         |
-| ------------------ | -------- | ------------------------------------------------------------------------------- |
-| `runCli`           | function | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                 |
-| `CliDependencies`  | type     | The `fs` / `cwd` / `now` / `log` / `error` bundle `runCli` requires.            |
-| `deriveNames`      | function | Produces the five naming forms every schematic uses.                            |
-| `DerivedNames`     | type     | The result of `deriveNames`.                                                    |
-| `GeneratedFile`    | type     | `{ path, contents, managed? }` — one file a schematic asks to create.           |
-| `Schematic`        | type     | `(names, options) => readonly GeneratedFile[]`.                                 |
-| `SchematicOptions` | type     | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`). |
-| `PROGRAM_NAME`     | const    | `'setu'` — interpolated into every usage string.                                |
-| `TemplateName`     | type     | The `--template` value union, for callers building argv programmatically.       |
-| `ModuleLoader`     | type     | The seam a custom schematic module is loaded through.                           |
-| `AppLoader`        | type     | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).        |
-| `detectPlugins`    | function | Reads a project manifest and returns the installed `@setu-ts` names.            |
+| Export             | Kind      | Purpose                                                                               |
+| ------------------ | --------- | ------------------------------------------------------------------------------------- |
+| `runCli`           | function  | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                       |
+| `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting and interruption. |
+| `deriveNames`      | function  | Produces the five naming forms every schematic uses.                                  |
+| `DerivedNames`     | type      | The result of `deriveNames`.                                                          |
+| `GeneratedFile`    | type      | `{ path, contents, managed? }` — one file a schematic asks to create.                 |
+| `Schematic`        | type      | `(names, options) => readonly GeneratedFile[]`.                                       |
+| `SchematicOptions` | type      | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`).       |
+| `PROGRAM_NAME`     | const     | `'setu'` — interpolated into every usage string.                                      |
+| `TemplateName`     | type      | The `--template` value union, for callers building argv programmatically.             |
+| `ModuleLoader`     | type      | The seam a custom schematic module is loaded through.                                 |
+| `AppLoader`        | type      | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).              |
+| `PromptChoice`     | interface | One value and label offered by a `Prompter`.                                          |
+| `Prompter`         | interface | Programmatic interactive-question seam.                                               |
+| `PromptSelection`  | type      | Answer, unavailable input, or user cancellation.                                      |
+| `detectPlugins`    | function  | Reads a project manifest and returns the installed `@setu-ts` names.                  |
 
 `CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
 `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`), so every other path is

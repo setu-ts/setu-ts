@@ -36,7 +36,7 @@ export type { CliDependencies } from './cli.ts';
  * Implemented by the terminal prompter `src/main.ts` supplies; a programmatic
  * consumer of {@linkcode CliDependencies} that wants prompting provides its own.
  */
-export type { PromptChoice, Prompter } from './prompt.ts';
+export type { PromptChoice, Prompter, PromptSelection } from './prompt.ts';
 
 /** Derives every naming form a schematic needs from one user-supplied name. */
 export { deriveNames } from './utils/names.ts';

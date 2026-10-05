@@ -28,7 +28,7 @@ interface IHarness {
 }
 
 function harness(seed: Readonly<Record<string, string>> = {}): IHarness {
-  const fs = createFakeFs(seed);
+  const fs = createFakeFs({ '/work/deno.json': '{}', ...seed });
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -57,6 +57,7 @@ const WORKSPACE_SEED = {
   // The workspace root manifest `generate library` may edit; an unparseable or
   // absent one is refused before any plan is printed.
   '/work/deno.json': '{"workspace": ["./apps/*"]}',
+  '/work/apps/orders/.setu-member': '',
 };
 
 /**
@@ -70,7 +71,10 @@ function withApp(commands: readonly { name: string; handler: () => void }[]): {
   wasBooted(): boolean;
   run(argv: readonly string[]): Promise<number>;
 } {
-  const fs = createFakeFs({ '/work/setu.config.ts': 'export function createApp() {}' });
+  const fs = createFakeFs({
+    '/work/deno.json': '{}',
+    '/work/setu.config.ts': 'export function createApp() {}',
+  });
   const err = createRecorder();
   let booted = false;
   const appModule = () => {
@@ -170,7 +174,7 @@ describe('unknown-option refusal', () => {
     expect(terminated.out.text()).not.toContain('would create');
     expect(terminated.fs.writes).toEqual([]);
 
-    const shortValue = harness();
+    const shortValue = harness({ '/other/deno.json': '{}' });
     expect(await shortValue.run(['g', 'service', 'billing', '--dir=/other', '--dry-run'])).toBe(0);
     expect(shortValue.err.text()).not.toContain('Unknown option');
     expect(shortValue.out.text()).toContain('would create /other/src/services/billing.service.ts');
@@ -227,7 +231,7 @@ describe('every documented flag is accepted', () => {
   });
 
   it('accepts the generate flags', async () => {
-    const h = harness();
+    const h = harness({ '/other/deno.json': '{}' });
     expect(
       await h.run(['g', 'service', 'billing', '--runtime', 'bun', '--dir', '/other', '--dry-run']),
       h.err.text(),

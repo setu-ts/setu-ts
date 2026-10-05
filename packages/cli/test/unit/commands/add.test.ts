@@ -198,6 +198,52 @@ describe('withIngressProviderWiring', () => {
 });
 
 describe('runAddCommand', () => {
+  it('refuses with exit 1 and writes nothing when a runtime marker is unreadable', async () => {
+    const fs = createFakeFs({ '/app/deno.json': DENO_MANIFEST, '/app/wrangler.jsonc': '{}' });
+    const err: string[] = [];
+    const code = await runAddCommand(parseArgs(['cloudflare-plugin']), {
+      fs: {
+        ...fs,
+        readFile: (path: string) =>
+          path === '/app/wrangler.jsonc'
+            ? Promise.reject(new Error('EACCES: permission denied'))
+            : fs.readFile(path),
+      },
+      cwd: '/app',
+      log: () => {},
+      error: (m) => err.push(m),
+    });
+    expect(code).toBe(1);
+    expect(err.join('\n')).toContain('Cannot read /app/wrangler.jsonc: EACCES');
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('refuses plugins that cannot register on the detected runtime', async () => {
+    const node = harness({
+      '/app/package.json': JSON.stringify({ scripts: { start: 'node main.ts' } }),
+    });
+    expect(await node.run(['cloudflare'])).toBe(2);
+    expect(node.err.join('\n')).toContain('Cloudflare Workers');
+    expect(node.fs.writes).toEqual([]);
+
+    const workers = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/package.json': '{}',
+      '/app/wrangler.toml': 'name = "app"',
+    });
+    expect(await workers.run(['scheduler'])).toBe(2);
+    expect(workers.err.join('\n')).toContain('unavailable on Cloudflare Workers');
+    expect(workers.fs.writes).toEqual([]);
+  });
+
+  it('refuses to rewrite JSONC and prints the exact entry to add', async () => {
+    const h = harness({ '/app/deno.jsonc': '{\n  // pins\n  "imports": {},\n}\n' });
+    expect(await h.run(['auth'])).toBe(1);
+    expect(h.err.join('\n')).toContain('rewriting it would discard');
+    expect(h.err.join('\n')).toContain('"@setu-ts/auth-plugin"');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   it('pins the package at the CLI own version', async () => {
     // The rule `setu new` already follows, so a project's framework packages
     // stay on one version rather than drifting per install.

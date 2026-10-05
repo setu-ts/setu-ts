@@ -14,7 +14,15 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { APP_VERB, EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
+import {
+  APP_VERB,
+  EXIT_ERROR,
+  EXIT_INTERRUPTED,
+  EXIT_OK,
+  EXIT_USAGE,
+  PROGRAM_NAME,
+} from '../constants.ts';
+import { interruptionMessage, throwIfInterrupted } from '../utils/interruption.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
@@ -22,6 +30,7 @@ import {
   type GeneratedFile,
   joinPath,
   resolveDir,
+  withFileTransaction,
   writeFiles,
 } from '../utils/file-writer.ts';
 import {
@@ -62,6 +71,8 @@ export interface AdoptDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -231,82 +242,114 @@ export async function runAdoptCommand(
     return EXIT_ERROR;
   }
 
-  // Moves first, so the root's `deno.json` is written into a directory the
-  // project's own has already left.
-  for (const file of plan.files) {
-    const moved = await moveFile(deps.fs, project, file);
-    if (!moved.ok) {
-      deps.error(moved.message);
-      deps.error(
-        'Stopped part-way. Every file moved so far exists in both places, so nothing is lost — ' +
-          'finish or undo the move by hand.',
-      );
-      return EXIT_ERROR;
+  const originalDeps = deps;
+  const perform = async (fs: IFileSystem): Promise<number> => {
+    const deps = { ...originalDeps, fs };
+    // Moves first, so the root's `deno.json` is written into a directory the
+    // project's own has already left.
+    for (const file of plan.files) {
+      const moved = await moveFile(deps.fs, project, file);
+      throwIfInterrupted(deps.interrupt);
+      if (!moved.ok) {
+        deps.error(moved.message);
+        deps.error(
+          'Stopped part-way. Every file moved so far exists in both places, so nothing is lost — ' +
+            'finish or undo the move by hand.',
+        );
+        return EXIT_ERROR;
+      }
+      deps.log(`moved ${file.from} -> ${file.to}`);
     }
-    deps.log(`moved ${file.from} -> ${file.to}`);
-  }
 
-  // The directories those files came out of: `moveFile` removes files, so an
-  // emptied `src/` would otherwise sit beside `apps/` looking like a second place
-  // source lives.
-  const kept = await pruneAdoptedDirectories(deps.fs, project, ADOPTED_DIRECTORIES);
-  for (const directory of kept) {
-    deps.log(`kept ${directory}/ — it still holds files this did not move`);
-  }
-
-  try {
-    await writeFiles(deps.fs, planned);
-  } catch (cause) {
-    deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
-    return EXIT_ERROR;
-  }
-  for (const file of planned) deps.log(`created ${file.path}`);
-
-  // The entry has to bind the allocated port rather than the literal it carried as
-  // a standalone project, or the member answers nothing at the address its
-  // siblings will dial.
-  const entryPath = joinPath(project, joinPath(memberRoot, 'main.ts'));
-  let rewritten: string | undefined;
-  try {
-    const entry = new TextDecoder().decode(await deps.fs.readFile(entryPath));
-    rewritten = rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER);
-  } catch (cause) {
-    if (!isMissingPath(cause)) {
-      deps.error(
-        `Failed to read ${entryPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-      return EXIT_ERROR;
+    // The directories those files came out of: `moveFile` removes files, so an
+    // emptied `src/` would otherwise sit beside `apps/` looking like a second place
+    // source lives.
+    const kept = await pruneAdoptedDirectories(deps.fs, project, ADOPTED_DIRECTORIES);
+    for (const directory of kept) {
+      deps.log(`kept ${directory}/ — it still holds files this did not move`);
     }
-    // A Workers project has src/index.ts and no main.ts to rewrite.
-  }
-  if (rewritten !== undefined) {
+
     try {
-      await writeFiles(deps.fs, [{ path: entryPath, contents: rewritten, managed: true }]);
+      await writeFiles(
+        deps.fs,
+        planned,
+        deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      );
     } catch (cause) {
-      deps.error(
-        `Failed to rewrite ${entryPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-      deps.error(
-        'Workspace files and moved project files remain in place; repair the entry before starting it.',
-      );
+      const interrupted = interruptionMessage(cause);
+      if (interrupted !== undefined) {
+        throw cause;
+      }
+      deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
       return EXIT_ERROR;
     }
-  }
+    for (const file of planned) deps.log(`created ${file.path}`);
 
-  deps.log('');
-  deps.log(`Converted into a workspace with ${names.kebab} on port ${basePort}.`);
-  if (rewritten === undefined) {
+    // The entry has to bind the allocated port rather than the literal it carried as
+    // a standalone project, or the member answers nothing at the address its
+    // siblings will dial.
+    const entryPath = joinPath(project, joinPath(memberRoot, 'main.ts'));
+    let rewritten: string | undefined;
+    try {
+      const entry = new TextDecoder().decode(await deps.fs.readFile(entryPath));
+      rewritten = rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER);
+    } catch (cause) {
+      if (!isMissingPath(cause)) {
+        deps.error(
+          `Failed to read ${entryPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+        return EXIT_ERROR;
+      }
+      // A Workers project has src/index.ts and no main.ts to rewrite.
+    }
+    if (rewritten !== undefined) {
+      try {
+        await writeFiles(
+          deps.fs,
+          [{ path: entryPath, contents: rewritten, managed: true }],
+          deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+        );
+      } catch (cause) {
+        const interrupted = interruptionMessage(cause);
+        if (interrupted !== undefined) {
+          throw cause;
+        }
+        deps.error(
+          `Failed to rewrite ${entryPath}: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        );
+        deps.error(
+          'Workspace files and moved project files remain in place; repair the entry before starting it.',
+        );
+        return EXIT_ERROR;
+      }
+    }
+
     deps.log('');
-    deps.log(`Its entry does not carry the port literal this rewrites, so bind the allocated`);
-    deps.log(`port yourself — two lines in ${joinPath(memberRoot, 'main.ts')}:`);
-    deps.log(`  import { ${SERVICE_PORT_EXPORT} } from '${DISCOVERY_SPECIFIER}';`);
-    deps.log(`  await app.start({ port: ${SERVICE_PORT_EXPORT} });`);
+    deps.log(`Converted into a workspace with ${names.kebab} on port ${basePort}.`);
+    if (rewritten === undefined) {
+      deps.log('');
+      deps.log(`Its entry does not carry the port literal this rewrites, so bind the allocated`);
+      deps.log(`port yourself — two lines in ${joinPath(memberRoot, 'main.ts')}:`);
+      deps.log(`  import { ${SERVICE_PORT_EXPORT} } from '${DISCOVERY_SPECIFIER}';`);
+      deps.log(`  await app.start({ port: ${SERVICE_PORT_EXPORT} });`);
+    }
+    deps.log('');
+    deps.log('Next:');
+    deps.log(`  ${PROGRAM_NAME} generate ${APP_VERB} <name>   # add a second service`);
+    // From the profile, which is the project's own detected toolchain: a converted
+    // Node project has no `deno task`.
+    deps.log(`  ${profile.runScript('dev')}   # run every member`);
+    return EXIT_OK;
+  };
+  try {
+    return await withFileTransaction(deps.fs, perform, deps.interrupt);
+  } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    deps.error(
+      interrupted ?? `Failed to adopt: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    return interrupted === undefined ? EXIT_ERROR : EXIT_INTERRUPTED;
   }
-  deps.log('');
-  deps.log('Next:');
-  deps.log(`  ${PROGRAM_NAME} generate ${APP_VERB} <name>   # add a second service`);
-  // From the profile, which is the project's own detected toolchain: a converted
-  // Node project has no `deno task`.
-  deps.log(`  ${profile.runScript('dev')}   # run every member`);
-  return EXIT_OK;
 }

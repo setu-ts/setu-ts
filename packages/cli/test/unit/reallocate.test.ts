@@ -22,6 +22,7 @@ function harness(members: readonly WorkspaceMember[]) {
       members,
     }),
     '/ws/deno.json': '{"workspace":["./apps/*"]}',
+    ...Object.fromEntries(members.map((member) => [`/ws/apps/${member.name}/.setu-member`, ''])),
   });
   const log = createRecorder();
   return {
@@ -81,6 +82,7 @@ describe('ports --reallocate', () => {
         members: [{ name: 'orders', port: 3000, devtoolPort: 4919 }],
       }),
       '/ws/deno.json': '{"workspace":["./apps/*"]}',
+      '/ws/apps/orders/.setu-member': '',
     });
     const occupied = new Set([3000, 3001]);
     let code = 0;

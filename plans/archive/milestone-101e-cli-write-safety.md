@@ -1,7 +1,7 @@
 # Milestone 101e — CLI commands that write where or when they should not (`@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m101e-cli-write-safety`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #412). Branch: `feat/m101e-cli-write-safety`. `main` is protected — all
+> work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
@@ -175,6 +175,12 @@ output.
   `findExisting`'s refusal: when every existing path lies under one directory the run would have
   created, the refusal adds "If an earlier run was interrupted before this change, delete `<dir>`
   and run this again."
+- **Adoption recovery:** relocation, root writes and the entry rewrite run through one internal
+  filesystem journal, `withFileTransaction`. It snapshots only paths the command mutates, checks
+  interruption around copies/deletions/directory creation, restores source bytes and removed empty
+  directories, and removes destination files and new directories before returning `130`. Recovery
+  ignores the aborted signal; unrelated concurrent writes remain untouched. Existing ordinary-I/O
+  refusal behavior is retained.
 - **Why:** M99b built the compensation and documented at `file-writer.ts:254` that a signal cannot
   reach it; §3.3 makes the signal reach it. Checking BETWEEN writes rather than racing a write in
   progress is what keeps the rollback's invariant: a write that started is recorded in `attempted`
@@ -383,6 +389,7 @@ No new CLI flag. `--prune` (for §3.6) and `--force` (M58) were considered and a
 | `test/unit/workspace-command.test.ts`, `test/unit/devtool-refusals.test.ts`, `test/unit/adopt-command.test.ts` | `commands/workspace.ts`, `devtool.ts`, `adopt.ts`  | reconciliation refusal (workspace); JSONC read accepted, JSONC write refused with wording (devtool); interruption → `130` on each                                                                                                                                                                                 |
 | `test/unit/cli.test.ts`                                                                                        | `cli.ts`, `constants.ts`                           | `runCli(argv, { …, interrupt })` returns `130` for an aborted signal on a writing command; unchanged without it                                                                                                                                                                                                   |
 | `test/unit/process-boundary.test.ts`                                                                           | `main.ts` (source text)                            | names `runtime.onSignal?.` and never `Deno.addSignalListener`                                                                                                                                                                                                                                                     |
+| `test/e2e/sigint-scaffold.test.ts`, `test/fixtures/sigint-scaffold.ts`                                         | process boundary                                   | real SIGINT after write 17: handled rollback and successful retry; unhandled control terminates by signal and leaves partial output                                                                                                                                                                               |
 | `test/unit/barrel-exports.test.ts`                                                                             | `src/index.ts`                                     | `Prompter`/`PromptSelection` present; none of the internal helpers exported                                                                                                                                                                                                                                       |
 | `test/e2e/scaffold-interrupted.test.ts`                                                                        | end to end                                         | real fs: interrupted `new --template full-stack` leaves no target directory; interrupted `generate app` leaves the two-member workspace byte-identical; immediate retry succeeds; a pre-existing debris tree gets the retry hint                                                                                  |
 | `test/e2e/generate-e2e.test.ts`, `test/e2e/workspace-e2e.test.ts`                                              | end to end                                         | `generate controller` in an empty temp dir and at a real workspace root exits non-zero with no `src/`; a commented `deno.json` project generates a gated schematic; deleted-member `generate app` leaves it deleted                                                                                               |
@@ -407,9 +414,11 @@ Negative controls, each observed failing and reverted (the one named in each §3
 1. §3.1 — remove `detectProject` from `generate.ts`: four directory shapes write and exit `0`.
 2. §3.2 — restore `null → undefined`: the cancelled-session case scaffolds a project, exit `0`.
 3. §3.4 — remove the `signal.aborted` check: the full-stack interruption leaves a partial tree.
-4. §3.3 — drop the `onSignal` registration in `main.ts`: control 3's e2e, driven through a real
-   subprocess receiving `SIGINT`, dies by signal with status `-2` (a second, process-level run of
-   the same scenario, because the in-process e2e cannot observe Deno's default handler).
+4. §3.3 — omit `onSignal` in the real-process fixture: `sigint-scaffold.test.ts` launches a
+   subprocess with real runtime services, pauses after its seventeenth filesystem write and sends
+   `SIGINT`. The handled arm exits `130` with no target directory; the unhandled control dies with
+   `status.signal === 'SIGINT'` and leaves partial files. Deno exposes the signal separately from
+   the exit code (other harnesses render this as `-2`). Both arms are committed regression tests.
 5. §3.5 — bare `JSON.parse` in the detector: the commented manifest reports the plugin missing.
 6. §3.6 — remove the stat loop: the deleted member's discovery module reappears.
 7. §3.7 — print `created` unconditionally: the root-manifest `updated` assertion fails.
@@ -425,7 +434,10 @@ handler terminates the process before any rollback can run, which is exactly the
   in milliseconds once planning is done, and the one long-running phase (`writeFiles`) checks per
   file. The listener is process-wide, so `dispatchPluginCommand` (which boots the user's
   application) is threaded too: on abort it stops the booted app through its existing teardown and
-  exits `130`; §6's `cli.test.ts` covers it.
+  exits `130`; §6's `cli.test.ts` covers it. Startup settles before interruption is observed so
+  teardown cannot race startup; an in-flight handler is no longer awaited, but arbitrary handler
+  code and external side effects cannot be cancelled through the existing `CliCommandHandler`
+  contract. Applications release their resources in shutdown hooks.
 - `onSignal` is additive and never removed → the CLI registers exactly one listener for its whole
   life, in `main.ts`, and never inside a command.
 - The JSONC stripper mis-parses an edge case → it is used for READING only, and a false `unreadable`
