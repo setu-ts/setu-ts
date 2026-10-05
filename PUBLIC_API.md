@@ -8407,7 +8407,12 @@ manifest cannot be parsed, `2` for an unknown package name, a missing argument, 
 | `0`   | Success (including `--help` and `--version`).                                                                                                                                                                                                               |
 | `1`   | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.                                                         |
 | `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
-| `130` | Interrupted or cancelled; rollback completed before the command returned.                                                                                                                                                                                   |
+| `130` | Interrupted or cancelled; built-in writes are rolled back, or plugin application shutdown was attempted. Incomplete recovery is reported.                                                                                                                   |
+
+For plugin commands, an already-aborted `CliDependencies.interrupt` prevents boot. Aborting during a
+handler stops awaiting its result and awaits `app.stop()` before returning `130`. The CLI cannot
+cancel arbitrary handler code or undo external side effects; the application's shutdown hooks must
+release its resources. Startup is allowed to settle before checking interruption and shutting down.
 
 ### Interactive scaffolding
 

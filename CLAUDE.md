@@ -5726,9 +5726,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   sixth found that a locale-less request carrying the reserved parameter keyed like a localized one,
   and it is served uncached too. All `src` files at 100% branch/function/line; twenty negative
   controls observed failing — complete (PR #405)
-- **Next milestone** — M101e (in progress on `feat/m101e-cli-write-safety`), then M101f, M101g (now
-  carrying the full-stack browser gate, §3.10 of its plan), M101h; M104 — the `v0.9.0` client-brief
-  run — follows the `v0.9.0` cut; see ROADMAP.md.
+- **Milestone 101e** (`packages/cli` — write safety): generation refuses non-project directories and
+  workspace roots; interactive cancellation exits `130`; JSONC inspection, runtime-aware add,
+  workspace member reconciliation, and honest write outcomes share command-layer checks. SIGINT
+  rolls back write batches and adoption's relocations, while plugin commands run application
+  shutdown. Real-filesystem interruption regressions cover adoption's copy, deletion, root write,
+  and entry rewrite; a subprocess SIGINT test pins both rollback and unhandled termination —
+  complete (PR pending).
+- **Next milestone** — M101f, then M101g (now carrying the full-stack browser gate, §3.10 of its
+  plan), M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

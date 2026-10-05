@@ -68,14 +68,15 @@ describe('adopt entry rewrite', () => {
     });
     const err = createRecorder();
     const out = createRecorder();
-    let reads = 0;
     const result = await runAdoptCommand(parseArgs([]), {
       fs: {
         ...fs,
         readFile(path) {
-          // moveFile verifies its destination by reading it once. The next read
-          // is adoption's optional entry-rewrite phase.
-          if (path === ENTRY_PATH && ++reads > 1) return Promise.reject('read denied');
+          // Refuse only in the entry-rewrite phase, after the workspace exists;
+          // the journal and copy verification also read the destination earlier.
+          if (path === ENTRY_PATH && fs.has('/work/svc/setu.workspace.json')) {
+            return Promise.reject('read denied');
+          }
           return fs.readFile(path);
         },
       },

@@ -311,5 +311,6 @@ function pluginCommandDeps(deps: CliDependencies): PluginCommandDependencies {
     log: deps.log,
     error: deps.error,
     ...(deps.loadApp === undefined ? {} : { loadApp: deps.loadApp }),
+    ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
   };
 }

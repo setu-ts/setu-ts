@@ -98,6 +98,64 @@ describe('runCommandsListing', () => {
 });
 
 describe('the no-socket boot', () => {
+  for (const stage of ['load', 'start'] as const) {
+    it(`observes interruption after ${stage} without running a handler`, async () => {
+      const controller = new AbortController();
+      let ran = false;
+      const app = createFakeApp([{
+        name: 'probe:run',
+        handler: () => {
+          ran = true;
+        },
+      }]);
+      const err = createRecorder();
+      const start = app.start;
+      app.start = async () => {
+        await start();
+        if (stage === 'start') controller.abort();
+      };
+      const deps = {
+        fs: createFakeFs({ [CONFIG]: 'x' }),
+        cwd: '/app',
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+        loadApp: () => {
+          if (stage === 'load') controller.abort();
+          return Promise.resolve({ createApp: () => app });
+        },
+      };
+      expect(await dispatchPluginCommand('probe:run', parseArgs([]), deps)).toBe(130);
+      expect(ran).toBe(false);
+      expect(app.isStarted()).toBe(false);
+      expect(app.stopCount()).toBe(stage === 'start' ? 1 : 0);
+    });
+  }
+
+  it('reports failed shutdown honestly while keeping an interrupted outcome', async () => {
+    const controller = new AbortController();
+    const app = createFakeApp([{
+      name: 'probe:run',
+      handler: () => {
+        controller.abort();
+      },
+    }], { failStop: 'cannot close pool' });
+    const err = createRecorder();
+    expect(
+      await dispatchPluginCommand('probe:run', parseArgs([]), {
+        fs: createFakeFs({ [CONFIG]: 'x' }),
+        cwd: '/app',
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+        loadApp: () => Promise.resolve({ createApp: () => app }),
+      }),
+    ).toBe(130);
+    expect(err.text()).toContain('cannot close pool');
+    expect(err.text()).toContain('plugin command stopped');
+    expect(err.text()).not.toContain('teardown completed');
+  });
+
   it('starts the application with NO port, so discovery binds nothing', async () => {
     const h = harness(createFakeApp([{ name: 'db:migrate', handler: noop }]));
     await h.list();

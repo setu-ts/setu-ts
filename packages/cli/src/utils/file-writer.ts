@@ -6,7 +6,7 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 import { isMissingPath } from './filesystem-errors.ts';
-import { throwIfInterrupted } from './interruption.ts';
+import { InterruptedError, throwIfInterrupted } from './interruption.ts';
 
 /**
  * One file a schematic asks the command layer to create.
@@ -359,6 +359,120 @@ export async function writeFiles(
         `${failureMessage(cause)}; rollback incomplete: ${failures.map(failureMessage).join('; ')}`,
         { cause },
       );
+    }
+    throw cause;
+  }
+}
+
+/**
+ * Journals a relocation and its write batches as one interruption recovery unit.
+ *
+ * Only paths mutated by the operation are restored. Directory removal is limited
+ * to empty directories: callers must never recursively delete populated trees.
+ * Ordinary returned refusals retain the caller's existing recovery policy.
+ *
+ * @param fs - The underlying filesystem
+ * @param operation - Performs relocation and writes through the journaled filesystem
+ * @param signal - Interruption observed before and after each mutation
+ * @returns The operation's result after its final interruption check
+ */
+export async function withFileTransaction<T>(
+  fs: IFileSystem,
+  operation: (journaled: IFileSystem) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const files = new Map<string, FileUndo>();
+  const created: string[] = [];
+  const removed: string[] = [];
+  const known = new Set<string>();
+  const remember = async (path: string): Promise<void> => {
+    if (!files.has(path)) files.set(path, { path, before: await previousBytes(fs, path) });
+  };
+  const journaled: IFileSystem = {
+    ...fs,
+    async writeFile(path, data) {
+      throwIfInterrupted(signal);
+      await remember(path);
+      await fs.writeFile(path, data);
+      throwIfInterrupted(signal);
+    },
+    async mkdir(path, options) {
+      throwIfInterrupted(signal);
+      if (options?.recursive === true) {
+        await ensureDirectory(fs, path, created, known, signal);
+      } else {
+        await fs.mkdir(path, options);
+        created.push(path);
+      }
+      throwIfInterrupted(signal);
+    },
+    async rm(path, options) {
+      throwIfInterrupted(signal);
+      const stat = await fs.stat(path);
+      if (stat.isDirectory) {
+        // Never let the journal remove unrecorded file contents.
+        const directories: string[] = [];
+        const collect = async (directory: string): Promise<void> => {
+          for (const name of await fs.readdir(directory)) {
+            const child = joinPath(directory, name);
+            if (!(await fs.stat(child)).isDirectory) {
+              throw new Error(`Refusing to remove unrecorded file ${child}`);
+            }
+            await collect(child);
+          }
+          directories.push(directory);
+        };
+        await collect(path);
+        await fs.rm(path, options);
+        removed.push(...directories);
+        known.delete(path);
+      } else {
+        await remember(path);
+        await fs.rm(path, options);
+      }
+      throwIfInterrupted(signal);
+    },
+  };
+  try {
+    throwIfInterrupted(signal);
+    const result = await operation(journaled);
+    throwIfInterrupted(signal);
+    return result;
+  } catch (cause) {
+    const failures: Error[] = [];
+    const recover = async (path: string, action: () => Promise<void>): Promise<void> => {
+      try {
+        await action();
+      } catch (error) {
+        failures.push(new Error(`${path}: ${failureMessage(error)}`, { cause: error }));
+      }
+    };
+    for (const path of [...removed].reverse()) {
+      await recover(path, () => fs.mkdir(path, { recursive: true }));
+    }
+    for (const undo of [...files.values()].reverse()) {
+      await recover(undo.path, () => restoreFile(fs, undo));
+    }
+    for (const path of [...created].reverse()) {
+      await recover(path, async () => {
+        try {
+          await fs.rm(path);
+        } catch (error) {
+          if (!isMissingPath(error)) throw error;
+        }
+      });
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        [cause, ...failures],
+        `${failureMessage(cause)}; rollback incomplete: ${failures.map(failureMessage).join('; ')}`,
+        { cause },
+      );
+    }
+    // An inner batch may have reported incomplete rollback while the signal
+    // was set. The enclosing journal has now recovered all its mutations.
+    if (cause instanceof AggregateError && cause.cause instanceof InterruptedError) {
+      throw cause.cause;
     }
     throw cause;
   }

@@ -415,7 +415,12 @@ refused rather than resolved by load order.
 | `0`   | Success, including `--help` and `--version`.                                                                                                                                                                        |
 | `1`   | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, or a handler threw.                                                             |
 | `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
-| `130` | Interrupted or cancelled; nothing written by the run remains.                                                                                                                                                       |
+| `130` | Interrupted or cancelled; built-in writes are rolled back, or plugin application shutdown was attempted. Incomplete recovery is reported.                                                                           |
+
+SIGINT before a plugin command boots prevents it from running. During a handler, the CLI stops
+awaiting it and runs the application's shutdown hooks before exiting. Handlers must release their
+resources through those hooks; their external side effects are not rolled back. An interruption
+during application startup is observed when startup settles, so shutdown does not race startup.
 
 ## Next Steps
 
