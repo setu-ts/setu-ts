@@ -365,6 +365,24 @@ export class MemoryAdapter implements IDatabaseAdapter {
           throw new Error('Transaction already finalized');
         }
         assertActiveGeneration();
+        // A buffered create was checked against THIS transaction's view when it
+        // was buffered; a row committed since — by another transaction or a
+        // direct create — may now hold the same key. Re-check against the
+        // stored rows (ignoring rows this transaction deletes) BEFORE writing
+        // anything, and refuse the whole commit on a collision, so a duplicate
+        // key can never reach the store (M101c security audit R2-F1).
+        for (const entry of overlay.creates) {
+          const store = this.getStore(entry.entity);
+          const key = recordKey(store, entry.record);
+          const deletedHere = overlay.tombstones.has(
+            overlayKey(entry.entity, key, store.primaryKey),
+          );
+          if (!deletedHere && findRecordIndex(store, key) !== -1) {
+            rolledBack = true;
+            releaseOnce();
+            return Promise.reject(duplicateKeyError(entry.entity));
+          }
+        }
         committed = true;
         try {
           // Flush creates

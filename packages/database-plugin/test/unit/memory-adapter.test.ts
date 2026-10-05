@@ -642,6 +642,36 @@ describe('MemoryAdapter', () => {
       expect(await ds.findAll(ALL)).toHaveLength(2);
     });
 
+    it('refuses a commit whose buffered create collides with a row committed since', async () => {
+      await adapter.connect();
+      const all = () => adapter.createDataSource('User').findAll(ALL);
+      // Two overlapping transactions buffering the same key.
+      const t1 = await adapter.beginTransaction();
+      const t2 = await adapter.beginTransaction();
+      await (t1 as IAdapterTransaction).createDataSource('User').create({ id: 'X', by: 't1' });
+      await (t2 as IAdapterTransaction).createDataSource('User').create({ id: 'X', by: 't2' });
+      await t1.commit();
+      await expect(t2.commit()).rejects.toThrow(/primary key/);
+      expect(await all()).toEqual([{ id: 'X', by: 't1' }]);
+      // A transaction overlapping a direct create of the same key.
+      const t3 = await adapter.beginTransaction();
+      await (t3 as IAdapterTransaction).createDataSource('User').create({ id: 'Y', by: 't3' });
+      await adapter.createDataSource('User').create({ id: 'Y', by: 'direct' });
+      await expect(t3.commit()).rejects.toThrow(/primary key/);
+      expect((await all()).filter((r) => r.id === 'Y')).toEqual([{ id: 'Y', by: 'direct' }]);
+    });
+
+    it('allows a commit that deletes a stored row and recreates its key', async () => {
+      await adapter.connect();
+      await adapter.createDataSource('User').create({ id: 'Z', v: 1 });
+      const txn = await adapter.beginTransaction();
+      const ds = (txn as IAdapterTransaction).createDataSource('User');
+      await ds.delete('Z');
+      await ds.create({ id: 'Z', v: 2 });
+      await txn.commit();
+      expect(await adapter.createDataSource('User').findAll(ALL)).toEqual([{ id: 'Z', v: 2 }]);
+    });
+
     it('refuses a duplicate inside a transaction, against committed and buffered rows', async () => {
       await adapter.connect();
       await adapter.createDataSource('User').create({ id: 'u1', name: 'committed' });
