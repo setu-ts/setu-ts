@@ -63,7 +63,9 @@ import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
 import {
+  allocateDevtoolPort,
   allocatePort,
+  devtoolRangeStart,
   MAX_PORT,
   MEMBERS_DIR,
   MIN_PORT,
@@ -150,13 +152,15 @@ function reportNoWorkspace(
   error: (message: string) => void,
 ): number {
   if (problem.kind === 'absent') {
-    error(`No ${WORKSPACE_MANIFEST} in ${dir}, so this is not a Setu workspace.`);
+    error(`No ${WORKSPACE_MANIFEST} in ${escapeName(dir)}, so this is not a Setu workspace.`);
     error(`Create one with \`${PROGRAM_NAME} new <name> --workspace\`, then run this inside it.`);
     return EXIT_ERROR;
   }
   if (problem.kind === 'unsupported-version') {
     error(
-      `${joinPath(dir, WORKSPACE_MANIFEST)} declares version ${problem.version}, ` +
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} declares version ${
+        escapeName(String(problem.version))
+      }, ` +
         `and this CLI understands version ${WORKSPACE_VERSION}.`,
     );
     error('Upgrade the CLI, or check the file into version control and roll it back.');
@@ -164,7 +168,9 @@ function reportNoWorkspace(
   }
   if (problem.kind === 'invalid-port') {
     error(
-      `${joinPath(dir, WORKSPACE_MANIFEST)} gives ${problem.field} the port ${problem.port}, ` +
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} gives ${
+        escapeName(problem.field)
+      } the port ${escapeName(String(problem.port))}, ` +
         `which no service can bind: it must be an integer between ${MIN_PORT} and ${MAX_PORT}.`,
     );
     error(
@@ -175,7 +181,9 @@ function reportNoWorkspace(
   }
   if (problem.kind === 'unknown-transport') {
     error(
-      `${joinPath(dir, WORKSPACE_MANIFEST)} names the transport "${problem.transport}", ` +
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names the transport "${
+        escapeName(String(problem.transport))
+      }", ` +
         `which this CLI does not know. Expected one of: ${TRANSPORTS.join(', ')}.`,
     );
     error(
@@ -184,7 +192,7 @@ function reportNoWorkspace(
     );
     return EXIT_ERROR;
   }
-  error(`${joinPath(dir, WORKSPACE_MANIFEST)} is not a readable workspace manifest.`);
+  error(`${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} is not a readable workspace manifest.`);
   error(`It must be JSON carrying \`version\`, \`basePort\`, and a \`members\` array.`);
   return EXIT_ERROR;
 }
@@ -514,7 +522,7 @@ export async function runAppCommand(
     const devtoolHeld = taken.devtoolPort === requested.port && taken.port !== requested.port;
     deps.error(
       `Port ${requested.port} is already ${devtoolHeld ? 'the devtool port of' : 'bound by'} ` +
-        `the member "${taken.name}" in this workspace.`,
+        `the member "${escapeName(taken.name)}" in this workspace.`,
     );
     deps.error(
       `Two listeners on one port cannot both bind, and the launcher or a sibling would ` +
@@ -589,7 +597,7 @@ export async function runAppCommand(
         deps.error(
           `Port ${devtoolPortFlag.port} is already ` +
             `${devtoolHeld ? 'the devtool port of' : 'bound by'} the member ` +
-            `"${devtoolTaken.name}" in this workspace.`,
+            `"${escapeName(devtoolTaken.name)}" in this workspace.`,
         );
         deps.error(
           'Two listeners on one port cannot both bind, and the launcher would connect to ' +
@@ -608,18 +616,18 @@ export async function runAppCommand(
       }
       devtoolPort = devtoolPortFlag.port;
     } else {
-      let candidate = allocatePort({
+      let candidate = allocateDevtoolPort({
         ...read.manifest,
         members: [...read.manifest.members, { name, port }],
       });
       if (deps.portAvailable !== undefined) {
         while (candidate !== undefined && !(await deps.portAvailable(candidate))) {
-          candidate = allocatePort({
+          candidate = allocateDevtoolPort({
             ...read.manifest,
             members: [
               ...read.manifest.members,
               { name, port },
-              { name: '__occupied__', port: candidate },
+              { name: '__occupied__', port: candidate, devtoolPort: candidate },
             ],
           });
         }
@@ -642,6 +650,10 @@ export async function runAppCommand(
 
   const next: WorkspaceManifest = {
     ...read.manifest,
+    ...(devtoolPort === undefined ? {} : {
+      devtoolBasePort: read.manifest.devtoolBasePort ?? devtoolPortFlag.port ??
+        devtoolRangeStart(read.manifest),
+    }),
     members: [
       ...read.manifest.members,
       {
@@ -699,7 +711,9 @@ export async function runAppCommand(
 
   const duplicate = firstDuplicatePath(plan.files);
   if (duplicate !== undefined) {
-    deps.error(`Refusing to plan ${duplicate} twice; it would be written and then overwritten.`);
+    deps.error(
+      `Refusing to plan ${escapeName(duplicate)} twice; it would be written and then overwritten.`,
+    );
     return EXIT_ERROR;
   }
 
@@ -712,8 +726,10 @@ export async function runAppCommand(
     for (const outcome of await classifyFiles(deps.fs, files)) {
       deps.log(
         outcome.outcome === 'unchanged'
-          ? `unchanged ${outcome.path}`
-          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${outcome.path}`,
+          ? `unchanged ${escapeName(outcome.path)}`
+          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${
+            escapeName(outcome.path)
+          }`,
       );
     }
     return EXIT_OK;
@@ -722,7 +738,7 @@ export async function runAppCommand(
   const existing = await findExisting(deps.fs, files);
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
-    for (const path of existing) deps.error(`  ${path}`);
+    for (const path of existing) deps.error(`  ${escapeName(path)}`);
     const retryHint = interruptedRunRetryHint(existing, joinPath(deps.dir, MEMBERS_DIR, name));
     if (retryHint !== undefined) deps.error(retryHint);
     return EXIT_ERROR;
@@ -732,16 +748,20 @@ export async function runAppCommand(
     const outcomes = await writeFiles(
       deps.fs,
       files,
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined
+        ? { root: deps.dir }
+        : { root: deps.dir, signal: deps.interrupt },
     );
-    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {
       deps.error(interrupted);
       return EXIT_INTERRUPTED;
     }
-    deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+    deps.error(
+      `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
     return EXIT_ERROR;
   }
 

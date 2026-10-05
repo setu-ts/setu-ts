@@ -1,12 +1,15 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
+import type { IFileSystem } from '@setu-ts/common';
 import {
+  assertInsideProject,
   dirName,
   findExisting,
   firstDuplicatePath,
   interruptedRunRetryHint,
   joinPath,
+  PathEscapesProjectError,
   resolveDir,
   writeFiles,
 } from '../../src/utils/file-writer.ts';
@@ -199,7 +202,7 @@ describe('writeFiles', () => {
         { path: 'created.ts', contents: 'new' },
         { path: 'updated.ts', contents: 'after' },
         { path: 'same.ts', contents: 'same' },
-      ]),
+      ], { root: '/' }),
     ).toEqual([
       { path: 'created.ts', outcome: 'created' },
       { path: 'updated.ts', outcome: 'updated' },
@@ -211,7 +214,7 @@ describe('writeFiles', () => {
     await writeFiles(fs, [
       { path: 'src/a.ts', contents: 'A' },
       { path: 'src/b.ts', contents: 'B' },
-    ]);
+    ], { root: '/' });
     expect(fs.writes).toEqual(['src/a.ts', 'src/b.ts']);
     expect(fs.read('src/a.ts')).toBe('A');
     expect(fs.read('src/b.ts')).toBe('B');
@@ -231,14 +234,14 @@ describe('writeFiles', () => {
       { path: 'src/services/a.ts', contents: 'A' },
       { path: 'src/services/b.ts', contents: 'B' },
       { path: 'src/controllers/c.ts', contents: 'C' },
-    ]);
+    ], { root: '/' });
     expect(fs.mkdirs).toEqual(['src', 'src/services', 'src/controllers']);
     expect(recursive).toBe(false);
   });
 
   it('does not mkdir for a file with no parent directory', async () => {
     const fs = createFakeFs();
-    await writeFiles(fs, [{ path: 'deno.json', contents: '{}' }]);
+    await writeFiles(fs, [{ path: 'deno.json', contents: '{}' }], { root: '/' });
     expect(fs.mkdirs).toEqual([]);
     expect(fs.read('deno.json')).toBe('{}');
   });
@@ -249,7 +252,94 @@ describe('writeFiles', () => {
       ...fs,
       writeFile: () => Promise.reject(new Error('disk full')),
     };
-    await expect(writeFiles(failing, [{ path: 'a.ts', contents: 'A' }]))
+    await expect(writeFiles(failing, [{ path: 'a.ts', contents: 'A' }], { root: '/' }))
       .rejects.toThrow('disk full');
+  });
+});
+
+describe('assertInsideProject (M101f re-audit N9/N10)', () => {
+  const base = { ...createFakeFs({ '/p/a.ts': 'a' }) };
+
+  it('accepts a path that resolves to its own place under the root', async () => {
+    await assertInsideProject(base, '/p', '/p/a.ts');
+    await assertInsideProject(base, '/p', '/p/new/dir/file.ts');
+  });
+
+  it('refuses a target lexically outside the root, including through ..', async () => {
+    await expect(assertInsideProject(base, '/p', '/q/a.ts')).rejects.toThrow('is outside');
+    await expect(assertInsideProject(base, '/p', '/p/../q/a.ts')).rejects.toThrow('is outside');
+  });
+
+  it('refuses a backslash below the root instead of rewriting it (N11)', async () => {
+    await expect(assertInsideProject(base, '/p', '/p/bs\\x/f.ts')).rejects.toThrow('backslash');
+  });
+
+  it('fails closed when the filesystem cannot resolve links', async () => {
+    const bare: IFileSystem = { ...base };
+    delete bare.realPath;
+    await expect(assertInsideProject(bare, '/p', '/p/a.ts')).rejects.toThrow(
+      'cannot resolve links',
+    );
+  });
+
+  it('refuses a target that resolves elsewhere through a link', async () => {
+    const linked: IFileSystem = {
+      ...base,
+      realPath: (path) =>
+        path === '/p/a.ts' ? Promise.resolve('/elsewhere/a.ts') : base.realPath!(path),
+    };
+    await expect(assertInsideProject(linked, '/p', '/p/a.ts')).rejects.toBeInstanceOf(
+      PathEscapesProjectError,
+    );
+  });
+
+  it('refuses a dangling link instead of treating it as absent', async () => {
+    const dangling: IFileSystem = {
+      ...base,
+      readdir: (path) => path === '/p' ? Promise.resolve(['a.ts', 'ghost']) : base.readdir(path),
+    };
+    await expect(assertInsideProject(dangling, '/p', '/p/ghost')).rejects.toThrow(
+      'link to something that does not exist',
+    );
+  });
+
+  it('reports a resolution failure that is not absence, escaped to one line', async () => {
+    const looping: IFileSystem = {
+      ...base,
+      realPath: () => Promise.reject(new Error('ELOOP: too many links\nsetu: FORGED')),
+    };
+    const failure = await assertInsideProject(looping, '/p', '/p/a.ts').then(
+      () => '',
+      (error: Error) => error.message,
+    );
+    expect(failure).toContain('Cannot resolve');
+    expect(failure).not.toContain('\n');
+  });
+
+  it('ignores an unlistable parent and resolves the next ancestor', async () => {
+    const unlistable: IFileSystem = {
+      ...base,
+      readdir: () => Promise.reject(new Error('EACCES')),
+    };
+    await assertInsideProject(unlistable, '/p', '/p/missing/file.ts');
+  });
+
+  it('refuses the whole batch before the first write', async () => {
+    const fs = createFakeFs({ '/p/a.ts': 'a' });
+    const linked: IFileSystem = {
+      ...fs,
+      realPath: (path) =>
+        path === '/p/b.ts' ? Promise.resolve('/elsewhere/b.ts') : fs.realPath!(path),
+      stat: (path) =>
+        path === '/p/b.ts'
+          ? Promise.resolve({ isFile: true, isDirectory: false, size: 1 })
+          : fs.stat(path),
+    };
+    await expect(
+      writeFiles(linked, [{ path: '/p/a.ts', contents: 'A' }, { path: '/p/b.ts', contents: 'B' }], {
+        root: '/p',
+      }),
+    ).rejects.toBeInstanceOf(PathEscapesProjectError);
+    expect(fs.writes).toEqual([]);
   });
 });

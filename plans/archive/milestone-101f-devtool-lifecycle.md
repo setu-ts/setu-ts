@@ -1,7 +1,8 @@
 # Milestone 101f — the devtool lifecycle (`@setu-ts/cli`, `@setu-ts/common`, every diagnostics source)
 
-> **Status:** Planning. Branch: `feat/m101f-devtool-lifecycle`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Implemented; verification evidence recorded at hand-back. Branch:
+> `feat/m101f-devtool-lifecycle`. `main` is protected — all work (implementation + fixes) stays on
+> this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
@@ -413,3 +414,161 @@ binds).
   the migration.
 - Re-pinning and re-cataloguing in the `setu-ts-devtool` repository — a dependency of §3.2,
   performed there.
+
+## Implementation evidence: production install adjustment
+
+The real Docker gate rejected the planned entrypoint-only pair: frozen startup of the Redis broker
+requested missing npm:amqplib/npm:ioredis edges after a green build. The implementation removes the
+development-only diagnostics-plugin pin from the member import map before installing, retains the
+full-map install/frozen pair to complete lazy production edges, and runs both planned entrypoint
+checks afterwards. The cache exclusion and read-only broker boot are still mandatory.
+
+## Verification correction: application allocation
+
+Verification found §3.4's "`allocatePort` keeps walking BOTH kinds" defeated the separate range: a
+maximum over `devtoolPort` moved every application added after the first connector to
+`basePort + 1001` onward, inside the connector range. `allocatePort` now takes the maximum over
+application ports only and SKIPS a candidate a connector holds — the mirror of `allocateDevtoolPort`
+— so neither allocator hands out the other's number and neither sequence moves the other. Pinned by
+`allocate-port.test.ts` and a `generate app` sequence in `devtool-lifecycle.test.ts`, both observed
+failing against the previous implementation.
+
+## Code-review correction: alias policy and re-enabling
+
+At the maintainer's direction (code review, 2026-10-05), §3.6's predicate also refuses the line
+separator (Zl, U+2028) and paragraph separator (Zp, U+2029): neither is Cc or Cf, yet both can break
+the line an alias is displayed on, which is the spoofing class V8-22 closes. The twelve refusals now
+read "contains a control, format or line-separator character", since a Cf or separator alias is not
+a control character. The same review found that an unedited 0.8.0 `main.dev.ts` was refused as
+edited; it is now an accepted rendering that reallocation and re-enabling rewrite, while the compact
+rendering an intermediate commit produced, which no release emitted, is no longer accepted.
+
+## 10. Design security review (recorded after implementation)
+
+**Completed corrective review, 2026-10-05.** The maintainer requested the security audit and then
+directed that its findings be fixed. The first independent audit of `be0d7372` found that this
+review was missing (S101F-P1). This section records a review completed during that correction; it
+does not claim a pre-implementation review or a passed implementation audit. The reviewer is the
+milestone's implementing context, Codex `/root`. The corrected committed tree must be audited in a
+separate fresh context against the obligations below. No finding is accepted or deferred here.
+
+### 10.1 Reviewed flows and trust boundaries
+
+1. A local project supplier edits `deno.json`, `deno.jsonc`, `setu.workspace.json`,
+   `setu.config.ts`, or `main.dev.ts`; the developer invokes the CLI; the CLI reads data, plans
+   writes, and prints refusals. Project-controlled data crosses into developer-owned files and
+   terminal/log output. Reading a manifest must not execute its code. Enabling or reallocating must
+   not silently migrate dependencies or overwrite an edited entry.
+2. The developer launches the generated development entry with launcher-supplied credential
+   environment variables. Its factory passes plugin composition into the kernel; the runtime owns
+   the local listener; an authenticated client receives signed diagnostics. An unrelated local
+   process can occupy a port or connect to loopback, but cannot be trusted merely because it
+   answered that port. The entry's registration marker detects discarded composition; it is **not**
+   authorization, a sandbox, or proof of connector identity.
+3. Application configuration supplies diagnostics aliases; collectors and the kernel project them;
+   the connector signs the response; a client validates it for display. Authentic signatures do not
+   make display-spoofing characters safe. Alias validation must hold at producer and consumer
+   boundaries, while allowed Unicode remains usable.
+4. A developer builds the generated Deno production image. The build context and import-map cache
+   cross into the deployment artifact. The normal generated image must omit the development entry
+   and diagnostics dependency, while retaining the complete production dependency graph. Production
+   cache exclusions do not sandbox a developer who deliberately replaces the Dockerfile, imports the
+   connector from `main.ts`, or adds a custom alias for that dependency.
+
+### 10.2 Assets, attackers and assumptions
+
+**Assets:** integrity of developer-owned files and pins; trustworthy CLI output; availability of the
+application and connector after refusals and shutdown; secrecy of connector credentials;
+authenticity of signed diagnostics; display integrity of aliases; and the absence of the generated
+development connector from the production artifact.
+
+**Attackers:** a supplier of a project manifest later processed by a developer or automation; a
+configuration author able to supply an alias or invalid numeric port; an unrelated local process
+occupying application/connector ports or presenting the wrong connector key; and a reader of
+terminal output, diagnostics responses, or a production image. A dropped factory composition is also
+an operational failure that must fail visibly and release the application listener.
+
+**Trusted execution:** launching `setu.config.ts`, arbitrary application plugins, and an injected
+`PortProbe` executes developer-selected in-process code. This milestone does not sandbox that code
+or promise a timeout for a custom callback that never settles. The built-in port probe and the
+finite candidate search are the production path. An injected synchronous throw must be observed; a
+hung callback is reported as a trusted-dependency limitation, not treated as authorization or
+evidence that a port is free. Attacker-controlled aliases and parsed manifests remain untrusted even
+when supplied by otherwise trusted application code.
+
+The connector's framing, replay, expiry, revocation, cross-instance credential binding and
+cryptographic algorithms are existing M98 contracts, not redesigned here. Re-audit their relevant
+seams and run a wrong-key/valid-key regression on the real connector; the broader unchanged
+credential lifecycle matrix remains separately owned by the connector milestones. This scope does
+not permit an authentication regression introduced by M101f.
+
+### 10.3 Budgets and secure defaults reviewed
+
+| Boundary                   | Required bound/default                                                                                                                                                     | Reason                                                                                                     |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Parsed or derived port     | Integer number in `1..65535`; strings, fractions, non-finite values and zero refused                                                                                       | Ephemeral or invalid ports cannot become silently successful allocations                                   |
+| Standalone default search  | `4919..5019`, inclusive (at most 101 candidates); exhausted search refuses                                                                                                 | Local port occupation cannot force an unbounded search or disable validation                               |
+| Workspace connector search | Recorded range, default `min(65535, basePort + 1000)`; skip every recorded application port and occupied candidate; stop at 65535                                          | Keep application and connector identities separate with a finite search                                    |
+| Observation aliases        | Existing per-family `1..64` UTF-8 byte limits; kernel/protocol display labels retain their `160`-byte cap and kernel allowlists their 256-entry cap                        | The shared character predicate must not widen existing resource budgets                                    |
+| Alias characters           | Reject every Unicode Cc and Cf; accept otherwise allowed Unicode within the existing byte limits                                                                           | Prevent bidi/control display spoofing without an ASCII-only policy                                         |
+| CLI pin refusal            | One CLI-authored line per pin; every project-controlled path, key and value escaped using the existing single-value escaping helper                                        | Global output escaping intentionally permits authored newlines and is insufficient for interpolated fields |
+| Generated connector        | Deno runtime, IPv4 loopback listener; no fallback to an application adapter or non-Deno listener                                                                           | A new development listener must not become remotely exposed                                                |
+| Generated production image | Omit `apps/*/main.dev.ts`; prune the generated diagnostics import from both effective member/root maps before caching; retain full-map/frozen and entrypoint/frozen checks | Remove development artifacts without losing lazy production dependencies                                   |
+
+Manifest file-size limits and a global workspace-member cap are not added by this milestone. Local
+project processing is not a remote request handler. That does not exempt invalid port fields,
+hostile JSON keys, or project-controlled output from validation. No new request-keyed registry,
+connection admission limit, secret format, cryptographic mechanism, or npm runtime dependency is
+introduced.
+
+### 10.4 Required implementation-audit obligations
+
+Every row requires source and raw probe output, a refused adversarial case and a legitimate positive
+control through the same path. Run probes locally with an emptied environment and scoped grants,
+never `-A`. Temporarily removing each new security control must make its probe fail; restore it and
+verify the clean exact revision afterwards. Treat correctness mutations in §3 separately where they
+do not enforce a security boundary.
+
+| ID      | Obligation and required evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A101F-1 | Drive Cc/Cf canaries through all thirteen alias boundaries, including SDK validation and the signed-snapshot verifier. Check retained byte limits and allowed Unicode. After 1,000 distinct refusals a legitimate alias still succeeds. Fixed validation errors must not echo the canary; no new attacker-keyed retained state may appear. Remove shared and SDK character checks independently.                                                                                                                                                                                      |
+| A101F-2 | Feed malicious pin keys and values containing LF, CR, NUL, tab, ESC, Unicode line/paragraph separators and bidi controls through real `runCli`, including a pin-mismatch refusal with zero writes and a valid-pin enable. Assert exact authored line count and escaped fields, including repeated expected-key text. Check standalone, workspace-member and inherited-root refusal paths; escape the interpolated manifest path as well. Remove field escaping to prove the probe detects forged lines.                                                                               |
+| A101F-3 | Mixed framework versions, signature-only composition, and byte-edited owned entries must refuse before any write; valid equivalents must enable/reallocate. An edited-entry refusal must escape its project-controlled path into one authored error line; restoring the owned entry on the same hostile path must still reallocate. Independently remove that field escape. Hostile JSON keys such as `__proto__`, `constructor` and `prototype` must not change the selected imports or authorize a rewrite. Remove pin and composition checks and byte-ownership checks separately. |
+| A101F-4 | Start a generated entry mapped to the exact worktree; obtain a legitimate signed running snapshot. A wrong connector key is refused, followed by another legitimate request. Plant synthetic credential canaries and confirm their absence from captured stdout/stderr and the served snapshot bytes. Dropped composition exits nonzero and closes the application socket. Remove the marker and diagnostics-presence checks separately and restart from each mutation.                                                                                                               |
+| A101F-5 | Exercise invalid numeric range values (`NaN`, infinities, zero, negative, fraction and numeric string), configured application-port collisions, occupied candidates, exhaustion and a valid free candidate. Allocation must not return a port outside its bound. Refusals followed by a valid operation must work. Independently boot a CLI-owned reallocated entry, authenticate its new port, confirm the old port is closed, and observe shutdown/socket cleanup. Remove search bounds and the owned-entry rewrite in independent controls.                                        |
+| A101F-6 | Build a real generated Deno production image; demonstrate the development entry and diagnostics cached source are absent and `main.ts` present. Serve `/health` under read-only root and no external network. Independently remove entry exclusion and import pruning, rebuild for each, and observe the respective exclusion assertion fail. Include commented `deno.json`, `deno.jsonc`, and inherited root-import layouts so pruning cannot depend on strict JSON or only the member map.                                                                                          |
+| A101F-7 | Check runtime-first refusals for Node, Bun and Workers before writes. Review literal dependency imports, generated Deno grants, loopback binding, migration/default documentation and all fifteen recurring security defect classes. Document unchanged surfaces as N/A with a reason and runtime/backend limits explicitly; they cannot be used to declare an unexecuted obligation passed.                                                                                                                                                                                          |
+
+### 10.5 Review findings and resolution criteria
+
+| Finding  | Threat                                                                                                                                                                                                                                                                                                                             | Resolution required; disposition                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S101F-P1 | No reviewed trust boundaries or implementation obligations existed, so an audit could only infer them from code                                                                                                                                                                                                                    | This completed corrective review supplies flows, assets, attackers, budgets and obligations. It is recorded after implementation; closure must be confirmed by the next independent audit, not inferred from green tests.                                                                                                                                                                                                                         |
+| S101F-1  | A project supplier inserts LF in a framework pin and forges another line in the CLI's refusal output                                                                                                                                                                                                                               | Escape each interpolated path/key/value with the existing single-value helper and retain CLI-authored multiline formatting. A101F-2 must demonstrate both the refusal and legitimate enable, with a discriminating negative control. Fixed code and committed revision are recorded in the correction/audit evidence. No acceptance or deferral.                                                                                                  |
+| S101F-2  | A workspace directory containing LF forges another line in the edited-entry reallocation refusal                                                                                                                                                                                                                                   | Escape the interpolated entry path and member name with the existing single-value helper. A101F-3 requires an exact single-line refusal, zero writes, valid same-path reallocation and an independent removal control. Fixed by the second correction; closure requires the next independent audit. No acceptance or deferral.                                                                                                                    |
+| S101F-3  | (audit of 6e0f46e8, F1) A member path containing LF forges a line in the `ports --reallocate` success and dry-run output                                                                                                                                                                                                           | Escape the path with the single-value helper; a regression test drives both lines with LF and U+2028 member names. Fixed on this branch; closure requires the next independent audit.                                                                                                                                                                                                                                                             |
+| S101F-4  | (audit F2) The devtool-port conflict refusal and the forwarded unreadable-runtime-marker error interpolate a member name / path unescaped                                                                                                                                                                                          | Escape both, the marker error at its constructor so `add` and `generate` are covered too; the same pass escapes the develop-era sites the audit listed (members list, created/updated lines, JSON reason, task values, reconcile refusal, duplicate-port refusal). Fixed on this branch; closure requires the next independent audit.                                                                                                             |
+| S101F-5  | (audit F3) The image pruning step runs an all-permission `deno eval` against floating `jsr:@std/jsonc@^1.0.2` with no lockfile                                                                                                                                                                                                     | Exact `@std/jsonc@1.0.3` via `deno run --no-config --no-lock --no-prompt --allow-read=/srv --allow-write=/srv`, pinned by a unit test and proven in the real `check:deploy --generated` build. Fixed on this branch; closure requires the next independent audit.                                                                                                                                                                                 |
+| S101F-6  | (re-audit of fc970ef6, N1) A refused task merge prints its `would write:` value raw; for `dev` it derives from the project's `start` task. The twin `devtoolTaken.name` in `generate app` is also raw                                                                                                                              | Escape both; the same pass escapes the develop-era `generate app`, `generate`, `add` and `workspace` sites the re-audit listed. Regression cases fail per file when each fix is reverted. Closure requires the next independent audit.                                                                                                                                                                                                            |
+| S101F-7  | (re-audit N2) The pruning step's docs and comment claim it cannot reach beyond the manifests while its grant is all of `/srv`                                                                                                                                                                                                      | Narrow read and write to `./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc`, pinned by the Dockerfile unit test; docs and comment now state that grant. Closure requires the next independent audit.                                                                                                                                                                                                                                       |
+| S101F-8  | (re-audit of 6cfdfa94, N3) The CHANGELOG claimed `generate app`, `generate` and `add` output was fully escaped while 25 project-controlled interpolations there were raw — three reachable from committed files alone (a manifest `transport`, an invalid-port member name, an artifact file name)                                 | Escape every listed site (manifest problems, existing-file lists, outcome and dry-run lines, skip/adopt/wired reports, schematic and write failures, the retry hint) so the claim is true; per-command regression cases fail when each file's fix is reverted. Closure requires the next independent audit.                                                                                                                                       |
+| S101F-9  | (re-audit of da3918c2, N4) `generate` still printed raw text from a helper and a subcommand: the legacy `src/routes/` notice listed committed file names unescaped, and `generate library` printed its directory, planned, existing and outcome paths and write failures raw                                                       | Escape both, plus the same class CLI-wide: the stale dev-runner refusal (`devtool enable`), the retry hint, the interrupted-rollback message, `new`/`adopt` file and failure lines, and plugin-command load and dispatch errors; the CHANGELOG entry names exactly the swept commands. Regression cases fail per file when each fix is reverted. Closure requires the next independent audit.                                                     |
+| S101F-10 | (re-audit of d2fc86e1, N5) `adopt` still printed committed file names (`would move`/`moved`) and its workspace-exists, no-config, move-failure and rewrite-failure messages raw; the plugin-command missing-config refusal printed the project path raw                                                                            | Escape every site, the move and no-config messages at their builders in `workspace/adopt.ts`; regression cases reach each refusal and fail per file when its fix is reverted. Closure requires the next independent audit.                                                                                                                                                                                                                        |
+| S101F-11 | (re-audit N6) Escaping whole caught messages in plugin-command dispatch flattened the loader's deliberate two-line hint into a literal `\u000a`                                                                                                                                                                                    | Escape only what the loader embeds (path and error detail) where it builds each message, and print caught messages as written; a test pins the hint's two lines. Closure requires the next independent audit.                                                                                                                                                                                                                                     |
+| S101F-12 | (re-audit of 11b863d7, N7) The N6 regression test pinned the loader's message, not the print site where N6 was; restoring the whole-message escape in plugin-command dispatch left every committed test green                                                                                                                      | A test drives `setu commands` and plugin-command dispatch with an injected throwing loader and asserts the printed hint's two lines; it fails when the print-site escape is restored. Closure requires the next independent audit.                                                                                                                                                                                                                |
+| S101F-13 | (re-audit N8) `adopt` crashed uncaught on a committed dangling symlink under an adopted directory, and the runtime printed the link's raw name                                                                                                                                                                                     | `planAdoption` catches a failed walk and returns an escaped refusal naming the entry; a real-filesystem test with a dangling symlink asserts the refusal, zero writes, and no forged line, and fails without the fix. Closure requires the next independent audit.                                                                                                                                                                                |
+| S101F-14 | (re-audit of 17424822, N9, Medium) `adopt` followed a committed directory link out of the project and moved, so deleted, the files it pointed at                                                                                                                                                                                   | Every walked entry, adopted top-level entry and move destination must resolve to its own place under the project (`assertInsideProject`); a real-filesystem test with `src/ext -> outside` shows the refusal and the outside file intact, and fails without the check. Closure requires the next independent audit.                                                                                                                               |
+| S101F-15 | (re-audit N10, Medium) The CLI's writers wrote through committed links: `generate` barrels, `devtool enable`'s `deno.json` merge and `ports --reallocate`'s `main.dev.ts`                                                                                                                                                          | `writeFiles` takes a REQUIRED `root` and checks every target before the first write; resolution is canonicalised through `realPath` on the deepest existing ancestor so a linked parent directory is unaffected, a dangling link is refused rather than treated as absent, and a filesystem without `realPath` fails closed. Real-filesystem tests per writer plus a linked-parent positive control. Closure requires the next independent audit. |
+| S101F-16 | (re-audit of 851cdcf7, N11, Medium) The containment check rewrote `\\` into `/` before resolving, and on POSIX `\\` is an ordinary filename character, so a link named `ext\\x` was checked as a different path from the one moved or written — reopening N9 and N10; workspace member names were only checked for being non-empty | Refuse any target whose part below the root holds a `\\` (the CLI never plans one), and require each manifest member name to be one path segment (no `/`, no `\\`, not `.`/`..`). Real-filesystem tests for the link and the member shapes; each rule fails its own test when removed. Closure requires the next independent audit.                                                                                                               |
+| S101F-17 | (re-audit N12, Low) `adopt` checked a top-level directory only through its children, so an EMPTY linked directory was never checked and its link was pruned                                                                                                                                                                        | Check every existing top-level entry before stat or walk; a real-filesystem test with a link to an empty outside directory shows the refusal and the link left in place. Closure requires the next independent audit.                                                                                                                                                                                                                             |
+
+**Audit status at merge (2026-10-06).** Eight independent rounds ran; round 8 (on `851cdcf7`) closed
+the round-7 attacks and found S101F-16 and S101F-17, both fixed afterwards on this branch with
+regression tests and per-rule negative controls. The maintainer stopped the cycle there: the fix
+range after `851cdcf7` was **not** independently re-audited, so S101F-16 and S101F-17 are fixed but
+not confirmed closed by an auditor. That is a recorded waiver, not a passed audit.
+
+The full independent report and PR audit record must name the final committed revision, implementer
+and fresh-context auditor, this §10 review, obligation results, all fifteen classes, restored
+negative controls, open findings and support limits. An open finding or an unexecuted obligation
+requires `failed`; this review is not a waiver of that rule.

@@ -325,7 +325,9 @@ export async function runAddCommand(
   const workspaceMarker = await findWorkspaceMarker(deps.fs, dir);
   if (workspaceMarker !== undefined) {
     deps.error(
-      `${dir} is a workspace root (${workspaceMarker}); framework packages are pinned in each ` +
+      `${escapeName(dir)} is a workspace root (${
+        escapeName(workspaceMarker)
+      }); framework packages are pinned in each ` +
         `member, because \`${PROGRAM_NAME} generate\` reads the member's manifest to decide what ` +
         `is installed.`,
     );
@@ -386,12 +388,14 @@ export async function runAddCommand(
       const read = await readJsonManifest(deps.fs, path);
       if (read.kind === 'ok' && read.format === 'jsonc') {
         deps.error(
-          `${path} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+          `${
+            escapeName(path)
+          } is JSONC (comments, trailing commas); rewriting it would discard them. ` +
             `Add this line under "${target.section}" yourself: ` +
             `"${specifier}": "${target.range}"`,
         );
       } else {
-        deps.error(`Cannot read ${path} as JSON; fix it and run this again.`);
+        deps.error(`Cannot read ${escapeName(path)} as JSON; fix it and run this again.`);
       }
       return EXIT_ERROR;
     }
@@ -419,17 +423,19 @@ export async function runAddCommand(
   }
 
   if (!found) {
-    deps.error(`No deno.json or package.json in ${dir} — this is not a Setu-TS project.`);
+    deps.error(
+      `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
+    );
     return EXIT_ERROR;
   }
 
   if (edits.length === 0 && alreadyPresent) {
-    deps.log(`${specifier} is already installed in ${dir}.`);
+    deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     return EXIT_OK;
   }
 
   if (args.flags['dry-run'] === true) {
-    for (const edit of edits) deps.log(`would update ${edit.path}`);
+    for (const edit of edits) deps.log(`would update ${escapeName(edit.path)}`);
     return EXIT_OK;
   }
 
@@ -438,7 +444,7 @@ export async function runAddCommand(
     outcomes = await writeFiles(
       deps.fs,
       edits.map((edit) => ({ ...edit, managed: true })),
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
@@ -447,11 +453,13 @@ export async function runAddCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to update the manifest: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to update the manifest: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
-  for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
+  for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
@@ -534,7 +542,7 @@ async function printJsrRegistryNote(
   }
   log('');
   log('Note:');
-  log(`  Add this line to ${joinPath(dir, '.npmrc')}, or the install cannot`);
+  log(`  Add this line to ${escapeName(joinPath(dir, '.npmrc'))}, or the install cannot`);
   log('  find @jsr packages:');
   log(`    ${JSR_REGISTRY_LINE}`);
 }

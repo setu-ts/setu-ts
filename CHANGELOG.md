@@ -8,6 +8,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Devtool lifecycle (M101f).** Enabling verifies both composition spreads and refuses mismatched
+  framework pins. Pin and edited-entry refusals escape project-controlled fields so embedded
+  newlines cannot forge additional CLI output lines. The entry detects dropped composition and stops
+  with a named error. Workspace connectors use a recorded `devtoolBasePort` range, and application
+  ports stay in their own sequence after a connector is allocated (skipping, never walking past, a
+  connector port); reallocation updates CLI-rendered development entries and refuses edited entries
+  before writes. Standalone defaults probe 4919–5019; the generated README reports the selected
+  port; subsequent enablement retains the existing entry port even when availability changes. New
+  entries are formatted; an unedited entry rendered by the 0.8.0 CLI is still recognized as
+  CLI-owned, so reallocation and re-enabling upgrade it instead of refusing it as edited. Production
+  images exclude `main.dev.ts` and remove the development connector pin before installing the
+  remaining import map, including JSONC and inherited-import layouts. Diagnostics aliases now refuse
+  Unicode format (Cf), line separator (U+2028) and paragraph separator (U+2029) characters through
+  `hasForbiddenAliasCharacter` in common, in addition to controls (Cc), and the twelve refusal
+  messages now read "contains a control, format or line-separator character"; replace bidi,
+  zero-width and separator aliases with printable names. Re-enabling an unchanged workspace member
+  now reports that nothing changed rather than "Enabled the devtool". **Launcher dependency:** the
+  `setu-ts-devtool` framework pin must be updated to the merge commit and its recipe catalog must
+  retain the previous entry renderings, because the probe changes the generated entry text. This
+  repository does not change that pin.
+
 - **CLI write safety (M101e).** Writing commands now cooperate with SIGINT and roll back partial
   batches, interactive cancellation exits `130`, generation refuses non-project directories and
   workspace roots, JSONC manifests are read safely, and `setu add` refuses runtime-incompatible
@@ -319,6 +340,40 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **CLI output cannot be forged by project-controlled text (M101f security audit).** A member name,
+  path, task value or parser message carrying a line feed, carriage return, U+2028/U+2029 or a bidi
+  control printed raw, so a hostile workspace could make `setu` print a line that read as the CLI's
+  own. Every such value in `devtool enable` (including the task value a refused merge would write
+  and the stale dev-runner refusal), `workspace ports --reallocate`, `generate` (including
+  `generate app`, `generate library` and the legacy `src/routes/` notice), `add`, the member
+  reconcile refusal, the duplicate-port refusals, the unreadable-runtime-marker error and the
+  interrupted-run retry hint is now escaped to `\uXXXX` and stays on one line. The file and failure
+  lines of `new`, every file, refusal and failure line of `adopt` (which now also refuses by name,
+  instead of crashing, when an adopted directory holds an entry it cannot stat, such as a committed
+  dangling symlink), the interrupted-rollback message, and the plugin-command missing-config refusal
+  and application-load errors are escaped the same way; an error raised by the project's own plugin
+  code is printed as written, since that code can already print anything. Messages keep their
+  intended line breaks, and legitimate output is unchanged.
+- **The CLI no longer follows symbolic links inside a project (M101f security audit).** A link is
+  committed content, so a cloned project could make `setu adopt` walk a linked directory and move —
+  deleting from where they lived — files outside the project, and could make `generate`,
+  `devtool enable` and `workspace ports --reallocate` overwrite or merge into a file outside it by
+  linking a barrel, `deno.json` or `main.dev.ts` there. Every CLI write, and every file `adopt`
+  moves, must now resolve to exactly its place under the project or workspace root; a path reached
+  through a link inside the project, or a dangling link, is refused by name with nothing written. A
+  path holding a backslash below the root is refused too (on POSIX it is an ordinary filename
+  character, so it names a different file on each platform), and a workspace member name must be one
+  path segment — no `/`, no `\\`, not `.` or `..` — or the manifest is refused as unreadable. A
+  project reached through a linked PARENT directory is unaffected. If you deliberately link a file
+  into a project (a shared `deno.json`, for example), replace the link with a copy before running a
+  writing command.
+- **Generated image pruning step pinned and scoped (M101f security audit).** The step that removes
+  the development-only diagnostics pin ran `deno eval` with every permission against a floating
+  `jsr:@std/jsonc@^1.0.2`, the one unlocked fetch in the image. It now runs `deno run` against
+  `jsr:@std/jsonc@1.0.3`, with read and write granted only to the member's and the root's
+  `deno.json`/`deno.jsonc`. Regenerate the managed Dockerfile with `setu generate app`,
+  `setu devtool enable` or `setu workspace ports --reallocate`.
 
 - **SAML binding cookie cleared only on consumption (M101c).** The ACS cleared the browser-binding
   cookie on every outcome, so a cross-site `POST` of an empty or junk body to the CSRF-exempt ACS,

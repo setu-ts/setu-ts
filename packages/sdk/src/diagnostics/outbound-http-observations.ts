@@ -46,7 +46,7 @@ export const OUTBOUND_HTTP_LIMITS = {
 export const OUTBOUND_ALIAS_ERRORS = {
   type: 'createObservedFetch: alias must be a string.',
   bytes: 'createObservedFetch: an alias must be 1 to 64 UTF-8 bytes.',
-  control: 'createObservedFetch: an alias contains a control character.',
+  control: 'createObservedFetch: an alias contains a control, format or line-separator character.',
 } as const;
 
 const ENCODER = new TextEncoder();
@@ -70,7 +70,7 @@ export function compileOutboundAlias(alias: unknown): string {
   }
   for (const character of alias) {
     const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f) || /[\p{Cf}\p{Zl}\p{Zp}]/u.test(character)) {
       throw new RangeError(OUTBOUND_ALIAS_ERRORS.control);
     }
   }

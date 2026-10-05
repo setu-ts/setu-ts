@@ -46,6 +46,10 @@ describe('compileTraceDiagnosticsPolicy', () => {
     );
     expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'a'.repeat(65) }))
       .toThrow(TRACE_COLLECTOR_ERRORS.aliasBytes);
+    expect(() =>
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'bad\u202ealias' })
+    )
+      .toThrow(TRACE_COLLECTOR_ERRORS.aliasControl);
     expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'bad\nalias' }))
       .toThrow(TRACE_COLLECTOR_ERRORS.aliasControl);
     expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 7 as never }))

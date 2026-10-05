@@ -20,6 +20,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   DiagnosticsInspectorState,
   IStorageDiagnosticsSource,
@@ -61,7 +62,8 @@ export const STORAGE_DIAGNOSTICS_ERRORS = {
   enabled: 'Storage diagnostics: enabled must be the literal true; omit diagnostics instead.',
   aliasType: 'Storage diagnostics: alias must be a string.',
   aliasBytes: 'Storage diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Storage diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Storage diagnostics: an alias contains a control, format or line-separator character.',
   extraKey: 'Storage diagnostics: options accept only enabled and alias.',
 } as const;
 
@@ -69,22 +71,6 @@ export const STORAGE_DIAGNOSTICS_ERRORS = {
 const OPTION_KEYS: ReadonlySet<string> = new Set(['enabled', 'alias']);
 
 const ENCODER = new TextEncoder();
-
-/**
- * Reports whether a string carries a C0/C1 control code point.
- *
- * @param value - The string to scan
- * @returns `true` when any code point is in U+0000–U+001F or U+007F–U+009F
- */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /**
  * Validates the storage-diagnostics options and returns the approved alias.
@@ -119,7 +105,7 @@ export function compileStorageDiagnosticsAlias(options: StorageDiagnosticsOption
   if (bytes < 1 || bytes > STORAGE_COLLECTOR_LIMITS.aliasBytes) {
     throw new RangeError(STORAGE_DIAGNOSTICS_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new RangeError(STORAGE_DIAGNOSTICS_ERRORS.aliasControl);
   }
   return alias;

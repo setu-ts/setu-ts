@@ -52,12 +52,13 @@ describe('compileLabelAllowlist', () => {
   });
 
   it('refuses control characters without naming the entry', () => {
+    expect(() => compileLabelAllowlist(['bad\u202elabel'], 'routes')).toThrow(RangeError);
     try {
       compileLabelAllowlist(['bad\u0000label'], 'routes');
       throw new Error('unreachable');
     } catch (error) {
       expect(error).toBeInstanceOf(RangeError);
-      expect((error as Error).message).toContain('control character');
+      expect((error as Error).message).toContain('control, format or line-separator character');
       expect((error as Error).message).not.toContain('bad');
     }
   });

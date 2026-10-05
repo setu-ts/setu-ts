@@ -24,6 +24,7 @@ import type { TargetRuntime } from '../constants.ts';
 import { joinPath } from './file-writer.ts';
 import { isMissingPath } from './filesystem-errors.ts';
 import { readJsonManifest } from './manifest-reader.ts';
+import { escapeName } from './names.ts';
 
 /**
  * A runtime marker exists but could not be read, so the runtime cannot be
@@ -42,7 +43,8 @@ export class RuntimeMarkerUnreadableError extends Error {
    * @param reason - Why it could not be read
    */
   constructor(path: string, reason: string) {
-    super(`Cannot read ${path}: ${reason}`);
+    // Both values are project-controlled; escaped so neither can forge an output line.
+    super(`Cannot read ${escapeName(path)}: ${escapeName(reason)}`);
     this.name = 'RuntimeMarkerUnreadableError';
     this.path = path;
     this.reason = reason;

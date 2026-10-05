@@ -31,6 +31,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   HealthCheckResult,
   HealthDiagnosticsObservation,
@@ -82,17 +83,6 @@ export interface HealthIndicatorRunner {
    * @returns The raw result promise, or `null` for an unregistered name
    */
   run(name: string): Promise<HealthCheckResult> | null;
-}
-
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /**
@@ -169,7 +159,8 @@ export const COLLECTOR_ERRORS = {
   badIndicators: 'Health diagnostics: indicators must map indicator names to aliases.',
   tooManyAliases: 'Health diagnostics: more than 64 approved indicators.',
   aliasBytes: 'Health diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Health diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Health diagnostics: an alias contains a control, format or line-separator character.',
   duplicateAlias: 'Health diagnostics: an alias is not unique.',
   badStaleAfter: 'Health diagnostics: staleAfterMs must be a positive finite integer.',
   badScheduled: 'Health diagnostics: scheduled.indicators must be an array of names.',
@@ -264,7 +255,7 @@ export function compileHealthDiagnosticsPolicy(
     if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
       throw new RangeError(COLLECTOR_ERRORS.aliasBytes);
     }
-    if (hasControlCharacter(alias)) {
+    if (hasForbiddenAliasCharacter(alias)) {
       throw new RangeError(COLLECTOR_ERRORS.aliasControl);
     }
     if (sourceNameByAlias.has(alias)) {

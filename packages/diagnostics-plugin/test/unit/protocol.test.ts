@@ -674,7 +674,10 @@ describe('Protocol — configuration target and projection (M98e)', () => {
     }
     // C1 (U+0085) and DEL are refused too; a non-control code point is not.
     for (
-      const [alias, accepted] of [['a\u0085b', false], ['a\u007fb', false], ['a\u00a0b', true]]
+      const [alias, accepted] of [['a\u202eb', false], ['a\u0085b', false], ['a\u007fb', false], [
+        'a\u00a0b',
+        true,
+      ]]
     ) {
       const projected = projectConfigSnapshot({
         ...readySnapshot(),

@@ -63,6 +63,14 @@ export function createFakeFs(seed: Readonly<Record<string, string>> = {}): FakeF
     store.set(path, encoder.encode(contents));
   }
 
+  /** A stored file, or a directory implied by one (or created by `mkdir`). */
+  const exists = (path: string): boolean => {
+    if (store.has(path) || dirs.has(path)) return true;
+    const prefix = `${path}/`;
+    for (const key of store.keys()) if (key.startsWith(prefix)) return true;
+    return false;
+  };
+
   return {
     writes,
     mkdirs,
@@ -108,6 +116,12 @@ export function createFakeFs(seed: Readonly<Record<string, string>> = {}): FakeF
         return Promise.resolve({ isFile: false, isDirectory: true, size: 0 });
       }
       return Promise.reject(notFound(path));
+    },
+
+    // No links exist in this fake, so a path resolves to itself — when it exists,
+    // exactly as a real `realPath` refuses a missing one.
+    realPath(path) {
+      return exists(path) ? Promise.resolve(path) : Promise.reject(notFound(path));
     },
 
     readdir(path) {

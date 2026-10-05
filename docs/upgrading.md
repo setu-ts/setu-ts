@@ -12,6 +12,35 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Replace links inside a project before running a writing `setu` command
+
+`setu` now refuses to write through, or `adopt` to move, a path reached through a symbolic link
+inside the project or workspace, and refuses a dangling link, with nothing written. If you link a
+file into a project on purpose (a shared `deno.json`, for example), replace the link with a copy
+before running `generate`, `add`, `devtool enable`, `workspace ports --reallocate` or `adopt`. A
+project reached through a linked parent directory needs no change.
+
+### Refresh `main.dev.ts` and production images (M101f)
+
+Upgrade every `@setu-ts/*` pin together before `setu devtool enable`; mixed versions are refused.
+Apply the complete factory edit in the CLI README: the second parameter AND both usage spreads. The
+development entry now stops when composition is discarded. Restore an edited entry before
+`ports --reallocate`; only CLI-rendered entries are rewritten, and an unedited 0.8.0 entry counts as
+one — the next reallocation or `devtool enable` upgrades it. Workspace manifests record
+`devtoolBasePort` on first allocation, defaulting to `basePort + 1000` (capped at 65535). Standalone
+defaults probe 4919–5019; read the reported port or pass `--devtool-port`.
+
+Regenerate managed deployment files with `generate app`, `devtool enable`, or `ports --reallocate`
+and rebuild production images to exclude the development entry and connector cache. Replace aliases
+containing Unicode format characters (bidi controls, zero-width format characters) or the line and
+paragraph separators U+2028/U+2029 with printable ones; these now fail at construction and wire
+validation. Code matching the old "contains a control character" refusal text should match "contains
+a control, format or line-separator character".
+
+The devtool extension release must re-pin the framework to this milestone merge commit and retain
+previous recipe renderings in its catalog. Until that cross-repository update, an older launcher may
+refuse newly generated entries with `PREPARATION_FAILED`.
+
 ### Update programmatic CLI `Prompter` implementations
 
 `Prompter.select` now returns `PromptSelection`. Replace a string result with

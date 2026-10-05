@@ -160,7 +160,14 @@ WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 # metadata on every file the cache layer created, so overlayfs copies the
 # ENTIRE module cache into a second layer — measured at 563 MB vs 362 MB with
 # the fold, paid on every push and every node pull.
-RUN deno cache main.ts && deno install && deno install --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
+# Remove the development-only pin before resolving the production import map.
+# Deno 2.9 needs the full-map install pair to complete lazy broker npm edges;
+# an entrypoint-only frozen install can pass while the real broker later refuses.
+# The parser is pinned to an exact version and may read and write only the
+# member and root manifests, so this unlocked fetch cannot float or touch any
+# other file in the image.
+RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
+RUN deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,
@@ -205,6 +212,7 @@ function dockerignore(): string {
     '.git',
     '.gitignore',
     'coverage',
+    `${MEMBERS_DIR}/*/main.dev.ts`,
     // The Dockerfile itself is passed with -f and read from the client, so
     // ignoring the directory costs nothing and keeps k8s/ and docker/ out of the
     // image.

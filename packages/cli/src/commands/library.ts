@@ -129,7 +129,9 @@ export async function runLibraryCommand(
   const read = await readWorkspaceManifest(deps.fs, deps.dir);
   if (!read.ok) {
     deps.error(
-      `No usable ${WORKSPACE_MANIFEST} in ${deps.dir}, so this is not a Setu workspace.`,
+      `No usable ${WORKSPACE_MANIFEST} in ${
+        escapeName(deps.dir)
+      }, so this is not a Setu workspace.`,
     );
     deps.error(
       `A library is resolved by the workspace, so it needs one: create it with ` +
@@ -175,7 +177,9 @@ export async function runLibraryCommand(
 
   const duplicate = firstDuplicatePath(files);
   if (duplicate !== undefined) {
-    deps.error(`Refusing to plan ${duplicate} twice; it would be written and then overwritten.`);
+    deps.error(
+      `Refusing to plan ${escapeName(duplicate)} twice; it would be written and then overwritten.`,
+    );
     return EXIT_ERROR;
   }
 
@@ -194,14 +198,14 @@ export async function runLibraryCommand(
   const planned = files.map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of planned) deps.log(`would create ${file.path}`);
+    for (const file of planned) deps.log(`would create ${escapeName(file.path)}`);
     return EXIT_OK;
   }
 
   const existing = await findExisting(deps.fs, planned);
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
-    for (const path of existing) deps.error(`  ${path}`);
+    for (const path of existing) deps.error(`  ${escapeName(path)}`);
     return EXIT_ERROR;
   }
 
@@ -209,16 +213,20 @@ export async function runLibraryCommand(
     const outcomes = await writeFiles(
       deps.fs,
       planned,
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined
+        ? { root: deps.dir }
+        : { root: deps.dir, signal: deps.interrupt },
     );
-    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {
       deps.error(interrupted);
       return EXIT_INTERRUPTED;
     }
-    deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+    deps.error(
+      `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
     return EXIT_ERROR;
   }
 

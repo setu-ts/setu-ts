@@ -27,6 +27,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   IQueueDiagnosticsSource,
   IRuntimeServices,
@@ -85,7 +86,8 @@ export const QUEUE_COLLECTOR_ERRORS = {
   badQueues: 'Queue diagnostics: queues must map job names to aliases.',
   tooManyQueues: 'Queue diagnostics: more than 64 approved queues.',
   aliasBytes: 'Queue diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Queue diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Queue diagnostics: an alias contains a control, format or line-separator character.',
   duplicateAlias: 'Queue diagnostics: a queue alias is not unique.',
   badDepths: 'Queue diagnostics: depths must be an object.',
   badInterval: 'Queue diagnostics: depths.intervalMs must be an integer from 1000 to 300000.',
@@ -123,17 +125,6 @@ export interface CompiledQueueDiagnosticsPolicy {
   readonly depths: CompiledQueueDepthPolicy | null;
 }
 
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** Reports whether a value is a plain non-null, non-array object. */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -159,7 +150,7 @@ function assertAliasShape(alias: string): void {
   if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
     throw new RangeError(QUEUE_COLLECTOR_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new RangeError(QUEUE_COLLECTOR_ERRORS.aliasControl);
   }
 }

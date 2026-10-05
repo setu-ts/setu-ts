@@ -159,7 +159,7 @@ function overflow(conn: SseConnection): void {
 describe('SsePlugin realtime observations (M98l)', () => {
   it('refuses an invalid diagnostics option when the plugin is constructed', () => {
     expect(() => SsePlugin({ diagnostics: { enabled: true, alias: 'a\u0000' } })).toThrow(
-      'control character',
+      'control, format or line-separator character',
     );
   });
 

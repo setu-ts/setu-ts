@@ -83,7 +83,7 @@ describe('generated Dockerfile lockfile verification', () => {
     // repairing install fails the build (exit 1), and dropping `--frozen` is what
     // let the incomplete lockfile reach production in the first place.
     expect(buildRun).toContain(
-      'deno cache main.ts && deno install && deno install --frozen',
+      'deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen',
     );
   });
 
@@ -93,5 +93,25 @@ describe('generated Dockerfile lockfile verification', () => {
     // without `--frozen` a container updates the shipped lockfile, and without
     // the verify an incomplete one reaches production and never serves.
     expect(dockerfile()).toContain('CMD ["run", "--frozen"');
+  });
+});
+
+describe('generated Dockerfile development-pin pruning (M101f audit F3)', () => {
+  it('runs an exactly pinned parser that may touch only the four manifests', () => {
+    // The only step in the image that fetches without the lockfile: a floating
+    // range or an all-permission `deno eval` would let it change underneath an
+    // unchanged project, or reach beyond the two manifests it edits.
+    const pruning = dockerfile()
+      .split('\n')
+      .find((line) => line.includes('@setu-ts/diagnostics-plugin'));
+    expect(pruning).toBeDefined();
+    expect(pruning).toContain('"jsr:@std/jsonc@1.0.3"');
+    expect(pruning).not.toMatch(/jsr:@std\/jsonc@[\^~]/);
+    expect(pruning).not.toContain('deno eval');
+    expect(pruning).toContain('deno run --no-config --no-lock --no-prompt');
+    const manifests = './deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc';
+    expect(pruning).toContain(`--allow-read=${manifests} --allow-write=${manifests} -`);
+    expect(pruning).not.toMatch(/--allow-(read|write)=\/srv[ ,]/);
+    expect(pruning).not.toMatch(/--allow-all|\s-A\s/);
   });
 });

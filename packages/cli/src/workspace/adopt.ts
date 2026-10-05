@@ -24,7 +24,8 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { CONFIG_MODULE } from '../constants.ts';
-import { joinPath } from '../utils/file-writer.ts';
+import { assertInsideProject, joinPath } from '../utils/file-writer.ts';
+import { escapeName } from '../utils/names.ts';
 
 /**
  * The files and directories a conversion relocates into the member.
@@ -88,6 +89,9 @@ async function walk(
   const found: string[] = [];
   for (const entry of await fs.readdir(joinPath(root, prefix))) {
     const relative = prefix === '' ? entry : joinPath(prefix, entry);
+    // A committed link would otherwise be FOLLOWED: a linked directory walked
+    // and its files moved — deleting them where they live, outside the project.
+    await assertInsideProject(fs, root, joinPath(root, relative));
     const stat = await fs.stat(joinPath(root, relative));
     if (stat.isDirectory) {
       found.push(...(await walk(fs, root, relative)));
@@ -122,7 +126,7 @@ export async function planAdoption(
   } catch {
     return {
       ok: false,
-      message: `No ${CONFIG_MODULE} in ${project}, so this is not a Setu project. ` +
+      message: `No ${CONFIG_MODULE} in ${escapeName(project)}, so this is not a Setu project. ` +
         `A conversion needs one: it becomes the first member's application factory.`,
     };
   }
@@ -137,13 +141,35 @@ export async function planAdoption(
       continue;
     }
 
+    // Checked whatever its kind: a linked DIRECTORY with nothing inside it would
+    // otherwise never be checked, since a directory is reached through its children.
+    try {
+      await assertInsideProject(fs, project, joinPath(project, entry));
+    } catch (cause) {
+      return { ok: false, message: cause instanceof Error ? cause.message : String(cause) };
+    }
+
     if (!isDirectory) {
       files.push({ from: entry, to: joinPath(memberRoot, entry) });
       continue;
     }
 
-    for (const nested of await walk(fs, project, entry)) {
-      files.push({ from: nested, to: joinPath(memberRoot, nested) });
+    // A walk fails on an entry it cannot stat — a dangling symlink, which git
+    // commits happily, or an unreadable directory. Reported as a refusal, not
+    // left to escape as an uncaught error that prints the raw path.
+    let nested: readonly string[];
+    try {
+      nested = await walk(fs, project, entry);
+    } catch (cause) {
+      return {
+        ok: false,
+        message: `Cannot read every file under ${escapeName(joinPath(project, entry))}: ${
+          escapeName((cause instanceof Error ? cause.message : String(cause)).replace(/\.$/, ''))
+        }. Fix or remove that entry, then run this again.`,
+      };
+    }
+    for (const path of nested) {
+      files.push({ from: path, to: joinPath(memberRoot, path) });
     }
   }
 
@@ -176,6 +202,10 @@ export async function moveFile(
   const to = joinPath(project, file.to);
 
   try {
+    // Both ends: the source was checked when planned, but a destination under a
+    // committed `apps` link would put the moved files outside the project.
+    await assertInsideProject(fs, project, from);
+    await assertInsideProject(fs, project, to);
     const bytes = await fs.readFile(from);
     const parent = to.slice(0, to.lastIndexOf('/'));
     if (parent !== '') await fs.mkdir(parent, { recursive: true });
@@ -185,7 +215,7 @@ export async function moveFile(
     if (written.byteLength !== bytes.byteLength) {
       return {
         ok: false,
-        message: `Copied ${file.from} to ${file.to} but the copy is ` +
+        message: `Copied ${escapeName(file.from)} to ${escapeName(file.to)} but the copy is ` +
           `${written.byteLength} bytes against ${bytes.byteLength} — the original is untouched.`,
       };
     }
@@ -197,8 +227,8 @@ export async function moveFile(
   } catch (cause) {
     return {
       ok: false,
-      message: `Failed to move ${file.from}: ${
-        cause instanceof Error ? cause.message : String(cause)
+      message: `Failed to move ${escapeName(file.from)}: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
       }`,
     };
   }

@@ -135,6 +135,7 @@ package fits the plugin architecture.
 | `formEncodingOf`                     | function  |
 | `fromNullable`                       | function  |
 | `httpStatusHintOf`                   | function  |
+| `hasForbiddenAliasCharacter`         | function  |
 | `isErr`                              | function  |
 | `isLexicallyContained`               | function  |
 | `isNone`                             | function  |

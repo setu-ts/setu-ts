@@ -1,17 +1,27 @@
 /** Workspace maintenance commands. */
 
+import { devEntryVariants, DEVTOOL_ENTRY_MODULE, renderDevEntry } from '../devtool/dev-entry.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
+import { escapeName } from '../utils/names.ts';
 import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
-import { DISCOVERY_MODULE, renderDiscoveryModule } from '../workspace/discovery-module.ts';
+import {
+  DISCOVERY_MODULE,
+  DISCOVERY_SPECIFIER,
+  renderDiscoveryModule,
+  SERVICE_PORT_EXPORT,
+} from '../workspace/discovery-module.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import {
+  allocateDevtoolPort,
+  devtoolRangeStart,
   MAX_PORT,
+  MEMBERS_DIR,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
@@ -35,7 +45,7 @@ export interface WorkspaceCommandDependencies {
 /**
  * Reassigns all member ports to currently bindable ports at or above basePort.
  *
- * A member's devtool port moves WITH it, from the same sequence: the two
+ * A member's devtool port moves WITH it, from the connector range: the two
  * addresses a devtool launcher reads for one member — the application port in
  * every sibling's discovery map, the devtool port in this manifest — must be
  * reassigned as one unit, or a reallocation leaves the manifest's devtool
@@ -51,18 +61,31 @@ async function reallocate(
   for (const member of manifest.members) {
     while (candidate <= MAX_PORT && !(await probe(candidate))) candidate++;
     if (candidate > MAX_PORT) return undefined;
-    if (member.devtoolPort === undefined) {
-      members.push({ ...member, port: candidate });
-    } else {
-      let devtoolCandidate = candidate + 1;
-      while (devtoolCandidate <= MAX_PORT && !(await probe(devtoolCandidate))) devtoolCandidate++;
-      if (devtoolCandidate > MAX_PORT) return undefined;
-      members.push({ ...member, port: candidate, devtoolPort: devtoolCandidate });
-      candidate = devtoolCandidate;
-    }
+    const nextMember = { ...member, port: candidate };
+    delete nextMember.devtoolPort;
+    members.push(nextMember);
     candidate++;
   }
-  return { ...manifest, members };
+  let next: WorkspaceManifest = { ...manifest, members };
+  for (const old of manifest.members) {
+    if (old.devtoolPort === undefined) continue;
+    let port = allocateDevtoolPort(next);
+    while (port !== undefined && !(await probe(port))) {
+      port = allocateDevtoolPort({
+        ...next,
+        members: [...next.members, { name: '__occupied__', port, devtoolPort: port }],
+      });
+    }
+    if (port === undefined) return undefined;
+    next = {
+      ...next,
+      devtoolBasePort: devtoolRangeStart(manifest),
+      members: next.members.map((member) =>
+        member.name === old.name ? { ...member, devtoolPort: port } : member
+      ),
+    };
+  }
+  return next;
 }
 
 /** Plans every managed file whose content contains a workspace port. */
@@ -70,6 +93,13 @@ function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
   const profile = workspaceProfile(manifest.runtime);
   const transport = transportSpec(manifest.transport);
   return [
+    ...manifest.members.filter((member) => member.devtoolPort !== undefined).map((member) => ({
+      path: joinPath(MEMBERS_DIR, member.name, DEVTOOL_ENTRY_MODULE),
+      contents: renderDevEntry({
+        devtoolPort: member.devtoolPort!,
+        port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
+      }),
+    })),
     ...manifest.members.map((member) => ({
       path: joinPath('apps', member.name, DISCOVERY_MODULE),
       contents: renderDiscoveryModule(member, manifest.members, profile),
@@ -101,13 +131,45 @@ export async function runWorkspaceCommand(
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const read = await readWorkspaceManifest(deps.fs, dir);
   if (!read.ok) {
-    deps.error(`No usable ${WORKSPACE_MANIFEST} in ${dir}, so this is not a Setu workspace.`);
+    deps.error(
+      `No usable ${WORKSPACE_MANIFEST} in ${escapeName(dir)}, so this is not a Setu workspace.`,
+    );
     return EXIT_ERROR;
   }
   const reconciliation = await reconcileMembers(deps.fs, dir, read.manifest);
   if (!reconciliation.ok) {
     deps.error(describeReconcileFailure(reconciliation));
     return EXIT_ERROR;
+  }
+  for (const member of read.manifest.members) {
+    if (member.devtoolPort === undefined) continue;
+    const path = joinPath(dir, MEMBERS_DIR, member.name, DEVTOOL_ENTRY_MODULE);
+    let source: string | undefined;
+    try {
+      source = new TextDecoder().decode(await deps.fs.readFile(path));
+    } catch {
+      source = undefined;
+    }
+    if (source === undefined) {
+      deps.error(
+        `${
+          escapeName(path)
+        }: the member records devtool port ${member.devtoolPort} but this entry is missing, so the launcher has nothing to start; recreate it with setu devtool enable ${
+          escapeName(member.name)
+        }, then run this again.`,
+      );
+      return EXIT_ERROR;
+    }
+    if (!devEntryVariants(member.devtoolPort).includes(source)) {
+      deps.error(
+        `${
+          escapeName(path)
+        }: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run setu devtool enable ${
+          escapeName(member.name)
+        }) or move the port literal yourself.`,
+      );
+      return EXIT_ERROR;
+    }
   }
   const next = await reallocate(read.manifest, deps.portAvailable ?? assumePortAvailable);
   if (next === undefined) {
@@ -116,15 +178,16 @@ export async function runWorkspaceCommand(
   }
   const files = managedFiles(next).map((file) => ({ ...file, path: joinPath(dir, file.path) }));
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would update ${file.path}`);
+    for (const file of files) deps.log(`would update ${escapeName(file.path)}`);
     return EXIT_OK;
   }
   try {
-    await writeFiles(
+    const outcomes = await writeFiles(
       deps.fs,
       files,
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {
@@ -132,7 +195,9 @@ export async function runWorkspaceCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to update workspace ports: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to update workspace ports: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }

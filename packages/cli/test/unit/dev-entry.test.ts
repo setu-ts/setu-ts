@@ -1,9 +1,32 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { renderDevEntry } from '../../src/devtool/dev-entry.ts';
+import { devEntryPort, devEntryVariants, renderDevEntry } from '../../src/devtool/dev-entry.ts';
 
 describe('renderDevEntry', () => {
+  it('recognises ports only in complete current and previous CLI renderings', () => {
+    for (const member of [false, true]) {
+      for (const source of devEntryVariants(4920, member)) {
+        expect(devEntryPort(source, member)).toBe(4920);
+        expect(devEntryPort(`${source}// edited\n`, member)).toBeUndefined();
+      }
+    }
+    for (const port of [0, 65536, 1e100]) {
+      expect(devEntryPort(renderDevEntry({ devtoolPort: port }))).toBeUndefined();
+    }
+    expect(devEntryPort('handwritten entry')).toBeUndefined();
+  });
+  it('checks plugin registration and diagnostics after starting and stops on discarded composition', () => {
+    const entry = renderDevEntry({ devtoolPort: 4919 });
+    expect(entry).toContain("name: 'setu-devtool-probe'");
+    expect(entry).toContain('plugins: [diagnostics, devtoolProbe]');
+    expect(entry).toContain('if (!devtoolRegistered || app.diagnostics === undefined)');
+    expect(entry.indexOf('if (!devtoolRegistered')).toBeGreaterThan(
+      entry.indexOf('await app.start'),
+    );
+    expect(entry).toContain('await app.stop();');
+    expect(entry).toContain('did not pass the devtool composition');
+  });
   it('reads exactly the two credential variables', () => {
     const entry = renderDevEntry({ devtoolPort: 4919 });
     expect(entry).toContain("Deno.env.get('SETU_DEVTOOL_SESSION_ID')");

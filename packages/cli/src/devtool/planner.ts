@@ -14,6 +14,7 @@
  */
 
 import { CONFIG_EXPORT, type TargetRuntime } from '../constants.ts';
+import { escapeName } from '../utils/names.ts';
 import type { EntryPort, ResolvedHost } from '../templates/project-files.ts';
 import { DEVTOOL_ENTRY_MODULE, devtoolTasks } from '../templates/project-files.ts';
 import { workspaceDevRunner } from '../workspace/dev-runner.ts';
@@ -24,10 +25,10 @@ import { renderDevEntry } from './dev-entry.ts';
 export { DEVTOOL_ENTRY_MODULE };
 
 /**
- * The devtool port a standalone project gets when none is supplied.
+ * The start of the bounded standalone devtool port search.
  *
- * A workspace allocates; a standalone project has no allocation space, so it
- * takes the documented example port. An explicit `--devtool-port` overrides it,
+ * A workspace records a range; a standalone project probes from this port through
+ * 100 ports beyond it. An explicit `--devtool-port` overrides it,
  * range-checked like every other port; a collision fails at bind time with the
  * listener's own named refusal, exactly as a colliding application port does.
  */
@@ -81,13 +82,15 @@ export function devtoolRunnerRefusal(
   if (existing === undefined) return undefined;
   if (DEVTOOL_ENV_NAMES.every((name) => existing.includes(name))) return undefined;
   return (
-    `${path} predates the devtool: it starts every member with that member's \`start\`` +
+    `${
+      escapeName(path)
+    } predates the devtool: it starts every member with that member's \`start\`` +
     ` task and passes no per-child environment, so the development entry would never run` +
     ` and the launcher would meet a closed port. It also hands every member the runner's` +
     ` whole environment, which is how a sibling would come to hold this session's` +
     ` credentials.\n` +
     `The runner is yours once written, so this command will not overwrite it. Delete` +
-    ` ${path} and run this again — it is rewritten with the devtool-aware runner — or` +
+    ` ${escapeName(path)} and run this again — it is rewritten with the devtool-aware runner — or` +
     ` port the change yourself: read ${DEVTOOL_ENV_NAMES.join(', ')}, spawn the named` +
     ` member's \`dev\` task instead of \`start\`, and give every child an explicit \`env\`` +
     ` that blanks all three for every other member.`
@@ -101,7 +104,7 @@ export function devtoolRunnerRefusal(
  * only on the shapes the CLI itself has emitted, which are known strings, so a
  * hand-edited factory the check cannot classify proceeds rather than being
  * refused wrongly. This fragment is what the emitted shapes share, so its
- * presence means the factory already takes the composition.
+ * presence means the factory takes the parameter; factoryRefusal also verifies both usage fragments.
  */
 export const DEVTOOL_PARAMETER_MARK = 'devtool?: { plugins?: readonly IPlugin[];';
 
@@ -130,26 +133,33 @@ const EXPECTED_SIGNATURE = `export function createApp(\n` +
   `): IApplication {`;
 
 /**
- * Returns why a config module cannot host the devtool, or `undefined` when it
- * can — or when the check cannot classify it, which proceeds: the refusal is
- * deliberately limited to the known pre-letter shapes, and the emitted `check`
- * task is the backstop that turns a genuinely mismatched hand-written factory
- * into a TS2554 at the project's own gate.
+ * Refuses known legacy signatures and devtool parameters missing either usage
+ * fragment. An unclassified handwritten factory proceeds; the generated entry
+ * checks composition after start as its runtime backstop.
  *
  * @param source - The `setu.config.ts` contents
  * @returns The refusal message, or `undefined` to proceed
  */
-export function legacyFactoryRefusal(source: string): string | undefined {
-  if (source.includes(DEVTOOL_PARAMETER_MARK)) return undefined;
+export function factoryRefusal(source: string): string | undefined {
+  const marked = source.includes(DEVTOOL_PARAMETER_MARK);
+  const fragments = [
+    '...(devtool?.plugins ?? [])',
+    '...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {})',
+  ];
+  const missing = fragments.filter((fragment) => !source.includes(fragment));
+  if (marked && missing.length === 0) return undefined;
   const legacy = LEGACY_FACTORY_SHAPES.find((shape) => source.includes(shape));
-  if (legacy === undefined) return undefined;
+  if (!marked && legacy === undefined) return undefined;
   return (
-    `This project's setu.config.ts declares the factory this CLI emitted before the` +
-    ` devtool existed, so the development entry's composition would be discarded in` +
+    `This project's setu.config.ts does not fully pass the devtool composition to` +
+    ` createApplication, so the development entry's composition would be discarded in` +
     ` silence: \`deno run\` drops both arguments, the application carries no` +
     ` connector, and nothing else in the project reports why. Edit setu.config.ts so` +
     ` the factory takes the devtool composition as its SECOND parameter:\n\n` +
     `${EXPECTED_SIGNATURE}\n\n` +
+    `Inside createApplication({ … }), add the diagnostics spread; inside its plugins array, add the plugins spread:\n` +
+    `${fragments.join(',\n')},\n\n` +
+    `Missing usage fragments: ${missing.join('; ')}\n\n` +
     `Then run this command again. The development entry this command writes passes` +
     ` the composition there; the project's new \`check\` task will type-check it.`
   );
@@ -165,7 +175,7 @@ export const STARTER_FACTORY_MARK = `export async function ${CONFIG_EXPORT}(`;
  *
  * The starter-composed rendering is the only async factory shape this CLI
  * emits, so the async opening identifies it. Unlike
- * {@linkcode legacyFactoryRefusal}, this check has no cannot-classify
+ * {@linkcode factoryRefusal}, this check has no cannot-classify
  * fallback — a hand-written async `createApp` is refused too, because the
  * async shape is the only signal available and refusing is the safe side: a
  * connector registered onto an application built elsewhere would refuse to
@@ -211,6 +221,7 @@ export function withDevtool(
 ): ResolvedHost {
   return {
     ...host,
+    devtoolPort,
     extraTasks: { ...host.extraTasks, ...devtoolTasks(host.manifest) },
     packageImports: [...host.packageImports, { pkg: 'diagnostics-plugin' }],
     files: [
@@ -300,4 +311,14 @@ export function deriveDevTask(startTask: string): string | undefined {
  */
 export function devtoolCheckTask(): string {
   return devtoolTasks().check;
+}
+
+/** Finds a bindable standalone default, bounded to 100 ports beyond 4919. */
+export async function standaloneDevtoolPort(
+  probe?: (port: number) => Promise<boolean>,
+): Promise<number | undefined> {
+  for (let port = DEFAULT_DEVTOOL_PORT; port <= DEFAULT_DEVTOOL_PORT + 100; port++) {
+    if (probe === undefined || await probe(port)) return port;
+  }
+  return undefined;
 }

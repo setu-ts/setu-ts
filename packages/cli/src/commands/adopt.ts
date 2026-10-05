@@ -120,7 +120,9 @@ export async function runAdoptCommand(
   // would write a second root over the first.
   const existing = await readWorkspaceManifest(deps.fs, project);
   if (existing.ok) {
-    deps.error(`${joinPath(project, WORKSPACE_MANIFEST)} already exists: this IS a workspace.`);
+    deps.error(
+      `${escapeName(joinPath(project, WORKSPACE_MANIFEST))} already exists: this IS a workspace.`,
+    );
     deps.error(`Add a service to it with \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`.`);
     return EXIT_ERROR;
   }
@@ -220,25 +222,27 @@ export async function runAdoptCommand(
     );
   } catch (cause) {
     deps.error(
-      `Failed to inspect existing files: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to inspect existing files: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
 
   if (args.flags['dry-run'] === true) {
     for (const file of plan.files) {
-      deps.log(`would move ${file.from} -> ${file.to}`);
+      deps.log(`would move ${escapeName(file.from)} -> ${escapeName(file.to)}`);
     }
-    for (const file of planned) deps.log(`would create ${file.path}`);
+    for (const file of planned) deps.log(`would create ${escapeName(file.path)}`);
     // Reported here too: a dry run that prints a clean plan for a conversion the
     // real run refuses is worse than no dry run.
-    for (const path of collisions) deps.log(`WOULD REFUSE: ${path} already exists`);
+    for (const path of collisions) deps.log(`WOULD REFUSE: ${escapeName(path)} already exists`);
     return collisions.length > 0 ? EXIT_ERROR : EXIT_OK;
   }
 
   if (collisions.length > 0) {
     deps.error('Refusing to overwrite existing files:');
-    for (const path of collisions) deps.error(`  ${path}`);
+    for (const path of collisions) deps.error(`  ${escapeName(path)}`);
     return EXIT_ERROR;
   }
 
@@ -258,7 +262,7 @@ export async function runAdoptCommand(
         );
         return EXIT_ERROR;
       }
-      deps.log(`moved ${file.from} -> ${file.to}`);
+      deps.log(`moved ${escapeName(file.from)} -> ${escapeName(file.to)}`);
     }
 
     // The directories those files came out of: `moveFile` removes files, so an
@@ -273,17 +277,21 @@ export async function runAdoptCommand(
       await writeFiles(
         deps.fs,
         planned,
-        deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+        deps.interrupt === undefined
+          ? { root: project }
+          : { root: project, signal: deps.interrupt },
       );
     } catch (cause) {
       const interrupted = interruptionMessage(cause);
       if (interrupted !== undefined) {
         throw cause;
       }
-      deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+      deps.error(
+        `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      );
       return EXIT_ERROR;
     }
-    for (const file of planned) deps.log(`created ${file.path}`);
+    for (const file of planned) deps.log(`created ${escapeName(file.path)}`);
 
     // The entry has to bind the allocated port rather than the literal it carried as
     // a standalone project, or the member answers nothing at the address its
@@ -296,7 +304,9 @@ export async function runAdoptCommand(
     } catch (cause) {
       if (!isMissingPath(cause)) {
         deps.error(
-          `Failed to read ${entryPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          `Failed to read ${escapeName(entryPath)}: ${
+            escapeName(cause instanceof Error ? cause.message : String(cause))
+          }`,
         );
         return EXIT_ERROR;
       }
@@ -307,7 +317,9 @@ export async function runAdoptCommand(
         await writeFiles(
           deps.fs,
           [{ path: entryPath, contents: rewritten, managed: true }],
-          deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+          deps.interrupt === undefined
+            ? { root: project }
+            : { root: project, signal: deps.interrupt },
         );
       } catch (cause) {
         const interrupted = interruptionMessage(cause);
@@ -315,8 +327,8 @@ export async function runAdoptCommand(
           throw cause;
         }
         deps.error(
-          `Failed to rewrite ${entryPath}: ${
-            cause instanceof Error ? cause.message : String(cause)
+          `Failed to rewrite ${escapeName(entryPath)}: ${
+            escapeName(cause instanceof Error ? cause.message : String(cause))
           }`,
         );
         deps.error(
@@ -348,7 +360,8 @@ export async function runAdoptCommand(
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     deps.error(
-      interrupted ?? `Failed to adopt: ${cause instanceof Error ? cause.message : String(cause)}`,
+      interrupted ??
+        `Failed to adopt: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
     );
     return interrupted === undefined ? EXIT_ERROR : EXIT_INTERRUPTED;
   }

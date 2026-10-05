@@ -501,6 +501,37 @@ const GENERATED_PROBE_ATTEMPTS = 120;
 const GENERATED_PROBE_INTERVAL_MS = 1_000;
 
 /**
+ * The `setu` arguments that add the generated gate's member: a microservice WITH the devtool, so
+ * every built image is proved to exclude what `--devtool` adds (M101f V8-21) — a member without it
+ * would make the exclusion check below pass vacuously.
+ */
+export const GENERATED_MEMBER_ARGS: readonly string[] = [
+  'g',
+  'app',
+  GENERATED_MEMBER,
+  '--devtool',
+  '--template',
+  'microservice',
+];
+
+/**
+ * The manifest layouts each built: a commented `deno.json`, a `deno.jsonc`, and a member whose
+ * imports are inherited from the workspace root — the import pruning must hold in all three.
+ */
+export const GENERATED_LAYOUTS: readonly string[] = [
+  'commented-json',
+  'jsonc',
+  'inherited-imports',
+];
+
+/**
+ * The shell check run inside the built image: no development entry, and no cached connector
+ * source anywhere in the module cache.
+ */
+export const PRODUCTION_DEVTOOL_PROBE: string =
+  `test ! -e /srv/apps/${GENERATED_MEMBER}/main.dev.ts && ! grep -rl diagnostics-plugin /deno-dir`;
+
+/**
  * Converts a file URL into the native path `Deno.Command` expects.
  *
  * `URL.pathname` deliberately retains percent encoding, which makes a checkout path containing a
@@ -839,15 +870,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       '--port',
       String(GENERATED_PORT),
     ]);
-    const member = await cli([
-      'g',
-      'app',
-      GENERATED_MEMBER,
-      '--template',
-      'microservice',
-      '--dir',
-      root,
-    ]);
+    const member = await cli([...GENERATED_MEMBER_ARGS, '--dir', root]);
     if (!created.success || !member.success) {
       console.error('  ✗ scaffolding the workspace failed');
       if (!created.success) console.error(created.stderr);
@@ -870,17 +893,55 @@ async function checkGenerated(): Promise<CheckOutcome> {
       }
     }
 
-    // The GENERATED Dockerfile, not this repository's own — the defect lives in what `setu`
-    // emits. Framework resolution from jsr.io happens here, on the build's network; the run
-    // below is the part that must not need one.
-    console.log('  installing the workspace and building its generated image …');
-    const built = await buildGeneratedImage(root, resources.image);
-    if (!built.success) {
-      console.error(
-        '  ✗ the generated workspace failed to install or its Dockerfile failed to build',
-      );
-      console.error(built.stderr);
-      return 'failed';
+    // Build the user Dockerfile against all supported manifest layouts. The last
+    // layout also proves a member can inherit imports from the workspace root.
+    const memberManifest = `${root}/apps/${GENERATED_MEMBER}/deno.json`;
+    const memberJsonc = `${memberManifest}c`;
+    const memberSource = await Deno.readTextFile(memberManifest);
+    for (const layout of GENERATED_LAYOUTS) {
+      if (layout === 'commented-json') {
+        await Deno.writeTextFile(memberManifest, `// Member configuration\n${memberSource}`);
+      } else if (layout === 'jsonc') {
+        await Deno.rename(memberManifest, memberJsonc);
+      } else {
+        const member = JSON.parse(memberSource) as { imports?: Record<string, string> };
+        const rootPath = `${root}/deno.json`;
+        const rootManifest = JSON.parse(await Deno.readTextFile(rootPath)) as {
+          imports?: Record<string, string>;
+        };
+        rootManifest.imports = { ...rootManifest.imports, ...member.imports };
+        delete member.imports;
+        await Deno.writeTextFile(rootPath, `${JSON.stringify(rootManifest, null, 2)}\n`);
+        await Deno.writeTextFile(
+          memberJsonc,
+          `// Imports inherited from the root\n${JSON.stringify(member, null, 2)}\n`,
+        );
+      }
+      console.log(`  installing and building the generated image (${layout}) …`);
+      const built = await buildGeneratedImage(root, resources.image);
+      if (!built.success) {
+        console.error(`  ✗ the generated workspace failed to install or build (${layout})`);
+        console.error(built.stderr);
+        return 'failed';
+      }
+      const connectorCache = await run([
+        'docker',
+        'run',
+        '--rm',
+        '--read-only',
+        '--network',
+        'none',
+        '--entrypoint',
+        'sh',
+        resources.image,
+        '-c',
+        PRODUCTION_DEVTOOL_PROBE,
+      ], { quiet: true });
+      if (!connectorCache.success) {
+        console.error(`  ✗ production carries a devtool entry or cached connector (${layout})`);
+        return 'failed';
+      }
+      console.log(`  ✓ production excludes the devtool (${layout})`);
     }
 
     // Lazy driver imports must actually run. The old memory-only scaffold passed

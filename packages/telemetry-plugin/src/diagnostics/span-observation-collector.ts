@@ -24,6 +24,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   IRuntimeServices,
   ITraceDiagnosticsSource,
@@ -70,7 +71,8 @@ export const TRACE_COLLECTOR_ERRORS = {
   notEnabled: 'Trace diagnostics: enabled must be the literal true.',
   badServiceAlias: 'Trace diagnostics: serviceAlias must be a string.',
   aliasBytes: 'Trace diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Trace diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Trace diagnostics: an alias contains a control, format or line-separator character.',
   badOperations: 'Trace diagnostics: operations must map exact span names to aliases.',
   tooManyOperations: 'Trace diagnostics: more than 128 approved operations.',
   duplicateAlias: 'Trace diagnostics: an operation alias is not unique.',
@@ -114,17 +116,6 @@ const PARENT_VISIBILITIES: ReadonlySet<string> = new Set([
 
 const ENCODER = new TextEncoder();
 
-/** Reports whether a string carries a C0/C1 control code point. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** Reports whether a value is a plain non-null, non-array object. */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -143,7 +134,7 @@ function assertAliasShape(alias: string): void {
   if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
     throw new RangeError(TRACE_COLLECTOR_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new RangeError(TRACE_COLLECTOR_ERRORS.aliasControl);
   }
 }
@@ -560,7 +551,7 @@ function parentKey(traceId: string, spanId: string): string {
 /** Validates one alias value without throwing (the collector's read path). */
 function isAliasValue(value: unknown): value is string {
   return typeof value === 'string' && ENCODER.encode(value).length >= 1 &&
-    ENCODER.encode(value).length <= MAX_ALIAS_BYTES && !hasControlCharacter(value);
+    ENCODER.encode(value).length <= MAX_ALIAS_BYTES && !hasForbiddenAliasCharacter(value);
 }
 
 /**

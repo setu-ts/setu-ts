@@ -290,6 +290,9 @@ describe('runAdoptCommand', () => {
       readdir(path: string) {
         return this.backing.readdir(path);
       }
+      realPath(path: string) {
+        return this.backing.realPath!(path);
+      }
       mkdir(path: string, options?: { readonly recursive?: boolean }) {
         return this.backing.mkdir(path, options);
       }

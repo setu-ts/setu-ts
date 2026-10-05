@@ -373,18 +373,24 @@ grace period is real because the generated entry handles `SIGTERM`, and the star
 
 ### The image is the member's only dependency source at runtime
 
-The generated Deno image runs `deno cache main.ts && deno install && deno install --frozen` at build
-time and starts with `--frozen`. The generated Dockerfile copies `deno.lock` before that step, and
-`--frozen` makes runtime resolution use those same pinned versions without modifying the lockfile.
+The generated Deno image first removes the development-only diagnostics-plugin pin from the member
+and root import maps. It accepts comments and trailing commas in `deno.json` or `deno.jsonc`, and a
+member may inherit imports from the root. This changes only the copies inside the image. The parser
+is pinned to an exact `@std/jsonc` version and runs through `deno run --no-config --no-lock` with
+read and write granted only to the member's and the root's `deno.json`/`deno.jsonc`, in a temporary
+build cache removed in the same layer: it cannot float to a newer release, touch any other file in
+the image, alter the project lockfile, or add parser modules to the production cache.
 
-The third step is the one that makes the first two safe. Deno records a jsr package's npm edge list
-nondeterministically on a cold cache: four `--no-cache` builds of one unchanged workspace left
-`@setu-ts/messaging-plugin` missing its `npm:amqplib` and `npm:ioredis` edges twice and complete
-twice, while both packages were recorded in the lockfile's package section every time. A runtime
-that refuses to write the lockfile therefore refuses to start against an incomplete one, from an
-image that built green. The install completes the edge lists the frozen check compares against, and
-the `--frozen` install verifies it, so a still-missing edge fails the build once rather than every
-container at startup.
+The build then runs
+`deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen`.
+The full-map install/frozen pair completes and verifies lazy broker npm edges; the entrypoint checks
+verify the production entry too. The remaining import map is cached, including dependencies not
+reachable from `main.ts`. The verified exclusion is the development connector.
+
+Deno can record a jsr package's npm edge list incompletely on a cold cache. An entrypoint-only
+frozen install can pass while lazy `npm:amqplib`/`npm:ioredis` imports later fail at startup.
+Retaining the full-map pair after removing the development pin prevents that failure. Runtime uses
+`--frozen` and the lockfile completed during the image build without modifying it.
 
 Refusing to write is also what closes the original read-only-root failure, where the first lazy
 driver registration attempted to add an edge to `deno.lock`:
@@ -401,10 +407,17 @@ at startup and fails in an air-gapped deployment. The same `deno install --froze
 diagnostic outside a build, on any checkout whose lockfile may be stale: it exits non-zero instead
 of changing it.
 
-For an existing generated workspace, run `setu generate app <member>` to regenerate its managed
-Dockerfile. A Dockerfile emitted earlier needs both halves by hand: the build step extended to
-`deno cache main.ts && deno install && deno install --frozen`, and `--frozen` rather than
-`--no-lock` on the start command.
+For an existing generated workspace, regenerate the managed Dockerfile and `.dockerignore` with
+`setu devtool enable <member>` or `setu workspace ports --reallocate`, then rebuild the image. New
+member generation also refreshes these files. For a Dockerfile maintained by hand, keep the
+following two build steps after `WORKDIR /srv/apps/${MEMBER}` (the generated image uses UID 1000):
+
+```dockerfile
+RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
+RUN deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R 1000:1000 /srv /deno-dir
+```
+
+Add `apps/*/main.dev.ts` to `.dockerignore` and keep `--frozen` on the start command.
 
 Do not mount a volume over the image's `DENO_DIR` (the generated Deployment mounts only `/tmp` for
 exactly this reason): measured, a cold cache fails identically with and without network egress,
@@ -485,3 +498,8 @@ failing:
 | Hand-edit a committed manifest                | `--render` fails and names the file.                                                  |
 | Drop `watch` from the discovery Role          | `kubectl auth can-i watch` answers `no`.                                              |
 | Point the Service selector at a missing label | Endpoints go empty and the request is refused — while `kubectl apply` still succeeds. |
+
+The generated-image gate builds commented `deno.json`, `deno.jsonc`, and inherited-import layouts,
+inspecting each image for the development entry and connector cache. It then boots a real Redis
+broker under a read-only filesystem with no external network to verify lazy driver resolution and
+`/health`.
