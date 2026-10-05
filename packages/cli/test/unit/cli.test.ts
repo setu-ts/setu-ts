@@ -32,6 +32,44 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
 }
 
 describe('runCli', () => {
+  it('escapes manifest pin keys and values without creating extra refusal lines', async () => {
+    const controls = ['\n', '\r', '\0', '\t', '\u001b', '\u2028', '\u2029', '\u202e'];
+    for (const control of controls) {
+      const key = `@setu-ts/common${control}FORGED-KEY`;
+      const value = `canary-pin${control}FORGED-VALUE`;
+      const h = harness({
+        '/work/deno.json': JSON.stringify({
+          tasks: { start: 'deno run --allow-net --allow-env main.ts' },
+          imports: { [key]: value },
+        }),
+        '/work/setu.config.ts': 'export const createApp = makeApplicationFactory();',
+      });
+      expect(await h.run(['devtool', 'enable'])).toBe(1);
+      const lines = h.err.text().split('\n');
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toBe('Framework pins in /work/deno.json disagree with this CLI:');
+      const escaped = `\\u${control.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      expect(lines[1]).toBe(
+        `  @setu-ts/common${escaped}FORGED-KEY: canary-pin${escaped}FORGED-VALUE; expected jsr:@setu-ts/common${escaped}FORGED-KEY@^${VERSION}`,
+      );
+      expect(lines[2]).toContain('upgrade the project first');
+      expect(h.fs.writes).toEqual([]);
+    }
+  });
+
+  it('keeps legitimate devtool enable working after pin refusals', async () => {
+    const h = harness({
+      '/work/deno.json': JSON.stringify({
+        tasks: { start: 'deno run --allow-net --allow-env main.ts' },
+        imports: { '@setu-ts/common': `jsr:@setu-ts/common@^${VERSION}` },
+      }),
+      '/work/setu.config.ts': 'export const createApp = makeApplicationFactory();',
+    });
+    expect(await h.run(['devtool', 'enable'])).toBe(0);
+    expect(h.fs.has('/work/main.dev.ts')).toBe(true);
+    expect(h.err.text()).toBe('');
+  });
+
   describe('--version', () => {
     it('prints the version from the package deno.json and returns 0', async () => {
       const h = harness();

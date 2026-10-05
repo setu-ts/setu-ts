@@ -880,7 +880,11 @@ function frameworkPinRefusal(handle: DenoJsonHandle): string | undefined {
       /^jsr:@setu-ts\/[^@]+@(\^[^/]+)(?:\/.*)?$/.exec(value)?.[1] !== `^${VERSION}`)
   );
   if (wrong.length === 0) return undefined;
-  return `Framework pins in ${handle.path} disagree with this CLI:\n` +
-    wrong.map(([key, value]) => `  ${key}: ${value}; expected jsr:${key}@^${VERSION}`).join('\n') +
+  return `Framework pins in ${escapeName(handle.path)} disagree with this CLI:\n` +
+    wrong.map(([key, value]) =>
+      `  ${escapeName(key)}: ${escapeName(String(value))}; expected jsr:${
+        escapeName(key)
+      }@^${VERSION}`
+    ).join('\n') +
     `\nThe devtool entry imports types that exist only at ${VERSION}; upgrade the project first (see docs/upgrading.md), then run this again.`;
 }

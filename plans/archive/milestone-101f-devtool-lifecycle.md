@@ -422,3 +422,111 @@ requested missing npm:amqplib/npm:ioredis edges after a green build. The impleme
 development-only diagnostics-plugin pin from the member import map before installing, retains the
 full-map install/frozen pair to complete lazy production edges, and runs both planned entrypoint
 checks afterwards. The cache exclusion and read-only broker boot are still mandatory.
+
+## 10. Design security review (recorded after implementation)
+
+**Completed corrective review, 2026-10-05.** The maintainer requested the security audit and then
+directed that its findings be fixed. The first independent audit of `be0d7372` found that this
+review was missing (S101F-P1). This section records a review completed during that correction; it
+does not claim a pre-implementation review or a passed implementation audit. The reviewer is the
+milestone's implementing context, Codex `/root`. The corrected committed tree must be audited in a
+separate fresh context against the obligations below. No finding is accepted or deferred here.
+
+### 10.1 Reviewed flows and trust boundaries
+
+1. A local project supplier edits `deno.json`, `deno.jsonc`, `setu.workspace.json`,
+   `setu.config.ts`, or `main.dev.ts`; the developer invokes the CLI; the CLI reads data, plans
+   writes, and prints refusals. Project-controlled data crosses into developer-owned files and
+   terminal/log output. Reading a manifest must not execute its code. Enabling or reallocating must
+   not silently migrate dependencies or overwrite an edited entry.
+2. The developer launches the generated development entry with launcher-supplied credential
+   environment variables. Its factory passes plugin composition into the kernel; the runtime owns
+   the local listener; an authenticated client receives signed diagnostics. An unrelated local
+   process can occupy a port or connect to loopback, but cannot be trusted merely because it
+   answered that port. The entry's registration marker detects discarded composition; it is **not**
+   authorization, a sandbox, or proof of connector identity.
+3. Application configuration supplies diagnostics aliases; collectors and the kernel project them;
+   the connector signs the response; a client validates it for display. Authentic signatures do not
+   make display-spoofing characters safe. Alias validation must hold at producer and consumer
+   boundaries, while allowed Unicode remains usable.
+4. A developer builds the generated Deno production image. The build context and import-map cache
+   cross into the deployment artifact. The normal generated image must omit the development entry
+   and diagnostics dependency, while retaining the complete production dependency graph. Production
+   cache exclusions do not sandbox a developer who deliberately replaces the Dockerfile, imports the
+   connector from `main.ts`, or adds a custom alias for that dependency.
+
+### 10.2 Assets, attackers and assumptions
+
+**Assets:** integrity of developer-owned files and pins; trustworthy CLI output; availability of the
+application and connector after refusals and shutdown; secrecy of connector credentials;
+authenticity of signed diagnostics; display integrity of aliases; and the absence of the generated
+development connector from the production artifact.
+
+**Attackers:** a supplier of a project manifest later processed by a developer or automation; a
+configuration author able to supply an alias or invalid numeric port; an unrelated local process
+occupying application/connector ports or presenting the wrong connector key; and a reader of
+terminal output, diagnostics responses, or a production image. A dropped factory composition is also
+an operational failure that must fail visibly and release the application listener.
+
+**Trusted execution:** launching `setu.config.ts`, arbitrary application plugins, and an injected
+`PortProbe` executes developer-selected in-process code. This milestone does not sandbox that code
+or promise a timeout for a custom callback that never settles. The built-in port probe and the
+finite candidate search are the production path. An injected synchronous throw must be observed; a
+hung callback is reported as a trusted-dependency limitation, not treated as authorization or
+evidence that a port is free. Attacker-controlled aliases and parsed manifests remain untrusted even
+when supplied by otherwise trusted application code.
+
+The connector's framing, replay, expiry, revocation, cross-instance credential binding and
+cryptographic algorithms are existing M98 contracts, not redesigned here. Re-audit their relevant
+seams and run a wrong-key/valid-key regression on the real connector; the broader unchanged
+credential lifecycle matrix remains separately owned by the connector milestones. This scope does
+not permit an authentication regression introduced by M101f.
+
+### 10.3 Budgets and secure defaults reviewed
+
+| Boundary                   | Required bound/default                                                                                                                                                     | Reason                                                                                                     |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Parsed or derived port     | Integer number in `1..65535`; strings, fractions, non-finite values and zero refused                                                                                       | Ephemeral or invalid ports cannot become silently successful allocations                                   |
+| Standalone default search  | `4919..5019`, inclusive (at most 101 candidates); exhausted search refuses                                                                                                 | Local port occupation cannot force an unbounded search or disable validation                               |
+| Workspace connector search | Recorded range, default `min(65535, basePort + 1000)`; skip every recorded application port and occupied candidate; stop at 65535                                          | Keep application and connector identities separate with a finite search                                    |
+| Observation aliases        | Existing per-family `1..64` UTF-8 byte limits; kernel/protocol display labels retain their `160`-byte cap and kernel allowlists their 256-entry cap                        | The shared character predicate must not widen existing resource budgets                                    |
+| Alias characters           | Reject every Unicode Cc and Cf; accept otherwise allowed Unicode within the existing byte limits                                                                           | Prevent bidi/control display spoofing without an ASCII-only policy                                         |
+| CLI pin refusal            | One CLI-authored line per pin; every project-controlled path, key and value escaped using the existing single-value escaping helper                                        | Global output escaping intentionally permits authored newlines and is insufficient for interpolated fields |
+| Generated connector        | Deno runtime, IPv4 loopback listener; no fallback to an application adapter or non-Deno listener                                                                           | A new development listener must not become remotely exposed                                                |
+| Generated production image | Omit `apps/*/main.dev.ts`; prune the generated diagnostics import from both effective member/root maps before caching; retain full-map/frozen and entrypoint/frozen checks | Remove development artifacts without losing lazy production dependencies                                   |
+
+Manifest file-size limits and a global workspace-member cap are not added by this milestone. Local
+project processing is not a remote request handler. That does not exempt invalid port fields,
+hostile JSON keys, or project-controlled output from validation. No new request-keyed registry,
+connection admission limit, secret format, cryptographic mechanism, or npm runtime dependency is
+introduced.
+
+### 10.4 Required implementation-audit obligations
+
+Every row requires source and raw probe output, a refused adversarial case and a legitimate positive
+control through the same path. Run probes locally with an emptied environment and scoped grants,
+never `-A`. Temporarily removing each new security control must make its probe fail; restore it and
+verify the clean exact revision afterwards. Treat correctness mutations in §3 separately where they
+do not enforce a security boundary.
+
+| ID      | Obligation and required evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A101F-1 | Drive Cc/Cf canaries through all thirteen alias boundaries, including SDK validation and the signed-snapshot verifier. Check retained byte limits and allowed Unicode. After 1,000 distinct refusals a legitimate alias still succeeds. Fixed validation errors must not echo the canary; no new attacker-keyed retained state may appear. Remove shared and SDK character checks independently.                                                                                                                                               |
+| A101F-2 | Feed malicious pin keys and values containing LF, CR, NUL, tab, ESC, Unicode line/paragraph separators and bidi controls through real `runCli`, including a pin-mismatch refusal with zero writes and a valid-pin enable. Assert exact authored line count and escaped fields, including repeated expected-key text. Check standalone, workspace-member and inherited-root refusal paths; escape the interpolated manifest path as well. Remove field escaping to prove the probe detects forged lines.                                        |
+| A101F-3 | Mixed framework versions, signature-only composition, and byte-edited owned entries must refuse before any write; valid equivalents must enable/reallocate. Hostile JSON keys such as `__proto__`, `constructor` and `prototype` must not change the selected imports or authorize a rewrite. Remove pin and composition checks and byte-ownership checks separately.                                                                                                                                                                          |
+| A101F-4 | Start a generated entry mapped to the exact worktree; obtain a legitimate signed running snapshot. A wrong connector key is refused, followed by another legitimate request. Plant synthetic credential canaries and confirm their absence from captured stdout/stderr and the served snapshot bytes. Dropped composition exits nonzero and closes the application socket. Remove the marker and diagnostics-presence checks separately and restart from each mutation.                                                                        |
+| A101F-5 | Exercise invalid numeric range values (`NaN`, infinities, zero, negative, fraction and numeric string), configured application-port collisions, occupied candidates, exhaustion and a valid free candidate. Allocation must not return a port outside its bound. Refusals followed by a valid operation must work. Independently boot a CLI-owned reallocated entry, authenticate its new port, confirm the old port is closed, and observe shutdown/socket cleanup. Remove search bounds and the owned-entry rewrite in independent controls. |
+| A101F-6 | Build a real generated Deno production image; demonstrate the development entry and diagnostics cached source are absent and `main.ts` present. Serve `/health` under read-only root and no external network. Independently remove entry exclusion and import pruning, rebuild for each, and observe the respective exclusion assertion fail. Include commented `deno.json`, `deno.jsonc`, and inherited root-import layouts so pruning cannot depend on strict JSON or only the member map.                                                   |
+| A101F-7 | Check runtime-first refusals for Node, Bun and Workers before writes. Review literal dependency imports, generated Deno grants, loopback binding, migration/default documentation and all fifteen recurring security defect classes. Document unchanged surfaces as N/A with a reason and runtime/backend limits explicitly; they cannot be used to declare an unexecuted obligation passed.                                                                                                                                                   |
+
+### 10.5 Review findings and resolution criteria
+
+| Finding  | Threat                                                                                                          | Resolution required; disposition                                                                                                                                                                                                                                                                                                                 |
+| -------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S101F-P1 | No reviewed trust boundaries or implementation obligations existed, so an audit could only infer them from code | This completed corrective review supplies flows, assets, attackers, budgets and obligations. It is recorded after implementation; closure must be confirmed by the next independent audit, not inferred from green tests.                                                                                                                        |
+| S101F-1  | A project supplier inserts LF in a framework pin and forges another line in the CLI's refusal output            | Escape each interpolated path/key/value with the existing single-value helper and retain CLI-authored multiline formatting. A101F-2 must demonstrate both the refusal and legitimate enable, with a discriminating negative control. Fixed code and committed revision are recorded in the correction/audit evidence. No acceptance or deferral. |
+
+The full independent report and PR audit record must name the final committed revision, implementer
+and fresh-context auditor, this §10 review, obligation results, all fifteen classes, restored
+negative controls, open findings and support limits. An open finding or an unexecuted obligation
+requires `failed`; this review is not a waiver of that rule.
