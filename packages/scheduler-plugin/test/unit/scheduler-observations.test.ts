@@ -102,6 +102,7 @@ describe('compileSchedulerDiagnostics', () => {
       [{ ...base, jobs: { a: 7 } }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsValue],
       [{ ...base, jobs: { a: '' } }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasBytes],
       [{ ...base, jobs: { a: 'a\u0085b' } }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasControl],
+      [{ ...base, jobs: { a: 'a\u202eb' } }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasControl],
       [{ ...base, jobs: { a: 'same', b: 'same' } }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsDuplicate],
     ];
     for (const [input, message] of cases) {

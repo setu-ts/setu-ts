@@ -17,6 +17,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   EventDiagnosticsRecord,
   EventDiagnosticsSnapshot,
@@ -71,17 +72,6 @@ export const EVENT_COLLECTOR_ERRORS = {
   duplicateAlias: 'Event diagnostics: an event alias is not unique.',
 } as const;
 
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** Reports whether a value is a plain non-null, non-array object. */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -102,7 +92,7 @@ function assertAliasShape(alias: string): void {
   if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
     throw new RangeError(EVENT_COLLECTOR_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new RangeError(EVENT_COLLECTOR_ERRORS.aliasControl);
   }
 }

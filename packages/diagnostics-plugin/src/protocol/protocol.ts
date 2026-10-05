@@ -9,6 +9,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 
 import type {
   ConfigDiagnosticsSnapshot,
@@ -875,7 +876,7 @@ function isInstanceField(value: unknown): boolean {
 function isNodeLabel(value: unknown): boolean {
   return typeof value === 'string' &&
     ALIAS_ENCODER.encode(value).length <= MAX_LABEL_BYTES &&
-    !hasControlCharacter(value);
+    !hasForbiddenAliasCharacter(value);
 }
 
 /**
@@ -1335,23 +1336,6 @@ function isAliasShape(value: unknown): value is string {
 }
 
 /**
- * Reports whether a string carries a C0/C1 control code point.
- *
- * @param value - The string to scan
- * @returns `true` when any code point is in U+0000–U+001F or U+007F–U+009F
- * @internal
- */
-export function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
  * A display alias on the wire: the approved-alias shape AND no control
  * character. An inspector source is untrusted input to the connector — any
  * in-process code can register a replacement — and a control character in a
@@ -1364,7 +1348,7 @@ export function hasControlCharacter(value: string): boolean {
  * @internal
  */
 export function isDisplayAlias(value: unknown): value is string {
-  return isAliasShape(value) && !hasControlCharacter(value);
+  return isAliasShape(value) && !hasForbiddenAliasCharacter(value);
 }
 
 /** A finite, non-negative millisecond measurement, or `null` where allowed. */

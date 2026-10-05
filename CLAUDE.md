@@ -5755,8 +5755,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   transaction committing a duplicate through delete-then-recreate. The memory adapter now refuses
   duplicate and changed primary keys in and out of transactions. Round 4 passed on `c011db69` —
   complete (PR #411).
-- **Next milestone** — M101f, then M101g (now carrying the full-stack browser gate, §3.10 of its
-  plan), M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
+- **Milestone 101f** (`packages/cli` + `packages/common` + diagnostics sources — devtool lifecycle):
+  enabling verifies composition and aligned pins; development entries detect discarded composition;
+  connector ports use a recorded range, and reallocation updates CLI-rendered entries before
+  rewriting the manifest. Production images exclude the development entry and connector cache, while
+  completing lazy broker lockfile edges. All diagnostics aliases refuse Cc and Cf characters through
+  the shared common predicate (SDK keeps its type-only import policy) — complete (PR pending).
+- **Next milestone** — M101g (now carrying the full-stack browser gate, §3.10 of its plan), M101h;
+  M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

@@ -52,6 +52,7 @@ describe('compileLabelAllowlist', () => {
   });
 
   it('refuses control characters without naming the entry', () => {
+    expect(() => compileLabelAllowlist(['bad\u202elabel'], 'routes')).toThrow(RangeError);
     try {
       compileLabelAllowlist(['bad\u0000label'], 'routes');
       throw new Error('unreachable');

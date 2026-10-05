@@ -1,5 +1,6 @@
 /** Workspace maintenance commands. */
 
+import { devEntryVariants, renderDevEntry } from '../devtool/dev-entry.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
@@ -11,6 +12,8 @@ import { workspaceContainerFiles } from '../workspace/compose.ts';
 import { DISCOVERY_MODULE, renderDiscoveryModule } from '../workspace/discovery-module.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import {
+  allocateDevtoolPort,
+  devtoolRangeStart,
   MAX_PORT,
   readWorkspaceManifest,
   renderWorkspaceManifest,
@@ -35,7 +38,7 @@ export interface WorkspaceCommandDependencies {
 /**
  * Reassigns all member ports to currently bindable ports at or above basePort.
  *
- * A member's devtool port moves WITH it, from the same sequence: the two
+ * A member's devtool port moves WITH it, from the connector range: the two
  * addresses a devtool launcher reads for one member — the application port in
  * every sibling's discovery map, the devtool port in this manifest — must be
  * reassigned as one unit, or a reallocation leaves the manifest's devtool
@@ -51,18 +54,31 @@ async function reallocate(
   for (const member of manifest.members) {
     while (candidate <= MAX_PORT && !(await probe(candidate))) candidate++;
     if (candidate > MAX_PORT) return undefined;
-    if (member.devtoolPort === undefined) {
-      members.push({ ...member, port: candidate });
-    } else {
-      let devtoolCandidate = candidate + 1;
-      while (devtoolCandidate <= MAX_PORT && !(await probe(devtoolCandidate))) devtoolCandidate++;
-      if (devtoolCandidate > MAX_PORT) return undefined;
-      members.push({ ...member, port: candidate, devtoolPort: devtoolCandidate });
-      candidate = devtoolCandidate;
-    }
+    const nextMember = { ...member, port: candidate };
+    delete nextMember.devtoolPort;
+    members.push(nextMember);
     candidate++;
   }
-  return { ...manifest, members };
+  let next: WorkspaceManifest = { ...manifest, members };
+  for (const old of manifest.members) {
+    if (old.devtoolPort === undefined) continue;
+    let port = allocateDevtoolPort(next);
+    while (port !== undefined && !(await probe(port))) {
+      port = allocateDevtoolPort({
+        ...next,
+        members: [...next.members, { name: '__occupied__', port, devtoolPort: port }],
+      });
+    }
+    if (port === undefined) return undefined;
+    next = {
+      ...next,
+      devtoolBasePort: devtoolRangeStart(manifest),
+      members: next.members.map((member) =>
+        member.name === old.name ? { ...member, devtoolPort: port } : member
+      ),
+    };
+  }
+  return next;
 }
 
 /** Plans every managed file whose content contains a workspace port. */
@@ -70,6 +86,13 @@ function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
   const profile = workspaceProfile(manifest.runtime);
   const transport = transportSpec(manifest.transport);
   return [
+    ...manifest.members.filter((member) => member.devtoolPort !== undefined).map((member) => ({
+      path: joinPath('apps', member.name, 'main.dev.ts'),
+      contents: renderDevEntry({
+        devtoolPort: member.devtoolPort!,
+        port: { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
+      }),
+    })),
     ...manifest.members.map((member) => ({
       path: joinPath('apps', member.name, DISCOVERY_MODULE),
       contents: renderDiscoveryModule(member, manifest.members, profile),
@@ -109,6 +132,22 @@ export async function runWorkspaceCommand(
     deps.error(describeReconcileFailure(reconciliation));
     return EXIT_ERROR;
   }
+  for (const member of read.manifest.members) {
+    if (member.devtoolPort === undefined) continue;
+    const path = joinPath(dir, 'apps', member.name, 'main.dev.ts');
+    let source: string | undefined;
+    try {
+      source = new TextDecoder().decode(await deps.fs.readFile(path));
+    } catch {
+      source = undefined;
+    }
+    if (source === undefined || !devEntryVariants(member.devtoolPort).includes(source)) {
+      deps.error(
+        `${path}: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run setu devtool enable ${member.name}) or move the port literal yourself.`,
+      );
+      return EXIT_ERROR;
+    }
+  }
   const next = await reallocate(read.manifest, deps.portAvailable ?? assumePortAvailable);
   if (next === undefined) {
     deps.error(`No bindable ports remain between ${read.manifest.basePort} and ${MAX_PORT}.`);
@@ -120,11 +159,12 @@ export async function runWorkspaceCommand(
     return EXIT_OK;
   }
   try {
-    await writeFiles(
+    const outcomes = await writeFiles(
       deps.fs,
       files,
       deps.interrupt === undefined ? {} : { signal: deps.interrupt },
     );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {

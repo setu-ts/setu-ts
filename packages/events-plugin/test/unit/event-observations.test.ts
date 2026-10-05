@@ -96,6 +96,8 @@ describe('compileEventsDiagnosticsPolicy (M98j option validation)', () => {
     expect(() =>
       compileEventsDiagnosticsPolicy({ enabled: true, alias: 'a'.repeat(65), events: {} })
     ).toThrow(EVENT_COLLECTOR_ERRORS.aliasBytes);
+    expect(() => compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus\u202e', events: {} }))
+      .toThrow(EVENT_COLLECTOR_ERRORS.aliasControl);
     expect(() => compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus\n', events: {} }))
       .toThrow(EVENT_COLLECTOR_ERRORS.aliasControl);
     expect(() =>

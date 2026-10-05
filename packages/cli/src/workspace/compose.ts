@@ -160,7 +160,11 @@ WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 # metadata on every file the cache layer created, so overlayfs copies the
 # ENTIRE module cache into a second layer — measured at 563 MB vs 362 MB with
 # the fold, paid on every push and every node pull.
-RUN deno cache main.ts && deno install && deno install --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
+# Remove the development-only pin before resolving the production import map.
+# Deno 2.9 needs the full-map install pair to complete lazy broker npm edges;
+# an entrypoint-only frozen install can pass while the real broker later refuses.
+RUN DENO_DIR=/srv/.setu-build-cache deno eval 'const path = "deno.json"; const manifest = JSON.parse(Deno.readTextFileSync(path)); delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest));' && rm -rf /srv/.setu-build-cache
+RUN deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,
@@ -205,6 +209,7 @@ function dockerignore(): string {
     '.git',
     '.gitignore',
     'coverage',
+    `${MEMBERS_DIR}/*/main.dev.ts`,
     // The Dockerfile itself is passed with -f and read from the client, so
     // ignoring the directory costs nothing and keeps k8s/ and docker/ out of the
     // image.

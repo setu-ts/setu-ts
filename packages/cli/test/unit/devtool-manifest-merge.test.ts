@@ -14,7 +14,7 @@ import { LEGACY_DENO_RUN_ALL, workspaceProfile } from '../../src/workspace/runti
 const CONFIG = 'export function createApp(\n' +
   '  _env?: Readonly<Record<string, unknown>>,\n' +
   '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
-  '): IApplication {\n  return {} as IApplication;\n}\n';
+  '): IApplication {\n  return createApplication({ plugins: [...(devtool?.plugins ?? [])], ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}) });\n}\n';
 
 const MEMBER_DENO_JSON = JSON.stringify({
   // Insertion order pinned on purpose: a merge that sorted the tasks map
@@ -123,7 +123,7 @@ describe('the devtool manifest merge', () => {
     (h.fs.writes as string[]).length = 0;
     expect(await h.run(['enable', 'orders'])).toBe(1);
     expect(h.err.text()).toContain(
-      'Refusing to replace the existing "@setu-ts/diagnostics-plugin" import',
+      'Framework pins in',
     );
     expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.6.0');
     expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.8.0');

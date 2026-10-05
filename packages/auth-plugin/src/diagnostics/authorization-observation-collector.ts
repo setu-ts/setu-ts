@@ -20,6 +20,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   AuthorizationCoverage,
   AuthorizationDecisionObservation,
@@ -66,17 +67,6 @@ const COLLECTOR_ERRORS = {
   beyondSequence: 'Authorization diagnostics: after is beyond the retained sequence.',
 } as const;
 
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** Recursively freezes a DTO so a reader holding it observes nothing after. */
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
@@ -119,7 +109,7 @@ function assertAlias(alias: unknown, seen: Set<string>): string {
   if (typeof alias !== 'string' || alias.length === 0 || utf8ByteLength(alias) > MAX_ALIAS_BYTES) {
     throw new Error(COLLECTOR_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new Error(COLLECTOR_ERRORS.aliasControl);
   }
   if (seen.has(alias)) {
@@ -172,7 +162,7 @@ export function compileAuthorizationDiagnosticsOptions(
     if (
       typeof options.policyRevision !== 'string' || options.policyRevision.length === 0 ||
       utf8ByteLength(options.policyRevision) > MAX_ALIAS_BYTES ||
-      hasControlCharacter(options.policyRevision)
+      hasForbiddenAliasCharacter(options.policyRevision)
     ) {
       throw new Error(COLLECTOR_ERRORS.badRevision);
     }

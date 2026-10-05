@@ -113,7 +113,7 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
     expect(() =>
       compileAuthorizationDiagnosticsOptions({
         enabled: true,
-        roles: { admin: 'a\nb' },
+        roles: { admin: 'a\u202eb' },
         permissions: {},
       })
     ).toThrow('control character');

@@ -137,9 +137,8 @@ export interface WorkspaceMember {
    * without a devtool port runs exactly `main.ts` and offers no connector, and
    * the dev runner keys on its presence only for the member the launcher named.
    *
-   * Allocated from the same sequence as `port` and walked by
-   * {@linkcode allocatePort}, so no generated port ever collides — a fixed
-   * offset was rejected because nothing constrains `basePort` spacing.
+   * Allocated from the recorded connector range by {@linkcode allocateDevtoolPort}.
+   * Both allocators avoid configured collisions, including stopped members.
    */
   readonly devtoolPort?: number;
   /** Sibling services that must answer `/ready` before this member starts. */
@@ -181,6 +180,8 @@ export interface WorkspaceManifest {
   readonly version: number;
   /** Floor for port allocation. */
   readonly basePort: number;
+  /** Connector allocation range start; absent derives basePort + 1000, capped at MAX_PORT. */
+  readonly devtoolBasePort?: number;
   /**
    * How members talk to each other.
    *
@@ -345,6 +346,16 @@ export async function readWorkspaceManifest(
     return { ok: false, problem: { kind: 'unsupported-version', version } };
   }
 
+  const devtoolBasePort = record['devtoolBasePort'];
+  if (devtoolBasePort !== undefined && typeof devtoolBasePort !== 'number') {
+    return { ok: false, problem: { kind: 'malformed' } };
+  }
+  if (devtoolBasePort !== undefined && !isUsablePort(devtoolBasePort)) {
+    return {
+      ok: false,
+      problem: { kind: 'invalid-port', port: devtoolBasePort, field: 'devtoolBasePort' },
+    };
+  }
   const basePort = record['basePort'];
   if (typeof basePort !== 'number') return { ok: false, problem: { kind: 'malformed' } };
   if (!isUsablePort(basePort)) {
@@ -433,6 +444,7 @@ export async function readWorkspaceManifest(
     manifest: {
       version,
       basePort,
+      ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }),
       transport: transport as TransportName,
       runtime,
       ...(rawUrl === undefined ? {} : { transportUrl: rawUrl }),
@@ -448,7 +460,14 @@ export async function readWorkspaceManifest(
  * @returns The `setu.workspace.json` contents
  */
 export function renderWorkspaceManifest(manifest: WorkspaceManifest): string {
-  return `${JSON.stringify(manifest, null, 2)}\n`;
+  const { devtoolBasePort, ...rest } = manifest;
+  return `${
+    JSON.stringify(
+      { ...rest, ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }) },
+      null,
+      2,
+    )
+  }\n`;
 }
 
 /**
@@ -482,4 +501,21 @@ export function allocatePort(manifest: WorkspaceManifest): number | undefined {
   }
   const next = highest + 1;
   return isUsablePort(next) ? next : undefined;
+}
+
+/** Returns the recorded connector range or its bounded default. */
+export function devtoolRangeStart(manifest: WorkspaceManifest): number {
+  return manifest.devtoolBasePort ?? Math.min(MAX_PORT, manifest.basePort + 1000);
+}
+
+/** Chooses the next connector port, skipping every configured application port. */
+export function allocateDevtoolPort(manifest: WorkspaceManifest): number | undefined {
+  let highest = devtoolRangeStart(manifest) - 1;
+  for (const member of manifest.members) {
+    if (member.devtoolPort !== undefined) highest = Math.max(highest, member.devtoolPort);
+  }
+  let candidate = highest + 1;
+  const applicationPorts = new Set(manifest.members.map((member) => member.port));
+  while (candidate <= MAX_PORT && applicationPorts.has(candidate)) candidate++;
+  return isUsablePort(candidate) ? candidate : undefined;
 }

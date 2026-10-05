@@ -133,7 +133,7 @@ describe('the one devtool planner', () => {
     const manifest = JSON.parse(enabled.fs.read('/ws/setu.workspace.json')) as {
       members: WorkspaceMember[];
     };
-    expect(manifest.members[0].devtoolPort).toBe(3001);
+    expect(manifest.members[0].devtoolPort).toBe(4000);
   });
 
   it('emits byte-identical files from `new --devtool` and `devtool enable` standalone', async () => {

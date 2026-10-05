@@ -594,3 +594,5 @@ export {
   isWorkerTaskReply,
   isWorkerTaskRequest,
 } from './services/worker-pool.ts';
+
+export { hasForbiddenAliasCharacter } from './diagnostics/alias.ts';

@@ -12,6 +12,24 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Refresh `main.dev.ts` and production images (M101f)
+
+Upgrade every `@setu-ts/*` pin together before `setu devtool enable`; mixed versions are refused.
+Apply the complete factory edit in the CLI README: the second parameter AND both usage spreads. The
+development entry now stops when composition is discarded. Restore an edited entry before
+`ports --reallocate`; only CLI-rendered entries are rewritten. Workspace manifests record
+`devtoolBasePort` on first allocation, defaulting to `basePort + 1000` (capped at 65535). Standalone
+defaults probe 4919–5019; read the reported port or pass `--devtool-port`.
+
+Regenerate managed deployment files with `generate app`, `devtool enable`, or `ports --reallocate`
+and rebuild production images to exclude the development entry and connector cache. Replace aliases
+containing Unicode format characters (bidi controls, zero-width format characters) with printable
+ones; these now fail at construction and wire validation.
+
+The devtool extension release must re-pin the framework to this milestone merge commit and retain
+previous recipe renderings in its catalog. Until that cross-repository update, an older launcher may
+refuse newly generated entries with `PREPARATION_FAILED`.
+
 ### Update programmatic CLI `Prompter` implementations
 
 `Prompter.select` now returns `PromptSelection`. Replace a string result with

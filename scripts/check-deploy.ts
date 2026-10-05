@@ -843,6 +843,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       'g',
       'app',
       GENERATED_MEMBER,
+      '--devtool',
       '--template',
       'microservice',
       '--dir',
@@ -880,6 +881,24 @@ async function checkGenerated(): Promise<CheckOutcome> {
         '  ✗ the generated workspace failed to install or its Dockerfile failed to build',
       );
       console.error(built.stderr);
+      return 'failed';
+    }
+
+    const connectorCache = await run([
+      'docker',
+      'run',
+      '--rm',
+      '--read-only',
+      '--network',
+      'none',
+      '--entrypoint',
+      'sh',
+      resources.image,
+      '-c',
+      'test ! -e /srv/apps/orders/main.dev.ts && ! grep -rl diagnostics-plugin /deno-dir',
+    ], { quiet: true });
+    if (!connectorCache.success) {
+      console.error('  ✗ the production image carries a devtool entry or cached connector source');
       return 'failed';
     }
 

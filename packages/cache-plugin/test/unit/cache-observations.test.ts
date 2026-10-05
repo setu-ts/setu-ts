@@ -121,6 +121,7 @@ describe('compileCacheDiagnosticsAlias', () => {
       [{ enabled: true, alias: 'x'.repeat(65) }, CACHE_DIAGNOSTICS_ERRORS.aliasBytes],
       [{ enabled: true, alias: 'a\u001bb' }, CACHE_DIAGNOSTICS_ERRORS.aliasControl],
       [{ enabled: true, alias: 'a\u0085b' }, CACHE_DIAGNOSTICS_ERRORS.aliasControl],
+      [{ enabled: true, alias: 'a\u202eb' }, CACHE_DIAGNOSTICS_ERRORS.aliasControl],
       [{ enabled: true, alias: 'a', keys: ['secret'] }, CACHE_DIAGNOSTICS_ERRORS.extraKey],
     ];
     for (const [input, message] of cases) {

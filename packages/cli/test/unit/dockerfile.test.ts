@@ -83,7 +83,7 @@ describe('generated Dockerfile lockfile verification', () => {
     // repairing install fails the build (exit 1), and dropping `--frozen` is what
     // let the incomplete lockfile reach production in the first place.
     expect(buildRun).toContain(
-      'deno cache main.ts && deno install && deno install --frozen',
+      'deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen',
     );
   });
 

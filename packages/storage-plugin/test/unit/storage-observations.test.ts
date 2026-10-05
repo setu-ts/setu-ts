@@ -161,7 +161,7 @@ describe('storage diagnostics — option validation', () => {
     ],
     [
       'a control-character alias',
-      () => ({ enabled: true, alias: 'a\u001bb' }),
+      () => ({ enabled: true, alias: 'a\u202eb' }),
       RangeError,
       STORAGE_DIAGNOSTICS_ERRORS.aliasControl,
     ],

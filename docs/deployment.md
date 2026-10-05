@@ -373,9 +373,11 @@ grace period is real because the generated entry handles `SIGTERM`, and the star
 
 ### The image is the member's only dependency source at runtime
 
-The generated Deno image runs `deno cache main.ts && deno install && deno install --frozen` at build
-time and starts with `--frozen`. The generated Dockerfile copies `deno.lock` before that step, and
-`--frozen` makes runtime resolution use those same pinned versions without modifying the lockfile.
+The generated Deno image runs
+`deno cache main.ts && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen`
+at build time and starts with `--frozen`. The generated Dockerfile copies `deno.lock` before that
+step, and `--frozen` makes runtime resolution use those same pinned versions without modifying the
+lockfile.
 
 The third step is the one that makes the first two safe. Deno records a jsr package's npm edge list
 nondeterministically on a cold cache: four `--no-cache` builds of one unchanged workspace left
@@ -403,8 +405,8 @@ of changing it.
 
 For an existing generated workspace, run `setu generate app <member>` to regenerate its managed
 Dockerfile. A Dockerfile emitted earlier needs both halves by hand: the build step extended to
-`deno cache main.ts && deno install && deno install --frozen`, and `--frozen` rather than
-`--no-lock` on the start command.
+`deno cache main.ts && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen`,
+and `--frozen` rather than `--no-lock` on the start command.
 
 Do not mount a volume over the image's `DENO_DIR` (the generated Deployment mounts only `/tmp` for
 exactly this reason): measured, a cold cache fails identically with and without network egress,
@@ -485,3 +487,13 @@ failing:
 | Hand-edit a committed manifest                | `--render` fails and names the file.                                                  |
 | Drop `watch` from the discovery Role          | `kubectl auth can-i watch` answers `no`.                                              |
 | Point the Service selector at a missing label | Endpoints go empty and the request is refused — while `kubectl apply` still succeeds. |
+
+The generated workspace `.dockerignore` excludes `apps/*/main.dev.ts`. Both Deno install steps use
+`--entrypoint main.ts`, so the production module cache contains only the production graph, excluding
+the diagnostics connector referenced solely by the development entry. `generate app`,
+`devtool enable` and `ports --reallocate` regenerate these managed production files.
+
+Deno 2.9 can leave lazy broker npm edges incomplete even when an entrypoint-only frozen install
+passes. The image therefore first removes the development-only diagnostics-plugin import pin, then
+retains the full production import-map install/frozen pair before the entrypoint checks. The
+generated-image gate boots a real Redis broker and inspects the cache to verify both promises.

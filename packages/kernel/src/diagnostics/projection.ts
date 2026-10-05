@@ -11,6 +11,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   DiagnosticsEdge,
   DiagnosticsNode,
@@ -67,17 +68,6 @@ export interface DiagnosticsLabelAllowlists {
   readonly middleware: ReadonlySet<string>;
 }
 
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
  * Compiles one allowlist, refusing malformed input with VALUE-FREE errors: an
  * error must state the constraint it enforces, never echo the offending value,
@@ -111,7 +101,7 @@ export function compileLabelAllowlist(
         `Invalid diagnostics labels.${listName}: an entry exceeds the ${MAX_LABEL_BYTES}-byte bound.`,
       );
     }
-    if (hasControlCharacter(entry)) {
+    if (hasForbiddenAliasCharacter(entry)) {
       throw new RangeError(
         `Invalid diagnostics labels.${listName}: an entry contains a control character.`,
       );

@@ -26,7 +26,7 @@ const CURRENT_CONFIG = "import type { IApplication, IPlugin } from '@setu-ts/com
   'export function createApp(\n' +
   '  _env?: Readonly<Record<string, unknown>>,\n' +
   '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
-  '): IApplication {\n  return createApplication({ plugins: [] });\n}\n';
+  '): IApplication {\n  return createApplication({ plugins: [...(devtool?.plugins ?? [])], ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}) });\n}\n';
 
 /**
  * The head of the runner every workspace created BEFORE the devtool carries,
@@ -131,14 +131,16 @@ describe('devtool enable refuses by name and writes nothing', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
-  it('is a no-op for a member that already carries a devtool port', async () => {
+  it('repairs an enabled member missing its entry, then becomes a no-op', async () => {
     // Idempotent at the command level: the merge has nothing left to add, so
     // the second run reports and writes nothing.
     const h = workspaceHarness(workspaceSeed([
       { name: 'orders', port: 3000, devtoolPort: 4919 },
     ]));
     expect(await h.run(['enable', 'orders'])).toBe(0);
-    expect(h.log.text()).toContain('already enabled');
+    expect(h.fs.read('/ws/apps/orders/main.dev.ts')).toContain('port: 4919,');
+    (h.fs.writes as string[]).length = 0;
+    expect(await h.run(['enable', 'orders'])).toBe(0);
     expect(h.fs.writes).toEqual([]);
   });
 
@@ -545,13 +547,13 @@ describe('devtool enable branch coverage', () => {
       cwd: '/ws',
       log: log.sink,
       error: () => {},
-      portAvailable: (port) => Promise.resolve(port !== 3001),
+      portAvailable: (port) => Promise.resolve(port !== 4000),
     });
     expect(code).toBe(0);
     const manifest = JSON.parse(fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
       members: { devtoolPort?: number }[];
     };
-    expect(manifest.members[0].devtoolPort).toBe(3002);
+    expect(manifest.members[0].devtoolPort).toBe(4001);
   });
 
   it('refuses when the workspace has no port left for the devtool address', async () => {
@@ -651,7 +653,7 @@ describe('devtool enable branch coverage', () => {
     });
     expect(await h.run(['enable'])).toBe(1);
     expect(h.err.text()).toContain(
-      'Refusing to replace the existing "@setu-ts/diagnostics-plugin" import',
+      'Framework pins in',
     );
     expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.6.0');
     expect(h.fs.writes).toEqual([]);
@@ -734,13 +736,13 @@ describe('generate app --devtool branch coverage', () => {
   it('skips an occupied port while allocating the devtool address', async () => {
     const { fs, code } = await runApp(
       ['app', 'billing', '--devtool'],
-      (port) => Promise.resolve(port !== 3002),
+      (port) => Promise.resolve(port !== 4000),
     );
     expect(code).toBe(0);
     const manifest = JSON.parse(fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
       members: { name: string; devtoolPort?: number }[];
     };
-    expect(manifest.members.at(-1)?.devtoolPort).toBe(3003);
+    expect(manifest.members.at(-1)?.devtoolPort).toBe(4001);
   });
 
   it('refuses when no port is left for the devtool address', async () => {

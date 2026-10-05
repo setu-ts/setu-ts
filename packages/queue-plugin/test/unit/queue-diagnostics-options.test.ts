@@ -90,7 +90,7 @@ describe('compileQueueDiagnosticsPolicy', () => {
       QUEUE_COLLECTOR_ERRORS.aliasControl,
     );
     expectRefusal(
-      options({ instanceAlias: `a\u0085b` }),
+      options({ instanceAlias: `a\u202eb` }),
       QUEUE_COLLECTOR_ERRORS.aliasControl,
     );
   });

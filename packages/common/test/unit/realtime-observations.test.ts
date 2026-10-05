@@ -148,6 +148,7 @@ describe('compileRealtimeDiagnosticsAlias', () => {
       [{ enabled: true, alias: 'x'.repeat(65) }, REALTIME_DIAGNOSTICS_ERRORS.aliasBytes],
       [{ enabled: true, alias: 'é'.repeat(33) }, REALTIME_DIAGNOSTICS_ERRORS.aliasBytes],
       [{ enabled: true, alias: 'a\nb' }, REALTIME_DIAGNOSTICS_ERRORS.aliasControl],
+      [{ enabled: true, alias: 'a\u202eb' }, REALTIME_DIAGNOSTICS_ERRORS.aliasControl],
       [{ enabled: true, alias: 'a\u0085b' }, REALTIME_DIAGNOSTICS_ERRORS.aliasControl],
       [{ enabled: true, alias: 'a\u007fb' }, REALTIME_DIAGNOSTICS_ERRORS.aliasControl],
     ];

@@ -3,8 +3,8 @@
  *
  * The production entry never imports this module and nothing in the production
  * graph imports the diagnostics plugin: the devtool composition exists only
- * here, which makes exclusion a property of the build rather than of a runtime
- * branch (the M98b README's development-only-composition guidance, emitted).
+ * here. The production image excludes each member's main.dev.ts through .dockerignore
+ * and installs only main.ts through --entrypoint, keeping the connector out of its cache.
  *
  * The entry READS its credentials; it never generates, writes or prints a pair.
  * The two variable names are approved CLI surface (AI_GUIDELINES §10.2): a
@@ -15,6 +15,7 @@
  * @module
  */
 
+import { DISCOVERY_SPECIFIER, SERVICE_PORT_EXPORT } from '../workspace/discovery-module.ts';
 import type { EntryPort } from '../templates/project-files.ts';
 import { DEVTOOL_ENTRY_MODULE, shutdownBlock } from '../templates/project-files.ts';
 
@@ -76,7 +77,7 @@ export function renderDevEntry(input: DevEntryInput): string {
 import { createApp } from './setu.config.ts';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { ILogger } from '@setu-ts/common';
+import type { ILogger, IPlugin } from '@setu-ts/common';
 import { DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
 ${portImport}
 const runtime = createRuntimeServices();
@@ -117,14 +118,44 @@ const diagnostics = DiagnosticsPlugin({
   maxSessionLifetimeMs: 28_800_000,
 });
 
+let devtoolRegistered = false;
+const devtoolProbe: IPlugin = {
+  name: 'setu-devtool-probe',
+  version: '0.0.0',
+  register() { devtoolRegistered = true; },
+};
+
 const app = await createApp(undefined, {
-  plugins: [diagnostics],
+  plugins: [diagnostics, devtoolProbe],
   diagnostics: {},
 });
 
 await app.start({ port: ${appPort} });
+if (!devtoolRegistered || app.diagnostics === undefined) {
+  console.error(
+    'setu devtool: setu.config.ts did not pass the devtool composition to createApplication — ' +
+      'the connector is not running. Re-run \`setu devtool enable\`, which names the two lines to add.',
+  );
+  await app.stop();
+  Deno.exit(1);
+}
 ${shutdownBlock('deno')}`;
 }
 
 /** The module path of the generated development entry, relative to a project root. */
 export { DEVTOOL_ENTRY_MODULE };
+
+/** The raw and deno fmt renderings accepted for a CLI-owned workspace entry. */
+export function devEntryVariants(devtoolPort: number, member = true): readonly string[] {
+  const raw = renderDevEntry({
+    devtoolPort,
+    ...(member ? { port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER } } : {}),
+  });
+  return [
+    raw,
+    raw.replace(
+      '  register() { devtoolRegistered = true; },',
+      '  register() {\n    devtoolRegistered = true;\n  },',
+    ),
+  ];
+}

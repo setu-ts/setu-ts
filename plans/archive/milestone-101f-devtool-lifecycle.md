@@ -1,7 +1,8 @@
 # Milestone 101f — the devtool lifecycle (`@setu-ts/cli`, `@setu-ts/common`, every diagnostics source)
 
-> **Status:** Planning. Branch: `feat/m101f-devtool-lifecycle`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Implemented; verification evidence recorded at hand-back. Branch:
+> `feat/m101f-devtool-lifecycle`. `main` is protected — all work (implementation + fixes) stays on
+> this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
@@ -413,3 +414,11 @@ binds).
   the migration.
 - Re-pinning and re-cataloguing in the `setu-ts-devtool` repository — a dependency of §3.2,
   performed there.
+
+## Implementation evidence: production install adjustment
+
+The real Docker gate rejected the planned entrypoint-only pair: frozen startup of the Redis broker
+requested missing npm:amqplib/npm:ioredis edges after a green build. The implementation removes the
+development-only diagnostics-plugin pin from the member import map before installing, retains the
+full-map install/frozen pair to complete lazy production edges, and runs both planned entrypoint
+checks afterwards. The cache exclusion and read-only broker boot are still mandatory.

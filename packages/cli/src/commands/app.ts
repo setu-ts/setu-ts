@@ -63,7 +63,9 @@ import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
 import {
+  allocateDevtoolPort,
   allocatePort,
+  devtoolRangeStart,
   MAX_PORT,
   MEMBERS_DIR,
   MIN_PORT,
@@ -608,18 +610,18 @@ export async function runAppCommand(
       }
       devtoolPort = devtoolPortFlag.port;
     } else {
-      let candidate = allocatePort({
+      let candidate = allocateDevtoolPort({
         ...read.manifest,
         members: [...read.manifest.members, { name, port }],
       });
       if (deps.portAvailable !== undefined) {
         while (candidate !== undefined && !(await deps.portAvailable(candidate))) {
-          candidate = allocatePort({
+          candidate = allocateDevtoolPort({
             ...read.manifest,
             members: [
               ...read.manifest.members,
               { name, port },
-              { name: '__occupied__', port: candidate },
+              { name: '__occupied__', port: candidate, devtoolPort: candidate },
             ],
           });
         }
@@ -642,6 +644,10 @@ export async function runAppCommand(
 
   const next: WorkspaceManifest = {
     ...read.manifest,
+    ...(devtoolPort === undefined ? {} : {
+      devtoolBasePort: read.manifest.devtoolBasePort ?? devtoolPortFlag.port ??
+        devtoolRangeStart(read.manifest),
+    }),
     members: [
       ...read.manifest.members,
       {

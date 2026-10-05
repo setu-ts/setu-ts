@@ -70,7 +70,7 @@ export function compileOutboundAlias(alias: unknown): string {
   }
   for (const character of alias) {
     const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f) || /\p{Cf}/u.test(character)) {
       throw new RangeError(OUTBOUND_ALIAS_ERRORS.control);
     }
   }

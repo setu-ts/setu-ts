@@ -16,6 +16,7 @@
  * @module
  * @since 0.8.0
  */
+import { hasForbiddenAliasCharacter } from './alias.ts';
 
 import type {
   DiagnosticsInspectorState,
@@ -176,22 +177,6 @@ const OPTION_KEYS: ReadonlySet<string> = new Set(['enabled', 'alias']);
 const ENCODER = new TextEncoder();
 
 /**
- * Reports whether a string carries a C0/C1 control code point.
- *
- * @param value - The string to scan
- * @returns `true` when any code point is in U+0000–U+001F or U+007F–U+009F
- */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
  * Validates the realtime `diagnostics` option and returns the approved alias
  * — the ONE validation of this option, which the three owning plugin
  * factories call when the plugin is constructed, so an invalid option refuses
@@ -232,7 +217,7 @@ export function compileRealtimeDiagnosticsAlias(options: RealtimeDiagnosticsOpti
   if (bytes < 1 || bytes > REALTIME_COLLECTOR_LIMITS.aliasBytes) {
     throw new RangeError(REALTIME_DIAGNOSTICS_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new RangeError(REALTIME_DIAGNOSTICS_ERRORS.aliasControl);
   }
   return alias;

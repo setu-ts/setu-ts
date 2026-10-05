@@ -18,6 +18,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   CacheDiagnosticsOperation,
   CacheDiagnosticsRecord,
@@ -78,22 +79,6 @@ const OPTION_KEYS: ReadonlySet<string> = new Set(['enabled', 'alias']);
 const ENCODER = new TextEncoder();
 
 /**
- * Reports whether a string carries a C0/C1 control code point.
- *
- * @param value - The string to scan
- * @returns `true` when any code point is in U+0000–U+001F or U+007F–U+009F
- */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
  * Validates the cache-diagnostics options and returns the approved alias.
  * The ONE validation of these options: the plugin factory calls it when
  * `CachePlugin(...)` is called, so an invalid option refuses before any
@@ -126,7 +111,7 @@ export function compileCacheDiagnosticsAlias(options: CacheDiagnosticsOptions): 
   if (bytes < 1 || bytes > CACHE_COLLECTOR_LIMITS.aliasBytes) {
     throw new RangeError(CACHE_DIAGNOSTICS_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new RangeError(CACHE_DIAGNOSTICS_ERRORS.aliasControl);
   }
   return alias;

@@ -33,6 +33,10 @@ import type { WebSocketGuardDecision, WebSocketUpgradeGuard } from '../../src/in
 import type { TraceparentSource } from '../../src/index.ts';
 
 describe('@setu-ts/common barrel — registry factory arm', () => {
+  it('exports the shared diagnostics alias predicate', () => {
+    expect(typeof common.hasForbiddenAliasCharacter).toBe('function');
+  });
+
   it('exports TraceparentSource as a type', () => {
     const source: TraceparentSource = {
       traceId: '0123456789abcdef0123456789abcdef',

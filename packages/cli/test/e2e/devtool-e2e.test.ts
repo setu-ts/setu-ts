@@ -185,6 +185,90 @@ async function bootDev(
 }
 
 describe('a scaffolded devtool project, driven end to end', () => {
+  it('stops and exits when a hand-edited factory drops either part of the composition', async () => {
+    for (const dropped of ['plugins', 'diagnostics']) {
+      const appPort = unusedPort();
+      expect(await run(['new', dropped, '--devtool', '--devtool-port', String(unusedPort())])).toBe(
+        0,
+      );
+      const project = `${root}/${dropped}`;
+      await useWorkspacePackages(project);
+      const path = `${project}/setu.config.ts`;
+      const source = await Deno.readTextFile(path);
+      await Deno.writeTextFile(
+        path,
+        source.replace(
+          dropped === 'plugins'
+            ? '...(devtool?.plugins ?? [])'
+            : '...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {})',
+          '...[]',
+        ),
+      );
+      const result = await denoRun(project, ['task', 'dev'], {
+        ...credentials().env,
+        PORT: String(appPort),
+      });
+      expect(result.code, result.output).toBe(1);
+      expect(result.output).toContain(
+        dropped === 'plugins'
+          ? 'did not pass the devtool composition'
+          : 'not created with kernel diagnostics enabled',
+      );
+      expect(await fetch(`http://127.0.0.1:${appPort}/`).then(() => true).catch(() => false)).toBe(
+        false,
+      );
+    }
+  });
+
+  it('boots a reallocated workspace entry and answers the signed client at its new port', async () => {
+    const appPort = unusedPort();
+    const oldPort = unusedPort();
+    const newPort = unusedPort();
+    expect(await run(['new', 'acme', '--workspace', '--port', String(appPort)])).toBe(0);
+    const workspace = `${root}/acme`;
+    expect(
+      await run([
+        'generate',
+        'app',
+        'orders',
+        '--devtool',
+        '--devtool-port',
+        String(oldPort),
+        '--dir',
+        workspace,
+      ]),
+    ).toBe(0);
+    const manifestPath = `${workspace}/setu.workspace.json`;
+    const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+    manifest.devtoolBasePort = newPort;
+    await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+    expect(await run(['workspace', 'ports', '--reallocate', '--dir', workspace])).toBe(0);
+    const project = `${workspace}/apps/orders`;
+    expect(await Deno.readTextFile(`${project}/main.dev.ts`)).toContain(`port: ${newPort},`);
+    expect(await Deno.readTextFile(`${workspace}/.dockerignore`)).toContain('apps/*/main.dev.ts');
+    await useWorkspacePackages(project);
+    const pair = credentials();
+    const booted = await bootDev(project, appPort, pair.env);
+    try {
+      await Deno.writeTextFile(`${project}/driver.ts`, DRIVER);
+      const result = await denoRun(project, [
+        'run',
+        '--allow-net',
+        'driver.ts',
+        String(newPort),
+        String(appPort),
+        pair.sessionId,
+        pair.sessionKey,
+      ]);
+      expect(result.code, result.output).toBe(0);
+      expect(JSON.parse(result.output.trim().split('\n').pop()!).instanceId).not.toBeNull();
+      expect(
+        await fetch(`http://127.0.0.1:${oldPort}/v1/status`).then(() => true).catch(() => false),
+      ).toBe(false);
+    } finally {
+      await booted.stop();
+    }
+  });
   it(
     'type-checks, boots with credentials, and answers the real client',
     { timeout: 240_000 },
@@ -248,7 +332,6 @@ describe('a scaffolded devtool project, driven end to end', () => {
     const appPort = unusedPort();
     expect(await run(['new', 'legacy'])).toBe(0);
     const project = `${root}/legacy`;
-    await useWorkspacePackages(project);
 
     // Rewrite the config to the shape every pre-M98c project carries: a
     // zero-parameter factory and NO devtool weave in the body — the shape
@@ -293,6 +376,20 @@ describe('a scaffolded devtool project, driven end to end', () => {
         .tasks['dev'],
     )
       .toBeUndefined();
+
+    const signatureOnly = (await Deno.readTextFile(configPath)).replace(
+      'export function createApp(): IApplication {',
+      'export function createApp(_env?: Readonly<Record<string, unknown>>, devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions }): IApplication {',
+    );
+    await Deno.writeTextFile(configPath, signatureOnly);
+    expect(await run(['devtool', 'enable', '--dir', project])).toBe(1);
+    await Deno.writeTextFile(
+      configPath,
+      signatureOnly.replace(
+        'export function createApp(_env?: Readonly<Record<string, unknown>>, devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions }): IApplication {',
+        'export function createApp(): IApplication {',
+      ),
+    );
 
     // Apply the edit the refusal names — the factory takes the devtool
     // composition as its SECOND parameter and the composition reaches the
@@ -351,6 +448,8 @@ describe('a scaffolded devtool project, driven end to end', () => {
     const repointed = { ...after };
     repointed.imports['@setu-ts/diagnostics-plugin'] = workspaceEntrypoint('diagnostics-plugin');
     await Deno.writeTextFile(manifestPath, `${JSON.stringify(repointed, null, 2)}\n`);
+
+    await useWorkspacePackages(project);
 
     // The project type-checks THROUGH the new check task — the arity mismatch
     // would be TS2554 here — and serves a snapshot.

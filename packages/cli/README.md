@@ -178,7 +178,7 @@ allocated so it never collides with any member's application port
 (`setu workspace ports --reallocate` moves both together).
 
 ```bash
-setu new my-app --devtool              # standalone; connector on 127.0.0.1:4919 by default
+setu new my-app --devtool              # standalone; connector probes from 4919; override with --devtool-port <n>
 setu new acme --workspace && cd acme
 setu generate app orders --devtool     # member; the devtool port is allocated
 setu devtool enable billing            # a member that already exists
@@ -204,7 +204,27 @@ the development entry resolves through, so the project's own `check` task passes
 without any edit. The refusals name their fix: a non-Deno runtime (the connector's listener refuses
 every non-Deno bind), a starter-composed template (kernel diagnostics must be enabled at
 construction), and a factory scaffolded before the devtool existed, which needs its signature
-widened before the command proceeds.
+widened AND its composition passed to createApplication before the command proceeds.
+
+```typescript
+export function createApp(
+  _env?: Readonly<Record<string, unknown>>,
+  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+): IApplication {
+  return createApplication({
+    plugins: [RuntimePlugin(), ...(devtool?.plugins ?? [])],
+    ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
+  });
+}
+```
+
+Keep the existing plugins in the array. The entry checks plugin registration and kernel diagnostics
+after startup, stops the application and exits 1 if the factory discarded the composition. All
+framework pins must match this CLI version before enabling; upgrade them together first. Workspace
+connectors allocate from `devtoolBasePort` (recorded on first enable, default `basePort + 1000`,
+capped at 65535). Standalone defaults probe 4919 through 5019; `--devtool-port` chooses explicitly.
+`ports --reallocate` updates an untouched CLI entry along with the manifest; an edited entry refuses
+the whole operation before writing. Production images exclude the entry and install only main.ts.
 
 ## Generated modules
 

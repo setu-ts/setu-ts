@@ -106,6 +106,8 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
  * until a generated project fails to compile.
  */
 export interface ResolvedHost {
+  /** Connector port, read by the generated README. */
+  readonly devtoolPort?: number;
   readonly plugins: readonly Wiring[];
   /** Module exports the Workers entry declares beside `fetch`. */
   readonly workerExports: readonly WorkerExport[];
@@ -1345,7 +1347,11 @@ ${
   }
 \`\`\`
 
-## Generate code
+${
+    host.devtoolPort === undefined
+      ? ''
+      : `## Devtool\n\nRun \`deno task dev\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
+  }## Generate code
 
 \`\`\`bash
 ${PROGRAM_NAME} generate service billing

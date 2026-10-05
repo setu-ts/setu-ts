@@ -25,6 +25,7 @@ import {
   DEFAULT_DEVTOOL_PORT,
   devtoolRuntimeRefusal,
   devtoolStarterRefusal,
+  standaloneDevtoolPort,
   withDevtool,
 } from '../devtool/planner.ts';
 import {
@@ -431,14 +432,17 @@ function applyBrokerOverlay(
  * @param args - The parsed arguments, read for `--template` and `--port`
  * @returns The planned files, or the refusal to print
  */
-function planProject(
+async function planProject(
   name: string,
   runtime: TargetRuntime,
   args: ParsedArgs,
-): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
-  readonly ok: false;
-  readonly message: string;
-} {
+  probe?: PortProbe,
+): Promise<
+  { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
+    readonly ok: false;
+    readonly message: string;
+  }
+> {
   // `--port` sets a workspace's base port and means nothing to a standalone
   // project, whose entry binds 3000. Accepting it silently would report success
   // for a project that ignores the number the user chose.
@@ -548,7 +552,14 @@ function planProject(
   }
   // Absent, the port is the documented standalone default, overridable with
   // --devtool-port and range-checked by the shared port-flag reader.
-  const devHost = withDevtool(overlaid, devtoolPortFlag.port ?? DEFAULT_DEVTOOL_PORT);
+  const devtoolPort = devtoolPortFlag.port ?? await standaloneDevtoolPort(probe);
+  if (devtoolPort === undefined) {
+    return {
+      ok: false,
+      message: 'No bindable standalone devtool port remains between 4919 and 5019.',
+    };
+  }
+  const devHost = withDevtool(overlaid, devtoolPort);
   return {
     ok: true,
     files: projectFiles(name, runtime, devHost),
@@ -685,7 +696,7 @@ export async function runNewCommand(
   if (workspace) {
     plan = planWorkspace(projectName, runtime, chosen);
   } else {
-    const projectPlan = planProject(projectName, runtime, chosen);
+    const projectPlan = await planProject(projectName, runtime, chosen, deps.portAvailable);
     if (projectPlan.ok) planNotice = projectPlan.notice;
     plan = projectPlan;
   }
