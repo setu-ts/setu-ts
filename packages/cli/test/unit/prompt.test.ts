@@ -69,6 +69,57 @@ describe('createTerminalPrompter', () => {
     expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
   });
 
+  it('never opens the prompt when the interrupt has already fired', async () => {
+    // A blocking prompt opened after Ctrl-C would hold cancellation hostage
+    // until the user typed something.
+    let asked = false;
+    const controller = new AbortController();
+    controller.abort();
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => {
+        asked = true;
+        return 'rest';
+      },
+      () => {},
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+    expect(asked).toBe(false);
+  });
+
+  it('cancels when the interrupt fires while the prompt is open', async () => {
+    const controller = new AbortController();
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => {
+        controller.abort();
+        return 'rest';
+      },
+      () => {},
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+  });
+
+  it('stops re-asking once the interrupt fires between attempts', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => {
+        calls++;
+        return 'aaa';
+      },
+      (message) => {
+        if (message.includes('is not one of')) controller.abort();
+      },
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+    expect(calls).toBe(1);
+  });
+
   it('prints the choice list through log and asks the question through the prompt', async () => {
     const printed: string[] = [];
     let question = '';

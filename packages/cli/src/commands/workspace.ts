@@ -20,7 +20,7 @@ import {
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { transportSpec } from '../workspace/transport.ts';
-import { reconcileMembers } from '../workspace/reconcile.ts';
+import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 
 /** Dependencies reached by workspace maintenance commands. */
 export interface WorkspaceCommandDependencies {
@@ -106,11 +106,7 @@ export async function runWorkspaceCommand(
   }
   const reconciliation = await reconcileMembers(deps.fs, dir, read.manifest);
   if (!reconciliation.ok) {
-    deps.error(
-      `Member "${reconciliation.member}" is in ${WORKSPACE_MANIFEST} but ` +
-        `apps/${reconciliation.member} does not exist. Remove its entry (and its dependsOn ` +
-        `references) from the manifest, or restore the directory, then run this again.`,
-    );
+    deps.error(describeReconcileFailure(reconciliation));
     return EXIT_ERROR;
   }
   const next = await reallocate(read.manifest, deps.portAvailable ?? assumePortAvailable);

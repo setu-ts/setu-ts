@@ -75,7 +75,7 @@ import {
   type WorkspaceManifest,
   type WorkspaceManifestProblem,
 } from '../workspace/manifest.ts';
-import { reconcileMembers } from '../workspace/reconcile.ts';
+import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 
 /**
@@ -425,11 +425,7 @@ export async function runAppCommand(
   if (!read.ok) return reportNoWorkspace(deps.dir, read.problem, deps.error);
   const reconciliation = await reconcileMembers(deps.fs, deps.dir, read.manifest);
   if (!reconciliation.ok) {
-    deps.error(
-      `Member "${reconciliation.member}" is in ${WORKSPACE_MANIFEST} but ` +
-        `${joinPath(MEMBERS_DIR, reconciliation.member)} does not exist. Remove its entry ` +
-        `(and its dependsOn references) from the manifest, or restore the directory, then run this again.`,
-    );
+    deps.error(describeReconcileFailure(reconciliation));
     return EXIT_ERROR;
   }
 

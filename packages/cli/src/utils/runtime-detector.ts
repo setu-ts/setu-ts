@@ -40,12 +40,20 @@ async function readText(fs: IFileSystem, path: string): Promise<string | undefin
 }
 
 /**
+ * Every configuration filename Wrangler accepts. The CLI scaffolds
+ * `wrangler.toml`, but Wrangler has read JSON and JSONC since v3.91.0 and
+ * Cloudflare recommends `wrangler.jsonc` for new projects, so a Workers
+ * project carrying either must not be misread as Node.
+ */
+const WRANGLER_CONFIGS = ['wrangler.toml', 'wrangler.json', 'wrangler.jsonc'] as const;
+
+/**
  * Detects the runtime a project was scaffolded for.
  *
  * The order is what makes it unambiguous. A Cloudflare Workers project carries
  * BOTH a `deno.json` (which `setu generate` reads for plugin gating) and a
  * `package.json` (which `wrangler` needs), so it has to be recognised by
- * `wrangler.toml` first or it would be misread as Node. Deno is last because it
+ * its Wrangler config first or it would be misread as Node. Deno is last because it
  * is the only target with no second marker — it deliberately has no
  * `package.json`, since one would switch Deno to `node_modules` resolution.
  *
@@ -59,8 +67,8 @@ export async function detectTargetRuntime(
   fs: IFileSystem,
   dir: string,
 ): Promise<TargetRuntime> {
-  if (await readText(fs, joinPath(dir, 'wrangler.toml')) !== undefined) {
-    return 'cloudflare-workers';
+  for (const config of WRANGLER_CONFIGS) {
+    if (await readText(fs, joinPath(dir, config)) !== undefined) return 'cloudflare-workers';
   }
 
   const packageJson = await readJsonManifest(fs, joinPath(dir, 'package.json'));

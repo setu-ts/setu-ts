@@ -50,6 +50,20 @@ describe('detectTargetRuntime', () => {
     expect(await detectTargetRuntime(fs, '/app')).toBe('cloudflare-workers');
   });
 
+  for (const config of ['wrangler.json', 'wrangler.jsonc']) {
+    it(`recognises Workers by ${config}, before the package.json`, async () => {
+      // Wrangler reads JSON and JSONC configs too (v3.91.0+); a project using
+      // one carries a `start` script that would otherwise read as Node and
+      // make `setu add cloudflare-plugin` refuse a real Workers project.
+      const fs = createFakeFs({
+        [`/app/${config}`]: '{ "name": "svc" }',
+        '/app/deno.json': '{}',
+        '/app/package.json': pkg('wrangler dev'),
+      });
+      expect(await detectTargetRuntime(fs, '/app')).toBe('cloudflare-workers');
+    });
+  }
+
   it('reads deno when there is no package.json at all', async () => {
     // Deno is the only target with no second marker: it deliberately has no
     // `package.json`, since one switches Deno to node_modules resolution.

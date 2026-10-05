@@ -85,6 +85,9 @@ export function createTerminalPrompter(
   interrupt?: AbortSignal,
 ): Prompter {
   const print = (message: string): void => log(escapeTerminalControls(message));
+  // A function rather than an inline read: the signal can fire WHILE
+  // `promptFn` blocks, which property narrowing across the call cannot see.
+  const interrupted = (): boolean => interrupt?.aborted === true;
   return {
     select(question: string, choices: readonly PromptChoice[]): Promise<PromptSelection> {
       // The SECOND line of defense against blocking a non-interactive run: the
@@ -98,11 +101,14 @@ export function createTerminalPrompter(
       const menu = choices.map((choice) => `  ${choice.value} — ${choice.label}`).join('\n');
 
       for (;;) {
+        // Checked BEFORE each prompt as well as after: an interrupt that has
+        // already fired must not open a blocking read it would then wait on.
+        if (interrupted()) return Promise.resolve({ kind: 'cancelled' });
         print(menu);
         const answer = promptFn(`${question} [${fallback.value}] `);
         // Both "stdin was never a terminal" and "the user pressed Ctrl-D"
         // arrive here; both mean stop asking, never "take the default".
-        if (answer === null || interrupt?.aborted === true) {
+        if (answer === null || interrupted()) {
           return Promise.resolve({ kind: 'cancelled' });
         }
         if (answer === '') return Promise.resolve({ kind: 'answer', value: fallback.value });

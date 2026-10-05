@@ -208,6 +208,38 @@ describe('runWorkspaceCommand', () => {
     expect(fs.writes).toEqual([]);
   });
 
+  it('reports an uninspectable member as an access problem, never as deleted', async () => {
+    // Advising removal of the manifest entry here would delete a valid member
+    // whose directory merely has a permission problem.
+    const base = createFakeFs({
+      [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
+        version: WORKSPACE_VERSION,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'http',
+        members: [{ name: 'orders', port: 3000 }],
+      }),
+    });
+    const fs = {
+      ...base,
+      stat: () => Promise.reject(new Error('permission denied')),
+    };
+    const err = createRecorder();
+    expect(
+      await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+        fs,
+        cwd: '/ws',
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(1);
+    expect(err.text()).toContain('apps/orders cannot be inspected');
+    expect(err.text()).toContain('access permissions');
+    expect(err.text()).not.toContain('does not exist');
+    expect(err.text()).not.toContain('Remove its entry');
+    expect(base.writes).toEqual([]);
+  });
+
   it('returns 130 when interrupted before its write batch', async () => {
     const fs = createFakeFs({
       [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
