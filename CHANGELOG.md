@@ -218,6 +218,11 @@ All notable changes to this project are documented here. The format follows
   object that names no `transport` no longer receives the development policy, and a configuration
   that binds its own `sources` gets the printed line rather than the CLI's declaration.
 
+- **RabbitMQ `publish()` and `queue.add()` now wait for the broker.** They resolve only once
+  RabbitMQ has accepted the message, which costs one broker round trip per publish, and they can now
+  reject — when the broker refuses the message, the channel closes first, or `publishTimeoutMs`
+  expires — where they used to resolve unconditionally. See `docs/upgrading.md`.
+
 - **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
   primary key is already stored now rejects
   (`Entity '<name>' already has a row with this primary
@@ -430,6 +435,29 @@ All notable changes to this project are documented here. The format follows
   `jsr:@std/jsonc@1.0.3`, with read and write granted only to the member's and the root's
   `deno.json`/`deno.jsonc`. Regenerate the managed Dockerfile with `setu generate app`,
   `setu devtool enable` or `setu workspace ports --reallocate`.
+
+- **RabbitMQ messages and jobs survive a broker restart.** Both RabbitMQ publishers —
+  `messaging-plugin`'s broker and `queue-plugin`'s adapter — declared durable queues and then
+  published every message TRANSIENT on a plain channel, so a RabbitMQ restart silently emptied every
+  queue of the messages and background jobs waiting in it, while `publish()`/`add()` had already
+  resolved. Measured against RabbitMQ 4.3.5: 5 messages and 5 jobs → 0 and 0 after a restart, the
+  queues surviving empty. Every publish is now persistent (`persistentMessages`, default `true`;
+  `false` restores the old wire behaviour exactly) and goes through a publisher-confirm channel, so
+  `publish()`/`add()` resolve only once RabbitMQ has accepted the message and reject when it refuses
+  it. A queue retry or dead-letter now acknowledges the reserved job only after its replacement is
+  accepted — previously it acknowledged after an unconfirmed publish, so a broker failure between
+  the two lost the job. The drive-mode reconnect reopens a confirm channel too. `IAmqpConnection`
+  and `IAmqpQueueConnection` gain an optional `createConfirmChannel()`; an injected facade without
+  it keeps a plain channel and logs one warning. Proven by restarting a real broker in CI, with the
+  transient control losing its messages in the same restart.
+
+- **A paused RabbitMQ no longer hangs `publish()` or `add()` forever.** Each publish made an
+  unbounded broker round trip (an exchange assert in `messaging-plugin`, queue declarations in
+  `queue-plugin`) that a paused broker — socket open, nothing answering — never completes. The new
+  `publishTimeoutMs` option (default `15000`, `0` unbounded, out-of-range values refused with
+  `RangeError` when the plugin is constructed) bounds every round trip of one publish, confirm
+  included; measured against a paused broker, both calls reject at the bound with a message naming
+  the option. A rejection is not proof the message was dropped.
 
 - **SAML binding cookie cleared only on consumption (M101c).** The ACS cleared the browser-binding
   cookie on every outcome, so a cross-site `POST` of an empty or junk body to the CSRF-exempt ACS,

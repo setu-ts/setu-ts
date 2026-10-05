@@ -6,6 +6,12 @@
  * - Buffer.isBuffer(content) check on publish (throws otherwise)
  * - Returns false (not null) for empty queue on get()
  * - Routes delay queue publishes to ready queue for testing
+ * - Publisher confirms (probed against amqplib 0.10.x and RabbitMQ 4): the
+ *   connection HAS `createConfirmChannel()`, as every real one does, and on a
+ *   confirm channel `publish`'s fifth argument is called with `null` once the
+ *   broker accepts the message or with an error when it refuses it. Before
+ *   0.9.0 this fake had no confirms and no test read the publish options —
+ *   how transient job publishes into durable queues shipped green.
  */
 
 import { Buffer } from 'node:buffer';
@@ -19,6 +25,12 @@ export interface FakeAmqpQueueOptions {
   rejectCreateChannel?: boolean;
   /** Whether to reject publish. */
   rejectPublish?: boolean;
+  /** Model a minimal injected facade with no `createConfirmChannel()`. */
+  withoutConfirmChannel?: boolean;
+  /** On a confirm channel, refuse every publish with this error. */
+  confirmError?: Error;
+  /** On a confirm channel, hold every confirm until `releaseConfirms()`. */
+  withholdConfirms?: boolean;
 }
 
 /**
@@ -33,6 +45,9 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
   #delayBuffers: Map<string, Array<{ content: Buffer; options: unknown }>>;
   // Deterministic deliveryTag counter starting at 1
   #nextDeliveryTag: number;
+  #withheld: Array<() => void> = [];
+  /** Set when the channel was opened through `createConfirmChannel()`. */
+  confirmMode = false;
 
   constructor(options: FakeAmqpQueueOptions = {}) {
     this.#options = options;
@@ -103,11 +118,21 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
     return Promise.resolve({ queue });
   }
 
+  /** Delivers every withheld confirm (as accepted). */
+  releaseConfirms(): void {
+    const pending = this.#withheld;
+    this.#withheld = [];
+    for (const deliver of pending) {
+      deliver();
+    }
+  }
+
   publish(
     exchange: string,
     routingKey: string,
     content: Buffer,
     options?: unknown,
+    confirm?: (err: unknown) => void,
   ): boolean {
     this.#record('publish', [exchange, routingKey, content, options]);
 
@@ -141,6 +166,15 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
       });
     }
 
+    if (this.confirmMode && confirm !== undefined) {
+      const error = this.#options.confirmError ?? null;
+      const deliver = (): void => confirm(error);
+      if (this.#options.withholdConfirms) {
+        this.#withheld.push(deliver);
+      } else {
+        queueMicrotask(deliver);
+      }
+    }
     return true;
   }
 
@@ -188,6 +222,18 @@ export class FakeAmqpQueueConnection {
 
   constructor(options: FakeAmqpQueueOptions = {}) {
     this.#options = options;
+    if (options.withoutConfirmChannel) {
+      // An own `undefined` shadows the prototype method, so `typeof` reads it
+      // the way the adapter does — a facade that lacks the member.
+      Object.defineProperty(this, 'createConfirmChannel', { value: undefined });
+    }
+  }
+
+  /** Opens the (single) channel in publisher-confirm mode. */
+  async createConfirmChannel(): Promise<FakeAmqpQueueChannel> {
+    const channel = await this.createChannel();
+    channel.confirmMode = true;
+    return channel;
   }
 
   createChannel(): Promise<FakeAmqpQueueChannel> {

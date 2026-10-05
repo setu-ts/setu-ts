@@ -17,10 +17,12 @@ import type { QueueAdapter } from './queue-adapter.ts';
 import type {
   IAmqpQueueChannel,
   IAmqpQueueConnection,
+  RabbitMqQueueOptions,
   StoredJob,
   StoredRecurring,
 } from '../interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { deadlineRangeError, withDeadline } from '@setu-ts/common';
 
 /**
  * Lazily load amqplib at runtime. Pin to 0.10.x for stability.
@@ -79,16 +81,58 @@ async function resolveClient(
   return connection as unknown as IAmqpQueueConnection;
 }
 
+/** Default bound on one job publish, including its confirm, in ms. */
+export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
+
 /**
- * Options for configuring RabbitMqQueue.
+ * Resolves and validates `publishTimeoutMs`. Shared by
+ * `QueuePlugin(...)` (which refuses a bad value at construction) and the
+ * adapter constructor, so both read one rule.
+ *
+ * `messaging-plugin`'s RabbitMQ broker carries the same rule; it is restated
+ * here because AI_GUIDELINES §2.2 forbids a plugin importing another plugin,
+ * and the validation itself is the shared `deadlineRangeError` in `common`.
+ *
+ * @param value - The configured bound, or `undefined` for the default
+ * @returns The bound in milliseconds (`0` = unbounded)
+ * @throws {RangeError} When the value is outside `0`–`2147483647` or not finite
  */
-export interface RabbitMqQueueOptions {
-  /** RabbitMQ connection URL (default 'amqp://localhost:5672'). */
-  url?: string;
-  /** Injected AMQP connection (bypasses lazy import). */
-  client?: IAmqpQueueConnection;
-  /** Queue name prefix (default 'he.queue'). */
-  prefix?: string;
+export function resolvePublishTimeoutMs(value: number | undefined): number {
+  const resolved = value ?? DEFAULT_PUBLISH_TIMEOUT_MS;
+  const refusal = deadlineRangeError('queue-plugin: options.publishTimeoutMs', resolved);
+  if (refusal !== null) {
+    throw refusal;
+  }
+  return resolved;
+}
+
+/**
+ * Publishes on a confirm channel and settles on the broker's answer.
+ *
+ * amqplib throws SYNCHRONOUSLY when the channel is already closed (probed);
+ * the executor turns that into a rejection, so the returned promise is the
+ * only failure channel.
+ */
+function publishConfirmed(
+  channel: IAmqpQueueChannel,
+  queue: string,
+  content: Buffer,
+  options: Record<string, unknown>,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    channel.publish('', queue, content, options, (err) => {
+      if (err === null || err === undefined) {
+        resolve();
+        return;
+      }
+      const detail = err instanceof Error ? err.message : String(err);
+      reject(
+        new Error(`RabbitMQ did not confirm the job published to queue "${queue}": ${detail}`, {
+          cause: err,
+        }),
+      );
+    });
+  });
 }
 
 /**
@@ -112,8 +156,15 @@ export class RabbitMqQueue implements QueueAdapter {
   #url: string;
   #injectedClient: IAmqpQueueConnection | undefined;
   #prefix: string;
+  #persistentMessages: boolean;
+  #publishTimeoutMs: number;
+  #reportWarning: ((message: string) => void) | undefined;
   #connection: IAmqpQueueConnection | null = null;
   #channel: IAmqpQueueChannel | null = null;
+  /** Whether `#channel` is a confirm channel (set where the channel is made). */
+  #confirmed = false;
+  /** Whether the no-confirm-channel warning has been reported (once). */
+  #warnedUnconfirmed = false;
   #ready = false;
   /**
    * M70c: set when the connection fires `'error'`/`'close'` — the same fault
@@ -146,6 +197,11 @@ export class RabbitMqQueue implements QueueAdapter {
     this.#url = options?.url ?? 'amqp://localhost:5672';
     this.#injectedClient = options?.client;
     this.#prefix = options?.prefix ?? 'he.queue';
+    this.#persistentMessages = options?.persistentMessages ?? true;
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(
+      options?.publishTimeoutMs,
+    );
+    this.#reportWarning = options?.reportWarning;
     this.#processing = new Map();
     this.#recurringJobs = new Map();
     this.#asserted = new Set();
@@ -219,8 +275,7 @@ export class RabbitMqQueue implements QueueAdapter {
     // host process — a defect a fake-based test can never construct (a fake
     // connection never emits).
     this.#installConnectionFaultListener();
-    // Create channel unconditionally from the resolved connection
-    this.#channel = await this.#connection.createChannel();
+    this.#channel = await this.#openChannel(this.#connection);
     this.#ready = true;
     // Guard the channel the same way: amqplib emits `'error'` on every channel
     // when the underlying connection resets.
@@ -233,6 +288,80 @@ export class RabbitMqQueue implements QueueAdapter {
     } else {
       delete this.isHealthy;
     }
+  }
+
+  /**
+   * Opens the adapter's channel: a confirm channel when the connection can
+   * open one (a real amqplib connection always can), otherwise a plain channel
+   * — reported once, since its publishes resolve before RabbitMQ has stored
+   * the job.
+   */
+  async #openChannel(connection: IAmqpQueueConnection): Promise<IAmqpQueueChannel> {
+    if (typeof connection.createConfirmChannel === 'function') {
+      const channel = await connection.createConfirmChannel();
+      this.#confirmed = true;
+      return channel;
+    }
+    const channel = await connection.createChannel();
+    this.#confirmed = false;
+    if (!this.#warnedUnconfirmed) {
+      this.#warnedUnconfirmed = true;
+      this.#reportWarning?.(
+        'RabbitMqQueue: the injected AMQP connection has no createConfirmChannel(), so job ' +
+          'publishes are NOT confirmed: add() resolves before RabbitMQ has stored the job, ' +
+          'and a broker failure can lose it',
+      );
+    }
+    return channel;
+  }
+
+  /**
+   * Publishes one job message to `queue` through the default exchange —
+   * persistent unless `persistentMessages: false`, and, on a confirm channel,
+   * resolving only once the broker has accepted it. Every publish site goes
+   * through here, so no site can drift from the durability policy. Bounded by
+   * the caller through {@linkcode RabbitMqQueue.#bounded}.
+   */
+  async #publish(
+    channel: IAmqpQueueChannel,
+    queue: string,
+    content: Buffer,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    // Set only when enabled, so `persistentMessages: false` publishes exactly
+    // what every release before 0.9.0 published.
+    const options: Record<string, unknown> = this.#persistentMessages
+      ? { ...extra, persistent: true }
+      : { ...extra };
+    if (!this.#confirmed) {
+      channel.publish('', queue, content, options);
+      return;
+    }
+    await publishConfirmed(channel, queue, content, options);
+  }
+
+  /**
+   * Runs one publish operation — queue declarations included — under
+   * `publishTimeoutMs`. The bound covers EVERY broker round trip, not only
+   * the confirm: a paused broker keeps its socket open, so a queue assert
+   * never answers either (measured on the messaging broker's equivalent
+   * exchange assert), and bounding only the confirm would leave the call
+   * pending before the bound armed.
+   */
+  async #bounded(queue: string, run: () => Promise<void>): Promise<void> {
+    const timeoutMs = this.#publishTimeoutMs;
+    await withDeadline(run, {
+      timeoutMs,
+      onTimeout: () =>
+        new Error(
+          `RabbitMQ did not accept the job published to queue "${queue}" within ` +
+            `${timeoutMs} ms (publishTimeoutMs); it may still be accepted`,
+        ),
+      timing: {
+        setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+        clearTimer: (handle) => this.#runtime.clearTimeout(handle),
+      },
+    });
   }
 
   /**
@@ -315,22 +444,25 @@ export class RabbitMqQueue implements QueueAdapter {
       throw new Error('RabbitMqQueue is not connected');
     }
 
-    await this.#assertQueues(job.name);
-
+    const channel = this.#channel;
     const content = Buffer.from(JSON.stringify(job), 'utf8');
     const readyQ = this.#readyQueue(job.name);
     const delayQ = this.#delayQueue(job.name);
 
     // Check if delayed (availableAtMs > now)
     const now = this.#runtime.now();
-    if (job.availableAtMs <= now) {
-      // No delay: publish directly to ready queue
-      this.#channel.publish('', readyQ, content);
-    } else {
-      // Delayed: publish to delay queue with TTL
-      const expiration = job.availableAtMs - now;
-      this.#channel.publish('', delayQ, content, { expiration });
-    }
+    const delayed = job.availableAtMs > now;
+    await this.#bounded(delayed ? delayQ : readyQ, async () => {
+      await this.#assertQueues(job.name);
+      if (!delayed) {
+        // No delay: publish directly to ready queue
+        await this.#publish(channel, readyQ, content);
+      } else {
+        // Delayed: publish to delay queue with TTL
+        const expiration = job.availableAtMs - now;
+        await this.#publish(channel, delayQ, content, { expiration });
+      }
+    });
   }
 
   async reserve<T>(name: string, limit: number, _nowMs: number): Promise<readonly StoredJob<T>[]> {
@@ -392,8 +524,11 @@ export class RabbitMqQueue implements QueueAdapter {
       throw new Error('RabbitMqQueue is not connected');
     }
 
-    await this.#assertQueues(name);
-
+    // The channel is captured BEFORE any await: a `disconnect()` during the
+    // publish nulls `#channel`, and the ack must go to the channel the job was
+    // reserved on (a closed one throws, leaving the job unacked for RabbitMQ to
+    // redeliver — never lost).
+    const channel = this.#channel;
     const processing = this.#getOrCreateProcessing(name);
     const entry = processing.get(id);
     if (!entry) {
@@ -408,10 +543,16 @@ export class RabbitMqQueue implements QueueAdapter {
     const delayQ = this.#delayQueue(name);
     const now = this.#runtime.now();
     const expiration = Math.max(1, availableAtMs - now);
-    this.#channel.publish('', delayQ, content, { expiration });
+    // Ack only AFTER the replacement is accepted: acking first would let a
+    // broker failure between the two lose the job outright, where this order
+    // can at worst run it twice.
+    await this.#bounded(delayQ, async () => {
+      await this.#assertQueues(name);
+      await this.#publish(channel, delayQ, content, { expiration });
+    });
 
     // Ack the original message
-    this.#channel.ack(entry.message);
+    channel.ack(entry.message);
 
     // Remove from processing
     processing.delete(id);
@@ -422,21 +563,24 @@ export class RabbitMqQueue implements QueueAdapter {
       throw new Error('RabbitMqQueue is not connected');
     }
 
-    await this.#assertQueues(name);
-
+    // Captured before any await, for the same reason as `requeue`.
+    const channel = this.#channel;
     const processing = this.#getOrCreateProcessing(name);
     const entry = processing.get(id);
     if (!entry) {
       return;
     }
 
-    // Publish to dead queue
+    // Publish to dead queue — accepted before the ack, as in `requeue`.
     const content = Buffer.from(JSON.stringify(entry.job), 'utf8');
     const deadQ = this.#deadQueue(name);
-    this.#channel.publish('', deadQ, content, { timestamp: nowMs });
+    await this.#bounded(deadQ, async () => {
+      await this.#assertQueues(name);
+      await this.#publish(channel, deadQ, content, { timestamp: nowMs });
+    });
 
     // Ack the original message
-    this.#channel.ack(entry.message);
+    channel.ack(entry.message);
 
     // Remove from processing
     processing.delete(id);

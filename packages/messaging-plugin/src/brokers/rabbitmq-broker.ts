@@ -7,7 +7,7 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
-import { createCachedProbe } from '@setu-ts/common';
+import { createCachedProbe, deadlineRangeError, withDeadline } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError } from './describe-error.ts';
@@ -50,6 +50,73 @@ export function validateClient(client: unknown): client is IAmqpConnection {
     }
   }
   return true;
+}
+
+/** Default bound on one publish, including its confirm, in ms. */
+export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
+
+/**
+ * Resolves and validates `publishTimeoutMs`. Shared by
+ * `MessagingPlugin(...)` (which refuses a bad value at construction) and the
+ * broker constructor, so both read one rule.
+ *
+ * @param value - The configured bound, or `undefined` for the default
+ * @returns The bound in milliseconds (`0` = unbounded)
+ * @throws {RangeError} When the value is outside `0`–`2147483647` or not finite
+ */
+export function resolvePublishTimeoutMs(value: number | undefined): number {
+  const resolved = value ?? DEFAULT_PUBLISH_TIMEOUT_MS;
+  const refusal = deadlineRangeError('messaging-plugin: publishTimeoutMs', resolved);
+  if (refusal !== null) {
+    throw refusal;
+  }
+  return resolved;
+}
+
+/**
+ * The publish signature of an amqplib channel. On a confirm channel the fifth
+ * argument is called once the broker has accepted (`null`) or refused (an
+ * error) the message; a channel that closes first calls it with an error.
+ */
+interface PublishingChannel {
+  publish(
+    exchange: string,
+    routingKey: string,
+    content: Uint8Array,
+    properties?: unknown,
+    confirm?: (err: unknown) => void,
+  ): boolean;
+}
+
+/**
+ * Publishes on a confirm channel and settles on the broker's answer.
+ *
+ * amqplib throws SYNCHRONOUSLY when the channel is already closed (probed);
+ * the executor turns that into a rejection, so the returned promise is the
+ * only failure channel.
+ */
+function publishConfirmed(
+  channel: PublishingChannel,
+  exchange: string,
+  routingKey: string,
+  content: Uint8Array,
+  properties: Record<string, unknown>,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    channel.publish(exchange, routingKey, content, properties, (err) => {
+      if (err === null || err === undefined) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `RabbitMQ did not confirm the message published to exchange "${exchange}" ` +
+            `with routing key "${routingKey}": ${describeError(err)}`,
+          { cause: err },
+        ),
+      );
+    });
+  });
 }
 
 /** Reachability-probe cache lifetime (M95b review), in ms. */
@@ -147,9 +214,19 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   #injectedClient: IAmqpConnection | undefined;
   #exchangeName: string;
   #defaultQueue: string;
-  #logger?: { error: (msg: string) => void };
+  #persistentMessages: boolean;
+  #publishTimeoutMs: number;
+  #logger?: { error: (msg: string) => void; warn?: (msg: string) => void };
   #connection: IAmqpConnection | null = null;
   #channel: unknown | null = null;
+  /**
+   * Whether `#channel` is a confirm channel. Set by the ONE channel factory,
+   * {@linkcode RabbitMqBroker.#createChannel}, so the drive-mode reconnect
+   * cannot silently fall back to unconfirmed publishing.
+   */
+  #confirmed = false;
+  /** Whether the no-confirm-channel warning has been logged (once per broker). */
+  #warnedUnconfirmed = false;
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
   #rr: RequestReplyCore;
@@ -191,6 +268,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     this.#injectedClient = options?.client;
     this.#exchangeName = options?.exchangeName ?? 'messaging';
     this.#defaultQueue = options?.defaultQueue ?? 'messaging-consumers';
+    this.#persistentMessages = options?.persistentMessages ?? true;
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(
+      options?.publishTimeoutMs,
+    );
     if (options?.logger) {
       this.#logger = options.logger;
     }
@@ -417,18 +498,9 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       throw new Error('RabbitMqBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
-    const realChannel = this.#channel as unknown as {
+    const realChannel = this.#channel as unknown as PublishingChannel & {
       assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
-      publish(
-        exchange: string,
-        routingKey: string,
-        content: Uint8Array,
-        properties?: unknown,
-      ): boolean;
     };
-
-    // Assert topic exchange (idempotent)
-    await realChannel.assertExchange(this.#exchangeName, 'topic', { durable: true });
 
     // Build properties
     const properties: Record<string, unknown> = {};
@@ -441,9 +513,44 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
         properties.messageId = msg.messageId;
       }
     }
+    // Set only when enabled, so `persistentMessages: false` publishes exactly
+    // what every release before 0.9.0 published.
+    if (this.#persistentMessages) {
+      properties.persistent = true;
+    }
 
     const content = Buffer.from(serialized, 'utf8');
-    realChannel.publish(this.#exchangeName, topic, content, properties);
+    const exchange = this.#exchangeName;
+    const confirmed = this.#confirmed;
+    const timeoutMs = this.#publishTimeoutMs;
+    // The bound covers EVERY broker round trip this publish makes — the
+    // exchange assert as well as the confirm. A paused broker keeps its socket
+    // open, so the assert alone never answers (measured): bounding only the
+    // confirm would leave publish() pending forever before the bound armed.
+    await withDeadline(
+      async () => {
+        // Assert topic exchange (idempotent)
+        await realChannel.assertExchange(exchange, 'topic', { durable: true });
+        if (!confirmed) {
+          realChannel.publish(exchange, topic, content, properties);
+          return;
+        }
+        await publishConfirmed(realChannel, exchange, topic, content, properties);
+      },
+      {
+        timeoutMs,
+        onTimeout: () =>
+          new Error(
+            `RabbitMQ did not accept the message published to exchange "${exchange}" ` +
+              `with routing key "${topic}" within ${timeoutMs} ms (publishTimeoutMs); ` +
+              'it may still be accepted',
+          ),
+        timing: {
+          setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+          clearTimer: (handle) => this.#runtime.clearTimeout(handle),
+        },
+      },
+    );
   }
 
   /**
@@ -592,11 +699,38 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Creates a fresh channel on the current connection.
+   * Creates the shared channel on the current connection — the ONE channel
+   * factory, used by `connect()` and by the drive-mode reconnect alike, so a
+   * reconnected broker keeps publisher confirms.
+   *
+   * A connection that can open a confirm channel gets one (a real amqplib
+   * connection always can). One that cannot keeps a plain channel, and the
+   * broker says so once: publishes on it resolve before RabbitMQ has stored
+   * anything.
    */
   async #createChannel(): Promise<unknown> {
-    const realConn = this.#connection as unknown as { createChannel(): Promise<unknown> };
-    return await realConn.createChannel();
+    const connection = this.#connection as IAmqpConnection;
+    if (typeof connection.createConfirmChannel === 'function') {
+      const channel = await connection.createConfirmChannel();
+      this.#confirmed = true;
+      return channel;
+    }
+    const channel = await connection.createChannel();
+    this.#confirmed = false;
+    if (!this.#warnedUnconfirmed) {
+      this.#warnedUnconfirmed = true;
+      const message = 'RabbitMqBroker: the injected AMQP connection has no ' +
+        'createConfirmChannel(), so publishes are NOT confirmed: publish() resolves ' +
+        'before RabbitMQ has stored the message, and a broker failure can lose it';
+      // Called as a method, never detached: a logger may keep its state in
+      // private fields (the M52c `logQueries` defect).
+      if (this.#logger?.warn !== undefined) {
+        this.#logger.warn(message);
+      } else {
+        this.#logger?.error(message);
+      }
+    }
+    return channel;
   }
 
   /**

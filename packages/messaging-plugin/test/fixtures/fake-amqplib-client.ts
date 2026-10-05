@@ -8,6 +8,15 @@ import { Buffer } from 'node:buffer';
  * Node `Buffer` (amqplib's frame codec throws `TypeError('content is not a
  * buffer')`), so a regression to a string/Uint8Array payload fails the suite
  * instead of passing silently.
+ *
+ * Also mirrors amqplib's publisher-confirm surface (probed against amqplib
+ * 0.10.x and RabbitMQ 4): the connection HAS `createConfirmChannel()`, as
+ * every real connection does; `publish` returns a `boolean` (not a promise);
+ * on a confirm channel the fifth argument is called with `null` once the
+ * broker accepts the message, or with an error when it refuses it. Before
+ * 0.9.0 this fake had neither confirms nor a faithful `publish` return, and
+ * no test read the publish options — which is how transient publishes into
+ * durable queues shipped green.
  */
 export interface FakeAmqpOptions {
   /** Whether to reject on createChannel. */
@@ -22,6 +31,18 @@ export interface FakeAmqpOptions {
   }>;
   /** Whether to deliver a null message (consumer-cancel notification). */
   deliverNull?: boolean;
+  /**
+   * Model a minimal injected facade with no `createConfirmChannel()`. A real
+   * amqplib connection always has it, so the default fake does too.
+   */
+  withoutConfirmChannel?: boolean;
+  /** On a confirm channel, refuse every publish with this error. */
+  confirmError?: Error;
+  /**
+   * On a confirm channel, hold every confirm until {@linkcode
+   * FakeAmqpChannel.releaseConfirms} — a broker that has stopped answering.
+   */
+  withholdConfirms?: boolean;
 }
 
 /**
@@ -36,6 +57,9 @@ export class FakeAmqpChannel {
     consumerTag: string;
   }>;
   #consumerTagCounter = 0;
+  #withheld: Array<() => void> = [];
+  /** Set when the channel was opened through `createConfirmChannel()`. */
+  confirmMode = false;
 
   constructor(options: FakeAmqpOptions = {}) {
     this.#options = options;
@@ -58,6 +82,15 @@ export class FakeAmqpChannel {
     return Promise.resolve();
   }
 
+  /** Delivers every withheld confirm (as accepted). */
+  releaseConfirms(): void {
+    const pending = this.#withheld;
+    this.#withheld = [];
+    for (const deliver of pending) {
+      deliver();
+    }
+  }
+
   assertQueue(queue: string, _options?: unknown): Promise<{ queue: string }> {
     this.#record('assertQueue', [queue, _options]);
     return Promise.resolve({ queue });
@@ -73,7 +106,8 @@ export class FakeAmqpChannel {
     routingKey: string,
     content: unknown,
     properties?: unknown,
-  ): Promise<boolean> {
+    confirm?: (err: unknown) => void,
+  ): boolean {
     // Faithful to amqplib: the frame codec requires a Node Buffer and throws
     // for a string or a Uint8Array (Buffer.isBuffer(new Uint8Array()) === false).
     if (!Buffer.isBuffer(content)) {
@@ -81,9 +115,19 @@ export class FakeAmqpChannel {
     }
     this.#record('publish', [exchange, routingKey, content, properties]);
     if (this.#options.rejectPublish) {
+      // amqplib throws synchronously on a closed channel (probed).
       throw new Error('Publish failed');
     }
-    return Promise.resolve(true);
+    if (this.confirmMode && confirm !== undefined) {
+      const error = this.#options.confirmError ?? null;
+      const deliver = (): void => confirm(error);
+      if (this.#options.withholdConfirms) {
+        this.#withheld.push(deliver);
+      } else {
+        queueMicrotask(deliver);
+      }
+    }
+    return true;
   }
 
   consume(
@@ -143,6 +187,18 @@ export class FakeAmqpConnection {
 
   constructor(options: FakeAmqpOptions = {}) {
     this.#options = options;
+    if (options.withoutConfirmChannel) {
+      // An own `undefined` shadows the prototype method, so `typeof` reads it
+      // the way the broker does — a facade that lacks the member.
+      Object.defineProperty(this, 'createConfirmChannel', { value: undefined });
+    }
+  }
+
+  /** Opens the (single) channel in publisher-confirm mode. */
+  async createConfirmChannel(): Promise<FakeAmqpChannel> {
+    const channel = await this.createChannel();
+    channel.confirmMode = true;
+    return channel;
   }
 
   createChannel(): Promise<FakeAmqpChannel> {

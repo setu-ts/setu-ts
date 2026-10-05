@@ -494,6 +494,39 @@ describe('real-backend CI wiring', () => {
     }
   });
 
+  it('pins the RabbitMQ durability restart suites, their guard, and their grants', async () => {
+    // Each suite restarts the CI RabbitMQ service to prove persistent
+    // messages/jobs survive it, with a transient control losing its own in the
+    // same restart. They guard with `ignore:` on RABBITMQ_URL, so a deleted
+    // file, a dropped guard, a lost restart, or a lost `docker`/AMQP grant
+    // would turn the only proof of durability into a silent skip.
+    const suites = [
+      ['messaging-plugin', 'REAL RabbitMQ message durability'],
+      ['queue-plugin', 'REAL RabbitMQ job durability'],
+    ] as const;
+    for (const [pkg, title] of suites) {
+      const source = await Deno.readTextFile(
+        `packages/${pkg}/test/integration/durability-real.test.ts`,
+      );
+      expect(source).toContain(title);
+      expect(source).toContain("Deno.env.get('RABBITMQ_URL')");
+      expect(source).toContain('ignore: rabbitUrl === undefined');
+      expect(source).toContain("docker(['restart', containerId])");
+      // The control is what makes the restart discriminate.
+      expect(source).toContain('.toEqual([5, 0])');
+      const config = await readJson<{
+        readonly test?: {
+          readonly permissions?: {
+            readonly net?: readonly string[];
+            readonly run?: readonly string[];
+          };
+        };
+      }>(`packages/${pkg}/deno.json`);
+      expect(config.test?.permissions?.run).toEqual(['docker']);
+      expect(config.test?.permissions?.net).toContain('127.0.0.1:5672');
+    }
+  });
+
   it('pins the M101a paused-Redis bound suites, their guard, and their grants', async () => {
     // Each suite `docker pause`s the CI Redis service to prove a command is
     // bounded. They guard with `ignore:` on REDIS_URL, so a deleted file, a

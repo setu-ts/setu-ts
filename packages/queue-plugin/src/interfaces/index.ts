@@ -88,6 +88,15 @@ export interface IAmqpQueueConnection {
   /** Create a channel. */
   createChannel(): Promise<IAmqpQueueChannel>;
   /**
+   * Create a channel in publisher-confirm mode (optional). A real amqplib
+   * connection always has it; when present every job publish waits for the
+   * broker to accept it. A facade without it keeps a plain channel, and the
+   * adapter reports once that its publishes are unconfirmed.
+   *
+   * @since 0.9.0
+   */
+  createConfirmChannel?(): Promise<IAmqpQueueChannel>;
+  /**
    * M70c: registers a fault listener. The real amqplib connection exposes
    * `'error'`/`'close'`; the adapter sets a fault flag when either fires, which
    * `isHealthy` reads. Optional so a minimal fake still type-checks.
@@ -109,12 +118,16 @@ export interface IAmqpQueueConnection {
 export interface IAmqpQueueChannel {
   /** Assert a queue. */
   assertQueue(queue: string, options?: unknown): Promise<{ queue: string }>;
-  /** Publish a message. */
+  /**
+   * Publish a message. On a confirm channel `confirm` is called once the
+   * broker has accepted (`null`) or refused (an error) the message.
+   */
   publish(
     exchange: string,
     routingKey: string,
     content: Buffer,
     options?: unknown,
+    confirm?: (err: unknown) => void,
   ): boolean;
   /** Get a message (polling). */
   get(queue: string, options?: unknown): Promise<IAmqpQueueMessage | false>;
@@ -220,6 +233,35 @@ export interface QueuePluginOptions {
   pollIntervalMs?: number;
   /** Queue name prefix for RabbitMQ adapter (default 'he.queue'). */
   prefix?: string;
+  /**
+   * Publish every job persistent (`delivery_mode` 2) — adapter `'rabbitmq'`
+   * only. Default `true`.
+   *
+   * The adapter's ready/delay/dead queues are durable, and a durable queue
+   * keeps only PERSISTENT messages across a broker restart: before 0.9.0 every
+   * job was published transient, so a RabbitMQ restart silently discarded
+   * every job not yet processed. `false` restores that behaviour.
+   *
+   * @since 0.9.0
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one job publish, in milliseconds — adapter `'rabbitmq'` only.
+   * Default `15000`; `0` waits without a bound.
+   *
+   * It covers every broker round trip the publish makes — the job's queue
+   * declarations and, on a confirm channel (a real amqplib connection always
+   * opens one), the wait for RabbitMQ to accept the job. `add()` resolves once
+   * RabbitMQ has accepted the job and rejects when it refuses it or the bound
+   * expires; a retry or dead-letter acknowledges the reserved job only after
+   * its replacement is accepted, so a broker failure between the two cannot
+   * lose it. A rejection is not proof the job was dropped: the broker may
+   * still accept it after the bound. A value outside `0`–`2147483647`
+   * (including `NaN`) throws `RangeError` when `QueuePlugin(...)` is called.
+   *
+   * @since 0.9.0
+   */
+  publishTimeoutMs?: number;
   /**
    * How long a dead-lettered job's payload is retained, in milliseconds.
    *
@@ -490,4 +532,22 @@ export interface RabbitMqQueueOptions {
   client?: IAmqpQueueConnection;
   /** Queue name prefix (default 'he.queue'). */
   prefix?: string;
+  /**
+   * Publish jobs persistent (default `true`). See
+   * {@linkcode QueuePluginOptions.persistentMessages}.
+   * @since 0.9.0
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one job publish, including its confirm, in ms (default `15000`,
+   * `0` unbounded). See {@linkcode QueuePluginOptions.publishTimeoutMs}.
+   * @since 0.9.0
+   */
+  publishTimeoutMs?: number;
+  /**
+   * Receives the one warning the adapter emits when the connection cannot
+   * open a confirm channel. `QueuePlugin` supplies one backed by its logger.
+   * @since 0.9.0
+   */
+  reportWarning?: (message: string) => void;
 }

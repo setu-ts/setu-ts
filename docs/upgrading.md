@@ -83,7 +83,23 @@ The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, th
 to a running application. The three M102 mail entries can. The three M101b messaging entries do not
 fail to compile; each changes what a running broker names or refuses. The two M101c entries do not
 fail to compile: one changes a documented recipe that otherwise refuses an IdP posting
-`Origin: null`, the other makes the memory adapter refuse writes it used to accept.
+`Origin: null`, the other makes the memory adapter refuse writes it used to accept. The RabbitMQ
+durability entry does not fail to compile; it makes `publish()` and `add()` wait for the broker.
+
+### Handle a rejecting RabbitMQ publish (`publishTimeoutMs`)
+
+With `broker: 'rabbitmq'` (`messaging-plugin`) or `adapter: 'rabbitmq'` (`queue-plugin`),
+`publish()` and `queue.add()` now resolve only once RabbitMQ has accepted the message, and reject
+when it refuses it, when the channel closes first, or when `publishTimeoutMs` (default `15000`)
+expires. Before, they resolved before RabbitMQ had stored anything and never rejected — which is
+also why a broker restart could lose messages without any caller noticing. Code that published
+without handling a rejection should now handle it. A rejection is not proof the message was dropped:
+retrying can deliver it twice, so a retried message needs an idempotent consumer.
+
+Messages are also published persistent now, so they survive a broker restart. To keep the old
+transient publishes for deliberately ephemeral traffic, pass `persistentMessages: false`. An
+injected AMQP connection without `createConfirmChannel()` still works, unconfirmed, and logs one
+warning; a real amqplib connection always has the method.
 
 ### Give memory-adapter rows distinct keys, and do not change a key by `update` (M101c)
 
