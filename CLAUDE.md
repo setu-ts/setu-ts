@@ -5747,7 +5747,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   duplicates; round 3 found an `update` able to rewrite a key onto another row's key (High) and a
   transaction committing a duplicate through delete-then-recreate. The memory adapter now refuses
   duplicate and changed primary keys in and out of transactions. Round 4 passed on `c011db69` —
-  complete (PR pending).
+  complete (PR #411).
 - **Next milestone** — M101e (in progress on `feat/m101e-cli-write-safety`), then M101f, M101g (now
   carrying the full-stack browser gate, §3.10 of its plan), M101h; M104 — the `v0.9.0` client-brief
   run — follows the `v0.9.0` cut; see ROADMAP.md.
