@@ -1,7 +1,7 @@
 # Milestone 101e — CLI commands that write where or when they should not (`@setu-ts/cli`)
 
-> **Status:** Complete (PR pending). Branch: `feat/m101e-cli-write-safety`. `main` is protected —
-> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #412). Branch: `feat/m101e-cli-write-safety`. `main` is protected — all
+> work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 

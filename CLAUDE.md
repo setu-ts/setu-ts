@@ -5732,7 +5732,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   rolls back write batches and adoption's relocations, while plugin commands run application
   shutdown. Real-filesystem interruption regressions cover adoption's copy, deletion, root write,
   and entry rewrite; a subprocess SIGINT test pins both rollback and unhandled termination —
-  complete (PR pending).
+  complete (PR #412).
 - **Milestone 101c** (`packages/session-plugin` + `packages/common` +
   `packages/multi-tenancy-plugin` + `packages/database-plugin` + `packages/http-security-plugin` +
   `packages/auth-plugin` — tenancy and identity features that do not compose; V8-7, V8-8, V8-9,
