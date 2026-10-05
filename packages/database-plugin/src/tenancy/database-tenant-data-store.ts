@@ -33,7 +33,10 @@
  * since M101c) and which a generated key never produces — so let the backend
  * generate keys, or treat a caller-supplied key as tenant-scoped data. An
  * `update` whose returned row carries another tenant's column is refused
- * rather than returned, so the race can never read a foreign row back.
+ * rather than returned, so the race can never read a foreign row back — but
+ * the write has already happened. A `delete` has no such after-check: it can
+ * remove the swapped-in row and still return `true`. Closing the window needs
+ * a conditional write on `IRepository`, which ROADMAP Milestone 105 owns.
  *
  * **`find` filters are equality only.** A filter key starting with `$` or a
  * non-scalar value is refused, because some backends (MongoDB) read those as
