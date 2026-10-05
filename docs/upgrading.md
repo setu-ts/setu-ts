@@ -12,6 +12,14 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Replace links inside a project before running a writing `setu` command
+
+`setu` now refuses to write through, or `adopt` to move, a path reached through a symbolic link
+inside the project or workspace, and refuses a dangling link, with nothing written. If you link a
+file into a project on purpose (a shared `deno.json`, for example), replace the link with a copy
+before running `generate`, `add`, `devtool enable`, `workspace ports --reallocate` or `adopt`. A
+project reached through a linked parent directory needs no change.
+
 ### Refresh `main.dev.ts` and production images (M101f)
 
 Upgrade every `@setu-ts/*` pin together before `setu devtool enable`; mixed versions are refused.

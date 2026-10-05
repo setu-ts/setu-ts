@@ -24,7 +24,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { CONFIG_MODULE } from '../constants.ts';
-import { joinPath } from '../utils/file-writer.ts';
+import { assertInsideProject, joinPath } from '../utils/file-writer.ts';
 import { escapeName } from '../utils/names.ts';
 
 /**
@@ -89,6 +89,9 @@ async function walk(
   const found: string[] = [];
   for (const entry of await fs.readdir(joinPath(root, prefix))) {
     const relative = prefix === '' ? entry : joinPath(prefix, entry);
+    // A committed link would otherwise be FOLLOWED: a linked directory walked
+    // and its files moved — deleting them where they live, outside the project.
+    await assertInsideProject(fs, root, joinPath(root, relative));
     const stat = await fs.stat(joinPath(root, relative));
     if (stat.isDirectory) {
       found.push(...(await walk(fs, root, relative)));
@@ -139,6 +142,11 @@ export async function planAdoption(
     }
 
     if (!isDirectory) {
+      try {
+        await assertInsideProject(fs, project, joinPath(project, entry));
+      } catch (cause) {
+        return { ok: false, message: cause instanceof Error ? cause.message : String(cause) };
+      }
       files.push({ from: entry, to: joinPath(memberRoot, entry) });
       continue;
     }
@@ -191,6 +199,10 @@ export async function moveFile(
   const to = joinPath(project, file.to);
 
   try {
+    // Both ends: the source was checked when planned, but a destination under a
+    // committed `apps` link would put the moved files outside the project.
+    await assertInsideProject(fs, project, from);
+    await assertInsideProject(fs, project, to);
     const bytes = await fs.readFile(from);
     const parent = to.slice(0, to.lastIndexOf('/'));
     if (parent !== '') await fs.mkdir(parent, { recursive: true });

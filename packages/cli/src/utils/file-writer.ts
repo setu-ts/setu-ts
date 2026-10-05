@@ -133,6 +133,111 @@ export function dirName(path: string): string {
   return path.slice(0, index);
 }
 
+/** Raised when a path the CLI would touch resolves outside the project through a link. */
+export class PathEscapesProjectError extends Error {
+  /**
+   * @param message - The single-line, escaped explanation
+   */
+  constructor(message: string) {
+    super(message);
+    this.name = 'PathEscapesProjectError';
+  }
+}
+
+/** `/`-separated, with `.` and `..` resolved lexically, so prefix comparison is sound. */
+function normalizeAbsolute(path: string): string {
+  const parts: string[] = [];
+  for (const part of path.replaceAll('\\', '/').split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') parts.pop();
+    else parts.push(part);
+  }
+  return `/${parts.join('/')}`;
+}
+
+/**
+ * A path as the filesystem resolves it: `realPath` of its deepest existing
+ * ancestor, with the not-yet-existing remainder appended. A missing component
+ * that its parent nevertheless LISTS is a dangling link — writing through it
+ * would create its target — so it is reported, never treated as absent.
+ */
+async function canonicalPath(fs: IFileSystem, path: string): Promise<string> {
+  if (fs.realPath === undefined) {
+    throw new PathEscapesProjectError(
+      `Cannot verify that ${escapeName(path)} stays inside the project: this filesystem ` +
+        'cannot resolve links, so nothing is written.',
+    );
+  }
+  const suffix: string[] = [];
+  let probe = normalizeAbsolute(path);
+  for (;;) {
+    try {
+      const real = normalizeAbsolute(await fs.realPath(probe));
+      return suffix.length === 0 ? real : normalizeAbsolute(`${real}/${suffix.join('/')}`);
+    } catch (cause) {
+      if (!isMissingPath(cause)) {
+        throw new PathEscapesProjectError(
+          `Cannot resolve ${escapeName(probe)}: ${escapeName(failureMessage(cause))}.`,
+        );
+      }
+      const parent = dirName(probe);
+      if (parent === probe || parent === '') {
+        return normalizeAbsolute(`${probe}/${suffix.join('/')}`);
+      }
+      const name = probe.slice(parent === '/' ? 1 : parent.length + 1);
+      try {
+        if ((await fs.readdir(parent)).includes(name)) {
+          throw new PathEscapesProjectError(
+            `${escapeName(probe)} is a link to something that does not exist; Setu will not ` +
+              'write through it. Remove the link, then run this again.',
+          );
+        }
+      } catch (listing) {
+        if (listing instanceof PathEscapesProjectError) throw listing;
+        // An unlistable parent resolves on the next step or fails there.
+      }
+      suffix.unshift(name);
+      probe = parent;
+    }
+  }
+}
+
+/**
+ * Refuses a path that does not resolve to exactly its place under `root` — one
+ * reached through a symbolic link, whether the link points outside the project or
+ * merely elsewhere inside it. A project reached through a linked PARENT directory
+ * is fine: the root is resolved the same way, so only links INSIDE it are refused.
+ *
+ * @param fs - The filesystem to resolve through
+ * @param root - The project or workspace root (absolute)
+ * @param target - The path about to be read for a move or written (absolute)
+ * @throws {PathEscapesProjectError} When the target leaves `root` or cannot be verified
+ */
+export async function assertInsideProject(
+  fs: IFileSystem,
+  root: string,
+  target: string,
+): Promise<void> {
+  const lexicalRoot = normalizeAbsolute(root);
+  const lexicalTarget = normalizeAbsolute(target);
+  const prefix = lexicalRoot === '/' ? '/' : `${lexicalRoot}/`;
+  if (!lexicalTarget.startsWith(prefix)) {
+    throw new PathEscapesProjectError(
+      `${escapeName(target)} is outside ${escapeName(root)}; nothing is written.`,
+    );
+  }
+  const relative = lexicalTarget.slice(prefix.length);
+  const realRoot = await canonicalPath(fs, lexicalRoot);
+  const realTarget = await canonicalPath(fs, lexicalTarget);
+  if (realTarget !== normalizeAbsolute(`${realRoot}/${relative}`)) {
+    throw new PathEscapesProjectError(
+      `${escapeName(target)} resolves to ${escapeName(realTarget)} through a symbolic link; ` +
+        'Setu will not read or write through links inside a project. Replace the link with ' +
+        'the files it points at, or remove it, then run this again.',
+    );
+  }
+}
+
 /**
  * Returns the first path planned more than once, if any.
  *
@@ -323,8 +428,11 @@ function failureMessage(cause: unknown): string {
 export async function writeFiles(
   fs: IFileSystem,
   files: readonly GeneratedFile[],
-  options: { readonly signal?: AbortSignal } = {},
+  options: { readonly root: string; readonly signal?: AbortSignal },
 ): Promise<readonly WriteOutcome[]> {
+  // Every target is checked BEFORE the first write, so a link anywhere in the
+  // plan refuses the whole batch with nothing written.
+  for (const file of files) await assertInsideProject(fs, options.root, file.path);
   const encoder = new TextEncoder();
   const directories: string[] = [];
   const known = new Set<string>();

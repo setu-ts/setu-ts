@@ -657,7 +657,7 @@ async function enableInWorkspace(
     await writeFiles(
       deps.fs,
       planned as readonly GeneratedFile[],
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
@@ -833,7 +833,7 @@ async function enableStandalone(
     await writeFiles(
       deps.fs,
       planned as readonly GeneratedFile[],
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
   } catch (cause) {
     const interrupted = interruptionMessage(cause);

@@ -277,7 +277,9 @@ export async function runAdoptCommand(
       await writeFiles(
         deps.fs,
         planned,
-        deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+        deps.interrupt === undefined
+          ? { root: project }
+          : { root: project, signal: deps.interrupt },
       );
     } catch (cause) {
       const interrupted = interruptionMessage(cause);
@@ -315,7 +317,9 @@ export async function runAdoptCommand(
         await writeFiles(
           deps.fs,
           [{ path: entryPath, contents: rewritten, managed: true }],
-          deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+          deps.interrupt === undefined
+            ? { root: project }
+            : { root: project, signal: deps.interrupt },
         );
       } catch (cause) {
         const interrupted = interruptionMessage(cause);

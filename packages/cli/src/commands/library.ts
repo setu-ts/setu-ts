@@ -213,7 +213,9 @@ export async function runLibraryCommand(
     const outcomes = await writeFiles(
       deps.fs,
       planned,
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined
+        ? { root: deps.dir }
+        : { root: deps.dir, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {

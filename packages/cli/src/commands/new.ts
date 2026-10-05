@@ -757,7 +757,7 @@ export async function runNewCommand(
     const outcomes = await writeFiles(
       deps.fs,
       files,
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined ? { root: root } : { root: root, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {

@@ -444,7 +444,7 @@ export async function runAddCommand(
     outcomes = await writeFiles(
       deps.fs,
       edits.map((edit) => ({ ...edit, managed: true })),
-      deps.interrupt === undefined ? {} : { signal: deps.interrupt },
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
   } catch (cause) {
     const interrupted = interruptionMessage(cause);

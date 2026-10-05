@@ -355,6 +355,16 @@ All notable changes to this project are documented here. The format follows
   and application-load errors are escaped the same way; an error raised by the project's own plugin
   code is printed as written, since that code can already print anything. Messages keep their
   intended line breaks, and legitimate output is unchanged.
+- **The CLI no longer follows symbolic links inside a project (M101f security audit).** A link is
+  committed content, so a cloned project could make `setu adopt` walk a linked directory and move —
+  deleting from where they lived — files outside the project, and could make `generate`,
+  `devtool enable` and `workspace ports --reallocate` overwrite or merge into a file outside it by
+  linking a barrel, `deno.json` or `main.dev.ts` there. Every CLI write, and every file `adopt`
+  moves, must now resolve to exactly its place under the project or workspace root; a path reached
+  through a link inside the project, or a dangling link, is refused by name with nothing written. A
+  project reached through a linked PARENT directory is unaffected. If you deliberately link a file
+  into a project (a shared `deno.json`, for example), replace the link with a copy before running a
+  writing command.
 - **Generated image pruning step pinned and scoped (M101f security audit).** The step that removes
   the development-only diagnostics pin ran `deno eval` with every permission against a floating
   `jsr:@std/jsonc@^1.0.2`, the one unlocked fetch in the image. It now runs `deno run` against
