@@ -390,20 +390,20 @@ export class MemoryAdapter implements IDatabaseAdapter {
         // stored rows (ignoring rows this transaction deletes) BEFORE writing
         // anything, and refuse the whole commit on a collision, so a duplicate
         // key can never reach the store (M101c security audit R2-F1).
-        const createdKeys = new Set<string>();
         for (const entry of overlay.creates) {
           const store = this.getStore(entry.entity);
           const key = recordKey(store, entry.record);
-          const mapKey = overlayKey(entry.entity, key, store.primaryKey);
-          const deletedHere = overlay.tombstones.has(mapKey);
-          if (
-            createdKeys.has(mapKey) || (!deletedHere && findRecordIndex(store, key) !== -1)
-          ) {
+          const deletedHere = overlay.tombstones.has(
+            overlayKey(entry.entity, key, store.primaryKey),
+          );
+          // Two buffered creates never share a key: each is refused at buffer
+          // time against the rows this transaction already holds, and an
+          // update cannot change a key — so only stored rows are re-checked.
+          if (!deletedHere && findRecordIndex(store, key) !== -1) {
             rolledBack = true;
             releaseOnce();
             return Promise.reject(duplicateKeyError(entry.entity));
           }
-          createdKeys.add(mapKey);
         }
         committed = true;
         try {
