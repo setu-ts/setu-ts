@@ -185,6 +185,17 @@ async function bootDev(
 }
 
 describe('a scaffolded devtool project, driven end to end', () => {
+  it('formats both standalone and workspace development entries without a repair', async () => {
+    expect(await run(['new', 'formatted', '--devtool'])).toBe(0);
+    const standalone = await denoRun(`${root}/formatted`, ['fmt', '--check']);
+    expect(standalone.output).not.toContain('not formatted');
+    expect(standalone.code).toBe(0);
+    expect(await run(['new', 'workspace', '--workspace'])).toBe(0);
+    expect(await run(['generate', 'app', 'orders', '--devtool'], `${root}/workspace`)).toBe(0);
+    const member = await denoRun(`${root}/workspace/apps/orders`, ['fmt', '--check']);
+    expect(member.output).not.toContain('not formatted');
+    expect(member.code).toBe(0);
+  });
   it('stops and exits when a hand-edited factory drops either part of the composition', async () => {
     for (const dropped of ['plugins', 'diagnostics']) {
       const appPort = unusedPort();

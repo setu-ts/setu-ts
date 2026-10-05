@@ -8288,7 +8288,8 @@ start, stops and exits 1 if the composition was dropped. Workspace connectors al
 `devtoolBasePort`, recorded on first allocation (default `basePort + 1000`, capped at 65535); the
 first explicit `--devtool-port` records that range start. Reallocation updates CLI-rendered entries
 and refuses edited entries before any write. Standalone defaults probe 4919 through 5019 and report
-the chosen port; `new --devtool` also writes it into the project README.
+the chosen port; `new --devtool` also writes it into the project README. Re-enabling an unchanged
+standalone entry retains its recorded port without probing again.
 
 `@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation.
 Install it with an explicit binary name, because Deno's default inference would name it after the

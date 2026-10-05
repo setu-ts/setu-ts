@@ -43,6 +43,38 @@ const seed = {
 };
 
 describe('M101f lifecycle refusals and allocation', () => {
+  it('retains a standalone entry port without probing again when availability changes', async () => {
+    for (const port of [4919, 4920, 6200]) {
+      for (const entry of devEntryVariants(port, false)) {
+        const fs = createFakeFs();
+        expect(
+          await runNewCommand(parseArgs(['shop', '--devtool', '--devtool-port', String(port)]), {
+            fs,
+            cwd: '/ws',
+            log: () => {},
+            error: () => {},
+          }),
+        ).toBe(0);
+        await fs.writeFile('/ws/shop/main.dev.ts', new TextEncoder().encode(entry));
+        const before = fs.writes.length;
+        const log = createRecorder();
+        expect(
+          await runDevtoolCommand(parseArgs(['enable']), {
+            fs,
+            cwd: '/ws/shop',
+            log: log.sink,
+            error: () => {},
+            portAvailable: () => {
+              throw new Error('an enabled project must not probe for a new port');
+            },
+          }),
+        ).toBe(0);
+        expect(log.text()).toContain('already enabled');
+        expect(fs.read('/ws/shop/main.dev.ts')).toBe(entry);
+        expect(fs.writes.length).toBe(before);
+      }
+    }
+  });
   it('requires the signature and both usage fragments and prints their locations', () => {
     const legacy = factoryRefusal('export function createApp(): IApplication {');
     expect(legacy).toContain(signature);

@@ -1,6 +1,6 @@
 /** Workspace maintenance commands. */
 
-import { devEntryVariants, renderDevEntry } from '../devtool/dev-entry.ts';
+import { devEntryVariants, DEVTOOL_ENTRY_MODULE, renderDevEntry } from '../devtool/dev-entry.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
@@ -9,12 +9,18 @@ import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from 
 import { interruptionMessage } from '../utils/interruption.ts';
 import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
-import { DISCOVERY_MODULE, renderDiscoveryModule } from '../workspace/discovery-module.ts';
+import {
+  DISCOVERY_MODULE,
+  DISCOVERY_SPECIFIER,
+  renderDiscoveryModule,
+  SERVICE_PORT_EXPORT,
+} from '../workspace/discovery-module.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import {
   allocateDevtoolPort,
   devtoolRangeStart,
   MAX_PORT,
+  MEMBERS_DIR,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
@@ -87,10 +93,10 @@ function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
   const transport = transportSpec(manifest.transport);
   return [
     ...manifest.members.filter((member) => member.devtoolPort !== undefined).map((member) => ({
-      path: joinPath('apps', member.name, 'main.dev.ts'),
+      path: joinPath(MEMBERS_DIR, member.name, DEVTOOL_ENTRY_MODULE),
       contents: renderDevEntry({
         devtoolPort: member.devtoolPort!,
-        port: { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
+        port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
       }),
     })),
     ...manifest.members.map((member) => ({
@@ -134,7 +140,7 @@ export async function runWorkspaceCommand(
   }
   for (const member of read.manifest.members) {
     if (member.devtoolPort === undefined) continue;
-    const path = joinPath(dir, 'apps', member.name, 'main.dev.ts');
+    const path = joinPath(dir, MEMBERS_DIR, member.name, DEVTOOL_ENTRY_MODULE);
     let source: string | undefined;
     try {
       source = new TextDecoder().decode(await deps.fs.readFile(path));

@@ -222,9 +222,12 @@ Keep the existing plugins in the array. The entry checks plugin registration and
 after startup, stops the application and exits 1 if the factory discarded the composition. All
 framework pins must match this CLI version before enabling; upgrade them together first. Workspace
 connectors allocate from `devtoolBasePort` (recorded on first enable, default `basePort + 1000`,
-capped at 65535). Standalone defaults probe 4919 through 5019; `--devtool-port` chooses explicitly.
-`ports --reallocate` updates an untouched CLI entry along with the manifest; an edited entry refuses
-the whole operation before writing. Production images exclude the entry and install only main.ts.
+capped at 65535). Standalone defaults probe 4919 through 5019 on first enablement; later enablement
+retains the entry's recorded port, including while the connector runs. `--devtool-port` chooses
+explicitly. `ports --reallocate` updates an untouched CLI entry along with the manifest; an edited
+entry refuses the whole operation before writing. Production images exclude the entry and remove the
+development connector pin before installing the remaining import map. See the
+[deployment recipe](../../docs/deployment.md) for the complete build sequence and JSONC support.
 
 ## Generated modules
 

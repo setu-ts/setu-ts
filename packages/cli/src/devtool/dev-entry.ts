@@ -4,7 +4,8 @@
  * The production entry never imports this module and nothing in the production
  * graph imports the diagnostics plugin: the devtool composition exists only
  * here. The production image excludes each member's main.dev.ts through .dockerignore
- * and installs only main.ts through --entrypoint, keeping the connector out of its cache.
+ * and removes the development-only import pin before installing the remaining
+ * import map and checking main.ts through --entrypoint, keeping the connector out of its cache.
  *
  * The entry READS its credentials; it never generates, writes or prints a pair.
  * The two variable names are approved CLI surface (AI_GUIDELINES §10.2): a
@@ -16,6 +17,7 @@
  */
 
 import { DISCOVERY_SPECIFIER, SERVICE_PORT_EXPORT } from '../workspace/discovery-module.ts';
+import { isUsablePort } from '../workspace/manifest.ts';
 import type { EntryPort } from '../templates/project-files.ts';
 import { DEVTOOL_ENTRY_MODULE, shutdownBlock } from '../templates/project-files.ts';
 
@@ -122,7 +124,9 @@ let devtoolRegistered = false;
 const devtoolProbe: IPlugin = {
   name: 'setu-devtool-probe',
   version: '0.0.0',
-  register() { devtoolRegistered = true; },
+  register() {
+    devtoolRegistered = true;
+  },
 };
 
 const app = await createApp(undefined, {
@@ -145,7 +149,7 @@ ${shutdownBlock('deno')}`;
 /** The module path of the generated development entry, relative to a project root. */
 export { DEVTOOL_ENTRY_MODULE };
 
-/** The raw and deno fmt renderings accepted for a CLI-owned workspace entry. */
+/** The formatted rendering and previous compact rendering of a CLI-owned entry. */
 export function devEntryVariants(devtoolPort: number, member = true): readonly string[] {
   const raw = renderDevEntry({
     devtoolPort,
@@ -154,8 +158,15 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
   return [
     raw,
     raw.replace(
-      '  register() { devtoolRegistered = true; },',
       '  register() {\n    devtoolRegistered = true;\n  },',
+      '  register() { devtoolRegistered = true; },',
     ),
   ];
+}
+
+/** Reads the port only from a complete, unedited CLI-owned entry. */
+export function devEntryPort(source: string, member = false): number | undefined {
+  const match = /\n {2}port: ([0-9]+), \/\/ IPv4 loopback only;/.exec(source);
+  const port = Number(match?.[1]);
+  return isUsablePort(port) && devEntryVariants(port, member).includes(source) ? port : undefined;
 }

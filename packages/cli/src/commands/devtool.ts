@@ -39,7 +39,7 @@ import {
 } from '../constants.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
-import { devEntryVariants, renderDevEntry } from '../devtool/dev-entry.ts';
+import { devEntryPort, devEntryVariants, renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
   deriveDevTask,
@@ -742,21 +742,26 @@ async function enableStandalone(
   const importRefusal = mergeImport(handle, DEVTOOL_IMPORT);
   if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);
 
-  const devtoolPort = requestedPort ?? await standaloneDevtoolPort(deps.portAvailable);
-  if (devtoolPort === undefined) {
-    return reportInapplicable(
-      deps,
-      'No bindable standalone devtool port remains between 4919 and 5019.',
-    );
-  }
   const entryPath = joinPath(dir, DEVTOOL_ENTRY_MODULE);
-  const entry = renderDevEntry({ devtoolPort });
   let existingEntry: string | undefined;
   try {
     existingEntry = new TextDecoder().decode(await deps.fs.readFile(entryPath));
   } catch {
     existingEntry = undefined;
   }
+  const recordedPort = existingEntry === undefined ? undefined : devEntryPort(existingEntry);
+  const devtoolPort = requestedPort ?? recordedPort ??
+    (existingEntry === undefined ? await standaloneDevtoolPort(deps.portAvailable) : undefined);
+  if (devtoolPort === undefined) {
+    return reportInapplicable(
+      deps,
+      existingEntry === undefined
+        ? 'No bindable standalone devtool port remains between 4919 and 5019.'
+        : `Refusing to overwrite ${DEVTOOL_ENTRY_MODULE}: it exists with different contents.` +
+          ' The file is yours once written — review it, remove it, and run this again.',
+    );
+  }
+  const entry = renderDevEntry({ devtoolPort });
   if (
     existingEntry !== undefined && !devEntryVariants(devtoolPort, false).includes(existingEntry)
   ) {
