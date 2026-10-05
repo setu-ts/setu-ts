@@ -1,5 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type { IFileSystem } from '@setu-ts/common';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runAdoptCommand } from '../../src/commands/adopt.ts';
@@ -272,6 +273,74 @@ describe('runAdoptCommand', () => {
     expect(h.fs.read(`/work/svc/apps/svc/${DISCOVERY_MODULE}`)).toContain(
       'export const SERVICE_PORT = 4000;',
     );
+  });
+
+  it('adopts through prototype filesystem methods with their original receiver', async () => {
+    class PrototypeFs implements IFileSystem {
+      constructor(private readonly backing: IFileSystem) {}
+      readFile(path: string) {
+        return this.backing.readFile(path);
+      }
+      writeFile(path: string, data: Uint8Array) {
+        return this.backing.writeFile(path, data);
+      }
+      stat(path: string) {
+        return this.backing.stat(path);
+      }
+      readdir(path: string) {
+        return this.backing.readdir(path);
+      }
+      mkdir(path: string, options?: { readonly recursive?: boolean }) {
+        return this.backing.mkdir(path, options);
+      }
+      rm(path: string, options?: { readonly recursive?: boolean }) {
+        return this.backing.rm(path, options);
+      }
+    }
+    const backing = createFakeFs(PROJECT);
+    const err = createRecorder();
+    expect(
+      await runAdoptCommand(parseArgs([]), {
+        fs: new PrototypeFs(backing),
+        cwd: '/work/svc',
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(0);
+    expect(err.text()).toBe('');
+    expect(backing.read('/work/svc/apps/svc/setu.config.ts')).toContain('createApp');
+    expect(backing.read('/work/svc/apps/svc/main.ts')).toContain('port: SERVICE_PORT');
+    expect(backing.has('/work/svc/main.ts')).toBe(false);
+  });
+
+  it('returns 130 and names incomplete recovery after nested batch rollback fails', async () => {
+    const backing = createFakeFs(PROJECT);
+    const controller = new AbortController();
+    const err = createRecorder();
+    const fs: IFileSystem = {
+      ...backing,
+      async writeFile(path, data) {
+        if (controller.signal.aborted && path === '/work/svc/setu.config.ts') {
+          throw new Error('restore denied');
+        }
+        await backing.writeFile(path, data);
+        if (path === `/work/svc/${WORKSPACE_MANIFEST}`) controller.abort();
+      },
+    };
+    expect(
+      await runAdoptCommand(parseArgs([]), {
+        fs,
+        cwd: '/work/svc',
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+      }),
+    ).toBe(130);
+    expect(err.text()).toContain('Interrupted; rollback was incomplete:');
+    expect(err.text()).toContain('/work/svc/setu.config.ts: restore denied');
+    expect(err.text()).not.toContain('files this run wrote were removed');
+    expect(backing.read('/work/svc/main.ts')).toBe(PROJECT['/work/svc/main.ts']);
+    expect(backing.has('/work/svc/setu.config.ts')).toBe(false);
   });
 
   // Without this the converted member binds 3000 while every sibling's map names

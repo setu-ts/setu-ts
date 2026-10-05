@@ -45,4 +45,20 @@ describe('readJsonManifest', () => {
     );
     expect(unterminated.kind).toBe('unreadable');
   });
+
+  it('preserves token boundaries around block comments', async () => {
+    for (const value of ['tru/*note*/e', '1/*note*/2', 'nu/*note*/ll', '1/*note*/e2']) {
+      const result = await readJsonManifest(
+        createFakeFs({ '/app/deno.jsonc': `{"value":${value}}` }),
+        '/app/deno.jsonc',
+      );
+      expect(result.kind).toBe('unreadable');
+    }
+    expect(
+      await readJsonManifest(
+        createFakeFs({ '/app/deno.jsonc': '{/*note*/"value"/*note*/:/*note*/true/*note*/}' }),
+        '/app/deno.jsonc',
+      ),
+    ).toEqual({ kind: 'ok', value: { value: true }, format: 'jsonc' });
+  });
 });

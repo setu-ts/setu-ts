@@ -39,6 +39,8 @@ function stripComments(source: string): string {
       continue;
     }
     if (current === '/' && next === '*') {
+      // Comments separate tokens; deleting them must not turn `tru/**/e` into `true`.
+      result += ' ';
       index += 2;
       let closed = false;
       while (index < source.length && !(source[index] === '*' && source[index + 1] === '/')) {

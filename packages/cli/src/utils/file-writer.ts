@@ -389,7 +389,12 @@ export async function withFileTransaction<T>(
     if (!files.has(path)) files.set(path, { path, before: await previousBytes(fs, path) });
   };
   const journaled: IFileSystem = {
-    ...fs,
+    // Adapters may implement their methods on a prototype and rely on `this`.
+    readFile: fs.readFile.bind(fs),
+    stat: fs.stat.bind(fs),
+    readdir: fs.readdir.bind(fs),
+    ...(fs.realPath === undefined ? {} : { realPath: fs.realPath.bind(fs) }),
+    ...(fs.readStream === undefined ? {} : { readStream: fs.readStream.bind(fs) }),
     async writeFile(path, data) {
       throwIfInterrupted(signal);
       await remember(path);
@@ -462,18 +467,18 @@ export async function withFileTransaction<T>(
         }
       });
     }
+    // A nested write batch rolls back through this abort-aware journal, so its
+    // aggregate can wrap the interruption even when outer recovery also fails.
+    const originalCause = cause instanceof AggregateError && cause.cause instanceof InterruptedError
+      ? cause.cause
+      : cause;
     if (failures.length > 0) {
       throw new AggregateError(
         [cause, ...failures],
         `${failureMessage(cause)}; rollback incomplete: ${failures.map(failureMessage).join('; ')}`,
-        { cause },
+        { cause: originalCause },
       );
     }
-    // An inner batch may have reported incomplete rollback while the signal
-    // was set. The enclosing journal has now recovered all its mutations.
-    if (cause instanceof AggregateError && cause.cause instanceof InterruptedError) {
-      throw cause.cause;
-    }
-    throw cause;
+    throw originalCause;
   }
 }

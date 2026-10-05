@@ -6,6 +6,37 @@ import { findExisting, withFileTransaction, writeFiles } from '../../src/utils/f
 import { InterruptedError } from '../../src/utils/interruption.ts';
 
 describe('relocation interruption journal', () => {
+  it('forwards optional filesystem capabilities with their original receiver', async () => {
+    const backing = createFakeFs({ '/project/a.ts': 'original' });
+    const fs = {
+      ...backing,
+      realPath(path: string): Promise<string> {
+        return Promise.resolve(this.read(path) === 'original' ? '/canonical/a.ts' : path);
+      },
+      async readStream(path: string, options?: { readonly start?: number; readonly end?: number }) {
+        const data = await this.readFile(path);
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(data.slice(options?.start, (options?.end ?? data.length - 1) + 1));
+            controller.close();
+          },
+        });
+      },
+    };
+    await withFileTransaction(fs, async (journal) => {
+      expect(await journal.realPath!('/project/a.ts')).toBe('/canonical/a.ts');
+      expect(
+        await new Response(await journal.readStream!('/project/a.ts', { start: 1, end: 3 })).text(),
+      )
+        .toBe('rig');
+    });
+    await withFileTransaction(backing, async (journal) => {
+      expect(journal.realPath).toBeUndefined();
+      expect(journal.readStream).toBeUndefined();
+      expect(await journal.readFile('/project/a.ts')).toEqual(new TextEncoder().encode('original'));
+    });
+  });
+
   it('restores only mutated files and leaves an unrelated concurrent write intact', async () => {
     const fs = createFakeFs({ '/project/a.ts': 'original' });
     const controller = new AbortController();

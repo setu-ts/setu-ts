@@ -63,6 +63,12 @@ function bareHarness(seed: Readonly<Record<string, string>> = {}): Harness {
 }
 
 describe('runGenerateCommand', () => {
+  it('writes nothing when a JSONC comment splits a manifest token', async () => {
+    const h = bareHarness({ '/app/deno.jsonc': '{"compilerOptions":{"strict":tru/*note*/e}}' });
+    expect(await h.run(['service', 'billing'])).toBe(1);
+    expect(h.err.text()).toContain('Cannot read /app/deno.jsonc:');
+    expect(h.fs.writes).toEqual([]);
+  });
   it('refuses to write outside a project', async () => {
     const h = bareHarness({ '/app/notes.txt': 'mine' });
     expect(await h.run(['service', 'billing'])).toBe(1);
