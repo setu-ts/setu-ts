@@ -7,6 +7,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 import { isMissingPath } from './filesystem-errors.ts';
 import { InterruptedError, throwIfInterrupted } from './interruption.ts';
+import { escapeName } from './names.ts';
 
 /**
  * One file a schematic asks the command layer to create.
@@ -198,7 +199,9 @@ export function interruptedRunRetryHint(
   const directory = wouldCreateDirectory.replace(/\/+$/, '');
   const prefix = `${directory}/`;
   if (!existing.every((path) => path.startsWith(prefix))) return undefined;
-  return `If an earlier run was interrupted before this change, delete ${directory} and run this again.`;
+  return `If an earlier run was interrupted before this change, delete ${
+    escapeName(directory)
+  } and run this again.`;
 }
 
 /** One attempted write, recorded before the filesystem can partially modify it. */

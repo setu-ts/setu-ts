@@ -325,7 +325,9 @@ export async function runAddCommand(
   const workspaceMarker = await findWorkspaceMarker(deps.fs, dir);
   if (workspaceMarker !== undefined) {
     deps.error(
-      `${dir} is a workspace root (${workspaceMarker}); framework packages are pinned in each ` +
+      `${escapeName(dir)} is a workspace root (${
+        escapeName(workspaceMarker)
+      }); framework packages are pinned in each ` +
         `member, because \`${PROGRAM_NAME} generate\` reads the member's manifest to decide what ` +
         `is installed.`,
     );
@@ -386,7 +388,9 @@ export async function runAddCommand(
       const read = await readJsonManifest(deps.fs, path);
       if (read.kind === 'ok' && read.format === 'jsonc') {
         deps.error(
-          `${path} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+          `${
+            escapeName(path)
+          } is JSONC (comments, trailing commas); rewriting it would discard them. ` +
             `Add this line under "${target.section}" yourself: ` +
             `"${specifier}": "${target.range}"`,
         );
@@ -538,7 +542,7 @@ async function printJsrRegistryNote(
   }
   log('');
   log('Note:');
-  log(`  Add this line to ${joinPath(dir, '.npmrc')}, or the install cannot`);
+  log(`  Add this line to ${escapeName(joinPath(dir, '.npmrc'))}, or the install cannot`);
   log('  find @jsr packages:');
   log(`    ${JSR_REGISTRY_LINE}`);
 }

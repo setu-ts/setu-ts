@@ -219,4 +219,73 @@ describe('project-controlled text stays on one output line', () => {
     });
     expectNoForgedLine(ports);
   });
+
+  it('generate app escapes manifest problems a committed manifest can carry (re-audit N3)', async () => {
+    const base = { version: 1, basePort: 5869, runtime: 'deno', transport: 'http', members: [] };
+    for (
+      const manifest of [
+        { ...base, transport: 'http\nsetu: FORGED' },
+        // The invalid-port refusal names the field, which embeds the member name.
+        { ...base, members: [{ name: FORGED, port: 70000 }] },
+      ]
+    ) {
+      const out = createRecorder();
+      await runAppCommand(parseArgs(['app', 'beta']), {
+        fs: createFakeFs({ '/ws/setu.workspace.json': JSON.stringify(manifest) }),
+        dir: '/ws',
+        log: out.sink,
+        error: out.sink,
+      });
+      expectNoForgedLine(out);
+    }
+    const absent = createRecorder();
+    await runAppCommand(parseArgs(['app', 'beta']), {
+      fs: createFakeFs(),
+      dir: '/w\nsetu: FORGED',
+      log: absent.sink,
+      error: absent.sink,
+    });
+    expectNoForgedLine(absent);
+  });
+
+  it('generate escapes a hostile artifact file name and its own output (re-audit N3)', async () => {
+    for (const dir of ['/p', '/p\nsetu: FORGED']) {
+      for (const argv of [['service', 'billing', '--dry-run'], ['service', 'billing']]) {
+        const out = createRecorder();
+        await runGenerateCommand(parseArgs(argv), {
+          fs: createFakeFs({
+            [`${dir}/deno.json`]: JSON.stringify({ imports: {} }),
+            [`${dir}/src/services/x\nsetu: FORGED.service.ts`]: 'export const nothing = 1;\n',
+          }),
+          cwd: dir,
+          now: () => 0,
+          log: out.sink,
+          error: out.sink,
+        });
+        expectNoForgedLine(out);
+      }
+    }
+  });
+
+  it('add escapes a hostile directory in its workspace-root and JSONC refusals (re-audit N3)', async () => {
+    const dir = '/p\nsetu: FORGED';
+    for (
+      const files of [
+        {
+          [`${dir}/deno.json`]: JSON.stringify({ workspace: ['./apps/*'] }),
+          [`${dir}/setu.workspace.json`]: '{}',
+        },
+        { [`${dir}/deno.jsonc`]: '{\n  // comment\n  "imports": {}\n}\n' },
+      ]
+    ) {
+      const out = createRecorder();
+      await runAddCommand(parseArgs(['cache']), {
+        fs: createFakeFs(files),
+        cwd: dir,
+        log: out.sink,
+        error: out.sink,
+      });
+      expectNoForgedLine(out);
+    }
+  });
 });
