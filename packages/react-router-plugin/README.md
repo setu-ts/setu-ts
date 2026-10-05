@@ -91,6 +91,17 @@ import type { ISession } from '@setu-ts/common';
 export const sessionContext = contextKeyFor<ISession | null>('app.session', null);
 ```
 
+## Refusals and the error responder
+
+React Router document requests and kernel API routes use different error protocols. A route
+middleware refusal is rendered by the route's React Router `ErrorBoundary` as HTML with the thrown
+status. The kernel `errorHandler({ format: 'rfc9457' })` continues to govern kernel routes and
+responder terminals; the plugin does not rewrite a route boundary's HTML into Problem Details.
+
+For document navigation, throw `redirect('/login')` when the user is anonymous or
+`data(..., { status: 403 })` when the page is forbidden. A fetch caller that requires the API error
+shape should call the corresponding kernel API route.
+
 ## Routing
 
 The catch-all is mounted on all seven verbs at `joinWildcard(basename)`. `flatRoutes` and file-based

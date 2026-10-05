@@ -10648,7 +10648,7 @@ merging beyond what the schema itself expresses.
   plugin covers it, and the part applications get wrong — cancelling the loop on shutdown — is an
   `AbortSignal` threading question that belongs with the runtime lifecycle, not here.
 - **Localization.** `IStringLocalizer` has no counterpart here and the framework has no i18n of any
-  kind. That is a real gap and a milestone in its own right, not an ergonomic.
+  kind. That is a real gap and a milestone in its own right, not an ergonomic — opened as M103.
 
 ---
 
@@ -12303,6 +12303,13 @@ failure — applied across seven packages, with one outage test per package driv
 **Regression note.** Only V8-1 regressed, and only through M99a's fix for V7-4. The rest are
 identical on `0.7.0` or concern `0.8.0` diagnostics surface.
 
+**Shipped.** One rule, `withDeadline` in `common`: every backend call is bounded and an expired
+bound is a recorded failure. Service Bus answers a retained outage at once; a saturated Drizzle pool
+(with `poolStats`) is `up` with `reachable: 'unknown'` and a pool timeout `degraded`; Vault requests
+are bounded and answer `503`; cache, queue and scheduler-lock Redis commands carry a
+`commandTimeoutMs`; a hung lock acquire is a counted `lockFailed`; an unread depth row is absent.
+Proven against a real paused Redis 7, PostgreSQL 16, Vault, and the Service Bus emulator.
+
 ---
 
 ### Milestone 101b: Message Transports That Fail Against the Real Broker
@@ -12329,15 +12336,41 @@ fails the same way. Encode the durable name, and add a real-NATS RPC case — `n
 drives no `request()`.
 
 **V8-26 — a Kafka subscription to a not-yet-existing topic kills boot** with a raw
-`KafkaJSProtocolError` naming no topic. kafkajs already retries `UNKNOWN_TOPIC_OR_PARTITION` (five
-retries, about nine seconds, the error is marked retriable) — what escaped was budget exhaustion on
-a broker with auto-create off, so no second retry loop: throw a named error naming the topic (the
-`JetStreamStreamError` precedent), forward the existing `retry` option, and document pre-creation.
+`KafkaJSProtocolError` naming no topic. ~~kafkajs already retries `UNKNOWN_TOPIC_OR_PARTITION`~~ —
+**corrected by measurement in M101b**: kafkajs 2.2.4's `brokerPool.refreshMetadata` retries ONLY
+`LEADER_NOT_AVAILABLE` and `bail()`s every other error, so an unknown topic rejects in milliseconds,
+unwrapped, whatever its `retriable` flag says. And on Kafka 4.0 (KRaft) with
+`auto.create.topics.enable=true` the metadata request that CREATES the topic answers exactly
+`UNKNOWN_TOPIC_OR_PARTITION` — the topic exists a moment later. So the run's failure was not budget
+exhaustion on a non-auto broker; it was the ordinary auto-creating broker, with nothing retrying.
+The fix is therefore a bounded broker-owned retry of that one error within the forwarded `retry`
+budget, then a named error naming the topic (the `JetStreamStreamError` precedent), and documented
+pre-creation for a broker that does not auto-create.
 
 **Why they are one letter.** Each is a broker-specific naming or startup rule — a subscription's
 topic binding, a durable-name grammar, topic leadership at subscribe — that a permissive fake
 accepts. All three need the same deliverable: a real-backend case per arm that exercises RPC and a
 second topic, not one topic at a time. None is a regression; V8-2's arm was never run on `0.7.0`.
+
+**Shipped.** Pub/Sub derives `<defaultQueue>.<topic ID>` and, on `ALREADY_EXISTS`, reads the
+existing subscription's topic through a new `getMetadata` facade member and refuses one bound
+elsewhere with `PubSubSubscriptionBoundElsewhereError`. NATS encodes each character the client
+refuses as `_` + two hex digits, records the raw queue as `setu.queue` consumer metadata, and
+refuses a collision — in process, and across processes on the server's
+`10148 consumer already exists` (the code the old `'consumer name already exists'`/`'duplicate'`
+match never saw) — with `NatsConsumerNameCollisionError`. Kafka retries an unknown topic within
+`KafkaOptions.retry` (now validated and forwarded), then throws `KafkaTopicUnavailableError`, and a
+`run()` rejection reaches the logger. Each arm's real suite drives two topics and RPC in one
+application: real NATS, Kafka 4.0 (CI's image), and the Pub/Sub emulator run twice against one
+instance. Every negative control reproduced the run's own signature —
+`invalid durable name - durable name cannot contain '.'`, a fresh-topic boot dying with the topic
+named, and with both Pub/Sub halves reverted a cross-topic misdelivery on run 1 and the second run's
+`RequestTimeoutError`. Two deployment facts surfaced and are documented rather than fixed: a NATS
+account admits only ONE stream owning `rr.inbox.>`, and the consumer metadata needs NATS 2.10+.
+Verification then found a failed-start leak (the close hook registered after the declared
+subscriptions), a fully-qualified Pub/Sub topic deriving an illegal default name, a cross-project
+binding the suffix match accepted, and a pre-existing Kafka shutdown leak (`stop()` without
+`disconnect()`, which hung every Kafka app after `app.stop()`) — all fixed on this branch.
 
 ---
 
@@ -12517,6 +12550,17 @@ member.
 diagnostics sources and `createObservedFetch` were hand-written (`X60-X65-FINDINGS.md`, generator
 gap #1). `devtool enable` or `setu add` must offer the option for installed plugins.
 
+**Second no-row deliverable — a browser gate for the full-stack scaffold.** Since M37c, hydration,
+static-asset delivery and client-side navigation of the full-stack example have been verified
+"manually against Chrome via Playwright" and never on a merge, because CI installs no browser. The
+gate is a Playwright suite run in its own CI job (a browser installed there and nowhere else, so the
+four ordinary gates stay browser-free) against BOTH `apps/full-stack` and a freshly scaffolded
+`--template full-stack` project, asserting the eleven M37c checks: SSR content, hydration, the eight
+referenced assets served by the framework's handler, a `<Form>` submit as a client-side transition,
+the `HttpOnly` session cookie, and the degraded real-POST login with JavaScript disabled. It is
+deliberately NOT in `ALLOW_SKIP`, so a runner without a browser fails rather than passes over it. It
+is also the instrument the `v0.9.0` client-brief run (M104) uses for its UI acceptance criteria.
+
 **Why they are one letter.** Every row is generated output missing its registration, its build path
 or its harness — the M60 "generated code that is wired" bar, applied to what has shipped since.
 
@@ -12541,6 +12585,381 @@ export-table rows.
 
 **Why they are one letter.** M95d's precedent: documentation that does not survive contact, carried
 on one branch with no behavioural risk — V8-30 is the one code change, and it is additive.
+
+---
+
+## Milestone 102: Mail Bodies Rendered Through the View Engine
+
+**Package:** `@setu-ts/mail-plugin`
+
+**Objective:** Let an application author an email body the way it authors a page — as a component
+the view engine renders — instead of a `{{ variable }}` string, without a second rendering mechanism
+and without the two plugins importing each other.
+
+**The gap is the shape of what M29 shipped, not a defect in it.** `TemplateEngine`
+(`mail-plugin/src/templates/template-engine.ts`) is 94 lines of named `{{ variable }}` substitution:
+no conditionals, no loops, no layouts, no components. That is the right size for a welcome mail and
+the wrong size for the invoice, the digest, and the order summary a client application sends on day
+two — every one of which an application today builds by concatenating strings by hand, which is
+exactly what M92 removed from HTTP responses. Meanwhile M92 shipped an `IViewEngine` under
+`CAPABILITIES.VIEW` (`common/src/services/view.ts:51`) whose `render` answers a primitive HTML
+string for a JSX component, an `html` tagged template, or a plain `(props) => string` function, with
+escaping owned by the rendering runtime. The capability exists; nothing lets a mail body reach it.
+
+**The bridge lives in `mail-plugin`, resolved as an OPTIONAL capability, and the committed `IMailer`
+contract does not change.** Three shapes were weighed. A free function in `view-plugin`
+(`sendRenderedMail(services, Component, props, envelope)`) would type-check props against the
+component, but it is the three lines an application already writes, bypasses the named-template
+registry, and would have no reader but its own test — the dead-surface rule. Shipping both would put
+two public surfaces on one capability. So `MailPluginOptions.templates` gains a **component arm**
+beside the string arm, `MailPlugin` declares `CAPABILITIES.VIEW` in `optionalDependencies` and
+resolves the engine once at `register()` — the `@Render` precedent
+(`decorator-plugin/src/plugin/decorator-plugin.ts:422-431`) — and
+`sendTemplate(name, envelope,
+data)` renders a component template through `IViewEngine.render` with
+`data` as its props. Every holder of `IMailer` that calls `sendTemplate` gets the new arm with no
+code change.
+
+**Deliverables.**
+
+- **`MailTemplate` becomes a union of two arms.** The string arm is the released
+  `{ html?: string; text?: string }`, unchanged. The component arm is
+  `{ view: Component<never>; text?: Component<never> }`: `view` renders the HTML body, `text` the
+  plain-text body, both through the SAME `IViewEngine.render`. A plain-string component is a valid
+  `Component` whose output the engine returns unchanged (M92 §3.15), so a text body is simply a
+  function returning a string. Each arm carries `never`-typed members forbidding the other arm's
+  keys, so a template mixing `view` with `html` is a compile error rather than a silent precedence
+  rule.
+- **A component template with no `CAPABILITIES.VIEW` provider fails at `register()`**, naming both
+  remedies (register `ViewPlugin` or any other provider of the token, or drop the component
+  templates) — never at the first `sendTemplate`, where the failure would be a request-time throw on
+  a path the application has already shipped. The check is per application, so one with only string
+  templates needs no view plugin at all. The `optionalDependencies` edge is what makes the
+  `register()`-time lookup a contract rather than plugin-order luck; `view-plugin` declares no
+  dependency and no `optionalDependencies`, so the edge cannot form a cycle (the M90i P1 class is
+  re-established from source, not inherited).
+- **`TemplateEngine.render` becomes asynchronous** (`Promise<RenderedTemplate>`), because
+  `IViewEngine.render` answers `string | Promise<string>` and an async component's render genuinely
+  is a promise. This is the milestone's one **breaking change** — a direct caller of the exported
+  class must `await` — and it is CHANGELOG'd with migration text and recorded in
+  `docs/upgrading.md`. `MailService.sendTemplate` already awaited the provider and now awaits the
+  render too; `send` is untouched.
+- **`data` is the props bag, passed verbatim, with no missing-key check.** The string arm throws on
+  a placeholder whose key is absent from `data`; a component reads whatever it reads, so no such
+  check is possible, and the docs say so rather than imply parity. The committed signature keeps
+  `data` as `Readonly<Record<string, unknown>>`, so a mistyped prop through `sendTemplate` is a
+  runtime defect; the compile-time route is to call `engine.render(Component, props)` and
+  `mailer.send` by hand, which the README shows beside the template form.
+- **Escaping is the rendering runtime's, exactly as for a page.** An `html` tagged template and a
+  JSX component escape their interpolations; a hand-written template literal does not, and the
+  caveat M92 states for `IViewEngine.render` applies unchanged to a mail body. The text body is used
+  verbatim, matching the string arm's raw text substitution.
+- **Docs.** The `mail-plugin` README gains the component arm in its options table and Templates
+  section with a compilable example; `PUBLIC_API.md`'s Mail section gains the arm, the `register()`
+  refusal, the async `render`, and the no-missing-key note; ARCHITECTURE's `@setu-ts/mail-plugin`
+  row gains the optional `view` dependency; CHANGELOG and `docs/upgrading.md` carry the breaking
+  change.
+
+**Not a deliverable.** No `common` change and no new capability token — `IMailer`, `IViewEngine`,
+`Component<P>`, `CAPABILITIES.MAIL` and `CAPABILITIES.VIEW` are all committed. No new package. No
+layout mechanism (a layout is a component taking `children`, M92's rule). No subject templating —
+`subject` stays verbatim from the envelope, as the committed `sendTemplate` signature requires. No
+CSS inlining, MJML, or `react-email` integration: each is reachable today as a component that
+returns a string, through the `'custom'` engine arm, or by rendering ahead of `send`, and none needs
+a seam this milestone does not already give it. A container-supplied engine
+(`@Injectable({ token: CAPABILITIES.VIEW })` under `DiPlugin`) is NOT consulted — `DecoratorPlugin`
+registers it into `ctx.container` during its own `register()`, which runs after this plugin's, so
+there is nothing to find at the time the lookup runs; the refusal message says to register a
+provider of the token in the registry.
+
+**Folded in at the maintainer's direction (pre-existing, found by verification).** The log and
+SendGrid providers now refuse a send while disconnected, as SMTP and SES already did — a send after
+`app.stop()` had reported success on the log provider and POSTed a real email through SendGrid. And
+the `@since` gate, which skipped every `@since 0.1.0` tag because that line shipped only as
+prereleases, now checks such a tag against the line's last prerelease; the 62 wrong tags it surfaced
+are corrected to the version the registry shows first shipping each symbol.
+
+## Milestone 103: Localization — Messages, Locale Resolution and a Shared Formatter
+
+**Package(s):** new `@setu-ts/localization-plugin`; `packages/common` (one token, one contract, one
+optional `IRequest` member); `packages/cache-plugin` (a default locale segment in the cache key)
+
+**Objective:** Give an application one place to keep its user-facing strings per locale, one way to
+learn which locale a request wants, and one formatter implementation shared by the server and the
+browser — so a server-rendered page, a React Router loader, a mail body and an SPA client all read
+the same catalogue and never disagree about how a message is spelled.
+
+**The gap is total, not partial.** `grep -rn "Accept-Language\|Intl\.\|locale" packages/*/src`
+returns no framework-owned localization of any kind; the M97 comparison recorded it as "a real gap
+and a milestone in its own right" and stopped there. Today a client application that must answer in
+two languages writes its own `Accept-Language` parser (which is harder than it looks — q-values,
+wildcards, `de-AT` → `de` fallback), its own message lookup, and, if it hydrates in a browser, a
+second formatter whose output drifts from the first. Every piece of that is the kind of code this
+framework exists to own once.
+
+**Backend capability, browser-safe formatter.** The plugin is a backend capability and reaches the
+browser through the three rendering paths the framework already has, each a different story:
+
+- **Server-rendered views** (`view-plugin`, `@Render`, M102 mail bodies) are fully covered with no
+  client code: the handler resolves `t()` for the request's locale and passes strings into component
+  props. The browser receives finished HTML. This is where most of the value lands cheapest.
+- **React Router full-stack** (SSR + hydration): a loader resolves the localizer through the
+  `servicesContext` M44 already populates (`react-router-plugin/src/handler/load-context.ts:28`),
+  and returns formatted strings or the locale plus its bundle as loader data. Client-side navigation
+  still calls loaders on the server, so resolution never moves to the browser. What DOES need client
+  code is formatting a runtime value after hydration, which needs the catalogue in the browser and a
+  formatter that runs there.
+- **SPA clients using `@setu-ts/sdk`**: the same need, without SSR — a resource route serving one
+  locale's catalogue and the client-side formatter.
+
+So the frontend half is one decision, and it is taken: **ship the formatter as a pure, zero-import
+subpath export** (`@setu-ts/localization-plugin/format`, the `@setu-ts/runtime/worker` subpath
+precedent at `runtime/deno.json:7`) that the server's `t()` and a browser both call. The alternative
+— letting each application write its own client formatter — is two implementations of one behaviour
+that pass every gate while drifting (the M70f/M56 class). `Intl.PluralRules`, `Intl.NumberFormat`
+and `Intl.DateTimeFormat` exist in every browser and on all four runtimes, so neither side needs an
+npm dependency.
+
+**Deliverables.**
+
+- **`common`: `CAPABILITIES.LOCALIZATION = 'localization'`** (passes the `createCapabilityToken`
+  grammar) **and `common/src/services/localization.ts`** carrying `ILocalizer` — `t(key, values?)`,
+  `locale`, `locales` (the supported set), `forLocale(tag)` returning a bound `ILocalizer` — plus
+  `LocalizationMessage` (a string, or a plural-form record keyed by the CLDR categories
+  `zero`/`one`/`two`/`few`/`many`/`other`) and `MessageCatalogue`. The contract lives in `common` so
+  a plugin that formats text (mail, notification, a future error-page renderer) can resolve it
+  without importing this plugin (§2.2).
+- **`IRequest.locale?: string` is a first-class request field, the `tenant` precedent exactly** — a
+  BCP 47 tag, optional, populated by this plugin's middleware, absent when the plugin is not
+  registered or nothing resolved, and read STRUCTURALLY by any plugin holding a request context. It
+  is a field rather than a `ctx.state` key because the second reader already exists: a state key
+  read by another package must live as a constant in `common` anyway (`common/src/state-keys.ts:5`),
+  so the "no widening" alternative was the same `common` change in a less discoverable place. It
+  gets the M71 one-implicit-write seal and a `replaceLocale(request, tag)` beside `replaceTenant`
+  (`common/src/request-identity.ts:161`), so two independent writers fail loudly and an intentional
+  override — a user preference loaded after authentication — has a named spelling. **Three things to
+  watch, none of them a reason not to do it:** (1) it is a flagged `common` widening, so it ships
+  with its `PUBLIC_API.md` entry and CHANGELOG line; additive and optional, so no implementor or
+  test double breaks. (2) The seal is per request — M87 measured the existing two-field seal at ~0.5
+  µs, and a third field adds to it; consistency with `user`/`tenant` is worth that, and the plan
+  records the measurement rather than assuming it. (3) A reader at a LOWER priority than 45 sees
+  `undefined` on every request — the same hazard `tenant` has at 40, with the same answer: the
+  priority table says who runs first, and the field's JSDoc says so.
+- **`cache-plugin` keys on the locale by default.** `cacheMiddleware` already composes a
+  length-prefixed tenant segment from `ctx.request.tenant?.id`
+  (`cache-plugin/src/utils/cache-key.ts:42`), which is how M70b closed X4-1; it gains a locale
+  segment from `ctx.request.locale` the same way, so one locale's cached body is never served to
+  another WITHOUT the application remembering a `vary` callback. Absent locale → empty segment →
+  every existing key is byte-identical (pinned by a test), so nothing released changes.
+- **Catalogues are validated at `register()`, never at the first request.** `supportedLocales` (at
+  least one; the first is the default) and a `catalogues` record, or an injected `IMessageSource`
+  that loads them once at `register()` — the inject-or-static shape, no filesystem convention, so
+  the plugin stays Workers-portable by construction (M92's rule for views). Every supported locale's
+  catalogue must carry every key of the default locale's, or `register()` refuses naming the locale
+  and the missing keys; `allowPartialCatalogues: true` downgrades that to a warning per locale and
+  the default locale's message fills the gap. A key absent EVERYWHERE answers the key itself and
+  warns ONCE per key through `ctx.logger` (read at call time — the M52b lesson), because a request
+  must never `500` over a missing translation; `onMissing: 'throw'` is the strict arm for tests.
+- **Locale resolution is middleware at priority 45** — after `TenantMiddleware` (40), so a tenant
+  default can participate, and before `LoggingMiddleware` (50), so a log line can carry the locale
+  (ARCHITECTURE §10 table gains the row). The chain is fixed and documented: an explicit query
+  parameter, a cookie, `Accept-Language` (RFC 9110 §12.5.4 — q-values, `*`, and BCP 47 fallback
+  `de-AT` → `de`), a `tenantLocale(tenant)` callback, then the default. Every candidate is matched
+  ONLY against `supportedLocales`; a tag is canonicalized with `Intl.getCanonicalLocales` inside a
+  guard, because that call THROWS `RangeError` on a malformed tag and the header is attacker-
+  controlled. The header parse is bounded — at most 16 language ranges, each at most 35 bytes (the
+  BCP 47 practical maximum) — so a 64 KiB `Accept-Language` costs one slice, not one parse per range
+  (the M90a `maxBodyBytes` class: a bound applied after the cost is paid is not a bound).
+- **Two response headers, both load-bearing for caches.** The middleware appends
+  `Vary: Accept-Language` (plus `Cookie` while the cookie source is enabled, a stated cost for CDN
+  cacheability that `cookie: false` removes) on every governed response, whether or not the header
+  won (through `appendHeader`, which never consults `#ended` — M48 verified this in source), and
+  every governed response carries `Content-Language` with the FINAL tag, written after `next()` so a
+  later `replaceLocale` wins. Without `Vary`, `cache-plugin`'s middleware and any CDN serve one
+  locale's body to another: `cacheMiddleware` keys on method, URL, tenant and a caller-supplied
+  `vary` (`cache-plugin/src/interfaces/index.ts:165`) — the locale segment above makes that
+  automatic, and a test through the REAL `cacheMiddleware` proves two locales produce two entries.
+- **The catalogue resource route is opt-in.** `exposeCatalogues: { basePath }` registers
+  `GET <basePath>/:locale` serving one SUPPORTED locale's catalogue (anything else is a 404, never a
+  lookup) under a configurable `Cache-Control`, so a browser can fetch exactly what the formatter
+  needs. Off by default: an application whose strings never leave the server exposes nothing.
+- **The formatter is one module with no imports.** `format(message, values, locale)` substitutes
+  `{name}` placeholders, selects a plural form through `Intl.PluralRules(locale).select(count)` when
+  the message is a plural record (the `count` value is required for one, refused by name when
+  absent), and renders a `number` through `Intl.NumberFormat` and a `Date` through
+  `Intl.DateTimeFormat` for the locale. **It escapes nothing** — a value is substituted as text and
+  the RENDERING runtime owns escaping, the same rule M92 states for `IViewEngine.render` and M102
+  restates for mail; the docs say so in three sites rather than imply the formatter is a sanitizer.
+  There is no ICU message grammar (`select`, nested plurals, offsets); that is named below as the
+  follow-on, and the plural record is chosen precisely because it needs no grammar to parse.
+- **A `localization` health indicator** reporting `up` with the supported locale count and the
+  catalogue source (`'static'` or the injected source's name); no `onClose` (stateless after
+  `register()`).
+- **Docs.** A package README whose fences compile under the fence-compiler gate, covering all three
+  rendering paths — a `view-plugin` page, a React Router loader reading `servicesContext`, and an
+  SDK client fetching the catalogue and calling the shared formatter; `PUBLIC_API.md` sections for
+  the `common` additions and the plugin; the ARCHITECTURE priority-table row and package row; a
+  `docs/localization.md` guide; CHANGELOG `Added`.
+
+**Scope rules, each the reason this can run beside the open M101 letters.** No `src` change in
+`react-router-plugin`, `full-stack-starter` or `cli` — the React Router half is loader code over a
+seam that exists, and wiring localization into the scaffolded full-stack template is **M101g's
+deliverable (or a later CLI milestone)**, since M101g owns that template and M101d is editing
+`react-router-plugin` underneath it. No change to `view-plugin`, `mail-plugin` or
+`decorator-plugin`: a component receives strings as props, and a `@Params(Custom('locale'))`
+resolver is the application's two lines, shown in the README rather than shipped as a decorator
+(`decorator-plugin` may not import this plugin). `cache-plugin`'s change is one segment in one
+function and a test, nothing on its options surface.
+
+**Not a deliverable, named rather than implied.** ICU MessageFormat syntax (`select`, nested plural,
+`offset`) — a follow-on once the catalogue shape has a consumer. Translation-file tooling
+(extraction of keys from source, `.po`/`.xliff` import) — a CLI concern, and the CLI is M101e–g's.
+Right-to-left layout, locale-aware sorting (`Intl.Collator` is one line an application can call),
+and database- stored translations beyond what an injected `IMessageSource` already permits.
+Per-tenant catalogue OVERRIDES (tenant A spells "cart" as "basket") — expressible today as a
+tenant-selected locale tag such as `en-GB-x-acme`, which BCP 47 permits, and documented as the
+pattern rather than built as a mechanism.
+
+**Verification bar.** Beyond the four gates, both publish gates (a new package: `release:verify`
+moves to 50 and the first-publish runbook step applies) and the per-file bar: a real kernel app
+drives the resolution chain end to end for all five sources with a negative control per source; the
+`Vary`/cache test produces two entries for two locales; a `deno info --json` gate refuses any
+runtime dependency outside the formatter subpath's own modules, and a subprocess with `Deno` deleted
+checks import independence (output parity across runtimes is NOT claimed: `Intl` data and time zones
+differ, so dates take an explicit `timeZone`); and the bounded header parse is driven with a 64 KiB
+header and a malformed tag, each observed refused without a throw escaping the middleware. The plan
+records a design security review (its §10), since `Accept-Language`, the cookie and the query
+parameter are all network input reaching `Intl`.
+
+**Shipped.** As planned, with four corrections recorded in the plan's §11: `@setu-ts/testing` joined
+the package list (its mock request dropped a seeded `locale`); the plugin declares
+`optionalDependencies: [CAPABILITIES.LOGGER]`, because a partial-catalogue warning is raised during
+`register()`; `localizerFor` negotiates an unsupported `request.locale` instead of throwing; and the
+React Router recipe hands the loader the request's localizer through `populateLoadContext` rather
+than a catalogue. One `packages/cli` data line was required despite the scope rule: the CLI's static
+table of plugin health-indicator names, which a root gate keeps complete. The security audit found
+the Cloudflare Cache API middleware keyed on a bare URL — which the platform matches with no request
+headers, so `Vary` could not separate locales — and its default key now carries the locale; five
+re-audit rounds then tightened that key until no two URL-and-locale pairs can share an entry,
+serving uncached the requests no key can separate. The catalogue route serves each locale overlaid
+on the default, so a browser falls back exactly as `t()` does. The third sealed `IRequest` field
+costs about 170 ns per request (measured against `develop`), inside the 1 µs threshold. Twenty
+negative controls were observed failing and reverted.
+
+## Milestone 104: The `v0.9.0` Client-Brief Run
+
+**Package(s):** none — an exercise block, run against the PUBLISHED `0.9.0` artifacts; its findings
+become `smoke/DEFECTS.md` rows (V9-…) and its defects become the `v0.9.0` closeout letters.
+
+**Objective:** measure the two things no exercise so far has measured — whether the framework is
+production-ready for a WHOLE product rather than for one capability at a time, and how fast one
+product gets delivered with it — by handing a fresh agent a fictional client's requirements document
+and a deadline, and judging the result the way the client would.
+
+**Why a brief rather than another catalogue block.** Every block since Part 5 probes one capability
+per exercise (`X2` the REST API, `X11` the generated SDK, `X60` the devtool) and asks "does this
+work?". The regression runs ask "did this stop working?". Neither asks the question a team adopting
+the framework asks: "can I ship my product with it, and how long does that take?" The per-capability
+blocks also cannot see the seams BETWEEN capabilities under one deadline — the moment a session
+cookie, a tenant resolver, an outside issuer and a cached page have to agree in one application,
+with the clock running. M103's audit found exactly one such seam (the Cloudflare cache key knew the
+locale and not the tenant) by accident, nine rounds in; a product build finds them on purpose.
+
+**The brief.** Written as a client writes one, never naming a plugin or a package:
+
+- **A product with a shape.** A multi-tenant B2B application with a browser UI and an API — tenants
+  and users, a billing or ordering domain with real state transitions, notifications by mail, an
+  audit trail, an admin area, and a public REST surface a partner integrates against.
+- **Functional requirements** as user stories with acceptance criteria the agent can run.
+- **Non-functional requirements** stated as a client states them: sign-in through the client's
+  identity provider, tenant data never crossing, personal data redacted from logs and exports, a
+  readiness story the client's platform team can probe, a stated availability target, localized UI
+  for two markets, and a named deploy target (Kubernetes) with a container image.
+- **A deadline** in wall-clock hours, and a definition of done: the acceptance criteria pass against
+  the deployed product, from a browser and from the partner's generated client.
+
+The brief itself lives with the register (`smoke/v0.9.0/CLIENT-BRIEF.md`, local-only like every
+brief before it); this section carries the mechanism, which is the durable half.
+
+**Method.**
+
+1. **Cold start against the published packages** (Part 6's rule): the agent has the brief, the
+   public docs and jsr.io, and nothing from this repository's history. It scaffolds with the CLI and
+   records the Part 14 table — what the CLI wrote versus what was hand-written, every document
+   consulted and whether it misled, every failed attempt, and wall-clock per step. That table is the
+   delivery-speed baseline; later runs of the same brief against later releases are compared against
+   it.
+2. **Build to the brief's definition of done**, not to a probe: the acceptance criteria are executed
+   against the deployed product — through a browser for the UI stories (the M101g browser harness is
+   the instrument, which is why that gate lands before this run), and through a client generated
+   from the product's own `/openapi.json` for the partner stories.
+3. **Then the usual passes against the finished product**: the outage block (each backend stopped
+   and restarted, `/ready` and the UI observed), a security pass by a second fresh agent following
+   `.roo/skills/security-audit/SKILL.md` against the product rather than a package, and the
+   regression rows the `0.9.0` release claims.
+4. **Record by shape.** Findings enter `smoke/DEFECTS.md` as V9-rows and are grouped by SHAPE into
+   closeout letters, the rule since M70. Three outcomes are recorded separately and never folded: a
+   defect in the framework, a gap in the documentation, and time the agent spent that the framework
+   could have saved (the generator-gap list Part 14 started).
+
+**What "production ready" and "fast" mean here, so the run can fail.** The run fails as a readiness
+measure if any acceptance criterion cannot be met without changing framework source, or if the
+outage or security pass finds a High. It fails as a speed measure if the hand-written share of the
+application's own wiring exceeds what Part 14 measured for X60 (~100 of 144 lines were the
+diagnostics options M101g's no-row deliverable removes), or if any single step in the table exceeds
+the brief's deadline budget for it. Those thresholds are the first ones written down; the next run
+revises them against this one's table.
+
+**Dependencies.** Runs AFTER the `v0.9.0` cut (the brief targets published artifacts) and after
+M101g (the browser harness it uses for UI acceptance). M101c and M101e–h closing first is preferred
+but not required — a row already owned by an open letter is recorded against that letter, not
+re-filed.
+
+**Deliverables**
+
+- [ ] `smoke/v0.9.0/CLIENT-BRIEF.md` — the brief, with acceptance criteria and the deadline budget
+- [ ] The product built cold against `0.9.0`, with the Part 14 delivery table completed
+- [ ] Acceptance criteria executed from a browser and from a generated partner client
+- [ ] Outage pass and a fresh-agent security pass against the deployed product
+- [ ] V9-rows in `smoke/DEFECTS.md`, grouped by shape into closeout letters, plus the generator-gap
+      list and the delivery-speed baseline recorded in `smoke/EXERCISES.md` Part 15
+
+---
+
+## Versioning Policy From `0.9.0`
+
+**Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
+…) and a **minor** is the exception that carries batched breaking changes. README's Versioning table
+has promised since `v0.2.0` that a `0.x` patch is safe to take unread and a minor carries the
+breaks; nothing enforced the first half, and every release after the label drop (`0.2.0` through
+`0.8.0`, and `0.9.0` itself) was a minor carrying them. The adopter-facing cost is that a caret pin
+stopped at every release.
+
+**What it demands of a milestone.** Reading how the previous minors' breaks arose, three habits
+change:
+
+- **A required member added to a published interface** ("breaking for implementors" — M73, M74, M91,
+  M95b each added one) ships as an OPTIONAL member, and the required form is deferred to a named
+  minor. The ambiguity an optional member introduces ("absent" versus "not offered", the M70k
+  `reportsExit?` reasoning) is weighed against the release cost, and the plan says which won.
+- **A behaviour correction that changes a default** (a refusal moving from a masked `500` to `501`,
+  a default redaction turning on) ships behind its previous behaviour for one release — a flag, or
+  AI_GUIDELINES §9.2's deprecate-then-remove — and flips in a minor.
+- **Breaking changes are batched.** Patches as the norm; a minor when enough deferred breaks have
+  accumulated to be worth every caret pin moving at once. The deferred list lives in the CHANGELOG's
+  `Unreleased` section as entries marked for the next minor, so it is read at every cut.
+
+**Two gates, so the rule does not live in a runbook.** `deno task check:plan` requires every plan's
+"Exported surface" section to carry `**Breaking for implementors:** none` or a statement naming the
+break AND the minor that carries it — the release is chosen when the break is designed.
+`release:verify` check 10 (`scripts/release-shape.ts`) classifies the bump from the previous `v*`
+tag and refuses a PATCH whose shipping section carries a `BREAKING` entry, and a MINOR whose section
+carries none unless `--allow-quiet-minor` says the quiet minor is deliberate. Both landed before
+`0.9.0` so the first patch release has them.
+
+**What this does not change.** `0.x` stays pre-1.0: the GitHub Release keeps its `prerelease` flag
+(the `0.*` arm — drop it at 1.0), and 1.0 stays gated on M40. A `hotfix/…` branch from `main` is a
+patch by construction and gains nothing new here.
 
 ---
 
@@ -12727,11 +13146,14 @@ on one branch with no behavioural risk — V8-30 is the one code change, and it 
 | 100d      | ✅     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |
 | 100e      | ✅     | auth-plugin — passkeys (WebAuthn) ([#391](https://github.com/setu-ts/setu-ts/pull/391))                                                                                                                                                       |
 | 100f      | ✅     | auth-plugin — SAML 2.0 service provider (PR #393)                                                                                                                                                                                             |
-| 101a      | ⬜     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
-| 101b      | ⬜     | messaging-plugin — message transports that fail against the real broker                                                                                                                                                                       |
+| 101a      | ✅     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
+| 101b      | ✅     | messaging-plugin — message transports that fail against the real broker (PR #404)                                                                                                                                                             |
 | 101c      | ✅     | session + multi-tenancy + database + auth + http-security — tenancy and identity features that do not compose                                                                                                                                 |
-| 101d      | ⬜     | sdk + telemetry + react-router + full-stack-starter — two sides of a service call that disagree                                                                                                                                               |
+| 101d      | ✅     | sdk + telemetry + react-router + full-stack-starter — two sides of a service call that disagree ([#403](https://github.com/setu-ts/setu-ts/pull/403))                                                                                         |
 | 101e      | ⬜     | cli — CLI commands that write where or when they should not                                                                                                                                                                                   |
 | 101f      | ⬜     | cli + common + diagnostics sources — the devtool lifecycle                                                                                                                                                                                    |
 | 101g      | ⬜     | cli + testing + full-stack template — scaffolds that are not wired                                                                                                                                                                            |
 | 101h      | ⬜     | common + docs — documentation, plus redaction setup that takes extra work                                                                                                                                                                     |
+| 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |
+| 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |
+| 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |

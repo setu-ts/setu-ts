@@ -1080,6 +1080,7 @@ graph TB
         react-router[react-router-plugin]
         static[static-plugin]
         view[view-plugin]
+        localization[localization-plugin]
         worker-pool[worker-pool-plugin]
     end
 
@@ -1175,6 +1176,8 @@ graph TB
     kernel --> static
     common --> view
     kernel --> view
+    common --> localization
+    kernel --> localization
     common --> worker-pool
     kernel --> worker-pool
     common --> rest-starter
@@ -1491,10 +1494,10 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | Aspect               | Detail                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Email sending                                                                                     |
-| **Responsibilities** | SMTP, SES, SendGrid providers; template engine                                                    |
-| **Dependencies**     | `common`, `kernel`                                                                                |
+| **Responsibilities** | SMTP, SES, SendGrid providers; template engine (`{{ variable }}` strings and view components)     |
+| **Dependencies**     | `common`, `kernel`; optionally the `view` capability (component templates, M102)                  |
 | **Public API**       | `MailPlugin()`; `IMailer`                                                                         |
-| **Extension Points** | Custom mail provider; custom template engine                                                      |
+| **Extension Points** | Custom mail provider; component templates through `CAPABILITIES.VIEW`                            |
 | **Rules**            | Email SDKs are optional (injected or lazy-loaded via `npm:` specifiers); log provider for testing |
 
 #### @setu-ts/notification-plugin
@@ -1690,6 +1693,17 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | **Extension Points** | The `'custom'` engine arm; `@Render(Component)` in `decorator-plugin` resolves the same token                                            |
 | **Rules**            | No filesystem lookup, so Workers-portable by construction; output is a buffered primitive string, never a stream; rendering is stateless, so no `onClose` |
 
+#### @setu-ts/localization-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Message catalogues per locale, request locale resolution, and a formatter shared with the browser                                       |
+| **Responsibilities** | Register an `ILocalizer` under `CAPABILITIES.LOCALIZATION`; validate catalogues at `register()`; resolve `IRequest.locale` in middleware at 45; write `Vary` and `Content-Language`; the opt-in catalogue route; `localization` health indicator |
+| **Dependencies**     | `common` only; no npm package — plurals, numbers and dates come from the platform's `Intl`                                              |
+| **Public API**       | `LocalizationPlugin()`; `localizerFor()`; `localeMiddleware()`; three error classes; the `/format` subpath (`format`, `negotiateLocale`, `parseAcceptLanguage`) |
+| **Extension Points** | `IMessageSource` for catalogues kept outside the code; `tenantLocale` for a per-tenant default; other plugins resolve `ILocalizer` from `common` |
+| **Rules**            | Client text only ever selects a CONFIGURED locale and never reaches a header; the `/format` subpath has no runtime dependency outside itself (enforced by a `deno info` gate); the formatter escapes nothing; `cache-plugin` keys on the resolved locale |
+
 #### @setu-ts/service-discovery-plugin
 
 | Aspect               | Detail                                                                                                                                  |
@@ -1870,6 +1884,7 @@ last outbound).
 | 20       | MetricsMiddleware         | Record metrics           |
 | 30       | TelemetryMiddleware       | Propagate trace context  |
 | 40       | TenantMiddleware          | Resolve request tenant   |
+| 45       | LocaleMiddleware          | Resolve request locale   |
 | 50       | LoggingMiddleware         | Log incoming request     |
 | 100      | RequestIdMiddleware       | Generate request ID      |
 | 150      | CorrelationIdMiddleware   | Propagate correlation ID |
@@ -1882,11 +1897,12 @@ last outbound).
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
 
-These priorities are conventional bands. Metrics (20), telemetry (30), tenant resolution (40), HTTP
-security (120–270), session (260/275), and authentication (300) are self-registered by their own
-plugins. The application (or a starter) adds the error handler and any application middleware.
-`AuthPluginOptions.middleware` can move authentication, exclude selected paths, or disable its
-global registration when the application attaches `authMiddleware()` per route.
+These priorities are conventional bands. Metrics (20), telemetry (30), tenant resolution (40),
+locale resolution (45), HTTP security (120–270), session (260/275), and authentication (300) are
+self-registered by their own plugins. The application (or a starter) adds the error handler and any
+application middleware. `AuthPluginOptions.middleware` can move authentication, exclude selected
+paths, or disable its global registration when the application attaches `authMiddleware()` per
+route.
 
 The session sits below authentication so an auth strategy can read it — `SessionStrategy`
 (configured by `AuthPluginOptions.session`) is that reader. It opens the cookie through

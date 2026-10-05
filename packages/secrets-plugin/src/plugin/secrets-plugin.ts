@@ -5,6 +5,7 @@
  * @module
  */
 import type {
+  DeadlineOptions,
   ILogger,
   IPlugin,
   IPluginContext,
@@ -46,6 +47,7 @@ const DEFAULT_PROVIDER: SecretsProviderType = 'env';
  * @param type - The provider backend id
  * @param options - Provider-specific options
  * @param env - The runtime environment map (for `EnvProvider`)
+ * @param timing - The runtime's timers, which bound each Vault request
  * @returns The provider adapter
  * @throws {Error} If the provider type is unsupported
  */
@@ -53,6 +55,7 @@ export function createProvider(
   type: SecretsProviderType,
   options: SecretsProviderOptions,
   env: Readonly<Record<string, string | undefined>>,
+  timing?: DeadlineOptions['timing'],
 ): SecretProvider {
   switch (type) {
     case 'aws-kms':
@@ -80,6 +83,8 @@ export function createProvider(
         token: options.token,
         mount: options.mount,
         http: options.http,
+        requestTimeoutMs: options.requestTimeoutMs,
+        ...(timing !== undefined && { timing }),
       });
     case 'env':
       return new EnvProvider(env, { prefix: options.prefix });
@@ -123,7 +128,12 @@ export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
-      const provider = createProvider(providerType, providerOptions, ctx.runtime.env);
+      const provider = createProvider(
+        providerType,
+        providerOptions,
+        ctx.runtime.env,
+        resolveProbeTiming(ctx.runtime),
+      );
       await provider.connect();
 
       const service = new SecretsService(provider, buildServiceOptions(providerOptions, ctx));

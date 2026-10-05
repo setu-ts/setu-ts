@@ -14,8 +14,40 @@ import { createTopicInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
-import { JetStreamStreamError, JetStreamUnavailableError } from '../errors.ts';
+import {
+  JetStreamStreamError,
+  JetStreamUnavailableError,
+  NatsConsumerNameCollisionError,
+} from '../errors.ts';
 import { describeError } from './describe-error.ts';
+import { toJetStreamConsumerName } from './nats-consumer-name.ts';
+
+/** Consumer metadata key recording the raw queue a consumer was created for (M101b). */
+const QUEUE_METADATA_KEY = 'setu.queue';
+
+/** JetStream API error code for "consumer already exists" (probed, nats-server 2.14). */
+const CONSUMER_EXISTS_ERR_CODE = 10148;
+
+/** The fields of a consumer's config that decide whether this queue may attach. */
+interface ConsumerIdentity {
+  readonly durable_name?: string;
+  readonly filter_subject?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Reports whether a `jsm.consumers.add` rejection means the name is already
+ * taken by a consumer whose config differs (the server is idempotent for an
+ * identical config, so this arm is reached only on a difference).
+ */
+function isConsumerExistsError(err: unknown): boolean {
+  const apiError = (err as { api_error?: { err_code?: unknown } } | null)?.api_error;
+  if (apiError?.err_code === CONSUMER_EXISTS_ERR_CODE) {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : '';
+  return message.includes('already exists') || message.includes('duplicate');
+}
 
 /**
  * Lazily load nats at runtime.
@@ -122,6 +154,8 @@ export class NatsBroker implements MessageBrokerAdapter {
   #js: unknown | null = null;
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
+  /** Consumer name → raw queue for this broker's own subscriptions (M101b collision refusal). */
+  #consumerQueues = new Map<string, string>();
   #rr: RequestReplyCore;
   #supervisor: ReconnectSupervisor;
   #probe: () => Promise<boolean>;
@@ -348,6 +382,7 @@ export class NatsBroker implements MessageBrokerAdapter {
       }
     }
     this.#activeConsumers.clear();
+    this.#consumerQueues.clear();
     if (this.#connection) {
       const realConn = this.#connection as unknown as { close(): void };
       realConn.close();
@@ -481,8 +516,11 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @typeParam T - The message payload type
    * @param topic - The subject to subscribe to
    * @param handler - The handler to invoke for each message
-   * @param options - Optional subscription options (queue for durable consumer name)
+   * @param options - Optional subscription options (queue for durable consumer name,
+   *   encoded through `toJetStreamConsumerName`)
    * @returns The subscription handle
+   * @throws {NatsConsumerNameCollisionError} When the queue's consumer name
+   *   already belongs to a different queue or topic
    * @since 0.1.0
    */
   async subscribe<T>(
@@ -495,7 +533,15 @@ export class NatsBroker implements MessageBrokerAdapter {
     }
 
     const subscriptionId = this.#runtime.uuid();
-    const consumerName = options?.queue ?? `messaging-${this.#runtime.uuid()}`;
+    // M101b (V8-6): the raw queue may contain characters the nats client
+    // refuses in a consumer name (the reply inbox's `rr.inbox.<uuid>` always
+    // does), so it is encoded; the SUBJECT filter below stays verbatim.
+    const queue = options?.queue ?? `messaging-${this.#runtime.uuid()}`;
+    const consumerName = toJetStreamConsumerName(queue);
+    const mappedQueue = this.#consumerQueues.get(consumerName);
+    if (mappedQueue !== undefined && mappedQueue !== queue) {
+      throw new NatsConsumerNameCollisionError(queue, mappedQueue, consumerName);
+    }
 
     const realJs = this.#js!;
 
@@ -511,27 +557,37 @@ export class NatsBroker implements MessageBrokerAdapter {
     const jsmTyped = jsm as unknown as {
       consumers: {
         add(stream: string, config: unknown): Promise<unknown>;
+        info(stream: string, name: string): Promise<{ config: ConsumerIdentity }>;
       };
     };
 
-    // Ensure durable consumer exists
+    // Ensure durable consumer exists. The raw queue is recorded as consumer
+    // metadata so a later process can tell which queue created the name.
     try {
       await jsmTyped.consumers.add(this.#streamName, {
         name: consumerName,
         filter_subject: topic,
         durable_name: consumerName,
         ack_policy: 'explicit',
+        metadata: { [QUEUE_METADATA_KEY]: queue },
       });
     } catch (err) {
-      const e = err as Error;
-      // Consumer may already exist - that's fine
-      if (
-        !e.message.includes('consumer name already exists') &&
-        !e.message.includes('duplicate')
-      ) {
-        throw e;
+      // The server answers an IDENTICAL config idempotently, so this arm is
+      // reached only when a consumer of this name exists with a different
+      // config — another queue, another topic, or one created before M101b
+      // without the metadata. Attaching blindly would let two independent
+      // queues (or two topics) split one consumer's deliveries.
+      if (!isConsumerExistsError(err)) {
+        throw err;
+      }
+      const { config } = await jsmTyped.consumers.info(this.#streamName, consumerName);
+      const recordedQueue = config.metadata?.[QUEUE_METADATA_KEY];
+      const owner = recordedQueue ?? config.durable_name ?? consumerName;
+      if (owner !== queue || config.filter_subject !== topic) {
+        throw new NatsConsumerNameCollisionError(queue, owner, consumerName);
       }
     }
+    this.#consumerQueues.set(consumerName, queue);
 
     const realJsTyped = realJs as unknown as {
       consumers: {

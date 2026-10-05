@@ -494,6 +494,62 @@ describe('real-backend CI wiring', () => {
     }
   });
 
+  it('pins the M101a paused-Redis bound suites, their guard, and their grants', async () => {
+    // Each suite `docker pause`s the CI Redis service to prove a command is
+    // bounded. They guard with `ignore:` on REDIS_URL, so a deleted file, a
+    // dropped guard, or a lost `docker`/Redis grant would turn the proof into a
+    // silent skip or a permission failure while the rest of CI stays green.
+    const suites = [
+      ['cache-plugin', 'REAL Redis cache outage (M101a V8-5)'],
+      ['queue-plugin', 'REAL paused Redis bounds queue.add (M101a V8-5)'],
+      ['scheduler-plugin', 'REAL Redis scheduler lock outage (M101a V8-24)'],
+    ] as const;
+    for (const [pkg, title] of suites) {
+      const source = await Deno.readTextFile(
+        `packages/${pkg}/test/integration/outage-real.test.ts`,
+      );
+      expect(source).toContain(title);
+      expect(source).toContain("Deno.env.get('REDIS_URL')");
+      expect(source).toContain('ignore: redisUrl === undefined');
+      expect(source).toContain("'pause'");
+      const config = await readJson<{
+        readonly test?: {
+          readonly permissions?: {
+            readonly net?: readonly string[];
+            readonly run?: readonly string[];
+          };
+        };
+      }>(`packages/${pkg}/deno.json`);
+      expect(config.test?.permissions?.run).toEqual(['docker']);
+      expect(config.test?.permissions?.net).toContain('127.0.0.1:6379');
+    }
+  });
+
+  it('keeps the M101a Vault and live-Postgres outage cells deliberately local-only (§3.8)', async () => {
+    // CI runs neither Vault nor PostgreSQL. Asserting that here — rather than
+    // leaving it implicit — keeps a later reader from mistaking the skipped
+    // cells for an oversight, and pins the `ignore:` guards so an unset
+    // variable is reported IGNORED, never passed by an early return.
+    for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
+      const text = await Deno.readTextFile(workflow);
+      expect(text).not.toContain('VAULT_ADDR');
+      expect(text).not.toContain('POSTGRES_URL');
+    }
+    const vault = await Deno.readTextFile(
+      'packages/secrets-plugin/test/integration/vault-outage-real.test.ts',
+    );
+    expect(vault).toContain('local-only');
+    expect(vault).toContain("Deno.env.get('VAULT_ADDR')");
+    expect(vault).toContain('ignore: skip');
+    // The header carries the command that runs it, since no doc does.
+    expect(vault).toContain('docker run');
+    const postgres = await Deno.readTextFile(
+      'packages/database-plugin/test/integration/real-drizzle-adapter.test.ts',
+    );
+    expect(postgres).toContain("Deno.env.get('POSTGRES_URL')");
+    expect(postgres).toContain('ignore: skipLivePg');
+  });
+
   it('starts the NATS and Kafka backends and declares their endpoints and grants (M90d §3.5)', async () => {
     // The M90d real-backend suites (nats-real / kafka-real) guard on NATS_URL
     // / KAFKA_BROKERS via `ignore:` — a skipped suite is visible, but a DROPPED

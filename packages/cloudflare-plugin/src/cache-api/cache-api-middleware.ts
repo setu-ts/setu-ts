@@ -53,7 +53,24 @@ export interface CacheApiMiddlewareOptions {
   readonly cache?: ICacheApi;
   /**
    * Builds the cache key from the request. Omitted uses the full request URL,
-   * which is what the platform's own cache keys on.
+   * which is what the platform's own cache keys on — plus, when the request
+   * carries a resolved `ctx.request.tenant` (the multi-tenancy plugin) and/or
+   * `ctx.request.locale` (the localization plugin), a `setu-cache-tenant` and
+   * a `setu-cache-locale` query parameter naming them, appended last. The key
+   * is a URL STRING, so the platform matches it with no request headers and
+   * `Vary` cannot separate entries here. The tenant and locale in the key are
+   * the ones present when this middleware runs, so it must run AFTER the
+   * tenant and locale middleware: a GLOBAL registration needs a higher
+   * priority number than theirs (40 and 45 by default, or the configured
+   * priorities); where either is applied per route instead, this one must be
+   * too, listed after it; and a `replaceTenant` or `replaceLocale` made inside
+   * the handler is not reflected — such a route must not be cached here. That
+   * priority is a LOWER bound only: a global registration still runs before
+   * passive authentication (300) and every guard, so a HIT is served without
+   * them — inherent to global response caching, as with `cache-plugin`. A
+   * response that depends on who is asking belongs behind a per-route
+   * registration listed after its guards. A custom `key` replaces all of this
+   * and must include the tenant and locale itself.
    */
   readonly key?: (ctx: IRequestContext) => string;
   /** Returning `true` skips the cache entirely for this request. */
@@ -73,6 +90,117 @@ export interface CacheApiMiddlewareOptions {
 }
 
 /**
+ * The query parameters the default key appends for a request that carries a
+ * resolved tenant and/or locale, in this order.
+ *
+ * Each is APPENDED to the request URL's own TEXT — never a re-serialized
+ * query, and never a `set`. `set` would delete a client-supplied copy from
+ * the key while the handler still sees it, letting any client fill the
+ * canonical entry with a response reflecting its own input (web cache
+ * poisoning); re-serializing the query would fold encoding variants together
+ * (`?p=%32` with `?p=2`, `/page?&&` with `/page`), letting a client choose the
+ * exact text a cached reflection of `ctx.request.url` carries. Concatenation
+ * keeps every byte the client sent, and since an encoded value can contain
+ * neither `&` nor `=`, the LAST occurrence of each name in a key always names
+ * the request's own value: two different (URL, tenant, locale) triples never
+ * share a key.
+ */
+const KEY_DISCRIMINATORS: readonly {
+  readonly name: string;
+  readonly read: (ctx: IRequestContext) => string | undefined;
+}[] = [
+  { name: 'setu-cache-tenant', read: (ctx) => ctx.request.tenant?.id },
+  { name: 'setu-cache-locale', read: (ctx) => ctx.request.locale },
+];
+
+/**
+ * The default cache key: the request URL, carrying the resolved tenant and
+ * locale when there are any (M103 added the locale; the tenant followed from
+ * its audit). Without either the key is the URL unchanged, so an application
+ * without multi-tenancy or localization keeps byte-identical keys.
+ *
+ * Answers `undefined` — the request is then served uncached — whenever no
+ * key can keep that request apart from another:
+ *
+ * - **the URL text is not in its parsed form.** Workers and Bun normalize the
+ *   URL before the handler sees it, but Deno (and Node, for some targets)
+ *   hand the handler the request target as sent — `/a/./b`, `/a\b`, a raw
+ *   `"` or `<` in the query, an upper-case host — while the Cache API parses
+ *   a key before it matches, so such a request would fill the entry its
+ *   normalized sibling is served from with a response reflecting its own
+ *   text. Comparing the text with its own serialization costs one URL parse.
+ * - **the URL carries a fragment.** Deno, Node and Bun deliver one to the
+ *   handler when a client sends it, while the Cache API ignores fragments when
+ *   it matches, so `/page#x` would fill `/page`'s entry. A browser never
+ *   sends a fragment, so nothing legitimate is lost; workerd strips it before
+ *   the handler.
+ * - **a tenant id or locale is not well-formed UTF-16** (a lone surrogate),
+ *   which `encodeURIComponent` cannot encode. The two plugins only ever
+ *   resolve ids and tags they were configured with; this guards a value an
+ *   application sets through `replaceTenant` or `replaceLocale`.
+ * - **the request lacks a tenant (or locale), but its URL already contains
+ *   `setu-cache-tenant=` (or `setu-cache-locale=`).** Its key would be the
+ *   URL itself, which is exactly a tenanted request's key
+ *   (`/page?setu-cache-tenant=acme` is `/page` for `acme`). Every key for a
+ *   request carrying the value contains the name, so a key for one that does
+ *   not cannot match it. This arises only where an application resolves the
+ *   tenant or locale on some requests and not others; both plugins' own
+ *   middleware set theirs on every request they govern.
+ *
+ * With those excluded, a key is the parsed URL's own text plus, in a fixed
+ * order, the encoded value of each discriminator the request carries — so the
+ * names present in a key are exactly the ones the request resolved, and two
+ * keys match only when the URL, the tenant and the locale all do.
+ */
+function defaultKey(ctx: IRequestContext): string | undefined {
+  const url = ctx.request.url;
+  if (url.includes('#') || !isParsedForm(url)) {
+    return undefined;
+  }
+  let key = url;
+  for (const { name, read } of KEY_DISCRIMINATORS) {
+    const value = read(ctx);
+    if (value === undefined) {
+      if (url.includes(`${name}=`)) {
+        return undefined;
+      }
+      continue;
+    }
+    const encoded = encodeValue(value);
+    if (encoded === undefined) {
+      return undefined;
+    }
+    key += `${key.includes('?') ? '&' : '?'}${name}=${encoded}`;
+  }
+  return key;
+}
+
+/**
+ * Percent-encodes a discriminator value for the key, or `undefined` when it is
+ * not well-formed UTF-16 (`encodeURIComponent` throws `URIError` on a lone
+ * surrogate). A `try` rather than `String.prototype.isWellFormed`, which Node
+ * 18 lacks.
+ */
+function encodeValue(value: string): string | undefined {
+  try {
+    return encodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reports whether `url` is exactly its own WHATWG serialization. */
+function isParsedForm(url: string): boolean {
+  // `new URL` + `try` rather than `URL.parse`, which is newer than some of the
+  // runtimes this package supports.
+  try {
+    return new URL(url).href === url;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Caches responses in the Cloudflare edge cache.
  *
  * On a hit the cached response is replayed and the handler chain is **not**
@@ -82,7 +210,15 @@ export interface CacheApiMiddlewareOptions {
  *
  * Skipped without error, each reported as `X-Cache-Api: BYPASS` or `MISS`:
  *
+ * - the request is not a `GET` — the key is a URL string the Cache API resolves
+ *   as a GET, so a `POST` could otherwise be answered from a cached `GET`;
  * - `bypass` returned `true`;
+ * - with the default key, the URL is not in its parsed form, carries a
+ *   fragment, or a tenant id or locale is not well-formed, or the request
+ *   lacks a tenant or locale while its URL contains `setu-cache-tenant=` or
+ *   `setu-cache-locale=` — in each case no key could keep the request apart
+ *   from another (this last one applies to an application without either
+ *   plugin too);
  * - no cache handle is available (not running on Cloudflare Workers);
  * - the response is a live stream — teeing it would double the memory the
  *   stream exists to avoid and change its flush timing (the M42 guard
@@ -101,7 +237,8 @@ export interface CacheApiMiddlewareOptions {
  *
  * @example
  * ```typescript
- * app.router.get('/catalog', listCatalog, {
+ * app.router.get('/catalog', {
+ *   handler: listCatalog,
  *   middleware: [cacheApiMiddleware({ ttlSeconds: 300 })],
  * });
  * ```
@@ -136,7 +273,12 @@ export function cacheApiMiddleware(options?: CacheApiMiddlewareOptions): Middlew
       return;
     }
 
-    const key = keyFn !== undefined ? keyFn(ctx) : ctx.request.url;
+    const key = keyFn !== undefined ? keyFn(ctx) : defaultKey(ctx);
+    if (key === undefined) {
+      await next();
+      ctx.response.header(STATUS_HEADER, 'BYPASS');
+      return;
+    }
 
     const hit = await cache.match(key);
     if (hit !== undefined) {

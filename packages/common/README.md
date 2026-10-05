@@ -123,6 +123,7 @@ package fits the plugin architecture.
 | `createPathMatcher`                  | function  |
 | `createRealtimeObservationCollector` | function  |
 | `createRedactionService`             | function  |
+| `deadlineRangeError`                 | function  |
 | `decodeCursor`                       | function  |
 | `decodeFrameData`                    | function  |
 | `encodeCursor`                       | function  |
@@ -152,6 +153,7 @@ package fits the plugin architecture.
 | `parseFormBody`                      | function  |
 | `parseJsonBody`                      | function  |
 | `parseTraceparentToContext`          | function  |
+| `replaceLocale`                      | function  |
 | `replacePrincipal`                   | function  |
 | `replaceTenant`                      | function  |
 | `resolveKeysetSort`                  | function  |
@@ -174,6 +176,7 @@ package fits the plugin architecture.
 | `upgradeIntentOf`                    | function  |
 | `validatedStateKey`                  | function  |
 | `validationMetadataOf`               | function  |
+| `withDeadline`                       | function  |
 | `withHttpStatusHint`                 | function  |
 | `withResponseMetadata`               | function  |
 | `withSecurityMetadata`               | function  |
@@ -220,6 +223,7 @@ package fits the plugin architecture.
 | `CqrsQuery`                          | interface |
 | `CqrsRequest`                        | interface |
 | `CursorPayload`                      | interface |
+| `DeadlineOptions`                    | interface |
 | `DiagnosticsBatch`                   | interface |
 | `DiagnosticsEdge`                    | interface |
 | `DiagnosticsEvent`                   | interface |
@@ -296,6 +300,7 @@ package fits the plugin architecture.
 | `ILifecycleApi`                      | interface |
 | `ILocalDiagnosticsListener`          | interface |
 | `ILocalDiagnosticsListenerFactory`   | interface |
+| `ILocalizer`                         | interface |
 | `ILogger`                            | interface |
 | `IMailer`                            | interface |
 | `IMessageBroker`                     | interface |
@@ -379,6 +384,7 @@ package fits the plugin architecture.
 | `PageResult`                         | interface |
 | `PendingSignIn`                      | interface |
 | `PickOptions`                        | interface |
+| `PluralForms`                        | interface |
 | `ProbeTiming`                        | interface |
 | `ProcessOptions`                     | interface |
 | `ProviderOptions`                    | interface |
@@ -438,6 +444,7 @@ package fits the plugin architecture.
 | `SubscribeOptions`                   | interface |
 | `TaskPoolStats`                      | interface |
 | `TelemetryContext`                   | interface |
+| `TraceparentSource`                  | interface |
 | `TraceDiagnosticsBatch`              | interface |
 | `TraceLinkRelationship`              | interface |
 | `TraceObservation`                   | interface |
@@ -509,8 +516,10 @@ package fits the plugin architecture.
 | `JsonValue`                          | type      |
 | `LifecyclePhase`                     | type      |
 | `LoadBalanceStrategy`                | type      |
+| `LocalizationMessage`                | type      |
 | `LogLevel`                           | type      |
 | `LogMetadata`                        | type      |
+| `MessageCatalogue`                   | type      |
 | `MessageHandler`                     | type      |
 | `MetricType`                         | type      |
 | `MiddlewareFunction`                 | type      |

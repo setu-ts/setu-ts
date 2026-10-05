@@ -30,8 +30,18 @@ import type {
   IngressKind,
 } from '../../src/index.ts';
 import type { WebSocketGuardDecision, WebSocketUpgradeGuard } from '../../src/index.ts';
+import type { TraceparentSource } from '../../src/index.ts';
 
 describe('@setu-ts/common barrel — registry factory arm', () => {
+  it('exports TraceparentSource as a type', () => {
+    const source: TraceparentSource = {
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: '01',
+    };
+    expect(source.traceFlags).toBe('01');
+  });
+
   it('exports resolveRegistryEntry as a function', () => {
     expect(common.resolveRegistryEntry).toBeDefined();
     expect(typeof common.resolveRegistryEntry).toBe('function');
@@ -503,5 +513,50 @@ describe('@setu-ts/common barrel — M101c identity composition', () => {
       delete: async () => false,
     };
     expect(store.findAll('a', 'User')).resolves.toEqual([]);
+  });
+});
+
+describe('@setu-ts/common barrel — bounded backend call (M101a)', () => {
+  it('exports withDeadline and deadlineRangeError as functions', () => {
+    expect(typeof common.withDeadline).toBe('function');
+    expect(typeof common.deadlineRangeError).toBe('function');
+  });
+
+  it('exports the DeadlineOptions type (declared against the barrel)', async () => {
+    const options: common.DeadlineOptions = {
+      timeoutMs: 0,
+      onTimeout: () => new Error('never'),
+    };
+
+    await expect(common.withDeadline(() => Promise.resolve(7), options)).resolves.toBe(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M103 — the localization contract
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M103 localization contract', () => {
+  it('exposes CAPABILITIES.LOCALIZATION, resolved through the localization plugin', () => {
+    expect(common.CAPABILITIES.LOCALIZATION).toBe('localization');
+  });
+
+  it('exports replaceLocale beside the other two replacers', () => {
+    expect(typeof common.replaceLocale).toBe('function');
+  });
+
+  it('exports the four localization types (declared against the barrel)', () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class).
+    const plural: common.PluralForms = { one: '{count} item', other: '{count} items' };
+    const message: common.LocalizationMessage = plural;
+    const catalogue: common.MessageCatalogue = { items: message, title: 'Cart' };
+    const localizer: common.ILocalizer = {
+      locale: 'en',
+      locales: ['en'],
+      t: (key) => String(catalogue[key]),
+      forLocale: () => localizer,
+    };
+    expect(localizer.t('title')).toBe('Cart');
+    expect(localizer.forLocale('en')).toBe(localizer);
   });
 });

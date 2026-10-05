@@ -1,6 +1,6 @@
 # Milestone 101d — two sides of a service call that disagree
 
-> **Status:** Planning. Branch: `feat/m101d-call-sides-agree`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m101d-call-sides-agree`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
@@ -69,7 +69,7 @@ the React Router boundary.
 | C1 | `ROADMAP.md` M101d says "add the interceptor to the SDK and accept the type both producers emit" as if one change; the SDK cannot import the codec at runtime (type-only pin, §1), so the two halves are separate: a `common` type widening for server-side callers, and an SDK interceptor that formats the header itself            | Both ship; the duplication of the W3C format inside the SDK is deliberate and recorded in the interceptor's JSDoc (the M98n precedent), not a §11.1 miss | Reported in the hand-back (no `ROADMAP.md` edit here); sdk README "Interceptors" gains the trace section; `PUBLIC_API.md` SDK section gains `createTraceContextInterceptor` |
 | C2 | `ROADMAP.md` M101d for V8-11 offers "route the refusal through `respondWithError`, or document the boundary"; the responder writes through a full `IResponse` (§1), and React Router renders a thrown non-redirect `Response` into its error boundary for a document request, so the first arm is not reachable from route middleware | Document the boundary, and pin it by test so a later bridge change is deliberate (§3.2)                                                                  | react-router README `## Refusals and the error responder`; `PUBLIC_API.md:3915` section note; the scaffold's `require-user.server.ts` header comment                        |
 | C3 | `PUBLIC_API.md` SDK section documents `retry` without stating what a `Retry-After` longer than the policy tolerates does; the code sleeps for it (`retry-strategy.ts:111-113`)                                                                                                                                                        | The cap rule in §3.4 becomes the documented behaviour                                                                                                    | `PUBLIC_API.md` SDK `retry` row + a `maxRetryAfterMs` row; sdk README "Retry"                                                                                               |
-| C4 | sdk README "Generated names and shapes" and `PUBLIC_API.md` codegen text describe every non-`2xx` response as an error arm; a `3xx` can never be observed through the client (`fetch` follows it)                                                                                                                                     | `3xx` is neither an error arm nor a success arm (§3.3)                                                                                                   | sdk README codegen section + `PUBLIC_API.md` codegen paragraph                                                                                                              |
+| C4 | sdk README "Generated names and shapes" and `PUBLIC_API.md` codegen text describe every non-`2xx` response as an error arm; Fetch follows only `301`, `302`, `303`, `307`, and `308`, while responses such as `304` remain observable                                                                                                 | auto-follow redirects are not error arms; observable `3xx` responses remain error arms (§3.3)                                                            | sdk README codegen section + `PUBLIC_API.md` codegen paragraph                                                                                                              |
 | C5 | full-stack-starter README "Composing from configuration" and `PUBLIC_API.md:8808-8814` show `createFullStackAppFromConfig` returning the app alone, with no way to read the snapshot afterwards                                                                                                                                       | The snapshot is exposed through an additive accessor (§3.5); the return type is unchanged                                                                | both sections gain the accessor and a post-factory example                                                                                                                  |
 
 ## 3. Design decisions
@@ -145,26 +145,27 @@ the React Router boundary.
   The CLI comment is asserted by the existing template content test
   (`packages/cli/test/unit/templates/full-stack-app-files.test.ts`, extended with the sentence).
 
-### 3.3 V8-27 — `3xx` is neither an error arm nor a success arm
+### 3.3 V8-27 — auto-follow redirects are neither error arms nor typed successes
 
-- **Decision:** `getErrorArms` skips `300–399` alongside `2xx`; `getSuccessTypes` is unchanged for
-  `2xx`; an operation whose documented responses are ONLY `3xx` (no `2xx` schema at all) renders its
-  success type as `unknown`, not `void` — `fetch` follows the redirect and the body the client
-  receives is the follow target's, which the document does not describe. A generated-file header
-  comment states that redirects are followed by the transport and are not observable through the
-  client.
+- **Decision:** `getErrorArms` skips the exact statuses Fetch auto-follows (`301`, `302`, `303`,
+  `307`, and `308`) alongside `2xx`; other concrete `3xx` responses, including `304`, remain error
+  arms. An operation declaring an auto-follow status or the OpenAPI `3XX` range renders its success
+  type as `unknown`, even beside a declared `2xx` schema — the body the client receives may be the
+  follow target's, which the document does not describe. A generated-file header comment states that
+  followed target bodies are not described and are typed as `unknown`.
 - **Why:** an arm that can never fire is a lie the type system tells; `void` for a body that is the
   follow target's data is a second lie. `unknown` is the honest type for "something, not described
   here". Typing the follow TARGET was rejected: the document does not name it (a `Location` header
   is a runtime value) and the SDK has no redirect-tracking hook.
 - **Test home:** `packages/sdk/test/unit/openapi-codegen.test.ts` (a `303`-only operation emits no
-  `Error` union, no guard, and `unknown`; a `200`+`303` operation emits the `200` type and no `303`
-  arm) and `packages/sdk/test/e2e/generated-client.test.ts` (a real kernel route answering `303`
-  with `Location` to a `200` JSON route: the generated call resolves `200` with the target's body
-  and the guard symbol does not exist). A third committed codegen fixture carrying a `303` operation
-  joins the two existing ones so `deno task check` type-checks the emitted shape permanently (the
-  M70m X11-9 precedent). **Negative control:** with the skip reverted the fixture gains an
-  `Error303` arm and the e2e's absence assertion fails.
+  `Error` union, no guard, and `unknown`; a `200`+`303` operation emits `unknown` and no `303` arm;
+  a `304` remains an error arm; a `3XX` range emits `unknown`) and
+  `packages/sdk/test/e2e/generated-client.test.ts` (a real kernel route answering `303` with
+  `Location` to a `200` JSON route: the generated call resolves `200` with the target's body and the
+  guard symbol does not exist). A third committed codegen fixture carrying a `303` operation joins
+  the two existing ones so `deno task check` type-checks the emitted shape permanently (the M70m
+  X11-9 precedent). **Negative control:** with the skip reverted the fixture gains an `Error303` arm
+  and the e2e's absence assertion fails.
 
 ### 3.4 V8-28 — `Retry-After` is capped by the retry policy, and past the cap the error surfaces at once
 
@@ -175,8 +176,11 @@ the React Router boundary.
   for `'fixed'`. When a parsed `Retry-After` exceeds the cap the request is NOT retried: the
   `HttpClientError` carrying the `429`/`503` is thrown immediately, headers intact, so the caller
   sees the server's hint. A `Retry-After` within the cap replaces the computed backoff as today.
-  `maxRetryAfterMs` is validated at construction: a non-finite, negative or `NaN` value throws (the
-  M90a `NaN`-fails-open rule).
+  Every number used by that decision is validated at construction: `limit` must be a positive safe
+  integer, and `delay`, the largest derived exponential delay, and `maxRetryAfterMs` (when present)
+  must be finite, non-negative, and at most `2_147_483_647` ms — the portable JavaScript timer
+  maximum. Runtime strings, `NaN`, infinities, and timer-overflowing values throw without echoing
+  the supplied value (the M90a `NaN`-fails-open rule).
 - **Why:** sleeping a minute inside a two-attempt policy is the client ignoring its own policy.
   Clamping the sleep DOWN to the cap was rejected: it would retry before the server said to, which
   is the one thing `Retry-After` exists to prevent; surfacing the error lets the caller decide.
@@ -243,9 +247,10 @@ must stay green with the new interceptor module in the graph.
 | `packages/common/src/index.ts`                                                                                                                              | barrel: `TraceparentSource` type                                                                                                                                                                                                                                                                                                                                        |
 | `packages/sdk/src/trace/trace-context-interceptor.ts`                                                                                                       | `createTraceContextInterceptor`                                                                                                                                                                                                                                                                                                                                         |
 | `packages/sdk/src/http/contracts.ts`                                                                                                                        | `ClientRetryPolicy`; `ClientOptions.retry` retyped                                                                                                                                                                                                                                                                                                                      |
-| `packages/sdk/src/http/http-client.ts`                                                                                                                      | validates `maxRetryAfterMs` at construction; passes the cap to `runWithRetry`                                                                                                                                                                                                                                                                                           |
+| `packages/sdk/src/http/http-client.ts`                                                                                                                      | passes the validated retry policy to `runWithRetry`                                                                                                                                                                                                                                                                                                                     |
+| `packages/sdk/src/sdk.ts`                                                                                                                                   | validates retry count plus the finite and timer-safe bounds for delay, derived exponential maximum, and `maxRetryAfterMs` at construction                                                                                                                                                                                                                               |
 | `packages/sdk/src/retry/retry-strategy.ts`                                                                                                                  | cap computation; past-cap throw                                                                                                                                                                                                                                                                                                                                         |
-| `packages/sdk/src/codegen/openapi-codegen.ts`                                                                                                               | `3xx` skipped in `getErrorArms`; `unknown` for a `3xx`-only operation; header comment                                                                                                                                                                                                                                                                                   |
+| `packages/sdk/src/codegen/openapi-codegen.ts`                                                                                                               | auto-follow `3xx` statuses skipped in `getErrorArms`; observable `3xx` retained; `unknown` for any redirect-capable operation; header comment                                                                                                                                                                                                                           |
 | `packages/sdk/src/index.ts`                                                                                                                                 | barrel: interceptor + `ClientRetryPolicy`                                                                                                                                                                                                                                                                                                                               |
 | `packages/sdk/test/fixtures/redirect-client.ts` (committed generated output)                                                                                | the third codegen fixture, type-checked by `deno task check`                                                                                                                                                                                                                                                                                                            |
 | `packages/starters/full-stack-starter/src/from-config.ts`                                                                                                   | `WeakMap` registration; `fullStackConfigOf`; `FullStackConfigUnavailableError`                                                                                                                                                                                                                                                                                          |
@@ -266,6 +271,7 @@ must stay green with the new interceptor module in the graph.
 | `packages/sdk/test/e2e/trace-propagation.test.ts` (new)                                     | `trace/trace-context-interceptor.ts`, `http/http-client.ts` | §3.1 kernel echo; without the interceptor the server reads no header                                                      |
 | `packages/sdk/test/unit/retry-strategy.test.ts` (extended)                                  | `retry/retry-strategy.ts`                                   | §3.4 cases against `runWithRetry(fn, policy, method, timing, signal)` with the fake `IClientTiming` recording sleeps      |
 | `packages/sdk/test/unit/http-client.test.ts` (extended)                                     | `http/http-client.ts`, `http/contracts.ts`                  | `maxRetryAfterMs: NaN`/`-1` throws at `createClient`; a valid cap reaches the strategy                                    |
+| `packages/sdk/test/unit/sdk.test.ts` (extended)                                             | `sdk.ts`                                                    | hostile retry counts/delays, exponential overflow, and timer overflow throw; valid zero/fractional/boundary delays pass   |
 | `packages/sdk/test/integration/client-resilience.test.ts` (extended)                        | `retry/retry-strategy.ts`                                   | §3.4 kernel `429 Retry-After: 60` case rejects at once with the `HttpClientError` and its headers                         |
 | `packages/sdk/test/unit/openapi-codegen.test.ts` (extended)                                 | `codegen/openapi-codegen.ts`                                | §3.3 shapes; the new fixture is byte-identical to `generateOpenApiClient(doc)` output                                     |
 | `packages/sdk/test/e2e/generated-client.test.ts` (extended)                                 | `codegen/openapi-codegen.ts`                                | §3.3 live redirect case                                                                                                   |
@@ -309,10 +315,10 @@ load in place of the snapshot → identity fails).
   recorded as `Changed` not `Breaking`.
 - The SDK duplicates the W3C format → the interceptor's unit test shares its vectors with `common`'s
   `trace-context.test.ts` so the two cannot drift silently.
-- Changing codegen output for `3xx` operations changes already-published generated clients → a
-  behaviour change to generated output, CHANGELOG + `docs/upgrading.md` ("regenerate") per the M58
-  precedent; a client that never documented a `3xx` is byte-identical (pinned by the two existing
-  fixtures).
+- Changing codegen output for redirect-capable and observable `3xx` operations changes
+  already-published generated clients → a behaviour change to generated output, CHANGELOG +
+  `docs/upgrading.md` ("regenerate") per the M58 precedent; a client that never documented a `3xx`
+  is byte-identical (pinned by the two existing fixtures).
 - Surfacing a past-cap `429` immediately changes retry timing for callers relying on the sleep →
   named in CHANGELOG as a behaviour change; `maxRetryAfterMs: Infinity` is refused (non-finite), so
   there is no "restore the uncapped sleep" switch — the ROADMAP asked for the cap and the surfaced
@@ -333,3 +339,78 @@ load in place of the snapshot → identity fails).
   'manual'` option on `ClientOptions` — each a new SDK capability, not a disagreement
   between two shipped halves.
 - Problem Details for React Router document navigations (declined, §3.2).
+
+## 10. Design security review
+
+> Corrective review completed during the security-finding fix pass, before the final fix commit and
+> independent re-audit. The first committed-tree audit identified the missing review as S101D-2;
+> this section records the threat model the re-audit must test rather than treating functional tests
+> as security evidence.
+
+### 10.1 Reviewed trust-boundary flows
+
+1. An in-process telemetry provider returns span identity fields; the SDK validates and minimizes
+   them into one outbound `traceparent` header that a remote dependency and intermediaries read.
+2. A remote dependency controls the response status and `Retry-After`; the SDK parses only decimal
+   delta-seconds and compares the result with a cap derived from trusted-but-fallible deployment
+   configuration. A within-cap hint sleeps through `IClientTiming`; an over-cap hint surfaces the
+   original error.
+3. A build-time OpenAPI supplier controls response keys and schemas; codegen turns those records
+   into TypeScript consumed by application developers, so hostile keys must not become executable
+   source and redirect typing must not promise an unverified body shape.
+4. A browser drives a React Router document request; route middleware refusals cross into the
+   route-owned HTML error boundary, while API requests remain in the kernel Problem Details path.
+5. Deployment configuration is loaded once and retained in a module-private `WeakMap`; only
+   in-process code already holding the exact application object can recover that same snapshot.
+
+### 10.2 Assets and attackers
+
+| Asset                                               | Attacker / failure source                                                                    | Required property                                                                                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Client-process availability                         | malicious or overloaded remote dependency; malformed environment-derived retry configuration | no remote header may create a sleep above a finite validated cap; invalid policy values fail at construction                           |
+| Outbound header integrity                           | buggy or hostile in-process telemetry provider; application-supplied header                  | malformed span data emits nothing; an existing caller header is never overwritten                                                      |
+| Generated-client type integrity                     | untrusted or compromised build-time OpenAPI document                                         | only exact supported statuses affect arms; hostile record keys inject no source; redirect-capable results remain `unknown`             |
+| Refusal confidentiality and protocol shape          | unauthenticated browser requester                                                            | the static route boundary reveals no internal error or config; API refusal semantics are not silently rewritten                        |
+| Configuration snapshot confidentiality and identity | unrelated in-process code without the factory-created app reference                          | no network output or global registry is added; foreign apps fail closed; the returned snapshot is identity-equal to the registered one |
+
+Trusted application code may deliberately choose a large finite retry delay or explicit cap. It is
+not treated as a remote attacker, but deployment parsing is fallible: runtime strings, `NaN`, and
+infinities are therefore hostile inputs even though the TypeScript surface names numbers.
+
+### 10.3 Approved budgets and invariants
+
+- A generated `traceparent` is exactly 55 ASCII characters and contains only lowercase hexadecimal
+  W3C identity fields; CR, LF, NUL, wrong lengths, invalid hex, and all-zero ids produce no header.
+- `retry.limit` is a positive safe integer; `retry.delay`, `maxRetryAfterMs`, and
+  `delay * 2 ** (limit - 1)` are finite, non-negative, and no greater than `2_147_483_647` ms, so
+  every accepted value has the same meaning at the default timer seam.
+- A decimal `Retry-After` at or below the effective cap may allocate one sleep for the current
+  retry; a malformed or over-cap value allocates no server-directed sleep. One thousand over-cap
+  refusals must leave no timer/state that prevents a following legitimate call.
+- Retry parsing is anchored and linear. A one-million-digit header must be refused without a sleep;
+  Fetch/runtime header-size enforcement remains the pre-materialization wire bound.
+- M101d adds no request-keyed collection. The configuration map holds at most one entry per
+  factory-created application and permits garbage collection through weak keys.
+- Generated source contains no OpenAPI descriptions or response-key text, and own keys named
+  `__proto__`, `constructor`, or `prototype` create no emitted declaration.
+
+### 10.4 Design findings and resolutions
+
+| ID      | Threat                                                                                                                | Resolution required in the committed implementation                                                               | Audit evidence required                                                                                                         |
+| ------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| D101D-1 | `NaN`, infinity, a fraction/string count, or exponential overflow disables the default cap or adds a post-final sleep | validate count, delay, derived maximum, and explicit cap in `createClient`; fixed messages echo no supplied value | drive hostile numeric cases plus a valid zero/fractional delay; `Retry-After: 86400` cannot schedule after invalid construction |
+| D101D-2 | dependency chooses an excessive or JavaScript-specific delay spelling                                                 | accept decimal digits only and surface the original error above the finite cap                                    | valid decimal positive control; `1e3`, `+3`, `0x10`, fraction, date, empty, and a huge digit string                             |
+| D101D-3 | hostile span values inject or crash header construction                                                               | validate exact W3C fields before `Headers.set`, reject zero ids, preserve an existing header                      | valid header plus CR/LF/NUL/invalid/oversize/all-zero and caller-owned-header cases                                             |
+| D101D-4 | repeated refusals retain timers or retry state                                                                        | over-cap response throws before sleep and all state stays call-local                                              | 1,000 refusals, zero sleeps, then one successful call                                                                           |
+| D101D-5 | OpenAPI redirect/record input creates lying or injected generated code                                                | exact-code parsing, fixed redirect allowlist, range-to-`unknown`, and no interpolation of hostile keys            | 303 omitted, 304 retained, mixed/range returns `unknown`, hostile-key canaries absent                                           |
+| D101D-6 | config accessor leaks or returns a different snapshot                                                                 | module-private weak association keyed by exact app; foreign app throws named error                                | identity positive control and foreign-app refusal                                                                               |
+| D101D-7 | a finite delay above the runtime timer range is clamped into an immediate retry                                       | reject configured caps/delays and derived exponential delays above `2_147_483_647` ms                             | maximum boundary passes; boundary + 1 and `3_000_000_000` fail before fetch; one-second real-timer positive control             |
+
+### 10.5 Independent implementation-audit obligations
+
+The committed-tree auditor must run every evidence item in §10.4 with a legitimate positive control,
+sweep all fifteen recurring repository threat classes, and temporarily remove each new security
+control to prove the matching probe fails before restoring a clean tree. The audit must use an
+emptied environment and only repository-scoped read/write permissions; no remote target or real
+credential is authorized. Any code change after the audit invalidates its revision and requires the
+fix-range re-audit procedure.

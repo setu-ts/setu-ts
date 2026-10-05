@@ -1,7 +1,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import { httpStatusHintOf } from '@setu-ts/common';
 import { HashiCorpVaultProvider } from '../../src/providers/vault.ts';
+import { SecretProviderUnavailableError } from '../../src/errors.ts';
 import type { IVaultHttp } from '../../src/interfaces/index.ts';
 
 /** A recorded HTTP call. */
@@ -174,5 +176,416 @@ describe('HashiCorpVaultProvider', () => {
       const provider = new HashiCorpVaultProvider({});
       await expect(provider.isHealthy()).resolves.toBe(false);
     });
+  });
+});
+
+/** A timer surface nothing fires until the test calls `fire()`. */
+class ManualTimers {
+  readonly armed: Array<{ fn: () => void; ms: number }> = [];
+  readonly setTimer = (fn: () => void, ms: number): number => {
+    this.armed.push({ fn, ms });
+    return this.armed.length;
+  };
+  readonly clearTimer = (): void => {};
+  fire(): void {
+    const timer = this.armed.at(-1);
+    if (timer === undefined) throw new Error('no timer armed');
+    timer.fn();
+  }
+}
+
+/** Lets an in-flight request reach the injected `http`. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+describe('HashiCorpVaultProvider request bound (M101a V8-4)', () => {
+  const base = { address: 'https://vault.example.com', token: 'tok' };
+
+  it('rejects a read Vault never answers with a 503-branded error and aborts the request', async () => {
+    const timers = new ManualTimers();
+    let signal: AbortSignal | null | undefined;
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      timing: timers,
+      http: (_url, init) => {
+        signal = init?.signal;
+        return new Promise<Response>(() => {});
+      },
+    });
+    await provider.connect();
+
+    const pending = provider.get('database/password');
+    await flush();
+    expect(timers.armed[0]?.ms).toBe(5000);
+    timers.fire();
+
+    const error = await pending.then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretProviderUnavailableError);
+    expect(httpStatusHintOf(error)?.status).toBe(503);
+    expect((error as SecretProviderUnavailableError).provider).toBe('HashiCorpVaultProvider');
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('wraps a transport failure as unavailable, keeping it as the cause', async () => {
+    const failure = new TypeError('fetch failed');
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.reject(failure),
+    });
+    await provider.connect();
+
+    const error = await provider.set('a', 'b').then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretProviderUnavailableError);
+    expect((error as Error).cause).toBe(failure);
+    // The served sentence is fixed; the driver text stays in the log.
+    expect(httpStatusHintOf(error)?.detail).toBe(
+      'The secrets provider is temporarily unreachable.',
+    );
+  });
+
+  it('honors a configured bound, and 0 arms no timer at all', async () => {
+    const configured = new ManualTimers();
+    const p1 = new HashiCorpVaultProvider({
+      ...base,
+      requestTimeoutMs: 250,
+      timing: configured,
+      http: () => Promise.resolve(new Response(null, { status: 404 })),
+    });
+    await p1.connect();
+    expect(await p1.get('x')).toBeNull();
+    expect(configured.armed[0]?.ms).toBe(250);
+
+    const disabled = new ManualTimers();
+    const p2 = new HashiCorpVaultProvider({
+      ...base,
+      requestTimeoutMs: 0,
+      timing: disabled,
+      http: () => Promise.resolve(new Response(null, { status: 404 })),
+    });
+    await p2.connect();
+    expect(await p2.get('x')).toBeNull();
+    expect(disabled.armed).toHaveLength(0);
+  });
+
+  it('keeps an HTTP error from a Vault that answered as a plain error', async () => {
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response('boom', { status: 500 })),
+    });
+    await provider.connect();
+
+    const error = await provider.get('x').then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+  });
+
+  it('reports false from isHealthy when the bound fires', async () => {
+    const timers = new ManualTimers();
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      timing: timers,
+      http: () => new Promise<Response>(() => {}),
+    });
+    const pending = provider.isHealthy();
+    await flush();
+    timers.fire();
+    expect(await pending).toBe(false);
+  });
+
+  const refused: ReadonlyArray<number> = [-1, Number.NaN, Number.POSITIVE_INFINITY];
+  for (const value of refused) {
+    it(`refuses requestTimeoutMs ${value} at construction`, () => {
+      expect(() => new HashiCorpVaultProvider({ ...base, requestTimeoutMs: value })).toThrow(
+        RangeError,
+      );
+    });
+  }
+});
+
+describe('HashiCorpVaultProvider body bound and address validation (M101a)', () => {
+  const base = { address: 'https://vault.example.com', token: 'tok' };
+
+  /** A 200 response whose body sends headers and then never another byte. */
+  function stalledBody(): Response {
+    return new Response(new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}) }), {
+      status: 200,
+    });
+  }
+
+  it('bounds the body read: headers then silence rejects 503 instead of hanging', async () => {
+    const timers = new ManualTimers();
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      timing: timers,
+      http: () => Promise.resolve(stalledBody()),
+    });
+    await provider.connect();
+
+    const pending = provider.get('database/password');
+    await flush();
+    expect(timers.armed).toHaveLength(1);
+    timers.fire();
+
+    const error = await pending.then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretProviderUnavailableError);
+    expect(httpStatusHintOf(error)?.status).toBe(503);
+  });
+
+  it('keeps a malformed JSON body from a Vault that answered as a plain error', async () => {
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response('{not json', { status: 200 })),
+    });
+    await provider.connect();
+
+    const error = await provider.get('x').then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+  });
+
+  it('bounds the body release in isHealthy and a write', async () => {
+    const timers = new ManualTimers();
+    let cancelled = 0;
+    const body = (): Response =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull: () => new Promise(() => {}),
+          cancel: () => {
+            cancelled++;
+            return new Promise(() => {});
+          },
+        }),
+        { status: 200 },
+      );
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      timing: timers,
+      http: () => Promise.resolve(body()),
+    });
+    await provider.connect();
+
+    const health = provider.isHealthy();
+    await flush();
+    timers.fire();
+    expect(await health).toBe(false);
+
+    const write = provider.set('a', 'b');
+    await flush();
+    timers.fire();
+    const error = await write.then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(SecretProviderUnavailableError);
+    expect(cancelled).toBe(2);
+  });
+
+  const malformed: ReadonlyArray<string> = ['vault.example.com', 'ftp://vault.example.com', '::'];
+  for (const address of malformed) {
+    it(`connect refuses the malformed address ${JSON.stringify(address)} without echoing it`, async () => {
+      const provider = new HashiCorpVaultProvider({ address, token: 'tok' });
+      const error = await provider.connect().then(() => undefined, (e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+      expect((error as Error).message).toContain('options.address');
+      expect((error as Error).message).not.toContain(address);
+      expect(provider.isReady()).toBe(false);
+    });
+  }
+
+  it('connect accepts an http:// address', async () => {
+    const provider = new HashiCorpVaultProvider({ address: 'http://127.0.0.1:8200', token: 'tok' });
+    await provider.connect();
+    expect(provider.isReady()).toBe(true);
+  });
+});
+
+describe('HashiCorpVaultProvider secret path and body size (M101a security audit)', () => {
+  const base = { address: 'https://vault.example.com', token: 'tok' };
+
+  for (const name of ['../../sys/health', 'a/../b', './a', 'a//b', '', 'a/']) {
+    it(`refuses ${JSON.stringify(name)} before any request is sent`, async () => {
+      const calls: Call[] = [];
+      const provider = new HashiCorpVaultProvider({
+        ...base,
+        http: fakeHttp(jsonResponse({}), calls),
+      });
+      await provider.connect();
+      await expect(provider.get(name)).rejects.toThrow('path segment');
+      await expect(provider.set(name, 'v')).rejects.toThrow('path segment');
+      expect(calls).toHaveLength(0);
+    });
+  }
+
+  it('percent-encodes each segment so a name cannot add a query or an encoded dot segment', async () => {
+    const calls: Call[] = [];
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: (url) => {
+        calls.push({ url });
+        return Promise.resolve(jsonResponse({ data: { data: { value: 'v' } } }));
+      },
+    });
+    await provider.connect();
+    await provider.get('app db/pass?x=1#f');
+    await provider.get('%2e%2e/a');
+    expect(calls[0].url).toBe(
+      'https://vault.example.com/v1/secret/data/app%20db/pass%3Fx%3D1%23f',
+    );
+    expect(calls[1].url).toBe('https://vault.example.com/v1/secret/data/%252e%252e/a');
+  });
+
+  it('refuses a body over 1 MiB as a plain error and cancels the rest of it', async () => {
+    let cancelled = false;
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 65_536;
+        controller.enqueue(new Uint8Array(65_536));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+    await provider.connect();
+    const error = await provider.get('big').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+    expect((error as Error).message).toBe('Vault read for big exceeded 1048576 bytes');
+    expect(cancelled).toBe(true);
+    expect(sent).toBeLessThanOrEqual(1_048_576 + 2 * 65_536);
+  });
+
+  it('copies each chunk as it arrives instead of keeping views over the transport buffer', async () => {
+    // Every chunk is a 4-byte view over ONE shared buffer that the source
+    // overwrites before the next read, the shape a runtime produces when it
+    // hands small chunks over a larger backing buffer. Retaining the views
+    // would both pin that buffer and read back only the last write.
+    const text = '{"data":{"data":{"value":"' + 'abcd'.repeat(9000) + '"}}}';
+    const bytes = new TextEncoder().encode(text);
+    const shared = new Uint8Array(65_536);
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= bytes.byteLength) {
+          controller.close();
+          return;
+        }
+        const piece = bytes.subarray(offset, offset + 4);
+        shared.fill(0x7a);
+        shared.set(piece, 0);
+        offset += piece.byteLength;
+        controller.enqueue(new Uint8Array(shared.buffer, 0, piece.byteLength));
+      },
+    }, { highWaterMark: 0 }); // pull only on a pending read, so a chunk is consumed first
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+    await provider.connect();
+    expect(await provider.get('chunked')).toBe('abcd'.repeat(9000));
+  });
+
+  it('reads a many-chunk body ending exactly at the cap and refuses one byte more', async () => {
+    const prefix = '{"data":{"data":{"value":"';
+    const suffix = '"}}}';
+    const value = 'y'.repeat(1_048_576 - prefix.length - suffix.length);
+    const chunked = (extra: string) => {
+      const bytes = new TextEncoder().encode(prefix + value + extra + suffix);
+      let offset = 0;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (offset >= bytes.byteLength) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(bytes.slice(offset, offset + 1000));
+          offset += 1000;
+        },
+      });
+    };
+    const exact = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(chunked(''), { status: 200 })),
+    });
+    await exact.connect();
+    expect(await exact.get('exact')).toBe(value);
+    const over = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(chunked('y'), { status: 200 })),
+    });
+    await over.connect();
+    await expect(over.get('over')).rejects.toThrow('exceeded 1048576 bytes');
+  });
+
+  it('refuses a name longer than 4096 encoded characters as an input error, sending nothing', async () => {
+    const calls: Call[] = [];
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: fakeHttp(jsonResponse({}), calls),
+    });
+    await provider.connect();
+    const longest = 'a'.repeat(4096);
+    const tooLong = 'a'.repeat(4097);
+    const encodedTooLong = '%'.repeat(1366); // 1366 × 3 = 4098 encoded characters
+    for (const name of [tooLong, encodedTooLong]) {
+      const error = await provider.get(name).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
+      expect((error as Error).message).toBe(
+        'Vault secret name is longer than 4096 characters once encoded',
+      );
+    }
+    expect(calls).toHaveLength(0);
+    // A name over the cap that also has a refusable segment is refused for its
+    // length, without quoting it (round-3 L3: the segment message quoted it).
+    const hostile = '\u0001'.repeat(1_000_000) + '/';
+    for (const call of [() => provider.get(hostile), () => provider.set(hostile, 'v')]) {
+      const error = await call().catch((e: unknown) => e);
+      expect((error as Error).message).toBe(
+        'Vault secret name is longer than 4096 characters once encoded',
+      );
+    }
+    expect(calls).toHaveLength(0);
+    await provider.get(longest).catch(() => undefined);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('reads a body of exactly 1 MiB', async () => {
+    const prefix = '{"data":{"data":{"value":"';
+    const suffix = '"}}}';
+    const value = 'x'.repeat(1_048_576 - prefix.length - suffix.length);
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(prefix + value + suffix, { status: 200 })),
+    });
+    await provider.connect();
+    expect(await provider.get('exact')).toBe(value);
+  });
+
+  it('reads a bodiless 200 as an empty body (a plain JSON error)', async () => {
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response(null, { status: 200 })),
+    });
+    await provider.connect();
+    const error = await provider.get('a').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SyntaxError);
+  });
+
+  it('escapes control characters in a name it quotes', async () => {
+    const provider = new HashiCorpVaultProvider({
+      ...base,
+      http: () => Promise.resolve(new Response('no', { status: 500 })),
+    });
+    await provider.connect();
+    await expect(provider.get('a\r\nforged')).rejects.toThrow(
+      'Vault read failed for a\\u000d\\u000aforged: HTTP 500',
+    );
+    await expect(provider.set('a\u007f', 'v')).rejects.toThrow(
+      'Vault write failed for a\\u007f: HTTP 500',
+    );
   });
 });

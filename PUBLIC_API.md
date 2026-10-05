@@ -67,8 +67,9 @@
 58. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
 59. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
 60. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
-61. [Boundary-Type Compatibility](#boundary-type-compatibility)
-62. [Summary](#summary)
+61. [Localization Plugin (`@setu-ts/localization-plugin`)](#localization-plugin-setu-tslocalization-plugin)
+62. [Boundary-Type Compatibility](#boundary-type-compatibility)
+63. [Summary](#summary)
 
 ---
 
@@ -1368,8 +1369,17 @@ before the indicator reports it. A Drizzle registration that supplies
 `DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
 documented pool API — also publishes the returned `DatabasePoolCapacity` snapshot
 (`{ total, idle, waiting }`) under `data.capacity`. Omitted, the payload carries no capacity fields.
-Capacity is data, not policy: no threshold is applied and no status changes because of it
-(caller-facing pool-timeout status mapping is M90f). A snapshot the callback returns in a malformed
+Capacity is data, not policy: no threshold is applied, and the snapshot changes one row only.
+**Since M101a**, when it shows every connection busy with callers waiting (`idle === 0` and
+`waiting > 0`), the probe queues no `SELECT 1` and the indicator reports `up` with
+`reachable: 'unknown'` while queries through the adapter are still completing (one completed within
+the last 10 seconds; with none, a full pool is a hung database and reports `degraded`; once
+`getDrizzleDatabase`/`getDrizzleTransaction` has handed out the native instance, whose queries
+bypass the adapter, progress is unobservable and a saturated pool reads `up`) — saturation, not an
+outage, so `/ready` does not pull every saturated replica at once. Without `poolStats` that row
+cannot be read, so a pool connection timeout or an unanswered probe reports `degraded` (a pool
+connection timeout reported `down` before M101a: the database never answered either way).
+Caller-facing pool-timeout status mapping is M90f. A snapshot the callback returns in a malformed
 shape is dropped exactly like an absent one — a broken reading is never published as a number. A
 callback that throws, or one whose counters violate the documented shape (a negative count, or
 `idle` exceeding `total`, which counts idle + in use), is dropped the same way: capacity is omitted
@@ -3040,6 +3050,13 @@ listener `ioredis` prints every reconnect failure to `console.error`, bypassing 
 redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
 unchanged; the indicator still reports the outage.
 
+**Command bound.** Since M101a the Redis store's `options.commandTimeoutMs` (default `15000`, `0`
+disables) is the ioredis `commandTimeout` on the client it builds. A paused or partitioned Redis
+keeps its socket open, so a command used to wait forever; it now rejects inside the bound, is
+counted `failed` in the cache observations, and the `cache` indicator reports `down`. Not applied to
+an injected client. A value outside `0`–`2147483647` throws `RangeError` when `CachePlugin(...)` is
+called.
+
 ### Cache diagnostics (M98i)
 
 `CachePlugin({ diagnostics: { enabled: true, alias: 'primary' } })` counts every backend call its
@@ -3096,14 +3113,30 @@ app.router.get('/users/:id', {
 
 #### Options
 
-| Option              | Type                         | Default              | Behavior                                                                                                                                                                                                                                  |
-| ------------------- | ---------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ttlSeconds`        | `number`                     | store default        | Per-route TTL override in seconds; when omitted the store's `defaultTtl` applies                                                                                                                                                          |
-| `key`               | `(ctx) => string`            | `${method}:${url}`   | Custom cache key generator. The tenant discriminator segment is composed around this key too, so a tenant-aware application stores one entry per tenant even when a custom key is supplied                                                |
-| `vary`              | `(ctx) => readonly string[]` | —                    | Per-request discriminator values appended to the key after the tenant segment. Each returned string is length-prefixed and joined in order, so two requests differing in any value never share an entry; omitted leaves the key unchanged |
-| `bypass`            | `(ctx) => boolean`           | —                    | When `true`, skip caching entirely for this request and pass through to the handler                                                                                                                                                       |
-| `store`             | `string`                     | `CAPABILITIES.CACHE` | Capability token for the cache store to use                                                                                                                                                                                               |
-| `cacheableStatuses` | `number[]`                   | `[200]`              | HTTP status codes eligible for caching                                                                                                                                                                                                    |
+| Option              | Type                         | Default              | Behavior                                                                                                                                                                                                                                              |
+| ------------------- | ---------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttlSeconds`        | `number`                     | store default        | Per-route TTL override in seconds; when omitted the store's `defaultTtl` applies                                                                                                                                                                      |
+| `key`               | `(ctx) => string`            | `${method}:${url}`   | Custom cache key generator. The tenant and locale discriminator segments are composed around this key too, so a tenant-aware application stores one entry per tenant even when a custom key is supplied                                               |
+| `vary`              | `(ctx) => readonly string[]` | —                    | Per-request discriminator values appended to the key after the tenant and locale segments. Each returned string is length-prefixed and joined in order, so two requests differing in any value never share an entry; omitted leaves the key unchanged |
+| `bypass`            | `(ctx) => boolean`           | —                    | When `true`, skip caching entirely for this request and pass through to the handler                                                                                                                                                                   |
+| `store`             | `string`                     | `CAPABILITIES.CACHE` | Capability token for the cache store to use                                                                                                                                                                                                           |
+| `cacheableStatuses` | `number[]`                   | `[200]`              | HTTP status codes eligible for caching                                                                                                                                                                                                                |
+
+#### Key composition
+
+The key is `tenant segment + locale segment + vary segment + base key`. The tenant segment comes
+from `ctx.request.tenant?.id` and the locale segment (M103) from `ctx.request.locale`, each
+length-prefixed and empty when absent — so an application with neither multi-tenancy nor
+localization keeps byte-identical keys. Both segments are read **when `cacheMiddleware` runs**: a
+route-level `cacheMiddleware` runs after every global middleware and sees whatever global middleware
+set, while a GLOBAL registration must have a higher priority number than the middleware that sets
+each one — the tenant middleware (40) and the locale middleware (45 by default, or the configured
+`middleware.priority`). Where the locale middleware is applied per route instead
+(`middleware.enabled: false`), a global cache runs before it, so the cache belongs on that route,
+listed after `localeMiddleware`. A `replaceLocale` override is reflected only when it runs before
+the cache lookup; a route that changes the locale inside its handler must not be response-cached.
+The segments protect this plugin's own store only — a shared cache or CDN relies on the `Vary`
+header the localization middleware writes.
 
 ### ICacheStore Interface
 
@@ -3931,6 +3964,10 @@ a React frontend with Server-Side Rendering (SSR) and file-based routing. React 
 framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
 assets are served over `runtime.fs?.readFile`.
 
+A route-middleware refusal on a document request is rendered by React Router's `ErrorBoundary` as
+HTML with the thrown status. The kernel error responder governs kernel routes and is deliberately
+not applied to that document protocol; API callers needing Problem Details call a kernel API route.
+
 ### Registration
 
 ```typescript
@@ -4595,19 +4632,20 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 
 ### Options
 
-| Option                                               | Provider                | Description                                                                                                                   |
-| ---------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                |
-| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                       |
-| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                      |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                           |
-| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                |
-| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                            |
-| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected). |
-| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                |
-| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                     |
-| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                     |
-| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                |
+| Option                                               | Provider                | Description                                                                                                                      |
+| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                   |
+| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                          |
+| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                         |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                              |
+| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                   |
+| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                               |
+| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).    |
+| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                   |
+| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                        |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                        |
+| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                   |
+| `options.requestTimeoutMs`                           | `vault`                 | Bound on one Vault request in ms; `0` disables. Default `5000`. A value outside `0`–`2147483647` throws `RangeError` at startup. |
 
 ### Exports
 
@@ -4615,6 +4653,18 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 - `SecretsService` — the `ISecretManager` implementation (provider + read cache).
 - `EnvProvider`, `AwsKmsProvider`, `GcpSecretManagerProvider`, `AzureKeyVaultProvider`,
   `HashiCorpVaultProvider` — provider classes.
+- `SecretProviderUnavailableError` — **since M101a**, a provider that cannot be reached, answered
+  **`503 Service Unavailable`** through a status hint. `HashiCorpVaultProvider` rejects with it when
+  a request fails on the network or does not answer inside `options.requestTimeoutMs` — the body
+  read included, so headers followed by silence count as no answer; the transport error is kept as
+  `cause` for the log and never reaches the response body. A Vault that answers with an HTTP error
+  is reachable and keeps its handling: `404` reads as `null`, any other error status rejects with a
+  plain `Error`. `provider` names the unreachable provider. Since M101a the provider also
+  percent-encodes each `/`-separated segment of a secret name and refuses an empty, `.` or `..`
+  segment, or a name longer than 4096 characters once encoded, before sending anything; a read body
+  over 1 MiB is refused with a plain `Error`, with memory held per read bounded by the same 1 MiB;
+  and a name quoted in any `secrets-plugin` error message has its C0 and C1 control characters, DEL,
+  and U+2028/U+2029 escaped as `\uXXXX`, cut after 256 characters.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write
@@ -5024,11 +5074,22 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
    * (M90d / X28-2). Supplied and the stream is absent → the broker creates it
    * with exactly these subjects. Absent and the stream is absent → startup
    * rejects with `JetStreamStreamError`, naming the stream and both remedies.
-   * An existing stream is never touched either way.
+   * An existing stream is never touched either way. An RPC-capable stream must
+   * also cover `rr.req.<topic>` and `rr.inbox.>` (M101b); NATS refuses two
+   * streams with overlapping subjects, so one stream per account owns
+   * `rr.inbox.>`.
    * @since 0.5.0
    */
   streamSubjects?: readonly string[];
-  /** Default consumer group / queue name. */
+  /**
+   * Default consumer group / queue name. A queue becomes the JetStream durable
+   * consumer name with each character the nats client refuses (`.`, `*`, `>`,
+   * `/`, `\`, whitespace) escaped as `_` + two hex digits — `orders.eu` →
+   * `orders_2eeu` (M101b). A queue whose encoding collides with another queue's,
+   * or that is reused across topics, rejects `subscribe()` with
+   * `NatsConsumerNameCollisionError`. The raw queue is recorded as consumer
+   * metadata, which needs NATS 2.10+.
+   */
   defaultQueue?: string;
 }
 
@@ -5053,6 +5114,25 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
   defaultQueue?: string;
   /** Request-reply topic; must already exist on the broker. @defaultValue 'messaging.replies' */
   replyTopic?: string;
+  /**
+   * Retry budget (M101b). Forwarded to `new Kafka({ retry })` unless `client` is
+   * injected, and read by `subscribe()` to retry `UNKNOWN_TOPIC_OR_PARTITION` —
+   * which a KRaft broker answers to the request that auto-creates a topic, and
+   * which kafkajs does not retry. Exponential: `retries` after the first attempt,
+   * from `initialRetryTime`, growing by `multiplier` up to `maxRetryTime`
+   * (kafkajs's defaults: 5 / 300 ms / 2 / 30 000 ms). Still unknown after the
+   * budget → `KafkaTopicUnavailableError`. Every field is validated at
+   * construction, `factor` (kafkajs's jitter) included, held to [0, 1].
+   * @since 0.9.0
+   */
+  retry?: {
+    maxRetryTime?: number;
+    initialRetryTime?: number;
+    /** kafkajs's jitter, between 0 and 1. */
+    factor?: number;
+    multiplier?: number;
+    retries?: number;
+  };
 }
 
 // ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
@@ -5064,6 +5144,16 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   projectId?: string;
   /** Service-account credentials. Optional when client is injected. */
   credentials?: unknown;
+  /**
+   * Prefix of the per-topic default subscription. Since M101b a subscription with
+   * no `queue` uses `<defaultQueue>.<topic ID>` (a fully-qualified topic name
+   * contributes only its ID): Pub/Sub subscription names are
+   * project-global, so the previously shared name attached a second topic to the
+   * first topic's subscription. An existing subscription bound to another topic is
+   * refused with `PubSubSubscriptionBoundElsewhereError`; a name over 255
+   * characters is refused at `subscribe()`.
+   * @defaultValue 'messaging-consumers'
+   */
   defaultQueue?: string;
   replyTopic?: string;
 }
@@ -5077,6 +5167,7 @@ interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
   credentials?: unknown;
   /** Mutually exclusive with the injected arm — client?: never. */
   client?: never;
+  /** Per-topic default subscription prefix — see the injected arm. @defaultValue 'messaging-consumers' */
   defaultQueue?: string;
   replyTopic?: string;
 }
@@ -5325,15 +5416,26 @@ configuration verdict this broker reaches on its own, so that one arm has no `ca
 | `JetStreamUnavailableError` | `connect()` finds no JetStream on the server — start it with the `-js` flag. The raw `503` the server answered is the `cause`.                                   |
 | `JetStreamStreamError`      | The stream is absent and `streamSubjects` was not supplied (the message names both remedies), or the server refused the stream read/create (`cause` carries it). |
 
+Three more name failures the real brokers impose and a permissive fake accepts (M101b). Each is
+thrown by `subscribe()`, so a declared subscription rejects `start()` with it:
+
+| Error                                   | Thrown when                                                                                                                                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PubSubSubscriptionBoundElsewhereError` | The Pub/Sub subscription already exists and is bound to another topic. Carries `subscription`, `boundTopic` (fully qualified, or `'(unknown)'` when the service reported none) and `requestedTopic`.                     |
+| `NatsConsumerNameCollisionError`        | The queue's JetStream consumer name already belongs to a different queue (an encoding collision such as `orders.eu` / `orders_2eeu`) or a different topic. Carries `queue`, `existingQueue` and `consumerName`.          |
+| `KafkaTopicUnavailableError`            | The Kafka broker still reports the topic unknown after the `retry` budget — it does not auto-create. Carries `topic` and `groupId`; the kafkajs `UNKNOWN_TOPIC_OR_PARTITION` error is the `cause`. Pre-create the topic. |
+
 > **Broker support.** Request-reply is available on **all supported broker types** — in-memory,
 > Redis Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which
 > delegates to the injected `IMessageBroker`).
 >
 > **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
 > default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
-> either pre-create it or enable `auto.create.topics.enable`. Each broker instance reads that topic
-> under its own consumer group, so every instance receives every reply and discards those it did not
-> originate; give a high-traffic service its own `replyTopic` to bound that fan-out.
+> either pre-create it or enable `auto.create.topics.enable`; the same holds for every subscribed
+> topic, whose absence on a non-auto-creating broker rejects with `KafkaTopicUnavailableError`. Each
+> broker instance reads that topic under its own consumer group, so every instance receives every
+> reply and discards those it did not originate; give a high-traffic service its own `replyTopic` to
+> bound that fan-out.
 
 > **RPC and pub/sub are separate channels.** `request`/`respond` travel on a channel derived from
 > the topic, not on the topic itself. A plain `subscribe('orders', …)` therefore never observes an
@@ -5413,7 +5515,10 @@ export {
   CloudBrokerUnavailableError,
   JetStreamStreamError,
   JetStreamUnavailableError,
+  KafkaTopicUnavailableError,
   MessagingNotSupportedError,
+  NatsConsumerNameCollisionError,
+  PubSubSubscriptionBoundElsewhereError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
@@ -5558,17 +5663,22 @@ records the outcome of every real publish — the **data plane** — and `reacha
 FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs` (default
 `5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected topic or a
 quota error is an application-level fact, never an outage) resolves `false` until a successful
-publish or a positive management probe contradicts it. The plane distinction is the substance: the
-management round trip proves the **management** plane is reachable — evidence about the data plane,
-never proof of it — and that gap is what let a stopped namespace report `up` while every publish
-threw. Two further changes: every arm's probe is bounded by the indicator's `createCachedProbe`
-(5-second TTL, 2-second bound), so a probe that cannot answer — a **hung** broker, the condition a
-stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health` open; and
-the RabbitMQ probe is a real round trip (a throwaway channel open/close), replacing the
-connection-fault flag read that a hung broker never trips. Residual exposure, stated rather than
-implied: a deployment whose Service Bus management plane is unreachable and that publishes nothing
-keeps reporting `reachable: 'unknown'` with status `up` until its first publish — an operator who
-needs the signal can publish synthetically.
+publish or a positive management probe contradicts it. **Since M101a** that retained failure is
+answered at once: the management probe runs in the background and only a `true` answer clears the
+outcome, for the NEXT read. Before, `reachability()` awaited the probe, whose own 2-second bound
+tied the indicator's, so the indicator's bound fired first and a recorded outage was reported `up`.
+A failure inside a window the indicator has already cached as `up` is reported at the first poll
+after that 5-second cache expires. The plane distinction is the substance: the management round trip
+proves the **management** plane is reachable — evidence about the data plane, never proof of it —
+and that gap is what let a stopped namespace report `up` while every publish threw. Two further
+changes: every arm's probe is bounded by the indicator's `createCachedProbe` (5-second TTL, 2-second
+bound), so a probe that cannot answer — a **hung** broker, the condition a stopped one never
+produces — settles `reachable: 'unknown'` instead of holding `/health` open; and the RabbitMQ probe
+is a real round trip (a throwaway channel open/close), replacing the connection-fault flag read that
+a hung broker never trips. Residual exposure, stated rather than implied: a deployment whose Service
+Bus management plane is unreachable and that publishes nothing keeps reporting
+`reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
+can publish synthetically.
 
 ### Integration event contracts
 
@@ -5811,6 +5921,14 @@ app.register(QueuePlugin({
 `info`. Without a listener `ioredis` prints every reconnect failure to `console.error`, bypassing
 the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
 semantics are unchanged; the indicator still reports the outage.
+
+**Command bound.** Since M101a the `'redis'` adapter's `commandTimeoutMs` option (default `15000`,
+`0` disables) is the ioredis `commandTimeout` on the client it builds, so a paused server makes
+`add()` reject and a poll record the failure instead of waiting forever. Not applied to an injected
+`client`. A value outside `0`–`2147483647` throws `RangeError` when `QueuePlugin(...)` is called. A
+depth row in the observations describes the latest cycle only: a name that cycle did not read has no
+row, and the source's `failure` plus `depthCoverage: 'partial'` say why — an unreadable depth is
+never a retained zero.
 
 ### Declarative processors and behaviours
 
@@ -6121,7 +6239,15 @@ schedule until the registering plugin re-creates it. For durable background work
   scheduler (Cloudflare Workers); catch it by identity to branch on the refusal
 - **`SchedulerPluginOptions`** — Plugin configuration options (`timezone?`, `distributedLock?`)
 - **`DistributedLockOptions`** — Lock configuration (`enabled?`, `storage?`, `url?`, `client?`,
-  `lock?`, `ttlMs?`)
+  `lock?`, `ttlMs?`, `acquireTimeoutMs?`, `commandTimeoutMs?`). **Since M101a** every lock acquire
+  is bounded by `acquireTimeoutMs` (default `5000`, `0` waits indefinitely), whichever lock is in
+  use: an acquire still unsettled at the bound is a skipped fire — logged, counted `lockFailed` in
+  the execution observations, and re-armed for the next slot — and a token it returns later is
+  released. `commandTimeoutMs` is the ioredis `commandTimeout` on the client `RedisLock` builds
+  (default `acquireTimeoutMs`, or `15000` when that is `0`; never applied to an injected client or
+  lock); a timed-out `SET` may still apply on the server, so `RedisLock` releases that exact token
+  before rethrowing. Either value outside `0`–`2147483647`, or a `commandTimeoutMs` above a non-zero
+  `acquireTimeoutMs`, throws `RangeError` when `SchedulerPlugin(...)` is called
 - **`IDistributedLock`** — Lock seam (`acquire`/`release`) for a custom lock implementation
 - **`IRedisLockClient`** — Structural ioredis shape accepted by `distributedLock.client`
 - **`IScheduler`** — Scheduler service interface (re-exported from `@setu-ts/common`)
@@ -6737,31 +6863,33 @@ app.router.post('/users', async (ctx) => {
 
 ### Options
 
-| Option                                               | Provider   | Description                                                      |
-| ---------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
-| `provider`                                           | —          | `'log'` (default), `'smtp'`, `'ses'`, `'sendgrid'`.              |
-| `defaults.from`                                      | all        | Sender applied when a message omits `from`; else `send` throws.  |
-| `templates`                                          | all        | Named `{ html?, text? }` body templates for `sendTemplate`.      |
-| `options.host` / `port` / `secure` / `auth`          | `smtp`     | nodemailer transport config (ignored when `transport` injected). |
-| `options.transport`                                  | `smtp`     | Injected `ISmtpTransport` facade (bypasses the lazy import).     |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `ses`      | AWS client config (ignored when `client` injected).              |
-| `options.client`                                     | `ses`      | Injected `ISesClient` facade (bypasses the lazy SDK import).     |
-| `options.apiKey` / `endpoint`                        | `sendgrid` | SendGrid API key (Bearer) and endpoint (default v3 send URL).    |
-| `options.http`                                       | `sendgrid` | Injected `fetch`-shaped function (defaults to global `fetch`).   |
-| `options.sink`                                       | `log`      | Called with each sent `OutgoingMail` — a read-back seam.         |
+| Option                                               | Provider   | Description                                                                                                                                            |
+| ---------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `provider`                                           | —          | `'log'` (default), `'smtp'`, `'ses'`, `'sendgrid'`.                                                                                                    |
+| `defaults.from`                                      | all        | Sender applied when a message omits `from`; else `send` throws.                                                                                        |
+| `templates`                                          | all        | Named body templates for `sendTemplate`: `{ html?, text? }` strings, or `{ view, text? }` view components rendered through `CAPABILITIES.VIEW` (M102). |
+| `options.host` / `port` / `secure` / `auth`          | `smtp`     | nodemailer transport config (ignored when `transport` injected).                                                                                       |
+| `options.transport`                                  | `smtp`     | Injected `ISmtpTransport` facade (bypasses the lazy import).                                                                                           |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `ses`      | AWS client config (ignored when `client` injected).                                                                                                    |
+| `options.client`                                     | `ses`      | Injected `ISesClient` facade (bypasses the lazy SDK import).                                                                                           |
+| `options.apiKey` / `endpoint`                        | `sendgrid` | SendGrid API key (Bearer) and endpoint (default v3 send URL).                                                                                          |
+| `options.http`                                       | `sendgrid` | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                                         |
+| `options.sink`                                       | `log`      | Called with each sent `OutgoingMail` — a read-back seam.                                                                                               |
 
 ### Exports
 
 - `MailPlugin(options?)` — plugin factory. `createProvider(type, options, ctx)` — provider builder.
 - `MailService` — the `IMailer` implementation (default-`from` resolution + template dispatch).
-- `TemplateEngine`, `escapeHtml` — the `{{ variable }}` renderer and its HTML escaper.
+- `TemplateEngine`, `escapeHtml` — the template renderer (both arms; `render` is asynchronous since
+  M102) and its HTML escaper.
 - `LogProvider`, `SmtpProvider`, `SesProvider`, `SendGridProvider` — provider classes.
 - `adaptNodemailerModule` / `loadNodemailerModule` / `toNodemailerMessage` /
   `validateSmtpTransport`, `adaptSesModule` / `loadSesModule` / `toSesInput` / `validateSesClient`,
   `toSendGridBody` — provider adapter/mapper/validator helpers.
 - `MailServiceOptions`, `MailPluginOptions`, `MailProviderType`, `MailProviderOptions`,
-  `MailTemplate`, `OutgoingMail`, `RenderedTemplate`, `LogProviderOptions`, `SmtpProviderOptions`,
-  `NodemailerModule`, `SesProviderOptions`, `SesSdkModule`, `SendGridProviderOptions` — types.
+  `MailTemplate`, `MailStringTemplate`, `MailComponentTemplate`, `OutgoingMail`, `RenderedTemplate`,
+  `LogProviderOptions`, `SmtpProviderOptions`, `NodemailerModule`, `SesProviderOptions`,
+  `SesSdkModule`, `SendGridProviderOptions` — types.
 - `ISmtpTransport`, `ISesClient`, `IMailHttp` — structural injection types.
 - `IMailer`, `MailMessage` — re-exported from `@setu-ts/common`.
 
@@ -6783,12 +6911,34 @@ app.router.post('/users', async (ctx) => {
   AI_GUIDELINES §2.2 forbids it importing `mail-plugin` to find a probe.
 - `sendTemplate`'s envelope is `Omit<MailMessage, 'html' | 'text'>` — `subject` stays REQUIRED; the
   template provides the `html`/`text` bodies only, never the subject.
-- In an HTML template, interpolated `data` values are HTML-escaped (`& < > " '`); text templates
-  substitute raw. A placeholder whose key is absent from `data`, or an unknown template name,
-  throws.
+- `MailTemplate` is a union of two arms that never mix in one template (a template carrying both
+  `view` and `html` is a compile error). **String arm** (`MailStringTemplate`): in an HTML template,
+  interpolated `data` values are HTML-escaped (`& < > " '`); text templates substitute raw. A
+  placeholder whose key is absent from `data`, or an unknown template name, rejects. **Component
+  arm** (`MailComponentTemplate`, M102): `view` and the optional `text` are `Component`s rendered
+  through the `IViewEngine` registered under `CAPABILITIES.VIEW`, with `data` passed verbatim as
+  each component's props — `view` into `html`, `text` into `text` (verbatim; write it as a plain
+  `(props) => string` function, since one written with the `html` tag or JSX is HTML-escaped by its
+  runtime and puts entities such as `&amp;` into a plain-text body). Escaping is the rendering
+  runtime's (an `html` tagged template and a JSX component escape; a hand-written template literal
+  does not). There is NO missing-key check on this arm: an absent key renders as `undefined` rather
+  than throwing, because the committed `sendTemplate` types `data` as `Record<string, unknown>`; the
+  compile-time route is `engine.render(Component,
+  props)` by hand, then `mailer.send`.
+  `MailPlugin` declares `CAPABILITIES.VIEW` in `optionalDependencies` and resolves the engine ONCE
+  at `register()`; a component template configured with no provider **fails at `register()`** naming
+  both remedies (register `ViewPlugin` or any other provider of the token, or remove the component
+  templates) — never on the first `sendTemplate`. Only the registry is consulted: a
+  container-supplied engine registered by `DecoratorPlugin` lands after this plugin has run. A
+  rendering failure (`ViewRenderError`, `UnresolvedSuspenseError`) propagates unwrapped and the
+  provider is never reached.
+- `TemplateEngine.render(name, data)` returns `Promise<RenderedTemplate>` (asynchronous since M102,
+  because `IViewEngine.render` may answer a promise); every refusal is a rejection.
 - `LogProvider` never sends real email — it records each message (`.messages`), forwards to `sink`,
-  and logs via `ctx.logger`. `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only;
-  `SendGridProvider` is the Cloudflare Workers-portable path.
+  and logs via `ctx.logger`. Like every provider, it refuses a send outside `connect()`..
+  `disconnect()` with `'LogProvider is not connected'`, so a send after `app.stop()` rejects.
+  `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only; `SendGridProvider` is the
+  Cloudflare Workers-portable path.
 
 ---
 
@@ -7707,6 +7857,7 @@ its implementation seam.
 | `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                                                   |
 | `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below.                      |
 | `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                                       |
+| `TraceparentSource`        | interface       | Structural `traceId?`/`spanId?`/`traceFlags?` input accepted by `contextToTraceparent`; both `TelemetryContext` and `SpanContext` satisfy it.                                                                                                                                                                  |
 | `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                                       |
 
 > **Implicit parent/child linking is conditional.** Since M75 the plugin DOES register an OTel
@@ -9017,19 +9168,21 @@ The three starters share one option chain:
 MicroserviceStarterOptions extends RestStarterOptions`, so an arm
 added to the REST tier is available on all three.
 
-| Export                         | Kind     | Package                                            |
-| ------------------------------ | -------- | -------------------------------------------------- |
-| `createRestApp`                | function | `rest-starter`                                     |
-| `buildRestPlugins`             | function | `rest-starter`                                     |
-| `RestStarterOptions`           | type     | `rest-starter`                                     |
-| `RealtimeArm`                  | type     | all three (re-exported along the tier's pin chain) |
-| `createMicroserviceApp`        | function | `microservice-starter`                             |
-| `buildMicroservicePlugins`     | function | `microservice-starter`                             |
-| `MicroserviceStarterOptions`   | type     | `microservice-starter`                             |
-| `createFullStackApp`           | function | `full-stack-starter`                               |
-| `buildFullStackPlugins`        | function | `full-stack-starter`                               |
-| `createFullStackAppFromConfig` | function | `full-stack-starter`                               |
-| `FullStackStarterOptions`      | type     | `full-stack-starter`                               |
+| Export                            | Kind     | Package                                                              |
+| --------------------------------- | -------- | -------------------------------------------------------------------- |
+| `createRestApp`                   | function | `rest-starter`                                                       |
+| `buildRestPlugins`                | function | `rest-starter`                                                       |
+| `RestStarterOptions`              | type     | `rest-starter`                                                       |
+| `RealtimeArm`                     | type     | all three (re-exported along the tier's pin chain)                   |
+| `createMicroserviceApp`           | function | `microservice-starter`                                               |
+| `buildMicroservicePlugins`        | function | `microservice-starter`                                               |
+| `MicroserviceStarterOptions`      | type     | `microservice-starter`                                               |
+| `createFullStackApp`              | function | `full-stack-starter`                                                 |
+| `buildFullStackPlugins`           | function | `full-stack-starter`                                                 |
+| `createFullStackAppFromConfig`    | function | `full-stack-starter`                                                 |
+| `fullStackConfigOf`               | function | Returns the exact config snapshot used by the config-driven factory. |
+| `FullStackConfigUnavailableError` | class    | Thrown when the accessor receives an app built by another factory.   |
+| `FullStackStarterOptions`         | type     | `full-stack-starter`                                                 |
 
 Each arm is one plugin's option object, threaded through unchanged. **Gated arms are absent unless
 supplied**, so a starter called with no options registers exactly its always-on set:
@@ -9091,6 +9244,9 @@ where
 `FromConfigOptions = { config?: ConfigPluginOptions; env?: Readonly<Record<string, unknown>> }`. The
 resolver is called exactly once; if it throws, or configuration fails to load, the returned promise
 rejects and no partially-composed application exists.
+
+`fullStackConfigOf(app): IConfig` returns that exact snapshot for post-factory code. It throws the
+exported `FullStackConfigUnavailableError` when the application was built by another factory.
 
 **`env` is required on Cloudflare Workers.** Bindings arrive as the `env` argument of the `fetch`
 handler, never process-wide, so runtime services built before a request report an EMPTY environment
@@ -10213,11 +10369,14 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 
 | Export                                                 | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `createCapabilityToken(name)`                          | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `encodeFrameData(data)`                                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `decodeFrameData(payload)`                             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `createCachedProbe(options)`                           | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `withDeadline(run, options)`                           | function | **Since M101a.** Runs one backend call under a bound whose expiry is a recorded failure: `run` receives an `AbortSignal` to forward; the call is raced against the deadline (an injected seam may ignore the signal), and on expiry the signal is aborted and the promise REJECTS with `options.onTimeout()`. The call's own rejection is never swallowed. `timeoutMs: 0` arms no timer. The request-path counterpart of `createCachedProbe`, which never rejects. Prefer a client's native per-command timeout where one exists                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `deadlineRangeError(name, timeoutMs)`                  | function | **Since M101a.** Returns the `RangeError` naming `name` for a deadline outside `0`–`2147483647` (including `NaN`), or `null` when valid — so an option holder can refuse a bad value at construction with the same message `withDeadline` uses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `DeadlineOptions`                                      | type     | **Since M101a.** `{ timeoutMs, onTimeout, timing? }` for `withDeadline`; `timing` is the `setTimer`/`clearTimer` surface, typically `resolveProbeTiming(ctx.runtime)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `resolveProbeTiming(runtime)`                          | function | Resolves a probe's clock-and-timer surface — `{ hrtime, setTimer, clearTimer }` bound to the injected `IRuntimeServices` (e.g. `ctx.runtime`), ready to spread into `createCachedProbe`'s options. NO ambient `performance.now()`/`Date.now()` fallback: all time access outside `packages/runtime` goes through `IRuntimeServices` (AI_GUIDELINES §4), so a caller with no runtime to inject has no clock the probe may lawfully read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `createConnectionErrorReporter(options)`               | function | Builds a de-duplicating sink for one connection's error events from `{ source, logger }`, where `logger` is a thunk read at CALL time. The first error of a run, or one whose message differs from the previous, logs at `warn`; a repeat of the previous message logs at `debug` with a `repeats` count; `recovered()` after at least one error logs once at `info` and resets, so the next outage warns again. Only the error's message is logged, never its stack. Neither method throws — a failing logger or an unstringifiable value is swallowed, since the caller is an event-emitter listener. An accessor returning `undefined` drops the event (no log sink is registered; the owning package's `isHealthy` probe still reports the outage)                                                                                                                                                                                                                                        |
 | `attachConnectionErrorReporter(client, reporter)`      | function | Attaches a reporter to a client's `'error'` (→ `report`) and `'ready'` (→ `recovered`) events, returning `false` when the value exposes no `on` method. For clients a package BUILT: an injected client belongs to the caller, and adding an `'error'` listener to it would silence the caller's own handling, since `ioredis` falls back to `console.error` only when no listener exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -10258,9 +10417,10 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | `SESSION_TENANT_BINDING_STATE_KEY`                     | const    | `session-plugin:tenant-binding`, set to `true` by `session-plugin`'s middleware when `tenantBinding` is on; `multi-tenancy-plugin`'s tenant-side compare runs only when it reads `true`, so `tenantBinding: false` disables both compare sites in every middleware order (M101c, V8-7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `tenantBindingMismatch(session, tenantId)`             | function | The pure tenant-binding compare shared by the two compare sites (M101c, V8-7): `true` only when the session is bound to a DIFFERENT tenant than the one resolved for the request; inert for an unbound session or a tenant-less request                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `createPathMatcher(patterns)`                          | function | Builds a path-exclusion predicate from `readonly PathPattern[]`; strings match exactly and regular expressions are tested against the path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `sealRequestIdentity(request)`                         | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `sealRequestIdentity(request)`                         | function | Installs the one-implicit-write request identity guard for `user`, `tenant` and `locale`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `replacePrincipal(request, principal)`                 | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `replaceTenant(request, tenant)`                       | function | Deliberately replaces `request.tenant` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `replaceLocale(request, locale)`                       | function | Deliberately replaces `request.locale` after it has been guarded — the localization middleware's write, and the application's way to apply a signed-in user's saved preference once authentication has run (M103)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `isPromiseLike(value)`                                 | function | Duck-typed thenable test (M87) — see the note below the Types table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ### Types
@@ -10310,6 +10470,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | View rendering      | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Localization        | `ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue` — the localization port (`t(key, values?)`, `locale`, `locales`, `forLocale(tag)`) served under `CAPABILITIES.LOCALIZATION`, and the catalogue shape: a string with `{name}` placeholders or a CLDR plural record with `other` required (M103)                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
@@ -10474,10 +10635,17 @@ Contract notes:
   is severed (client disconnect, timeout). Populated by the HTTP adapter from the native
   `Request.signal`; optional because injected / test requests may not carry one. Added in
   Milestone 42.
-- `IRequest.user` and `IRequest.tenant` each allow one implicit assignment per request; a later
-  assignment throws. `replacePrincipal` and `replaceTenant` are the explicit escapes for an
-  intentional replacement. This catches late accidental overwrites, not authorization bypasses: a
-  write before authentication is still the permitted first write.
+- `IRequest.user`, `IRequest.tenant` and `IRequest.locale` each allow one implicit assignment per
+  request; a later assignment throws. `replacePrincipal`, `replaceTenant` and `replaceLocale` are
+  the explicit escapes for an intentional replacement. This catches late accidental overwrites, not
+  authorization bypasses: a write before authentication is still the permitted first write.
+- `IRequest.locale?: string` (M103) — the request's resolved BCP 47 tag, written by the localization
+  plugin's middleware at priority 45 and absent without that plugin or on a path it excludes. It is
+  a flagged, optional, source-compatible widening on the `tenant` precedent. Three things to keep in
+  mind: a reader running BELOW priority 45 sees `undefined` (the priority table orders it, exactly
+  as for `tenant` at 40); a response cache keys on the value present when the cache runs, so an
+  override must happen before the lookup to be reflected there; and it is a preference, never an
+  authorization input — any client can select any supported locale.
 - The application service registry seals after `runBootstrap()`. Its `register`, `registerFactory`,
   and `unregister` methods then throw; request-scoped child registries remain mutable. Startup-time
   `override: true` mutations log at `info`, and successful unregisters log at `warn` through the
@@ -11757,7 +11925,7 @@ interface ClientOptions {
   headers?: Record<string, string>;
   fetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
   timing?: IClientTiming;
-  retry?: RetryPolicy;
+  retry?: ClientRetryPolicy;
   circuitBreaker?: CircuitBreakerPolicy;
   rateLimit?: ClientRateLimitPolicy;
   requestInterceptors?: ClientRequestInterceptor[];
@@ -11765,17 +11933,32 @@ interface ClientOptions {
 }
 ```
 
-| Option                 | Consumer                     | Behavior                                                      |
-| ---------------------- | ---------------------------- | ------------------------------------------------------------- |
-| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`         |
-| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win         |
-| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`         |
-| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`           |
-| `retry`                | retry strategy               | `limit < 1` throws at construction                            |
-| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                        |
-| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                  |
-| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution            |
-| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure |
+`ClientRetryPolicy` adds the client-side server-hint cap to the shared retry policy:
+
+```typescript
+type ClientRetryPolicy = RetryPolicy & {
+  readonly maxRetryAfterMs?: number;
+};
+```
+
+| Option                 | Consumer                     | Behavior                                                                                                                                        |
+| ---------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`                                                                                           |
+| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win                                                                                           |
+| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`                                                                                           |
+| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`                                                                                             |
+| `retry`                | retry strategy               | `limit` must be a positive safe integer; every configured or derived delay must be finite, non-negative, and at most `2_147_483_647` ms         |
+| `maxRetryAfterMs`      | retry strategy               | `ClientRetryPolicy` member; same timer-safe bound. A larger `Retry-After` surfaces the response error immediately, without sleeping or retrying |
+| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                                                                                                          |
+| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                                                                                                    |
+| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution                                                                                              |
+| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure                                                                                   |
+
+When `maxRetryAfterMs` is absent, the cap is the policy's largest computed backoff: `delay` for
+fixed backoff, or `delay * 2 ** (limit - 1)` for exponential backoff. A `Retry-After` at or below
+the effective cap replaces the computed delay. Policy validation rejects runtime strings and
+non-finite or timer-overflowing values so the derived cap cannot fail open or be clamped into an
+immediate retry by the runtime.
 
 ### ClientRequest
 
@@ -11814,6 +11997,10 @@ Request interceptors receive a mutable `ClientRequestContext` (resolved `URL` an
 execute once in registration order before the outbound attempt sequence. Response interceptors
 receive a successful `ClientResponse<T>` and its immutable request description; they are skipped
 entirely when the request throws.
+
+`createTraceContextInterceptor(source)` reads `source.activeSpanContext?()` per request, validates
+the W3C identifiers, and sets `traceparent` unless the caller already supplied it. Missing or
+invalid active contexts set nothing.
 
 ### IClientTiming and createDefaultClientTiming()
 
@@ -11941,7 +12128,7 @@ interface OpenApiCodegenOptions {
 | Component type           | PascalCase from the component name (`User` → `export type User`)                                                                                                                                                                                                                                                                                                                               |
 | Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                                                                                                                                                                                                                                                                      |
 | Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                                                                                                                                                                                                                                                                     |
-| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx response                                                                                                                                                                                                                                                                     |
+| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted for every declared non-2xx response, auto-follow redirects (`301`, `302`, `303`, `307`, `308`) included — Fetch returns one unfollowed when it carries no `Location`                                                                                                                                     |
 | Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                                                                                                                                                                                                                                                                        |
 | Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                                                                                                                                                                                                                                                                         |
 | Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                                                                                                                                                                                                                                                                                |
@@ -11964,8 +12151,8 @@ _slow type_: it blocks automatic `.d.ts` generation, so a consumer could not pub
 containing the generated file — while the file's own header tells them not to edit it. Naming the
 interface is also the only way a consumer can name the client's type.
 
-**Declared error responses are typed.** For each operation declaring a non-2xx response the
-generator emits a union discriminated on the literal `status`, plus a narrowing guard:
+**Declared error responses are typed.** For each operation declaring an observable non-2xx response
+the generator emits a union discriminated on the literal `status`, plus a narrowing guard:
 
 ```typescript
 export type GetUserByIdError =
@@ -11978,6 +12165,13 @@ export function isGetUserByIdError(e: unknown): e is GetUserByIdError { … }
 keeps meaning exactly what it did. The union must be discriminated on `status` to be usable —
 `HttpClientError<A> | HttpClientError<B>` is not, because `status` is `number` on both arms. A
 `default` response and range codes such as `4XX` are skipped: they name no single status.
+
+Every declared `3xx` keeps a typed error arm, including the statuses the web transport follows
+(`301`, `302`, `303`, `307`, and `308`): Fetch returns such a response unfollowed when it carries no
+`Location`, and the client throws `HttpClientError` with that status. An operation declaring an
+auto-follow redirect or the OpenAPI `3XX` range returns `unknown`, even when it also declares a
+`2xx` schema: the runtime `Location` selects a follow target body the source operation does not
+describe.
 
 **Generated output is `deno fmt`- and `deno lint`-clean.** Two-space indentation, nested inline
 object types indented, no lint pragma (`{}` is emitted as `Record<PropertyKey, never>`, which is
@@ -12575,6 +12769,29 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   **`X-Cache-Api`** (`HIT`/`MISS`/`BYPASS`), never `X-Cache`, so an operator can tell which layer
   answered. `caches.default` is **per-datacenter**: a hit rate measured in one location says nothing
   about another, and a `delete` does not evict globally.
+- **The default key carries the resolved tenant and locale.** The key is a URL string, which the
+  platform matches with no request headers, so `Vary` cannot separate entries in this cache — and
+  before the tenant was keyed, tenant A's cached page was served to tenant B for the TTL. When
+  `ctx.request.tenant` and/or `ctx.request.locale` is set, the default key is the request URL's own
+  text with `setu-cache-tenant=<encoded id>` and then `setu-cache-locale=<encoded locale>`
+  concatenated after it, in that order. The query is never re-serialized and the parameter never
+  `set`: `set` would strip a client-supplied copy from the key while the handler still saw it, and
+  re-serializing would fold encoding variants (`?p=%32` and `?p=2`) into one entry, either way
+  letting one client choose what another is served. Without a tenant or locale the key is the URL
+  unchanged, except as below. Four kinds of request are served uncached (`X-Cache-Api: BYPASS`)
+  because no key could keep them apart from another: a URL whose text is not its own WHATWG
+  serialization (Deno, and Node for some targets, deliver the request target as sent, while the
+  Cache API parses a key before matching), a URL carrying a fragment (delivered by Deno, Node and
+  Bun, ignored by the Cache API when matching), a tenant id or locale that is not well-formed UTF-16
+  (`encodeURIComponent` cannot encode a lone surrogate), and a request lacking a tenant or locale
+  whose URL already contains `setu-cache-tenant=` or `setu-cache-locale=` (its key would equal a
+  tenanted or localized request's). Workers normalizes the URL and strips the fragment, so the first
+  two do not arise there. The tenant and locale are the ones present when the middleware runs, so
+  the same conditions as `cache-plugin` apply: the middleware must run after the tenant (40) and
+  locale (45) middleware (globally, at a higher priority number than theirs; per route, listed after
+  them), and a `replaceTenant` or `replaceLocale` made inside the handler is not reflected — such a
+  route must not be cached here. A custom `key` replaces this and must include the tenant and locale
+  itself.
 - **The platform's cache refusals are checked before the write, not discovered by it.**
   `caches.default.put` throws for a non-GET request, status 206, `Vary: *`, and an uncleared
   `Set-Cookie`; `assessCacheability` reports each as a `CacheRefusal` and the middleware skips the
@@ -13040,6 +13257,102 @@ rather than a deliberate empty render.
 - **Layouts are components.** A layout is an ordinary component taking `children`. There is no
   plugin-level `layout` option: it would wrap every render, including fragment responses where a
   full document is wrong.
+
+## Localization Plugin (`@setu-ts/localization-plugin`)
+
+Message catalogues per locale, request locale resolution, and a formatter shared with the browser,
+shipped in **Milestone 103**. The plugin registers an `ILocalizer` under
+`CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()`, and resolves each request's
+locale into `IRequest.locale`. Zero npm dependencies: plurals, numbers and dates come from `Intl`.
+
+### Registration
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LocalizationPlugin, localizerFor } from '@setu-ts/localization-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    LocalizationPlugin({
+      supportedLocales: ['en', 'de'],
+      catalogues: { en: { greeting: 'Hello {name}' }, de: { greeting: 'Hallo {name}' } },
+    }),
+  ],
+});
+
+app.router.get('/', (ctx) => ctx.response.text(localizerFor(ctx).t('greeting', { name: 'Ada' })));
+```
+
+### Options
+
+`LocalizationPluginOptions` requires exactly one of `catalogues` and `source` — supplying both or
+neither is a compile error, and a JavaScript caller is refused at construction.
+
+| Option                   | Type                                       | Default         | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------ | ------------------------------------------ | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `supportedLocales`       | `readonly string[]`                        | —               | BCP 47 tags, canonicalized; the first is the default. Refused when empty, malformed, duplicated, longer than 35 characters (no client could select it), or unknown to the runtime's `Intl`.                                                                                                                                                                                                                                                                                                                                                    |
+| `catalogues`             | `Record<string, MessageCatalogue>`         | —               | Static catalogues keyed by tag, validated at `register()`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `source`                 | `IMessageSource`                           | —               | Loaded once at `register()` (a rejection fails startup), validated identically; the health indicator reports `injected[:name]`.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `allowPartialCatalogues` | `boolean`                                  | `false`         | Accept a locale missing keys the default defines: one warning per locale at `register()`, the default's message served for the gap.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `onMissing`              | `'key' \| 'throw'`                         | `'key'`         | A key no catalogue defines answers the key (warned once per key, at most 256 tracked), or throws `MissingMessageError`.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `timeZone`               | `string`                                   | runtime zone    | IANA zone `Date` values are formatted in; refused at construction when `Intl` does not recognize it.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `tenantLocale`           | `(tenant: ITenant) => string \| undefined` | —               | The tenant's default, consulted after `Accept-Language`; matched like any candidate. A throw propagates (application code, not client input).                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `middleware.enabled`     | `boolean`                                  | `true`          | `false` registers no global middleware; attach `localeMiddleware(...)` yourself.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `middleware.priority`    | `number`                                   | `45`            | After tenant resolution (40), before logging (50). Must be an integer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `middleware.query`       | `string \| false`                          | `'locale'`      | The query parameter source; `false` disables it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `middleware.cookie`      | `string \| false`                          | `'setu_locale'` | The cookie source; `false` disables it and drops `Cookie` from `Vary`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `middleware.exclude`     | `readonly PathPattern[]`                   | six probe paths | Skipped entirely — no resolution, no headers. Default `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`; `[]` disables.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `exposeCatalogues`       | `{ basePath; cacheControl? }`              | off             | Registers `GET <basePath>/:locale`. `basePath` must be one or more plain path segments (letters, digits, `.`, `_`, `~`, `-`), with no segment of only `.` or `..` (URL parsing removes those, so the route would be unreachable), and not the root, which would claim every unrouted single-segment `GET`; `cacheControl` defaults to `private, max-age=3600` (never shared: a session with `rolling` or `idleTimeoutMs` refreshes its cookie on every response) and is refused at construction when the platform's `Headers` would reject it. |
+
+### Exports
+
+| Export                      | Kind     | Purpose                                                                                                                        |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `LocalizationPlugin`        | function | Plugin factory — registers the localizer, the resolution middleware, the opt-in catalogue route and a `localization` indicator |
+| `localizerFor`              | function | `localizerFor(ctx)` — the localizer for `ctx.request.locale`; the default locale when absent, negotiated when unsupported      |
+| `localeMiddleware`          | function | The resolution middleware, for an application registering it per route group under `middleware.enabled: false`                 |
+| `MissingMessageError`       | class    | `t()` under `onMissing: 'throw'` for a key no catalogue defines; carries `key` and `locale`                                    |
+| `MissingPluralCountError`   | class    | A plural message formatted without a finite numeric `count`; carries `key` when known                                          |
+| `UnsupportedLocaleError`    | class    | `forLocale(tag)` for a tag outside the supported set — callers pass configuration there, never client text                     |
+| `IMessageSource`            | type     | `{ name?; load(): Promise<Record<string, MessageCatalogue>> }`                                                                 |
+| `LocaleMiddlewareOptions`   | type     | `localeMiddleware`'s options                                                                                                   |
+| `LocalizationPluginOptions` | type     | The options above                                                                                                              |
+
+The subpath **`@setu-ts/localization-plugin/format`** exports
+`format(message, values, locale,
+options?)`, `negotiateLocale(candidates, supported, excluded?)`,
+`parseAcceptLanguage(value)` and the types `FormatValues`, `FormatOptions` and `AcceptLanguage`. Its
+runtime graph is confined to its own modules — a test walks `deno info --json` to enforce it — so it
+is safe in a browser bundle.
+
+### Behavior notes
+
+- **Resolution order:** query parameter, cookie, `Accept-Language`, `tenantLocale`, then the
+  default. Every candidate is canonicalized inside a guard (a malformed tag is "no match") and
+  matched against `supportedLocales` only, exactly, then with subtags stripped right to left
+  (`de-Latn-AT` → `de-Latn` → `de`). A `*` range selects the first supported locale no `q=0` range
+  excludes; exclusion applies to `*` only, and the plugin never answers `406`.
+- **Bounded input:** `Accept-Language` is cut to 1024 characters before splitting, at most 16 ranges
+  are read, and a range over 35 characters is dropped; a query or cookie candidate over 35
+  characters is ignored before any canonicalization.
+- **Headers:** `Vary: Accept-Language` (plus `Cookie` while the cookie source is on) is appended
+  before the handler on every governed response. `Content-Language` is written after the handler
+  from the FINAL `ctx.request.locale`, only when that is a supported tag and the response has none;
+  a rejected `next()` writes none. `Vary: Cookie` makes most CDN caching ineffective — the
+  documented cost of the cookie source.
+- **Missing keys never fail a request** by default; a partial locale falls back to the default
+  locale's message, formatted in the REQUEST's locale (numbers, dates and plural rules follow the
+  reader), which is also what a browser formatting the served catalogue does. The catalogue route
+  serves each locale overlaid on the default, so a browser falls back the same way.
+- **The formatter escapes nothing**; escaping belongs to the renderer, as for `IViewEngine.render`.
+  In English `count: 0` selects the `other` plural form.
+- **Shared code, not identical output across runtimes:** `Intl` data differs between runtimes, and a
+  `Date` formats in the runtime's zone unless `timeZone` is set on both sides.
+- **No `optionalDependencies` on tenancy:** the tenant default is read per request, which middleware
+  priority (40 < 45) orders. The plugin declares `CAPABILITIES.LOGGER` only, so a partial-catalogue
+  warning raised during `register()` reaches the logger.
 
 ## Boundary-Type Compatibility
 

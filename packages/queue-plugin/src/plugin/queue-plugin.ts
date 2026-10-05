@@ -36,7 +36,11 @@ import type {
 } from '../interfaces/index.ts';
 import type { QueueAdapter } from '../adapters/queue-adapter.ts';
 import { MemoryQueue } from '../adapters/memory-queue.ts';
-import { RedisQueue, validateClient as isRedisQueueClient } from '../adapters/redis-queue.ts';
+import {
+  RedisQueue,
+  resolveCommandTimeoutMs,
+  validateClient as isRedisQueueClient,
+} from '../adapters/redis-queue.ts';
 import {
   RabbitMqQueue,
   validateClient as isAmqpQueueConnection,
@@ -81,6 +85,9 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
   // invalid option — including `enabled: false` from a caller the literal
   // type cannot reach — refuses before any application exists, with a fixed,
   // value-free message.
+  // M101a V8-5: refused here, not at `start()`, like every other bound.
+  if (adapterType === 'redis') resolveCommandTimeoutMs(options?.commandTimeoutMs);
+
   const diagnosticsPolicy = options?.diagnostics === undefined
     ? null
     : compileQueueDiagnosticsPolicy(options.diagnostics);
@@ -170,6 +177,9 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             ...(options?.deadLetterTtlMs === undefined
               ? {}
               : { deadLetterTtlMs: options.deadLetterTtlMs }),
+            ...(options?.commandTimeoutMs === undefined
+              ? {}
+              : { commandTimeoutMs: options.commandTimeoutMs }),
             // The built client's reconnect failures go to the logger (read at
             // call time) rather than ioredis's own console fallback.
             connectionErrorReporter: createConnectionErrorReporter({

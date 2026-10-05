@@ -894,6 +894,37 @@ emitDecoratorMetadata).
 
 ---
 
+### @setu-ts/localization-plugin
+
+**Purpose:** Message catalogues per locale, request locale resolution, and a formatter shared with
+the browser.
+
+**Capability Token:** `CAPABILITIES.LOCALIZATION`
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ✅      |
+
+**Features:**
+
+- Catalogues validated at startup; plural forms through `Intl.PluralRules`
+- Locale resolved from query, cookie, `Accept-Language` or a tenant default into
+  `ctx.request.locale`
+- `Vary` and `Content-Language` headers; `cache-plugin` keys on the locale
+- An import-free `/format` subpath for browsers and SDK clients
+
+> Locale data comes from each runtime's `Intl`, so a thin ICU build can lack a locale — the plugin
+> refuses such a tag at startup rather than silently formatting in the runtime's default.
+
+**Links:**
+
+- [README](../packages/localization-plugin/README.md)
+- [API Reference](./api/localization-plugin/src/index.ts/index.html)
+
+---
+
 ## Tier 5: Platform-Specific
 
 ### @setu-ts/cloudflare-plugin

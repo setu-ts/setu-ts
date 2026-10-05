@@ -26,14 +26,14 @@ const ADAPTER = 'dynamodb';
  * `ValidationException`), so a stored timestamp is a string or a number and
  * the adapter cannot know which without a declaration.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export type DynamoDateEncoding = 'iso' | 'epochMs';
 
 /**
  * A configured global secondary index and its key schema.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoIndexMapping {
   /** The index's partition-key attribute. */
@@ -55,7 +55,7 @@ export interface DynamoIndexMapping {
  * column order matters is the resolved target's `keyColumns` (partition then
  * sort), because the cursor codec needs a stable order to carry values in.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoEntityMapping {
   /**
@@ -194,7 +194,7 @@ function requireIdentifier(entity: string, option: string, value: string | undef
  * @param entity - The entity name passed to `getRepository()`
  * @param mapping - The per-entity overrides, or none
  * @returns The resolved target
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function resolveDynamoTarget(
   entity: string,

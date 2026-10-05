@@ -1,6 +1,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import type { Component, IViewEngine } from '@setu-ts/common';
+
 import { MailService } from '../../src/services/mail-service.ts';
 import { TemplateEngine } from '../../src/templates/template-engine.ts';
 import type { MailProvider, OutgoingMail } from '../../src/interfaces/index.ts';
@@ -80,6 +82,42 @@ describe('MailService.sendTemplate', () => {
     await expect(
       svc.sendTemplate('welcome', { to: 'u@x.com', subject: 'W' }, {}),
     ).rejects.toThrow('Unknown template variable');
+    expect(provider.sent).toHaveLength(0);
+  });
+});
+
+describe('MailService.sendTemplate — component arm (M102)', () => {
+  const Body: Component<{ name: string }> = (p) => `<p>${p.name}</p>`;
+  const Text: Component<{ name: string }> = (p) => `Hi ${p.name}`;
+
+  it('renders both bodies through the view engine and reaches the provider', async () => {
+    const provider = new RecordingProvider();
+    const view: IViewEngine = {
+      render: <P>(component: Component<P>, props: P) => Promise.resolve(String(component(props))),
+    };
+    const engine = new TemplateEngine({ welcome: { view: Body, text: Text } }, view);
+    const svc = new MailService(provider, engine, { defaultFrom: 'noreply@myapp.com' });
+
+    await svc.sendTemplate('welcome', { to: 'u@x.com', subject: 'Welcome' }, { name: 'Ada' });
+
+    const sent = provider.sent[0];
+    expect(sent?.from).toBe('noreply@myapp.com');
+    expect(sent?.subject).toBe('Welcome');
+    expect(sent?.html).toBe('<p>Ada</p>');
+    expect(sent?.text).toBe('Hi Ada');
+  });
+
+  it('never reaches the provider when the view engine rejects (short-circuit)', async () => {
+    const provider = new RecordingProvider();
+    const view: IViewEngine = {
+      render: () => Promise.reject(new Error('render failed')),
+    };
+    const engine = new TemplateEngine({ welcome: { view: Body } }, view);
+    const svc = new MailService(provider, engine, { defaultFrom: 'x@x.com' });
+
+    await expect(
+      svc.sendTemplate('welcome', { to: 'u@x.com', subject: 'W' }, { name: 'Ada' }),
+    ).rejects.toThrow('render failed');
     expect(provider.sent).toHaveLength(0);
   });
 });

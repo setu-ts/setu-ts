@@ -44,6 +44,103 @@ All notable changes to this project are documented here. The format follows
   `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS with `Origin: null`, and
   `trustedOrigins: ['null']` would admit every opaque-origin `POST` on every route.
 
+- **Versioning policy from `0.9.0`, with two gates.** A patch is the normal release and breaking
+  changes are batched into an occasional minor (README "Versioning", ROADMAP "Versioning Policy From
+  `0.9.0`"). `release:verify` gains check 10 (`scripts/release-shape.ts`): it classifies the bump
+  from the previous tag and refuses a patch whose shipping changelog section carries a `BREAKING`
+  entry, and a minor whose section carries none unless `--allow-quiet-minor` is passed.
+  `deno task check:plan` requires every plan's "Exported surface" section to carry a
+  `**Breaking for implementors:**` statement — `none`, or the break and the minor that carries it.
+  No package source changed.
+- **Release tooling: `release:bump` and `release:verify` check 9.**
+  `deno task release:bump <version>` moves every site a version bump has to touch — discovered by
+  package name wherever a reference carries one, enumerated with its reason where it does not — and
+  re-sweeps the result with `check:versions`' own reader; `--dry-run` prints the plan.
+  `release:verify` gains check 9 (`scripts/changelog-prs.ts`): every pull request merged since the
+  previous tag is represented in the shipping changelog section, and no milestone PR's entry sits
+  under an already-published heading — the two manual release-cutting checks that each saved a
+  release. CI's publish-dry-run job checks out full history so the merge log is reachable, and the
+  release workflow calls the `release:verify` task rather than an inline copy. No package source
+  changed.
+- **Service-call agreement (M101d).** The SDK adds `createTraceContextInterceptor` and
+  `ClientRetryPolicy`; the full-stack starter adds `fullStackConfigOf` and
+  `FullStackConfigUnavailableError` for the exact composition snapshot; and `contextToTraceparent`
+  accepts the new `TraceparentSource` shared by both telemetry context shapes.
+- **`withDeadline`, `deadlineRangeError` and `DeadlineOptions` in `common` (M101a).** A bound on one
+  backend call whose expiry is a REJECTION with the caller's own error, never a swallowed timeout:
+  the call receives an `AbortSignal`, is raced against the deadline in case it ignores the signal,
+  and its own rejection is never masked. It is the request-path counterpart of `createCachedProbe`,
+  which never rejects. `deadlineRangeError` lets an option holder refuse a bad bound at
+  construction.
+- **New bound options (M101a).** `CachePlugin`'s Redis store and `QueuePlugin`'s `'redis'` adapter
+  take `commandTimeoutMs` (default `15000`, `0` disables), applied as the ioredis `commandTimeout`
+  on the client they build. `SchedulerPlugin`'s `DistributedLockOptions` take `acquireTimeoutMs`
+  (default `5000`, `0` waits) and `commandTimeoutMs` (default `acquireTimeoutMs`, or `15000` when
+  that is `0`). The `vault` secrets provider takes `requestTimeoutMs` (default `5000`). Each
+  `commandTimeoutMs` applies only to a Redis client the plugin builds, never an injected one;
+  `acquireTimeoutMs` bounds every acquire, an injected `lock` included, and `requestTimeoutMs`
+  bounds an injected `http` too. An out-of-range value — including `NaN`, which `Number(env.X)`
+  yields for an unset variable — throws `RangeError` at startup.
+- **`SecretProviderUnavailableError` (M101a).** Exported by `@setu-ts/secrets-plugin` and carrying a
+  `503` status hint, so an application running `errorHandler` answers an unreachable provider with a
+  retryable `503` instead of a masked `500`. The transport error is kept as `cause` and never
+  reaches the response body.
+- **Mail bodies rendered through the view engine (M102).** `MailPluginOptions.templates` gains a
+  component arm beside the released string arm: `{ view, text? }`, where `view` and `text` are
+  `Component`s (a JSX function, an `html` tagged template, or a plain `(props) => string`) rendered
+  through the `IViewEngine` registered under `CAPABILITIES.VIEW`, with `sendTemplate`'s `data`
+  passed verbatim as each component's props. `MailPlugin` declares `CAPABILITIES.VIEW` in
+  `optionalDependencies` and resolves the engine once at `register()`; a component template
+  configured with no provider fails at `register()` naming both remedies, never on the first send.
+  `MailTemplate` is now the union `MailStringTemplate | MailComponentTemplate` (both exported), and
+  the two arms cannot mix in one template (a compile error). Escaping is the rendering runtime's,
+  and the component arm performs no missing-key check — an absent key renders as `undefined`. The
+  committed `IMailer` contract is unchanged, so every holder calling `sendTemplate` gets the arm
+  with no code change.
+- **`@setu-ts/localization-plugin` (M103).** A new package: `LocalizationPlugin` registers an
+  `ILocalizer` under the new `CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()`
+  (a malformed or `Intl`-unknown tag, a catalogue for an unlisted locale, a malformed message, and a
+  locale missing default keys are refused by name; `allowPartialCatalogues` downgrades the last to
+  one warning per locale), and resolves each request's locale at middleware priority 45 — query
+  parameter, cookie, `Accept-Language` (bounded parse, q-values, `de-AT` → `de`, `q=0` honoured
+  under `*`), a `tenantLocale` default, then the default — matching every candidate against the
+  supported set only. Every governed response carries `Vary: Accept-Language` (plus `Cookie` while
+  the cookie source is on, a stated CDN cost that `middleware.cookie: false` removes) and a
+  `Content-Language` written after the handler from the final locale. `localizerFor(ctx)` binds the
+  localizer to the request; `localeMiddleware` registers the resolution per route group;
+  `exposeCatalogues` serves `GET <basePath>/:locale` for browsers, `private, max-age=3600` by
+  default (a session refreshing its cookie must never reach a shared cache); `MissingMessageError`,
+  `MissingPluralCountError` and `UnsupportedLocaleError` are exported, with the option types
+  `LocalizationPluginOptions` (exactly one of `catalogues` and `source`, a compile error otherwise),
+  `LocaleMiddlewareOptions` and `IMessageSource` (catalogues loaded once at `register()`). The
+  formatter and locale negotiation ship as the import-free subpath
+  `@setu-ts/localization-plugin/format` (`format`, `negotiateLocale`, `parseAcceptLanguage`, and the
+  types `FormatValues`, `FormatOptions` and `AcceptLanguage`), whose runtime graph a test confines
+  to its own modules. It escapes nothing — escaping is the renderer's — and promises one
+  implementation, not identical output across runtimes: `Intl` data differs, so dates take an
+  explicit `timeZone`. Zero npm dependencies.
+- **Localization contracts in `common` (M103).** `CAPABILITIES.LOCALIZATION`, `ILocalizer`,
+  `LocalizationMessage`, `PluralForms` and `MessageCatalogue`, so a plugin formatting text for a
+  person resolves the localizer without importing the localization plugin.
+- **`IRequest.locale` and `replaceLocale` in `common` (M103).** The request's resolved BCP 47 tag is
+  a first-class optional field on the `tenant` precedent, sealed by the same one-implicit-write
+  guard (a second plain assignment throws naming `replaceLocale`), with
+  `replaceLocale(request,
+  tag)` as the deliberate escape — for example, to apply a signed-in
+  user's saved preference once authentication has run. Optional and source-compatible: no `IRequest`
+  implementor breaks. A reader running below priority 45 sees `undefined`, exactly as one below 40
+  sees no `tenant`.
+- **`@setu-ts/testing`'s `createTestContext` carries a seeded `request.locale` (M103)**, sealed as
+  the kernel seals a request, so a test seeding a locale gets it — and the same one-write guard.
+
+- **Three named real-broker errors in `@setu-ts/messaging-plugin` (M101b).**
+  `PubSubSubscriptionBoundElsewhereError`, `NatsConsumerNameCollisionError` and
+  `KafkaTopicUnavailableError`, each thrown by `subscribe()` (so a declared subscription rejects
+  `start()`) for a naming or startup rule the real broker imposes and a permissive fake accepted.
+- **`KafkaOptions.retry` / the `kafka` arm's `retry` (M101b).** Forwarded to `new Kafka({ retry })`
+  unless a `client` is injected, and read by `subscribe()` as its unknown-topic retry budget. Every
+  field is validated at construction, `factor` (kafkajs's jitter) included, held to [0, 1].
+
 ### Changed
 
 - **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
@@ -67,11 +164,6 @@ All notable changes to this project are documented here. The format follows
   belong to another tenant — possible only if a key is reused across tenants between the ownership
   check and the write — rejects instead of returning the row.
 
-- **SAML binding cookie cleared only on consumption (M101c).** The ACS cleared the browser-binding
-  cookie on every outcome, so a cross-site `POST` of an empty or junk body to the CSRF-exempt ACS,
-  carrying the victim's `SameSite=None` cookie, burned the victim's in-flight login. It is now
-  cleared exactly when a pending request is consumed.
-
 - **A tenant-bound session is never re-bound (M101c, V8-7).** The session plugin now seals the
   tenant only into a session that carries no binding yet. Previously a session whose tenant was
   resolved after the session loaded could be re-sealed to a different tenant on commit, so a refused
@@ -85,6 +177,212 @@ All notable changes to this project are documented here. The format follows
   node-saml calls `removeAsync` on its failure path and on an unmatched `InResponseTo`, which is how
   a foreign post consumed the victim's request. A refused peek now answers `state-invalid` (the code
   the case already uses) instead of `assertion-invalid`.
+
+- **`cloudflare-plugin`'s `cacheApiMiddleware` keys a localized request on its locale (M103).** Its
+  key is a URL string, which the Cache API matches with no request headers, so `Vary` could never
+  separate locales there and one locale's page was served to everyone for the TTL. When
+  `ctx.request.locale` is set, the default key is the URL text as sent with a `setu-cache-locale`
+  parameter naming the locale concatenated after it (on the key only; a client-supplied copy and
+  every encoding variant stay distinct in the key, so a client can reach neither another locale's
+  entry nor an entry another URL is served from). Without a locale the key is unchanged, except in
+  the last case below. Four kinds of request are now served uncached, because no key can keep them
+  apart from another: a URL whose text is not in its parsed form (Deno, and Node for some targets,
+  hand the handler the request target as sent — `/a/./b`, a raw `"` in the query — while the Cache
+  API parses a key before matching, so such a request could fill its normalized sibling's entry), a
+  URL carrying a fragment (Deno, Node and Bun hand it to the handler, while the Cache API ignores it
+  when matching), a locale that is not well-formed UTF-16, and a request with no locale whose URL
+  already contains `setu-cache-locale=` (its key would equal a localized request's). Workers
+  normalizes the URL and strips the fragment, so the first two do not arise there. As for
+  `cache-plugin`, the middleware must run after the locale middleware, and a handler-time
+  `replaceLocale` is not reflected. A custom `key` is untouched and must include the locale itself.
+- **`cache-plugin` keys on the resolved locale (M103).** The cache key gains a length-prefixed
+  locale segment from `ctx.request.locale`, between the tenant and `vary` segments, so one locale's
+  cached body is never served to another. An application without the localization plugin has no
+  locale on its requests and keeps byte-identical keys. The segment is read when `cacheMiddleware`
+  runs, so it must run after the locale middleware: a GLOBAL `cacheMiddleware` needs a higher
+  priority number than that middleware's (45 by default, or the configured `middleware.priority`),
+  and where the locale middleware is applied per route, the cache must be on that route after it. A
+  `replaceLocale` override is reflected only when it runs before the lookup.
+- SDK-generated clients keep an error arm for every declared `3xx`, the auto-follow statuses (`301`,
+  `302`, `303`, `307`, and `308`) included, since Fetch returns one unfollowed when it carries no
+  `Location`. Operations that may follow a redirect return `unknown`. Retry policies now cap
+  honoured `Retry-After` delays and surface the original response error immediately when the hint
+  exceeds the cap. Client construction rejects invalid/non-finite retry counts, delays, and derived
+  exponential backoffs so malformed configuration cannot disable that cap; delays above the portable
+  JavaScript timer maximum are also rejected so runtimes cannot clamp a long wait into an immediate
+  retry. The client keeps a frozen copy of the validated policy, so mutating the caller's `retry`
+  object afterwards no longer changes the cap.
+- **Every backend call M101a covers is now bounded by default, and an expired bound is a recorded
+  failure.** A paused or partitioned Redis keeps its socket open, so a cache, queue or
+  scheduler-lock command used to wait forever. It now rejects inside the bound: a cache call is
+  counted `failed` and the `cache` indicator reports `down`; `queue.add()` rejects and a poll
+  records the failure — though the server may still apply a timed-out command, so a rejected `add()`
+  can have enqueued the job and a retry can run it twice; a lock acquire that does not settle is a
+  skipped fire, logged, counted `lockFailed` and re-armed for the next slot, so a paused backend
+  skips fires instead of stopping the schedule. A token an abandoned acquire returns later is
+  released, and `RedisLock` releases the exact token of a timed-out `SET`, which can still apply
+  once Redis answers. Verified against a real paused Redis 7.
+- **`RedisQueue` transitions are atomic (M101a).** `enqueue`, `reserve`, `ack`, `requeue` and
+  dead-lettering each run as one Lua script when the client exposes `eval` — always true of the
+  client the adapter builds. They used to run as separate commands, so a command that timed out
+  locally but was applied by the server afterwards could leave a reserved job in neither the ready
+  nor the processing set, lost with its payload still stored. An injected client without `eval`
+  keeps the separate commands. A `reserve` the server applies after its local timeout still leaves
+  the job in the processing set, and nothing reclaims it, so it needs moving back by hand. Verified
+  against a live Redis 7.
+- **A Vault request that fails on the network or does not answer in `requestTimeoutMs` now rejects
+  with `SecretProviderUnavailableError` (`503`)** instead of a plain error served as a masked `500`.
+  The bound covers reading the response body too. `connect()` now refuses an address that is not an
+  absolute `http:`/`https:` URL, so a malformed address fails at startup rather than as a `503` on
+  every read. A Vault that answers with an HTTP error keeps its handling: `404` reads as `null`, any
+  other error status rejects with a plain `Error`.
+- **The Vault provider encodes secret names and caps response bodies (M101a security audit).** Each
+  `/`-separated segment of a name is percent-encoded, and a name with an empty, `.` or `..` segment
+  is refused before any request — `../../sys/health` used to reach another Vault endpoint with the
+  token attached. A name that relied on a literal `%`, `?` or `#` reaching Vault unencoded now reads
+  a different path. A name longer than 4096 characters once encoded is refused as an input error
+  instead of failing in the transport and reading as an outage (`503`). A read body over 1 MiB is
+  refused with a plain `Error`, and the memory a read holds stays within that 1 MiB however small
+  the chunks a dependency sends. Secret names quoted in `secrets-plugin` error messages have C0 and
+  C1 control characters, DEL, and U+2028/U+2029 escaped, so a name cannot start a new log line, and
+  quoted only up to its first 256 characters.
+- **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
+  registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
+  `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
+  every saturated replica at once — but only while queries through the adapter keep completing (one
+  within the last 10 seconds). A full pool with no completed query is a hung database and reports
+  `degraded`. Once `getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native
+  instance, its queries bypass the adapter, so progress is unobservable and a saturated pool reads
+  `up`. A pool connection timeout now reports `degraded` rather than `down` — the probe used to
+  answer `false` for it, though the database never answered either way. Verified against a live
+  PostgreSQL 16 pool.
+- **A retained Service Bus outage is answered at once (M101a).** With a recorded network failure,
+  `reachability()` now returns `false` immediately and runs the management probe in the background,
+  where a `true` answer clears the outcome for the next read. It used to await that probe, whose
+  2-second bound tied the indicator's, so the indicator's bound fired first and a recorded outage
+  was reported `up`.
+- **Queue depth observations drop a row the latest cycle did not read (M101a)** instead of keeping
+  the previous count. The source's `failure` and `depthCoverage: 'partial'` say why; an unreadable
+  depth is never reported as a retained zero.
+- **BREAKING: `TemplateEngine.render` is asynchronous (M102).** The exported class's
+  `render(name, data)` now returns `Promise<RenderedTemplate>`, because `IViewEngine.render` may
+  answer a promise and both template arms share one lookup; every refusal (unknown template, missing
+  placeholder key) is now a rejection rather than a synchronous throw. `MailService` is unaffected
+  (it awaits). A direct caller of `TemplateEngine` adds an `await`; the constructor also gains an
+  optional second parameter, the view engine, which the plugin supplies. See `docs/upgrading.md`.
+- **BREAKING: the log and SendGrid mail providers refuse a send while not connected.** Both accepted
+  a send outside `connect()`..`disconnect()`, unlike the SMTP and SES providers: a send after
+  `app.stop()` reported success on the log provider and still POSTed a real email through SendGrid.
+  Both now reject with `'LogProvider is not connected'` / `'SendGridProvider is not
+  connected'`.
+  Through `MailPlugin` nothing changes before `stop()`, since the plugin connects the provider
+  during `register()`. A test constructing `LogProvider` directly must now call
+  `await provider.connect()` before sending.
+- **BREAKING: `MailTemplate` is a union type, no longer an interface (M102).** It is now
+  `MailStringTemplate | MailComponentTemplate`, so `interface X extends MailTemplate` fails with
+  `TS2312` and `class Y implements MailTemplate` with `TS2422`. Extend or implement
+  `MailStringTemplate` instead, which has the released `{ html?, text? }` shape. A value typed
+  `MailTemplate`, and every object literal assigned to one, compiles unchanged.
+
+- **BREAKING: a Pub/Sub subscription with no `queue` is named per topic (M101b, V8-2).** The default
+  is `<defaultQueue>.<topic ID>` (`messaging-consumers.<topic>`; a fully-qualified topic name
+  contributes only its ID, since `/` is illegal in a subscription ID) instead of one shared
+  `messaging-consumers`. Subscription names are project-global, so the shared default attached a
+  second topic to the first topic's subscription — its handler consumed the other topic's messages
+  with no log — and the RPC channel of one run to the previous run's. An existing subscription bound
+  to another topic is now refused with `PubSubSubscriptionBoundElsewhereError` rather than attached
+  to, and a name over 255 characters is refused at `subscribe()`. Migration: an existing
+  `messaging-consumers` subscription keeps its backlog with no consumer after upgrade; pass
+  `SubscribeOptions.queue: 'messaging-consumers'` on the ONE topic that owns it until it is drained,
+  then delete it.
+- **A Kafka subscription to a topic that does not exist yet retries, then is named (M101b, V8-26).**
+  A KRaft broker with auto-creation answers `UNKNOWN_TOPIC_OR_PARTITION` to the request that creates
+  the topic — measured on Kafka 4.0 — and kafkajs does not retry that, so such a subscription died
+  at boot with a raw `KafkaJSProtocolError` naming no topic. `subscribe()` now retries that one
+  error within `retry` (kafkajs's defaults, about 9 s) and the topic is found; a broker that does
+  not auto-create rejects after the budget with `KafkaTopicUnavailableError`. A consumer that failed
+  to join is disconnected rather than leaked, and a rejected `run()` (kafkajs's crash handler
+  rethrows a disconnect that fails) is reported through `KafkaOptions.logger` (its first reader)
+  instead of escaping as an unhandled rejection.
+- **A NATS consumer records its raw queue as `setu.queue` metadata (M101b).** Consumer metadata
+  needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
+
+### Fixed
+
+- **SAML binding cookie cleared only on consumption (M101c).** The ACS cleared the browser-binding
+  cookie on every outcome, so a cross-site `POST` of an empty or junk body to the CSRF-exempt ACS,
+  carrying the victim's `SameSite=None` cookie, burned the victim's in-flight login. It is now
+  cleared exactly when a pending request is consumed.
+
+- **`cloudflare-plugin`'s `cacheApiMiddleware` keys on the resolved tenant (#407).** The default key
+  carried the locale (M103) and not the tenant, so with multi-tenancy tenant A's cached page was
+  served to tenant B for the TTL — the exact gap the M103 audit recorded as pre-existing. When
+  `ctx.request.tenant` is set the key appends `setu-cache-tenant=<encoded id>` before the locale
+  parameter, under the same rules: the URL text is never re-serialized, a tenant-less request whose
+  URL already carries the parameter is served uncached (its key would equal a tenant's), as is an
+  unencodable id, and an application without the plugin keeps byte-identical keys. A global
+  registration must run after the tenant middleware (40). A custom `key` must include the tenant
+  itself.
+- **The documented Node.js floor is 22, not 18 (#406).** `docs/getting-started.md`,
+  `docs/runtime-deployment.md` and the runtime README claimed Node 18+; five packages use
+  `Promise.withResolvers`, which Node 22 was the first to ship, and `globalThis.crypto` alone
+  needs 19. CI verifies on Node 24. The `cacheApiMiddleware` JSDoc's list of skip reasons also names
+  the non-`GET` pass-through it had omitted since M52b.
+- **A Kafka `subscribe()` racing `disconnect()` no longer leaves a consumer running.** When
+  `disconnect()` landed while `subscribe()` was still connecting its consumer, or during a first
+  attempt that then succeeded, the subscription completed anyway — a consumer ran after shutdown,
+  holding the process open and consuming messages. It now rejects with
+  `KafkaBroker was disconnected while subscribing` and releases the consumer. The same held for a
+  consumer whose group JOIN was still in flight (about 3 s on a broker with Kafka's default
+  `group.initial.rebalance.delay.ms`): kafkajs's `stop()` is a no-op until the join completes, so
+  disconnecting closed the connections under it, which kafkajs treats as a retriable crash and
+  restarts — the consumer rejoined after `app.stop()`. Releasing a consumer now waits up to 10 s for
+  its join to settle and then disconnects it; a join still pending at 10 s is disconnected the
+  moment it settles, after `app.stop()` has returned, because disconnecting under it neither stops a
+  join that later succeeds nor returns before kafkajs's pending JoinGroup is answered. A record
+  delivered to a released consumer is left uncommitted for the group to redeliver. Found by the
+  M101b security audit; both predate M101b.
+
+- **A Kafka consumer stopped while kafkajs was restarting it no longer rejoins after `app.stop()`.**
+  After a broker restart or a connection reset, kafkajs restarts a crashed consumer behind its own
+  timer. A stop that landed once that restart had begun found nothing to stop — kafkajs's `stop()`
+  drops a runner that is still joining — so the restarted consumer joined the group after shutdown,
+  consumed and committed messages with the stopped application's handler, and held the process open
+  (measured on Kafka 4.0). The broker now declines kafkajs's restart and restarts the consumer
+  itself — after the crash's `retryTime`, else `KafkaOptions.retry.initialRetryTime`, else 300 ms,
+  as kafkajs reads them — so a stop cancels a pending restart and waits for one in progress. Found
+  by the M101b security audit; predates M101b.
+
+- **A Kafka application exits after `app.stop()`.** `KafkaBroker.disconnect()` and a subscription's
+  `unsubscribe()` called the kafkajs consumer's `stop()`, which halts fetching but leaves the
+  consumer's cluster connection open — so every Kafka application with a subscription hung after a
+  clean `app.stop()` until it was killed, and each RPC request's reply inbox leaked a connection
+  when it closed. Both now call `disconnect()`, which stops the consumer and closes its connection.
+  Found while verifying M101b; it predates M101b.
+
+- **A `MessagingPlugin` whose declared subscription rejects no longer leaks its broker (M101b).**
+  `register()` connected the broker, subscribed the declared entries, and only then registered the
+  close hook — so when a declared subscription rejected `start()`, the kernel's failed-start cleanup
+  had no hook to run, the connected broker was never closed, and the process could not exit
+  (measured against a real Kafka broker). M101b makes that rejection a documented outcome, so the
+  hook is now registered directly after `connect()`. A Kafka subscribe retry waiting out its backoff
+  is likewise cancelled by `disconnect()` instead of holding a timer for up to `maxRetryTime`.
+
+- **NATS request-reply works against a real server (M101b, V8-6).** The reply inbox subscribes with
+  the dotted queue `rr.inbox.<uuid>`, which was used verbatim as the JetStream consumer name, and
+  the nats client refuses `.` in one before anything reaches the server — so every `request()`
+  failed with `invalid durable name - durable name cannot contain '.'`, as did any dotted user
+  queue. A queue is now encoded (`.` → `_2e`, and likewise `*`, `>`, `/`, `\` and whitespace); a
+  queue with none of those characters is unchanged, so no existing consumer is renamed. A queue
+  whose encoding collides with another's, or that is reused across two topics, rejects with
+  `NatsConsumerNameCollisionError` instead of silently sharing one consumer's deliveries.
+
+- **62 `@since` tags named a release that does not ship their symbol.** The MongoDB, DynamoDB and
+  cursor-paging surfaces of `@setu-ts/database-plugin` (61 tags) carried `@since 0.1.0` while first
+  shipping in `0.2.0`, and the kernel router's `ROUTE_ENTRY` first shipped in `0.3.0`. Each is
+  corrected to the first published version whose file contains the symbol. They survived because the
+  `@since` gate skipped every `0.1.0` tag — that line shipped only as `0.1.0-alpha.*` — and now
+  checks such a tag against the line's last prerelease instead.
 
 ## [0.8.0] — 2026-10-03
 

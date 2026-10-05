@@ -14,7 +14,12 @@ import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig } from '@setu-ts/common';
 
-import { createFullStackAppFromConfig } from '../../src/from-config.ts';
+import { createFullStackApp } from '../../src/app.ts';
+import {
+  createFullStackAppFromConfig,
+  fullStackConfigOf,
+  FullStackConfigUnavailableError,
+} from '../../src/from-config.ts';
 
 /** Sets env vars for the duration of one case, then restores the environment. */
 async function withEnv(
@@ -179,6 +184,13 @@ describe('createFullStackAppFromConfig | one snapshot', () => {
     // Identity, not equality: a second load would produce an equal snapshot and
     // still be the bug this asserts against.
     expect(registered).toBe(seen);
+    expect(fullStackConfigOf(app)).toBe(seen);
+  });
+
+  it('throws the named error for an app built by another factory', () => {
+    expect(() => fullStackConfigOf(createFullStackApp())).toThrow(
+      FullStackConfigUnavailableError,
+    );
   });
 
   it('serves the composed value from the same snapshot at request time', async () => {

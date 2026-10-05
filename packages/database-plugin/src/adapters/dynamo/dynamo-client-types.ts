@@ -207,7 +207,7 @@ export type DynamoTransactWriteItemsCommandOutput = Record<never, never>;
  * An injected implementation needs only these operations. No SDK class or
  * `instanceof` identity is required.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface IDynamoClient {
   /** Sends a key-constrained query. */

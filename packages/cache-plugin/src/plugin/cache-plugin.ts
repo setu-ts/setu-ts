@@ -26,7 +26,7 @@ import {
 import type { CachePluginOptions, CacheStoreOptions } from '../interfaces/index.ts';
 import type { CacheStore } from '../stores/cache-store.ts';
 import { MemoryStore } from '../stores/memory-store.ts';
-import { RedisStore } from '../stores/redis-store.ts';
+import { RedisStore, resolveCommandTimeoutMs } from '../stores/redis-store.ts';
 import { NoopStore } from '../stores/noop-store.ts';
 import {
   attachCacheCollector,
@@ -79,6 +79,9 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
   const storeType = options?.store ?? DEFAULT_STORE;
   const instanceName = options?.name ?? 'default';
   const storeOptions = buildStoreOptions(options?.options);
+  // M101a V8-5: refused here, before any application exists, rather than at
+  // `start()` where the store is built.
+  if (storeType === 'redis') resolveCommandTimeoutMs(storeOptions.commandTimeoutMs);
   // M98i: validated here, before any application exists.
   const diagnosticsAlias = options?.diagnostics === undefined
     ? null
@@ -219,6 +222,7 @@ function createBackend(
         url: options.url,
         client: options.client,
         connectionErrorReporter: extra?.connectionErrorReporter,
+        commandTimeoutMs: options.commandTimeoutMs,
       });
     case 'noop':
       return new NoopStore(prefix);
@@ -264,6 +268,9 @@ function buildStoreOptions(opts?: CacheStoreOptions): CacheStoreOptions {
   }
   if (opts?.maxSize !== undefined) {
     result.maxSize = opts.maxSize;
+  }
+  if (opts?.commandTimeoutMs !== undefined) {
+    result.commandTimeoutMs = opts.commandTimeoutMs;
   }
   return result as CacheStoreOptions;
 }

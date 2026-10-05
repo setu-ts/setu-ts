@@ -524,6 +524,22 @@ describe('MockResponse', () => {
     expect((ctx.request as unknown as Record<string, unknown>).tenant).toEqual({ id: 't1' });
   });
 
+  it('createTestContext propagates locale and seals it as the kernel does (M103)', () => {
+    const ctx = createTestContext({
+      request: { method: 'GET', url: 'http://localhost/', locale: 'de' },
+    });
+    expect(ctx.request.locale).toBe('de');
+    // A seeded locale is the first write, exactly as on a kernel request.
+    expect(() => {
+      ctx.request.locale = 'fr';
+    }).toThrow('ctx.request.locale has already been set');
+  });
+
+  it('createTestContext leaves locale absent when not seeded', () => {
+    const ctx = createTestContext();
+    expect(ctx.request.locale).toBeUndefined();
+  });
+
   // --- P1-1: request.signal propagation to ctx.signal ---
 
   it('options.request.signal propagates to ctx.signal', () => {

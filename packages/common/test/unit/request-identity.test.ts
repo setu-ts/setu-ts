@@ -1,6 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
+  replaceLocale,
   replacePrincipal,
   replaceTenant,
   sealRequestIdentity,
@@ -76,5 +77,65 @@ describe('sealRequestIdentity', () => {
     replaceTenant(req, tenant);
     expect(req.user).toBe(principal);
     expect(req.tenant).toBe(tenant);
+  });
+});
+
+describe('request locale (M103)', () => {
+  it('guards locale independently, naming replaceLocale in the second-write error', () => {
+    const req = request();
+    sealRequestIdentity(req);
+    req.locale = 'de';
+    expect(req.locale).toBe('de');
+    expect(() => {
+      req.locale = 'fr';
+    }).toThrow('replaceLocale(ctx.request, value)');
+    expect(req.locale).toBe('de');
+  });
+
+  it('does not touch user or tenant when the locale is written', () => {
+    const req = request();
+    sealRequestIdentity(req);
+    req.locale = 'de';
+    const principal: IPrincipal = { id: 'p', roles: [] };
+    req.user = principal;
+    expect(req.user).toBe(principal);
+    expect(req.tenant).toBeUndefined();
+  });
+
+  it('treats a seeded locale as the first write', () => {
+    const req = request({ locale: 'fr' });
+    sealRequestIdentity(req);
+    expect(req.locale).toBe('fr');
+    expect(() => {
+      req.locale = 'de';
+    }).toThrow('ctx.request.locale has already been set');
+  });
+
+  it('replaces a sealed locale deliberately, also after an implicit write', () => {
+    const req = request();
+    sealRequestIdentity(req);
+    req.locale = 'en';
+    replaceLocale(req, 'de');
+    expect(req.locale).toBe('de');
+    replaceLocale(req, 'fr');
+    expect(req.locale).toBe('fr');
+  });
+
+  it('assigns on an unsealed request', () => {
+    const req = request();
+    replaceLocale(req, 'de');
+    expect(req.locale).toBe('de');
+  });
+
+  it('keeps the locale slots off every enumeration', () => {
+    const req = request();
+    sealRequestIdentity(req);
+    replaceLocale(req, 'de');
+    expect(Object.keys(req)).toContain('locale');
+    expect(Object.keys(req).join()).not.toContain('setu.request');
+    expect(JSON.parse(JSON.stringify(req)).locale).toBe('de');
+    expect(JSON.stringify(req)).not.toContain('setu.request.locale');
+    expect(Object.getOwnPropertySymbols(req).map(String).filter((s) => s.includes('locale')))
+      .toHaveLength(2);
   });
 });

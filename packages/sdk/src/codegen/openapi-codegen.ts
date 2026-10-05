@@ -672,6 +672,18 @@ function parseStatusCode(code: string): number | undefined {
   return /^[1-5][0-9]{2}$/.test(code) ? Number(code) : undefined;
 }
 
+/** Exact redirect statuses that the Fetch transport follows automatically. */
+function isAutoFollowRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+/** Whether a response key may describe a redirect followed by the transport. */
+function isRedirectResponseCode(code: string): boolean {
+  if (code === '3XX') return true;
+  const status = parseStatusCode(code);
+  return status !== undefined && isAutoFollowRedirectStatus(status);
+}
+
 /** A rendered type lifted out of its use site into its own exported alias. */
 interface HoistedAlias {
   readonly name: string;
@@ -727,7 +739,7 @@ function hoistMultiline(
 }
 
 /**
- * Collects an operation's declared non-2xx responses.
+ * Collects an operation's declared non-2xx responses, redirects included.
  *
  * `getSuccessTypes` reads only 2xx, so a document's 4xx schemas — the part a
  * client most needs help with — typed nothing at all: a non-2xx throws
@@ -736,7 +748,7 @@ function hoistMultiline(
  * @param op - The operation
  * @param path - Path, for diagnostics
  * @param method - Method, for diagnostics
- * @returns One arm per declared non-2xx status, in ascending status order
+ * @returns One arm per declared non-2xx status, in ascending order
  */
 function getErrorArms(
   op: SdkOpenApiOperation,
@@ -751,6 +763,10 @@ function getErrorArms(
   for (const [code, resp] of Object.entries(op.responses)) {
     // `default` and a range code such as `4XX` name no single status, so neither
     // can become a discriminated arm.
+    // An auto-follow redirect status keeps its arm: Fetch returns the 3xx
+    // itself when `Location` is absent, and `HttpClient` then throws
+    // `HttpClientError` with that status. Only a FOLLOWED redirect is the
+    // `unknown` success type.
     const status = parseStatusCode(code);
     if (status === undefined || (status >= 200 && status < 300)) continue;
     const media = resp.content?.['application/json'];
@@ -950,6 +966,10 @@ function getSuccessTypes(
   aliases: HoistedAlias[],
 ): string[] {
   if (!op.responses) return ['void'];
+  const hasRedirect = Object.keys(op.responses).some(isRedirectResponseCode);
+  // The followed target is selected at runtime through `Location`, so even a
+  // declared 2xx schema cannot describe every body this operation may return.
+  if (hasRedirect) return ['unknown'];
   const out: string[] = [];
   for (const [code, resp] of Object.entries(op.responses)) {
     const s = parseStatusCode(code);
@@ -974,7 +994,8 @@ function getSuccessTypes(
       } else out.push('void');
     }
   }
-  return out.length ? out : ['void'];
+  if (out.length > 0) return out;
+  return ['void'];
 }
 
 /**
@@ -1097,6 +1118,9 @@ export function generateOpenApiClient(
 
   const shapes = operations.map((entry) => buildOpShape(entry, types));
   const anyErrors = shapes.some((shape) => shape.errorArms.length > 0);
+  const hasRedirects = operations.some((entry) =>
+    Object.keys(entry.operation.responses ?? {}).some(isRedirectResponseCode)
+  );
 
   // No lint pragma. The generator emits only lint-clean constructs, and a
   // NARROWED ignore cannot be emitted unconditionally either: `deno lint`
@@ -1106,6 +1130,9 @@ export function generateOpenApiClient(
   // replaced.
   L('/**');
   L(' * Auto-generated SDK client. Do not edit manually.');
+  if (hasRedirects) {
+    L(' * Followed redirect target bodies are not described here and are typed as unknown.');
+  }
   L(' */');
   L('');
   L(`import type { ClientResponse, IHttpClient } from '${opts.sdkImport}';`);

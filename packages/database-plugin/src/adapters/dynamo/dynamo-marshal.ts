@@ -246,7 +246,7 @@ function marshalObjectValue(
  *   DynamoDB representation: a `Date` without a declared encoding, `undefined`,
  *   a non-finite number, a `bigint`, a function, a symbol, a non-`Uint8Array`
  *   typed-array view, or a `Map`/`Set`/class instance
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function marshalDynamoValue(
   value: unknown,
@@ -270,7 +270,7 @@ export function marshalDynamoValue(
  * @returns The DynamoDB item
  * @throws {UnsupportedQueryFeatureError} Per {@linkcode marshalDynamoValue},
  *   including the undeclared-`Date` refusal naming the attribute
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function marshalDynamoItem(
   row: Record<string, unknown>,
@@ -303,7 +303,7 @@ export function marshalDynamoItem(
  * @throws {UnsupportedQueryFeatureError} When the value carries no type
  *   member at all — DynamoDB never produces one, so reading it as `undefined`
  *   would silently corrupt a row
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function unmarshalDynamoValue(value: DynamoAttributeValue): unknown {
   if (value.S !== undefined) return value.S;
@@ -340,7 +340,7 @@ export function unmarshalDynamoValue(value: DynamoAttributeValue): unknown {
  *
  * @param item - The DynamoDB item read back from a response
  * @returns The repository row
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function unmarshalDynamoItem(item: DynamoAttributeMap): Record<string, unknown> {
   const row: Record<string, unknown> = {};

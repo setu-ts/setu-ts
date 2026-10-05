@@ -39,6 +39,13 @@ function createManualRuntime(): {
   return { runtime, advance: (ms: number) => void (clock += ms) };
 }
 
+/** Lets a background `.then` chain settle. */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) {
+    await Promise.resolve();
+  }
+}
+
 describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
   it('the C1 proof: a status-less probe failure leaves isReady() true and reachability() undefined', async () => {
     // The gate the v0.6.0 notes claimed does not exist: `isReady()` is
@@ -165,6 +172,10 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
     await broker.connect();
     await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
 
+    // M101a (V8-1): the read that finds the negative outcome answers it at
+    // once; the positive probe it started clears the outcome for the NEXT read.
+    expect(await broker.reachability()).toBe(false);
+    await flushMicrotasks();
     expect(await broker.reachability()).toBe(true);
   });
 
@@ -266,5 +277,95 @@ describe('dataPlaneEvidenceMs is validated at construction (M95b review)', () =>
     await defaulted.connect();
     await defaulted.publish('t', { a: 1 });
     expect(await defaulted.reachability()).toBe(true);
+  });
+});
+
+describe('ServiceBusBroker answers a retained negative outcome at once (M101a V8-1)', () => {
+  function failingBroker(isHealthy: () => Promise<boolean | undefined>): ServiceBusBroker {
+    return new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
+      connectionString: 'Endpoint=sb://test/',
+      client: makeTransport({
+        isHealthy,
+        send: () => Promise.reject(new Error('connection reset by peer')),
+      }),
+    });
+  }
+
+  it('resolves false before a never-settling probe can time out', async () => {
+    // The fake runtime's timers never fire on their own, so if reachability()
+    // waited on the probe this read would never settle — the V8-1 race, where
+    // the indicator's own 2 s bound fired first and reported `up`.
+    let probes = 0;
+    const broker = failingBroker(() => {
+      probes += 1;
+      return new Promise<boolean | undefined>(() => {});
+    });
+    await broker.connect();
+    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+
+    // Raced against a microtask flush: the answer must be available before
+    // ANY timer could fire, not merely before the 2 s probe bound.
+    const pending = flushMicrotasks().then(() => 'still waiting');
+    expect(await Promise.race([broker.reachability(), pending])).toBe(false);
+    expect(await Promise.race([broker.reachability(), pending])).toBe(false);
+    // Repeated reads share the one in-flight, coalesced probe.
+    expect(probes).toBe(1);
+  });
+
+  it('a probe settling true clears the outcome for the NEXT read, not the current one', async () => {
+    let release: (value: boolean) => void = () => {};
+    const broker = failingBroker(() => new Promise<boolean>((resolve) => (release = resolve)));
+    await broker.connect();
+    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+
+    expect(await broker.reachability()).toBe(false);
+    await flushMicrotasks();
+    release(true);
+    await flushMicrotasks();
+    expect(await broker.reachability()).toBe(true);
+  });
+
+  it('a probe settling undefined or false leaves the negative outcome in place', async () => {
+    for (const outcome of [undefined, false]) {
+      const broker = failingBroker(() => Promise.resolve(outcome));
+      await broker.connect();
+      await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset');
+
+      expect(await broker.reachability()).toBe(false);
+      await flushMicrotasks();
+      expect(await broker.reachability()).toBe(false);
+    }
+  });
+
+  it('a late true does not erase a failure recorded after the probe started', async () => {
+    let release: (value: boolean) => void = () => {};
+    const broker = failingBroker(() => new Promise<boolean>((resolve) => (release = resolve)));
+    await broker.connect();
+    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    expect(await broker.reachability()).toBe(false);
+
+    // A newer failure replaces the outcome (and rebuilds the probe) before
+    // the old probe answers.
+    await expect(broker.publish('orders', { id: 2 })).rejects.toThrow('connection reset by peer');
+    await flushMicrotasks();
+    release(true);
+    await flushMicrotasks();
+
+    expect(await broker.reachability()).toBe(false);
+  });
+
+  it('a probe settling after disconnect() writes nothing', async () => {
+    let release: (value: boolean) => void = () => {};
+    const broker = failingBroker(() => new Promise<boolean>((resolve) => (release = resolve)));
+    await broker.connect();
+    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    expect(await broker.reachability()).toBe(false);
+
+    await flushMicrotasks();
+    await broker.disconnect();
+    release(true);
+    await flushMicrotasks();
+
+    expect(await broker.reachability()).toBeUndefined();
   });
 });

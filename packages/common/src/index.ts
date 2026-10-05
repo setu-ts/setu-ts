@@ -43,6 +43,9 @@ export type { HttpStatusHint } from './errors/status-hint.ts';
 // Health probe
 export { createCachedProbe, resolveProbeTiming } from './health/probe.ts';
 export type { CachedProbeOptions, ProbeTiming } from './health/probe.ts';
+// Bounded backend call (M101a) — a deadline whose expiry is a recorded failure
+export { deadlineRangeError, withDeadline } from './health/deadline.ts';
+export type { DeadlineOptions } from './health/deadline.ts';
 // Connection-error reporting — routes a built client's 'error' events to the
 // logger, de-duplicated, instead of the driver's own console fallback
 export {
@@ -88,7 +91,12 @@ export type {
 } from './registry.ts';
 
 // Request identity and cross-package state keys
-export { replacePrincipal, replaceTenant, sealRequestIdentity } from './request-identity.ts';
+export {
+  replaceLocale,
+  replacePrincipal,
+  replaceTenant,
+  sealRequestIdentity,
+} from './request-identity.ts';
 export {
   CLIENT_IP_STATE_KEY,
   SESSION_STATE_KEY,
@@ -107,6 +115,7 @@ export {
   TRACEPARENT_HEADER,
   TRACESTATE_HEADER,
 } from './trace-context.ts';
+export type { TraceparentSource } from './trace-context.ts';
 
 // HTTP abstractions
 export type {
@@ -538,6 +547,14 @@ export type { ISsrService } from './services/ssr.ts';
 
 // View rendering contracts
 export type { Component, IViewEngine } from './services/view.ts';
+
+// Localization contracts
+export type {
+  ILocalizer,
+  LocalizationMessage,
+  MessageCatalogue,
+  PluralForms,
+} from './services/localization.ts';
 
 // Session contracts
 export { SESSION_TENANT_BINDING_KEY, tenantBindingMismatch } from './services/session.ts';

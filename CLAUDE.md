@@ -5572,27 +5572,185 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   branch. Verified beyond the gates: the client on Node, Bun and Deno against a Deno server, process
   freeze/resume, and a live 364 s machine suspend showing the cap counts awake time — complete (PR
   #392).
+- **Milestone 101d** (`packages/sdk` + `packages/telemetry-plugin` +
+  `packages/react-router-plugin` + `packages/starters/full-stack-starter`): aligned both sides of
+  five first-party call contracts. The SDK propagates an active trace and caps `Retry-After`;
+  generated clients no longer claim observable `3xx` error arms; React Router refusal ownership is
+  explicit; and post-factory code can read the exact full-stack configuration snapshot — complete
+  (PR #403).
 - **Release `v0.8.0`** — on `release/v0.8.0`, 2026-10-03 (PR #394). **49 packages**; first publish
   of `diagnostics-plugin`, so `release:create-packages` and `release:link-repos` run before the tag.
   Scope was M98a–M98o, M99a–M99e and M100a–M100f. The sdk manifest's pinned mapping value
   (`jsr:@setu-ts/common@<version>`) is a bump site a `^`-only sweep misses (see
   `docs/releasing.md`), and an in-place edit to the published `[0.7.0]` CHANGELOG section (the M99c
   Blob default) was reverted to its tag text, since 0.7.0 did not have that behaviour.
+- **Milestone 101a** (`common` + `messaging-plugin` + `database-plugin` + `secrets-plugin` +
+  `cache-plugin` + `queue-plugin` + `scheduler-plugin` — health that reports healthy, and calls that
+  hang, when a dependency fails): one rule, built on the new `withDeadline` in `common`, applied
+  across seven packages — every backend call is bounded, and an expired bound is a recorded failure.
+  V8-1 (the regression): a retained Service Bus outage answers `false` at once, with the management
+  probe only clearing it in the background. V8-3: a saturated Drizzle pool (seen through
+  `poolStats`) is `up` with `reachable: 'unknown'` only while queries complete through the adapter
+  (a hung database reads `degraded`), and a pool timeout is `degraded` rather than `down`. V8-4:
+  Vault requests are bounded by `requestTimeoutMs` and an outage rejects with the new
+  `SecretProviderUnavailableError` (`503`). V8-5: cache and queue Redis commands carry
+  `commandTimeoutMs`. V8-23: an unread queue depth row is absent, never a retained zero. V8-24: a
+  hung lock acquire is bounded by `acquireTimeoutMs`, counted `lockFailed`, re-armed, and a late
+  token released. Every bound refuses an out-of-range value (including `NaN`) at startup. Proven
+  against a real paused Redis 7 (CI, pinned by `test/apps-gate.test.ts`), PostgreSQL 16, Vault and
+  the Service Bus emulator. An unplanned security audit, requested by the maintainer, ran four
+  fresh-context rounds: round 1 found no design review (now plan §11, recorded after the fact) and
+  pre-existing Vault defects — an unencoded secret name reached any Vault endpoint with the token,
+  and bodies were unbounded — both fixed; round 2 found 16-byte chunks pinning 64 KiB buffers (a
+  read peaked at 2.4 GiB under the 1 MiB cap, now 131 MiB); rounds 2–3 found unbounded and partly
+  escaped names in messages. Round 4 passed on `0caf9f9` — complete (PR #401).
+- **Milestone 102** (`packages/mail-plugin` — mail bodies rendered through the view engine. M29's
+  `TemplateEngine` is 94 lines of `{{ variable }}` substitution, the right size for a welcome mail
+  and the wrong size for an invoice or a digest, which every application built by concatenating
+  strings — exactly what M92 removed from HTTP responses. `MailPluginOptions.templates` gains a
+  **component arm** beside the string arm (`{ view, text? }`, both `Component`s), rendered through
+  the `IViewEngine` under `CAPABILITIES.VIEW` with `sendTemplate`'s `data` passed verbatim as props,
+  so the committed `IMailer` contract is unchanged. **The bridge lives in `mail-plugin`, as an
+  optional capability** — a typed free function in `view-plugin` was rejected as the three lines an
+  application already writes, with no reader but its own test (maintainer decision). `MailPlugin`
+  declares `CAPABILITIES.VIEW` in `optionalDependencies` and resolves the engine ONCE at
+  `register()`; a component template with no provider fails at startup naming both remedies (the M92
+  `@Render` precedent), performed inside the `TemplateEngine` constructor so it is testable without
+  a plugin context. The two arms carry `never`-typed cross-arm members, so a template mixing `view`
+  and `html` is a compile error rather than a precedence rule (pinned by self-validating
+  `@ts-expect-error` rows). **One breaking change**: `TemplateEngine.render` is now asynchronous,
+  because `IViewEngine.render` may answer a promise and both arms share one lookup — CHANGELOG'd
+  with migration text and a `docs/upgrading.md` entry. Two asymmetries with the string arm are
+  stated in three doc sites and pinned by tests rather than implied away: escaping is the rendering
+  runtime's (an `html` template escapes, a hand-written literal does not), and there is NO
+  missing-key check (an absent key renders as `undefined`). Only the registry is consulted — a
+  container-supplied engine lands during `DecoratorPlugin`'s own `register()`, after this one.
+  Verified through a real kernel app with the real `ViewPlugin` under the non-default `hono-html`
+  arm, `MailPlugin` listed BEFORE `ViewPlugin` so the edge rather than array order is what orders
+  them; `ViewRenderError` and `UnresolvedSuspenseError` propagate unwrapped with the provider never
+  reached. Four negative controls each observed failing and reverted. All changed `src` files at
+  100% branch/function/line. **Two pre-existing defects the verification surfaced are fixed here at
+  the maintainer's direction** (the M58 `g controller` / M59 `detectRuntime` precedent): the log and
+  SendGrid providers accepted a send while disconnected — after `app.stop()` the log provider
+  reported success and SendGrid still POSTed a real email, while SMTP and SES refused — and the
+  `@since` gate skipped every `@since 0.1.0` tag, because that line shipped only as `0.1.0-alpha.*`,
+  reporting them as "ahead of the registry". The gate now checks such a tag against the line's last
+  prerelease, which took it from 946 verified tags to 1,728 and surfaced 62 wrong ones — the
+  MongoDB, DynamoDB and cursor-paging surfaces of `database-plugin` tagged `0.1.0` while shipping in
+  `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
+  registry rather than guessed) — complete (PR #400)
+- **Milestone 101b** (`packages/messaging-plugin` — message transports that fail against the real
+  broker): three arms that passed every fake-backed test and failed on first contact with the real
+  server. **V8-2:** a Pub/Sub subscription with no `queue` is named per topic,
+  `<defaultQueue>.<topic ID>` (breaking), and an existing subscription bound to another topic — read
+  through a new `getMetadata` facade member — is refused with
+  `PubSubSubscriptionBoundElsewhereError` rather than attached to. **V8-6:** a NATS queue is encoded
+  into a legal JetStream consumer name (`.` → `_2e`, the nine characters the client refuses held as
+  data; a legal queue is unchanged), the raw queue is recorded as `setu.queue` consumer metadata
+  (NATS 2.10+), and an encoding collision or a queue reused across topics rejects with
+  `NatsConsumerNameCollisionError` — in process, and across processes on the server's
+  `10148 consumer already exists`, which the old `'consumer name already exists'`/`'duplicate'`
+  match never saw. **V8-26:** **the plan's premise was falsified by measurement** — kafkajs retries
+  only `LEADER_NOT_AVAILABLE`, and a KRaft broker WITH auto-creation answers
+  `UNKNOWN_TOPIC_OR_PARTITION` to the request that creates the topic, so `subscribe()` now retries
+  that one error within a validated, forwarded `KafkaOptions.retry` (kafkajs's defaults), then
+  throws `KafkaTopicUnavailableError`; a `run()` rejection reaches the logger. Real suites drive two
+  topics and RPC in one app on real NATS, Kafka 4.0.0 and the Pub/Sub emulator (run twice on one
+  instance, striking the doc's restart advice that masked V8-2); every negative control reproduced
+  the run's own signature. **Verification then found three defects the gates passed.** The headline
+  one made the milestone's own named errors hang the process: `register()` connected the broker and
+  subscribed the declared entries BEFORE registering its close hook, so a declared subscription
+  rejecting `start()` — now the documented outcome — left the connected broker open and the process
+  never exited (measured on real Kafka); the hook now follows `connect()`. A fully-qualified Pub/Sub
+  topic derived a default name containing `/`, which the emulator refused with `INVALID_ARGUMENT`
+  (the topic ID is used now), and a Kafka retry wait held its timer through `disconnect()`. A
+  pre-existing leak, folded in at the maintainer's direction (the M58 precedent): `KafkaBroker`
+  `stop()`ped consumers on `disconnect()` and `unsubscribe()` but never `disconnect()`ed them, so
+  every Kafka app hung after `app.stop()` on `develop` too, and every RPC reply-inbox close leaked a
+  connection; both now `disconnect()` . The independent security audit (round 1, on `0d3da3da`)
+  failed on a missing design security review — now recorded as plan §10 after the fact (the M101a
+  precedent) — and a doc claim that every `retry` field was validated while `factor` was forwarded
+  unchecked (now held to [0, 1]); its pre-existing observation that a `disconnect()` racing
+  `subscribe()`'s connect or first attempt left a consumer running was folded in and fixed. Round 2
+  (on `1b6c741d`) found the same class one window later (F3): a consumer whose group JOIN was in
+  flight survived `app.stop()`, because kafkajs's `stop()` is a no-op mid-join and closing the
+  connections under the join is a retriable crash it RESTARTS — so release now waits for the join
+  (bounded 10 s) and a released consumer refuses the restart; on a real broker each half was shown
+  load-bearing on its own (without the wait a stale member lingers; without either the process
+  hangs). Round 3 (on `3a8dbccf`) found both claims one window short: a stop after kafkajs's own
+  restart timer fired still left the restarted consumer joining — kafkajs's `stop()` drops a runner
+  that is not yet running, so nothing could stop it, and it consumed after `app.stop()` (N2) — and
+  the 10 s bound covered only the wait, not the disconnect under a pending JoinGroup (N1: 45 s, 64
+  s). The broker now owns crash restarts (`restartOnFailure` always declines and schedules its own),
+  and a join outlasting the bound is disconnected the moment it settles rather than under it:
+  measured on Kafka 4.0, `app.stop()` 10.0 s in both N1 cases and every N2 window, 0 delivered, exit
+  0. Round 4 (on `ab9598e6`) found that fix taking `initialRetryTime: 0` literally where kafkajs
+  reads `|| 300` — 1393 restarts in a 20 s outage, now 64, fixed on `d015a9b4`; the maintainer
+  waived a fifth round — complete (PR #404).
+- **Milestone 103** (`packages/localization-plugin` (new), `packages/common`,
+  `packages/cache-plugin`, `packages/cloudflare-plugin`, `packages/testing`, and one `packages/cli`
+  claim-table line — localization): `LocalizationPlugin` registers an `ILocalizer` under the new
+  `CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()` (unknown or malformed tags,
+  unlisted locales, malformed messages, and locales missing default keys refused by name;
+  `allowPartialCatalogues` downgrades the last to one warning per locale), and resolves each
+  request's locale at priority 45 — query, cookie, a bounded `Accept-Language` parse with `q=0`
+  honoured under `*`, a `tenantLocale` default, then the default — matching every candidate against
+  the supported set only. The resolved tag is a first-class `IRequest.locale` on the `tenant`
+  precedent, sealed by the same one-write guard with `replaceLocale` as the deliberate escape; it
+  costs about 170 ns per request (measured against `develop`, inside the plan's 1 µs threshold).
+  `Vary: Accept-Language` (plus `Cookie` while the cookie source is on, a stated CDN cost) is
+  written before the handler and `Content-Language` after it, from the final locale. `cache-plugin`
+  keys on the locale by default; the plan's review found the ordering condition that governs it — a
+  global `cacheMiddleware` must run after the locale middleware and an override must precede the
+  lookup — and both limitations are pinned by tests rather than claimed. The formatter and
+  negotiation ship as the import-free subpath `/format`, whose runtime graph a `deno info --json`
+  walk confines to its own modules, with a planted `common` value import as a permanent negative
+  control; it promises one implementation, not identical output (`Intl` data and time zones differ,
+  so dates take an explicit `timeZone`). PR review of the plan caught four defects before any code:
+  `*` ignoring `q=0`, `Vary` missing `Cookie`, a cross-runtime parity claim no test could make, and
+  a date cache keyed by locale alone. Implementation found `@setu-ts/testing` dropping a seeded
+  locale. The fresh-context security audit then found the Cloudflare Cache API serving one locale's
+  page to everyone (a URL-string key is matched with no request headers, so `Vary` could not help —
+  its default key now carries the locale), the catalogue route marking a session `Set-Cookie`
+  response `public` (default now `private`), an overstated no-echo claim, blanket test permissions,
+  and base paths that registered dead or root routes; all fixed. The re-audit found the Cloudflare
+  fix had itself introduced web cache poisoning — `searchParams.set` stripped a client's copy of the
+  key parameter from the key while the handler still saw it — so the parameter is kept in the key
+  instead; two Low findings were fixed with it. A third round found that the key still re-serialized
+  the query, so encoding variants shared an entry (it now concatenates onto the URL text as sent),
+  and that the documented ordering condition hard-coded priority 45 where the real rule is "after
+  the locale middleware". A fourth round found that Deno and Node deliver a client's URL fragment,
+  so a fragment-carrying request is now served uncached, as is a locale that is not well-formed
+  UTF-16 (which made `encodeURIComponent` throw); a fifth found the same shape for URL text Deno
+  delivers un-normalized, so a URL that is not its own serialization is served uncached as well; a
+  sixth found that a locale-less request carrying the reserved parameter keyed like a localized one,
+  and it is served uncached too. All `src` files at 100% branch/function/line; twenty negative
+  controls observed failing — complete (PR #405)
 - **Milestone 101c** (`packages/session-plugin` + `packages/common` +
   `packages/multi-tenancy-plugin` + `packages/database-plugin` + `packages/http-security-plugin` +
   `packages/auth-plugin` — tenancy and identity features that do not compose; V8-7, V8-8, V8-9,
-  V8-25): a session's tenant binding now compares on whichever side sees the tenant second — the
-  session middleware's load-time compare and a new tenant-side compare in the multi-tenancy
-  middleware share one pure helper (`tenantBindingMismatch`), and the seal is narrowed to unbound
-  sessions so a bound session is never rebound (V8-7). The tenant repository's `ITenantDataStore`
-  port moves to `common` and a shipped `DatabaseTenantDataStore` bridge in `database-plugin`
-  (factory arm `createDatabaseTenantDataStore()`, resolved at `onInit`) makes the tenant repository
-  read and write through the application's real database (V8-8). `csrfMiddleware` gains an `exclude`
-  list and the SAML recipe stops trusting an `Origin: null` (V8-9), and the SAML ACS checks the
-  pending-request binding before consuming it, so a foreign browser's post cannot burn the victim's
-  login (V8-25). — complete (PR pending).
-- **Next milestone** — the M101 `v0.8.0` smoke closeout; M101a is the first open letter (see
-  ROADMAP.md).
+  V8-25): a session's tenant binding compares on whichever side sees the tenant second — the session
+  middleware's load-time compare and a new tenant-side compare share one pure
+  `tenantBindingMismatch`, the session plugin publishes `SESSION_TENANT_BINDING_STATE_KEY` so
+  `tenantBinding: false` disables both, and a bound session is never re-bound (V8-7).
+  `ITenantDataStore` moves to `common` and a `DatabaseTenantDataStore` bridge
+  (`createDatabaseTenantDataStore()`, resolved at `onInit`) makes the tenant repository read and
+  write the application's real database; key lookups go through the repository's own `findById`, so
+  a primary key not named `id` works (V8-8). `csrfMiddleware` gains `exclude` and the SAML recipe
+  stops trusting `Origin: null` (V8-9); the SAML ACS checks the binding before consuming the pending
+  request (V8-25). Verification found the bridge hardcoding `id` (a silent not-found on a real
+  MongoDB `primaryKey: 'user_id'`) and a dead `tenantColumn` factory option; code review found
+  `tenantBinding: false` ignored at the tenant-side compare. The security audit (plan §11, recorded
+  after implementation) ran four fresh-context rounds: round 1 found a cross-tenant overwrite
+  through duplicate memory-adapter keys (High), a cross-site POST burning a victim's SAML login, and
+  `$`-operators reaching MongoDB through `find`; round 2 found the commit path still admitting
+  duplicates; round 3 found an `update` able to rewrite a key onto another row's key (High) and a
+  transaction committing a duplicate through delete-then-recreate. The memory adapter now refuses
+  duplicate and changed primary keys in and out of transactions. Round 4 passed on `c011db69` —
+  complete (PR pending).
+- **Next milestone** — M101e (in progress on `feat/m101e-cli-write-safety`), then M101f, M101g (now
+  carrying the full-stack browser gate, §3.10 of its plan), M101h; M104 — the `v0.9.0` client-brief
+  run — follows the `v0.9.0` cut; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

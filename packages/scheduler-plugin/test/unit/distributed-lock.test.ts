@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IDistributedLock } from '../../src/interfaces/index.ts';
-import { resolveLock } from '../../src/lock/distributed-lock.ts';
+import { resolveLock, resolveLockTimeouts } from '../../src/lock/distributed-lock.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
 import { RedisLock } from '../../src/lock/redis-lock.ts';
@@ -109,5 +109,53 @@ describe('resolveLock', () => {
       new FakeRuntime(),
     );
     expect(lock).toBeInstanceOf(RedisLock);
+  });
+});
+
+describe('resolveLockTimeouts (M101a V8-24)', () => {
+  it('defaults the acquire bound to 5000 and the command bound to it', () => {
+    expect(resolveLockTimeouts(undefined)).toEqual({
+      acquireTimeoutMs: 5000,
+      commandTimeoutMs: 5000,
+    });
+  });
+
+  it('derives the command bound from a configured acquire bound', () => {
+    expect(resolveLockTimeouts({ acquireTimeoutMs: 500 })).toEqual({
+      acquireTimeoutMs: 500,
+      commandTimeoutMs: 500,
+    });
+  });
+
+  it('falls back to the ioredis default when the acquire bound is disabled', () => {
+    expect(resolveLockTimeouts({ acquireTimeoutMs: 0 })).toEqual({
+      acquireTimeoutMs: 0,
+      commandTimeoutMs: 15_000,
+    });
+    expect(resolveLockTimeouts({ acquireTimeoutMs: 0, commandTimeoutMs: 60_000 }))
+      .toEqual({ acquireTimeoutMs: 0, commandTimeoutMs: 60_000 });
+  });
+
+  it('accepts a command bound at or below the acquire bound, 0 included', () => {
+    expect(resolveLockTimeouts({ acquireTimeoutMs: 500, commandTimeoutMs: 200 }).commandTimeoutMs)
+      .toBe(200);
+    expect(resolveLockTimeouts({ acquireTimeoutMs: 500, commandTimeoutMs: 0 }).commandTimeoutMs)
+      .toBe(0);
+  });
+
+  it('refuses a command bound that outlasts a non-zero acquire bound, naming both', () => {
+    expect(() => resolveLockTimeouts({ acquireTimeoutMs: 500, commandTimeoutMs: 501 })).toThrow(
+      'scheduler-plugin: distributedLock.commandTimeoutMs (501) must not exceed ' +
+        'distributedLock.acquireTimeoutMs (500)',
+    );
+  });
+
+  it('refuses out-of-range values for either option', () => {
+    for (const value of [Number.NaN, -1, 2 ** 31, Number.POSITIVE_INFINITY]) {
+      expect(() => resolveLockTimeouts({ acquireTimeoutMs: value })).toThrow(RangeError);
+      expect(() => resolveLockTimeouts({ acquireTimeoutMs: 0, commandTimeoutMs: value })).toThrow(
+        RangeError,
+      );
+    }
   });
 });
