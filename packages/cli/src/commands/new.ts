@@ -740,14 +740,14 @@ export async function runNewCommand(
   }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${file.path}`);
+    for (const file of files) deps.log(`would create ${escapeName(file.path)}`);
     return EXIT_OK;
   }
 
   const existing = await findExisting(deps.fs, files);
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
-    for (const path of existing) deps.error(`  ${path}`);
+    for (const path of existing) deps.error(`  ${escapeName(path)}`);
     const retryHint = interruptedRunRetryHint(existing, root);
     if (retryHint !== undefined) deps.error(retryHint);
     return EXIT_ERROR;
@@ -759,14 +759,16 @@ export async function runNewCommand(
       files,
       deps.interrupt === undefined ? {} : { signal: deps.interrupt },
     );
-    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {
       deps.error(interrupted);
       return EXIT_INTERRUPTED;
     }
-    deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+    deps.error(
+      `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
     return EXIT_ERROR;
   }
   deps.log('');

@@ -220,7 +220,9 @@ export async function runAdoptCommand(
     );
   } catch (cause) {
     deps.error(
-      `Failed to inspect existing files: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to inspect existing files: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
@@ -229,16 +231,16 @@ export async function runAdoptCommand(
     for (const file of plan.files) {
       deps.log(`would move ${file.from} -> ${file.to}`);
     }
-    for (const file of planned) deps.log(`would create ${file.path}`);
+    for (const file of planned) deps.log(`would create ${escapeName(file.path)}`);
     // Reported here too: a dry run that prints a clean plan for a conversion the
     // real run refuses is worse than no dry run.
-    for (const path of collisions) deps.log(`WOULD REFUSE: ${path} already exists`);
+    for (const path of collisions) deps.log(`WOULD REFUSE: ${escapeName(path)} already exists`);
     return collisions.length > 0 ? EXIT_ERROR : EXIT_OK;
   }
 
   if (collisions.length > 0) {
     deps.error('Refusing to overwrite existing files:');
-    for (const path of collisions) deps.error(`  ${path}`);
+    for (const path of collisions) deps.error(`  ${escapeName(path)}`);
     return EXIT_ERROR;
   }
 
@@ -280,10 +282,12 @@ export async function runAdoptCommand(
       if (interrupted !== undefined) {
         throw cause;
       }
-      deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+      deps.error(
+        `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      );
       return EXIT_ERROR;
     }
-    for (const file of planned) deps.log(`created ${file.path}`);
+    for (const file of planned) deps.log(`created ${escapeName(file.path)}`);
 
     // The entry has to bind the allocated port rather than the literal it carried as
     // a standalone project, or the member answers nothing at the address its
@@ -296,7 +300,9 @@ export async function runAdoptCommand(
     } catch (cause) {
       if (!isMissingPath(cause)) {
         deps.error(
-          `Failed to read ${entryPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          `Failed to read ${escapeName(entryPath)}: ${
+            escapeName(cause instanceof Error ? cause.message : String(cause))
+          }`,
         );
         return EXIT_ERROR;
       }
@@ -348,7 +354,8 @@ export async function runAdoptCommand(
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     deps.error(
-      interrupted ?? `Failed to adopt: ${cause instanceof Error ? cause.message : String(cause)}`,
+      interrupted ??
+        `Failed to adopt: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
     );
     return interrupted === undefined ? EXIT_ERROR : EXIT_INTERRUPTED;
   }

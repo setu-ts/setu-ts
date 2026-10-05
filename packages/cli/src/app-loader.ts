@@ -12,6 +12,7 @@
 import type { IApplication } from '@setu-ts/common';
 import { CONFIG_EXPORT, CONFIG_MODULE } from './constants.ts';
 import { joinPath, toFileUrl } from './utils/file-writer.ts';
+import { escapeName } from './utils/names.ts';
 import { importModule, type ModuleLoader } from './schematics/custom.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -159,7 +160,9 @@ export async function loadApp(
     module = await load(url);
   } catch (cause) {
     throw new Error(
-      `Cannot load ${url}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Cannot load ${escapeName(String(url))}: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
       { cause },
     );
   }

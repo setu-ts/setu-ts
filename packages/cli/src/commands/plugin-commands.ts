@@ -219,7 +219,7 @@ export async function runCommandsListing(
       deps.error('Interrupted; plugin command stopped.');
       return EXIT_INTERRUPTED;
     }
-    deps.error(cause instanceof Error ? cause.message : String(cause));
+    deps.error(escapeName(cause instanceof Error ? cause.message : String(cause)));
     return EXIT_ERROR;
   }
 }
@@ -286,7 +286,7 @@ export async function dispatchPluginCommand(
       deps.error('Interrupted; plugin command stopped.');
       return EXIT_INTERRUPTED;
     }
-    deps.error(cause instanceof Error ? cause.message : String(cause));
+    deps.error(escapeName(cause instanceof Error ? cause.message : String(cause)));
     return EXIT_ERROR;
   }
 }

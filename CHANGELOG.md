@@ -344,10 +344,13 @@ All notable changes to this project are documented here. The format follows
 - **CLI output cannot be forged by project-controlled text (M101f security audit).** A member name,
   path, task value or parser message carrying a line feed, carriage return, U+2028/U+2029 or a bidi
   control printed raw, so a hostile workspace could make `setu` print a line that read as the CLI's
-  own. Every such value in `devtool enable` (including the task value a refused merge would write),
-  `workspace ports --reallocate`, `generate app`, `generate`, `add`, the member reconcile refusal,
-  the duplicate-port refusals and the unreadable-runtime-marker error is now escaped to `\uXXXX` and
-  stays on one line; legitimate output is unchanged.
+  own. Every such value in `devtool enable` (including the task value a refused merge would write
+  and the stale dev-runner refusal), `workspace ports --reallocate`, `generate` (including
+  `generate app`, `generate library` and the legacy `src/routes/` notice), `add`, the member
+  reconcile refusal, the duplicate-port refusals, the unreadable-runtime-marker error and the
+  interrupted-run retry hint is now escaped to `\uXXXX` and stays on one line. The file and failure
+  lines of `new` and `adopt`, the interrupted-rollback message and plugin-command load and dispatch
+  errors are escaped the same way. Legitimate output is unchanged.
 - **Generated image pruning step pinned and scoped (M101f security audit).** The step that removes
   the development-only diagnostics pin ran `deno eval` with every permission against a floating
   `jsr:@std/jsonc@^1.0.2`, the one unlocked fetch in the image. It now runs `deno run` against

@@ -280,7 +280,7 @@ export async function runGenerateCommand(
     try {
       schematic = await loadCustomSchematic(dir, customName, deps.load);
     } catch (cause) {
-      deps.error(cause instanceof Error ? cause.message : String(cause));
+      deps.error(escapeName(cause instanceof Error ? cause.message : String(cause)));
       return EXIT_ERROR;
     }
   } else if (requiredPlugin !== undefined && !installed.has(requiredPlugin)) {

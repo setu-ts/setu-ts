@@ -14,6 +14,7 @@
  */
 
 import { CONFIG_EXPORT, type TargetRuntime } from '../constants.ts';
+import { escapeName } from '../utils/names.ts';
 import type { EntryPort, ResolvedHost } from '../templates/project-files.ts';
 import { DEVTOOL_ENTRY_MODULE, devtoolTasks } from '../templates/project-files.ts';
 import { workspaceDevRunner } from '../workspace/dev-runner.ts';
@@ -81,13 +82,15 @@ export function devtoolRunnerRefusal(
   if (existing === undefined) return undefined;
   if (DEVTOOL_ENV_NAMES.every((name) => existing.includes(name))) return undefined;
   return (
-    `${path} predates the devtool: it starts every member with that member's \`start\`` +
+    `${
+      escapeName(path)
+    } predates the devtool: it starts every member with that member's \`start\`` +
     ` task and passes no per-child environment, so the development entry would never run` +
     ` and the launcher would meet a closed port. It also hands every member the runner's` +
     ` whole environment, which is how a sibling would come to hold this session's` +
     ` credentials.\n` +
     `The runner is yours once written, so this command will not overwrite it. Delete` +
-    ` ${path} and run this again — it is rewritten with the devtool-aware runner — or` +
+    ` ${escapeName(path)} and run this again — it is rewritten with the devtool-aware runner — or` +
     ` port the change yourself: read ${DEVTOOL_ENV_NAMES.join(', ')}, spawn the named` +
     ` member's \`dev\` task instead of \`start\`, and give every child an explicit \`env\`` +
     ` that blanks all three for every other member.`

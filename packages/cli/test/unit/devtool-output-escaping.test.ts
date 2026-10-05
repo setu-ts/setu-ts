@@ -19,6 +19,11 @@ import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
 import { runAddCommand } from '../../src/commands/add.ts';
 import { runAppCommand } from '../../src/commands/app.ts';
 import { runGenerateCommand } from '../../src/commands/generate.ts';
+import { runLibraryCommand } from '../../src/commands/library.ts';
+import { devtoolRunnerRefusal } from '../../src/devtool/planner.ts';
+import { interruptedRunRetryHint } from '../../src/utils/file-writer.ts';
+import { InterruptedError, interruptionMessage } from '../../src/utils/interruption.ts';
+import { legacyLayoutNotice } from '../../src/utils/legacy-layout.ts';
 import { devEntryVariants } from '../../src/devtool/dev-entry.ts';
 import { RuntimeMarkerUnreadableError } from '../../src/utils/runtime-detector.ts';
 import { describeReconcileFailure } from '../../src/workspace/reconcile.ts';
@@ -288,4 +293,61 @@ describe('project-controlled text stays on one output line', () => {
       expectNoForgedLine(out);
     }
   });
+
+  it('message builders escape the project text they embed (re-audit N4)', () => {
+    const hostile = '/p\nsetu: FORGED';
+    const built = [
+      ...legacyLayoutNotice(['evil\nsetu: FORGED.ts', 'ok.ts']),
+      interruptedRunRetryHint([`${hostile}/a.ts`], hostile) ?? '',
+      devtoolRunnerRefusal('old runner', `${hostile}/scripts/dev.ts`) ?? '',
+      interruptionMessage(
+        new AggregateError([], `rollback failed at ${hostile}`, {
+          cause: new InterruptedError(),
+        }),
+      ) ?? '',
+    ];
+    const recorder = createRecorder();
+    for (const message of built) {
+      expect(message).not.toBe('');
+      recorder.sink(message);
+    }
+    expectNoForgedLine(recorder);
+  });
+
+  it('generate library escapes its directory and file paths (re-audit N4)', async () => {
+    const dir = '/w\nsetu: FORGED';
+    const absent = createRecorder();
+    await runLibraryCommand(parseArgs(['library', 'shared']), {
+      fs: createFakeFs(),
+      dir,
+      log: absent.sink,
+      error: absent.sink,
+    });
+    expectNoForgedLine(absent);
+    for (const dryRun of [true, false]) {
+      const out = createRecorder();
+      await runLibraryCommand(parseArgs(['library', 'shared', ...(dryRun ? ['--dry-run'] : [])]), {
+        fs: workspaceAt(dir),
+        dir,
+        log: out.sink,
+        error: out.sink,
+      });
+      expect(out.text()).toContain(dryRun ? 'would create' : 'created');
+      expectNoForgedLine(out);
+    }
+  });
 });
+
+/** A one-member workspace rooted at `dir`. */
+function workspaceAt(dir: string) {
+  return createFakeFs({
+    [`${dir}/setu.workspace.json`]: renderWorkspaceManifest({
+      version: 1,
+      basePort: 5869,
+      runtime: 'deno',
+      transport: 'http',
+      members: [],
+    }),
+    [`${dir}/deno.json`]: JSON.stringify({ workspace: ['./apps/*'] }),
+  });
+}

@@ -1,5 +1,7 @@
 /** Internal cooperative-interruption helpers for CLI write boundaries. */
 
+import { escapeName } from './names.ts';
+
 /** Raised when an interrupted CLI run reaches a safe stopping point. */
 export class InterruptedError extends Error {
   constructor() {
@@ -54,7 +56,7 @@ export function interruptionMessage(cause: unknown): string | undefined {
     return 'Interrupted; the files this run wrote were removed.';
   }
   if (cause instanceof AggregateError && cause.cause instanceof InterruptedError) {
-    return `Interrupted; rollback was incomplete: ${cause.message}`;
+    return `Interrupted; rollback was incomplete: ${escapeName(cause.message)}`;
   }
   return undefined;
 }
