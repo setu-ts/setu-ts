@@ -321,6 +321,10 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
         expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
       }
 
+      const tested = await denoRun(project, ['task', 'test']);
+      expect(tested.code, tested.output).toBe(0);
+      expect(tested.output).toContain('1 passed');
+
       const paths = [
         '/health',
         '/ready',
@@ -347,6 +351,36 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       }
     });
   }
+
+  it('runs a smoke test on the template-less host', async () => {
+    expect(await run(['new', 'minimal'])).toBe(0);
+    const project = `${root}/minimal`;
+    await useWorkspacePackages(project);
+    const configPath = `${project}/setu.config.ts`;
+    const config = await Deno.readTextFile(configPath);
+    // The old annotation hides inject/unregister/hasPlugin. This control must
+    // fail at the actual testing-package boundary, not just a text assertion.
+    await Deno.writeTextFile(
+      configPath,
+      config.replace('): IKernelApplication {', '): IApplication {')
+        .replace(/type IKernelApplication,\s*/g, '')
+        .replace(
+          "import type { IPlugin } from '@setu-ts/common';",
+          "import type { IApplication, IPlugin } from '@setu-ts/common';",
+        ),
+    );
+    try {
+      const refused = await denoRun(project, ['check', 'test/app.test.ts']);
+      expect(refused.code, refused.output).not.toBe(0);
+      expect(refused.output).toContain('TS2739');
+      expect(refused.output).toContain('inject, unregister, hasPlugin');
+    } finally {
+      await Deno.writeTextFile(configPath, config);
+    }
+    const tested = await denoRun(project, ['task', 'test']);
+    expect(tested.code, tested.output).toBe(0);
+    expect(tested.output).toContain('1 passed');
+  });
 
   // The styled host gets its OWN boot case rather than a `HOSTS` entry: `HOSTS`
   // drives only `fmt --check` and `lint`, and the loop above iterates `BOOTABLE`

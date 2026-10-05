@@ -11,6 +11,44 @@ import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS, REST_TEMPLATE } from '../../src/templates/rest.ts';
 import { MICROSERVICE_TEMPLATE } from '../../src/templates/microservice.ts';
 import { CLASS_BASED_TEMPLATE } from '../../src/templates/class-based.ts';
+import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
+import { VERSION } from '../../src/constants.ts';
+
+describe('the scaffolded application smoke test', () => {
+  for (const host of [MINIMAL_HOST, ...listTemplates()]) {
+    for (const runtime of TARGET_RUNTIMES) {
+      it(`renders the runnable test contract for ${'name' in host ? host.name : 'minimal'} on ${runtime}`, () => {
+        const files = projectFiles('probe', runtime, resolveHost(host, runtime));
+        const test = files.find((file) => file.path === 'test/app.test.ts');
+        if (runtime === 'cloudflare-workers') {
+          expect(test).toBeUndefined();
+          expect(files.find((file) => file.path === 'deno.json')!.contents)
+            .toContain('deno test -A --permit-no-files');
+          expect(files.find((file) => file.path === 'README.md')!.contents)
+            .toContain('platform environment');
+          return;
+        }
+        expect(test?.contents).toContain("import { createTestApp } from '@setu-ts/testing';");
+        expect(test?.contents).toContain('createTestApp({ app: await createApp() })');
+        expect(test?.contents).toContain('await app.stop();');
+        expect(test?.contents).toContain(host === MINIMAL_HOST ? "url: '/'" : "url: '/health'");
+        if (runtime === 'node') {
+          expect(test?.contents).toContain("from 'node:test'");
+          expect(test?.contents).toContain('assert.deepStrictEqual(response.statusCode, 200)');
+        } else {
+          expect(test?.contents).toContain(
+            runtime === 'bun' ? "from 'bun:test'" : "from '@std/testing/bdd'",
+          );
+          expect(test?.contents).toContain('expect(response.statusCode).toEqual(200)');
+        }
+        const manifest = files.find((file) =>
+          file.path === (runtime === 'deno' ? 'deno.json' : 'package.json')
+        )!.contents;
+        expect(manifest).toContain(`setu-ts${runtime === 'deno' ? '/' : '__'}testing@^${VERSION}`);
+      });
+    }
+  }
+});
 
 const symbols = (wirings: readonly Wiring[]) => wirings.map((w) => w.symbol);
 

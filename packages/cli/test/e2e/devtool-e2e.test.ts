@@ -53,7 +53,7 @@ async function denoRun(
   cwd: string,
   args: readonly string[],
   env: Record<string, string> = {},
-): Promise<{ code: number; output: string }> {
+): Promise<{ code: number; output: string; stdout: string }> {
   const command = new Deno.Command(Deno.execPath(), {
     args: [...args],
     cwd,
@@ -64,7 +64,11 @@ async function denoRun(
   });
   const { code, stdout, stderr } = await command.output();
   const decoder = new TextDecoder();
-  return { code, output: `${decoder.decode(stdout)}${decoder.decode(stderr)}` };
+  return {
+    code,
+    stdout: decoder.decode(stdout),
+    output: `${decoder.decode(stdout)}${decoder.decode(stderr)}`,
+  };
 }
 
 /** A fresh valid credential pair, shaped exactly as the launcher would hand it over. */
@@ -312,7 +316,7 @@ describe('a scaffolded devtool project, driven end to end', () => {
           credentials_.sessionKey,
         ]);
         expect(driven.code, driven.output).toBe(0);
-        const report = JSON.parse(driven.output.trim().split('\n').pop()!) as {
+        const report = JSON.parse(driven.stdout.trim().split('\n').pop()!) as {
           instanceId: string | null;
           events: number;
         };
@@ -353,7 +357,12 @@ describe('a scaffolded devtool project, driven end to end', () => {
       configPath,
       config
         .replace(
-          /export function createApp\([\s\S]*?\): IApplication \{/,
+          "import type { IPlugin } from '@setu-ts/common';",
+          "import type { IApplication, IPlugin } from '@setu-ts/common';",
+        )
+        .replace(/type IKernelApplication,\s*/g, '')
+        .replace(
+          /export function createApp\([\s\S]*?\): IKernelApplication \{/,
           'export function createApp(): IApplication {',
         )
         .replace('      ...(devtool?.plugins ?? []),\n', '')
@@ -414,14 +423,22 @@ describe('a scaffolded devtool project, driven end to end', () => {
         )
         .replace(
           "import type { IApplication } from '@setu-ts/common';",
+          "import type { IPlugin } from '@setu-ts/common';",
+        )
+        .replace(
           "import type { IApplication, IPlugin } from '@setu-ts/common';",
+          "import type { IPlugin } from '@setu-ts/common';",
+        )
+        .replace(
+          'type KernelDiagnosticsOptions',
+          'type IKernelApplication, type KernelDiagnosticsOptions',
         )
         .replace(
           'export function createApp(): IApplication {',
           'export function createApp(\n' +
             '  _env?: Readonly<Record<string, unknown>>,\n' +
             '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
-            '): IApplication {',
+            '): IKernelApplication {',
         )
         .replace(
           '      RuntimePlugin(),\n',
@@ -466,6 +483,9 @@ describe('a scaffolded devtool project, driven end to end', () => {
     // would be TS2554 here — and serves a snapshot.
     const checked = await denoRun(project, ['task', 'check']);
     expect(checked.code, checked.output).toBe(0);
+    const tested = await denoRun(project, ['task', 'test']);
+    expect(tested.code, tested.output).toBe(0);
+    expect(tested.output).toContain('1 passed');
 
     const credentials_ = credentials();
     const booted = await bootDev(project, appPort, credentials_.env);
@@ -481,7 +501,7 @@ describe('a scaffolded devtool project, driven end to end', () => {
         credentials_.sessionKey,
       ]);
       expect(driven.code, driven.output).toBe(0);
-      const report = JSON.parse(driven.output.trim().split('\n').pop()!) as {
+      const report = JSON.parse(driven.stdout.trim().split('\n').pop()!) as {
         instanceId: string | null;
       };
       expect(report.instanceId).not.toBeNull();

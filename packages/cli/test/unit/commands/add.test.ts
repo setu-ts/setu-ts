@@ -66,6 +66,10 @@ export function createApp() {
 `;
 
 describe('resolveAddablePackage', () => {
+  it('accepts the testing package by short and full name', () => {
+    expect(resolveAddablePackage('testing')).toBe('testing');
+    expect(resolveAddablePackage('@setu-ts/testing')).toBe('testing');
+  });
   it('accepts a short name', () => {
     expect(resolveAddablePackage('auth')).toBe('auth-plugin');
   });
@@ -102,6 +106,26 @@ describe('resolveAddablePackage', () => {
       expect(resolveAddablePackage(plugin), plugin).toBe(plugin);
     }
   });
+});
+
+describe('setu add testing', () => {
+  it('pins testing in the Deno import map', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    expect(await h.run(['testing'])).toBe(0);
+    expect(JSON.parse(h.read('/app/deno.json')).imports['@setu-ts/testing'])
+      .toBe(`jsr:@setu-ts/testing@^${VERSION}`);
+  });
+
+  for (const start of ['tsx main.ts', 'bun run main.ts']) {
+    it(`uses devDependencies on the ${start} target`, async () => {
+      const h = harness({ '/app/package.json': JSON.stringify({ scripts: { start } }) });
+      expect(await h.run(['testing'])).toBe(0);
+      const manifest = JSON.parse(h.read('/app/package.json'));
+      expect(manifest.devDependencies['@setu-ts/testing'])
+        .toBe(`npm:@jsr/setu-ts__testing@^${VERSION}`);
+      expect(manifest.dependencies?.['@setu-ts/testing']).toBeUndefined();
+    });
+  }
 });
 
 describe('withDependency', () => {

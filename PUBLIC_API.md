@@ -8272,10 +8272,13 @@ Devtool enabling requires all existing `@setu-ts/*` pins to equal this CLI versi
 generated factory must accept the composition as its second argument and use both spreads:
 
 ```typescript
+import type { IPlugin } from '@setu-ts/common';
+import type { IKernelApplication, KernelDiagnosticsOptions } from '@setu-ts/kernel';
+
 export function createApp(
   _env?: Readonly<Record<string, unknown>>,
   devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
-): IApplication {
+): IKernelApplication {
   return createApplication({
     plugins: [RuntimePlugin(), ...(devtool?.plugins ?? [])],
     ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
@@ -8303,6 +8306,11 @@ deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
 pins projects to its own version — so on release day the install fails without it.
 
 ### Commands
+
+Every socket-target scaffold includes `test/app.test.ts`: it starts the application's own
+`createApp()` through `createTestApp`, injects its smoke-test endpoint, and stops it. Workers needs
+the platform environment and emits no smoke test; its `test` task permits an empty suite.
+`setu add testing` pins `@setu-ts/testing` in Deno's import map or npm's `devDependencies`.
 
 ```bash
 # Scaffold a project (creates ./my-app)
@@ -11739,6 +11747,10 @@ const app = await createTestApp({
 
 `TestAppOptions` — `createTestApp(options?)` — is a **union of two mutually exclusive arms**, so
 supplying both `plugins` and `app` is a compile error rather than a runtime throw.
+
+New scaffold factories return `IKernelApplication` (or `Promise<IKernelApplication>`). For an older
+project, replace the factory's `IApplication` annotation with `IKernelApplication`, imported from
+`@setu-ts/kernel`. Await an async factory before passing its result to `createTestApp`.
 
 `TestAppFromPlugins` — assemble by hand (unit scope):
 

@@ -48,6 +48,13 @@ imports it to start the server and the CLI imports it to discover plugin-contrib
 the plugin list has exactly one home. The factory does not start the app: importing a module that
 binds a socket would make command discovery bind one too.
 
+Socket targets also receive `test/app.test.ts`, using the target runtime's test harness and
+`createTestApp({ app: await createApp() })`. It starts the real composition, checks `/health` (`/`
+on the minimal host), and stops it. The factory returns `IKernelApplication`, or its promise on a
+starter. Workers requires the platform environment and emits no smoke test; its `test` task permits
+an empty suite. Use `setu add testing` on an existing project to pin `@setu-ts/testing` in Deno's
+import map or npm's `devDependencies`.
+
 ### Style is its own axis: decorators and DI are one choice, and functional is the default
 
 Decorators are optional and dependency injection is optional — and they are one axis with two

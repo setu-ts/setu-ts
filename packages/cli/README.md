@@ -36,6 +36,13 @@ Every project gets a `setu.config.ts` exporting `createApp()` — the one place 
 `main.ts` imports it to start the server, and `setu` imports it to find plugin commands, so the two
 cannot disagree. The factory does **not** start the application.
 
+The factory returns `IKernelApplication` (or `Promise<IKernelApplication>` for a starter), so it
+works directly with `createTestApp({ app: await createApp() })`. Every Deno, Node, and Bun scaffold
+includes `test/app.test.ts`, which starts this composition without a socket, checks `/health` (`/`
+on the minimal host), and stops it. Workers needs the platform environment and emits no smoke test;
+its `test` task permits an empty suite. For an existing project, `setu add testing` pins the testing
+package in Deno's import map or npm's `devDependencies`.
+
 On Deno, Node, and Bun, config-backed templates emit a gitignored `.env` and tracked `.env.example`,
 and load the selected path through `ConfigPlugin({ envFilePath })`. Use `--env-file <path>` to
 select another relative path. Cloudflare Workers use request bindings and therefore emit no dotenv
@@ -207,10 +214,13 @@ construction), and a factory scaffolded before the devtool existed, which needs 
 widened AND its composition passed to createApplication before the command proceeds.
 
 ```typescript
+import type { IPlugin } from '@setu-ts/common';
+import type { IKernelApplication, KernelDiagnosticsOptions } from '@setu-ts/kernel';
+
 export function createApp(
   _env?: Readonly<Record<string, unknown>>,
   devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
-): IApplication {
+): IKernelApplication {
   return createApplication({
     plugins: [RuntimePlugin(), ...(devtool?.plugins ?? [])],
     ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),

@@ -233,7 +233,7 @@ describe('runNewCommand', () => {
       ).toContain(
         'export function createApp(\n  _env?: Readonly<Record<string, unknown>>,\n' +
           '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
-          '): IApplication {',
+          '): IKernelApplication {',
       );
     });
 
@@ -276,7 +276,7 @@ describe('runNewCommand', () => {
       // devtool parameter's type names `KernelDiagnosticsOptions` (M98c), so
       // the config still imports the package, as a type.
       expect(config).not.toContain('createApplication');
-      expect(config).toContain('import type { KernelDiagnosticsOptions } from');
+      expect(config).toContain('import type { IKernelApplication, KernelDiagnosticsOptions } from');
     });
 
     it('exports an async factory, which the loader already awaits', async () => {
@@ -285,7 +285,7 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/shop/setu.config.ts');
 
       expect(config).toContain('export async function createApp(');
-      expect(config).toContain('): Promise<IApplication> {');
+      expect(config).toContain('): Promise<IKernelApplication> {');
       // Still must not start the server: command discovery imports this module.
       expect(config).not.toContain('.start(');
     });
@@ -302,7 +302,7 @@ describe('runNewCommand', () => {
       // (M98c), so the config imports the kernel even on the starter path —
       // as a type, never calling `createApplication`.
       expect(manifest.imports['@setu-ts/kernel']).toMatch(/^jsr:@setu-ts\/kernel@\^/);
-      // Still needed: the config module imports the IApplication type.
+      // Still needed: the config module imports IPlugin from common.
       expect(manifest.imports['@setu-ts/common']).toBeDefined();
     });
 

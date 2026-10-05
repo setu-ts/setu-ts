@@ -1,7 +1,13 @@
 # Milestone 101g — scaffolds that are not wired (`@setu-ts/cli`, `@setu-ts/testing`, the full-stack template)
 
-> **Status:** Planning. Branch: `feat/m101g-wired-scaffolds`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Implementation in progress; plan reviewed and verified by the maintainer. Branch:
+> `feat/m101g-wired-scaffolds`. `main` is protected — all work (implementation + fixes) stays on
+> this one branch until it merges via a single PR.
+
+Implementation progress: §3.1 (V8-12 and V8-39) is implemented: kernel factory annotations,
+`setu add testing`, generated socket-target smoke tests, the Workers empty-suite exception, and
+updated devtool upgrade instructions. Sections §3.2–§3.10 remain to be implemented; this milestone
+is not complete and the plan stays at `plans/` root.
 
 ## 0. Objective & scope
 

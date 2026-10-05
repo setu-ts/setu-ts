@@ -48,6 +48,12 @@ export interface AddCommandDependencies {
   readonly interrupt?: AbortSignal;
 }
 
+/** A package pin and the npm section that consumes it. */
+interface IAddablePackage {
+  readonly pkg: string;
+  readonly section?: 'dev';
+}
+
 /**
  * The framework packages this command will install.
  *
@@ -60,45 +66,46 @@ export interface AddCommandDependencies {
  * manifest carries. Both resolve, so `setu add auth` and
  * `setu add @setu-ts/auth-plugin` are the same command.
  */
-const ADDABLE: ReadonlyMap<string, string> = new Map([
-  ['audit', 'audit-plugin'],
-  ['auth', 'auth-plugin'],
-  ['cache', 'cache-plugin'],
-  ['cloudflare', 'cloudflare-plugin'],
-  ['config', 'config-plugin'],
-  ['cqrs', 'cqrs-plugin'],
-  ['database', 'database-plugin'],
-  ['decorator', 'decorator-plugin'],
-  ['di', 'di-plugin'],
-  ['events', 'events-plugin'],
-  ['feature-flags', 'feature-flags-plugin'],
-  ['graphql', 'graphql-plugin'],
-  ['grpc', 'grpc-plugin'],
-  ['health', 'health-plugin'],
-  ['http-security', 'http-security-plugin'],
-  ['logger', 'logger-plugin'],
-  ['mail', 'mail-plugin'],
-  ['messaging', 'messaging-plugin'],
-  ['metrics', 'metrics-plugin'],
-  ['multi-tenancy', 'multi-tenancy-plugin'],
-  ['notification', 'notification-plugin'],
-  ['openapi', 'openapi-plugin'],
-  ['queue', 'queue-plugin'],
-  ['react-router', 'react-router-plugin'],
-  ['realtime-backplane', 'realtime-backplane-plugin'],
-  ['resilience', 'resilience-plugin'],
-  ['scheduler', 'scheduler-plugin'],
-  ['secrets', 'secrets-plugin'],
-  ['sdk', 'sdk'],
-  ['service-discovery', 'service-discovery-plugin'],
-  ['session', 'session-plugin'],
-  ['sse', 'sse-plugin'],
-  ['static', 'static-plugin'],
-  ['storage', 'storage-plugin'],
-  ['telemetry', 'telemetry-plugin'],
-  ['validation', 'validation-plugin'],
-  ['websocket', 'websocket-plugin'],
-  ['worker-pool', 'worker-pool-plugin'],
+const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
+  ['audit', { pkg: 'audit-plugin' }],
+  ['auth', { pkg: 'auth-plugin' }],
+  ['cache', { pkg: 'cache-plugin' }],
+  ['cloudflare', { pkg: 'cloudflare-plugin' }],
+  ['config', { pkg: 'config-plugin' }],
+  ['cqrs', { pkg: 'cqrs-plugin' }],
+  ['database', { pkg: 'database-plugin' }],
+  ['decorator', { pkg: 'decorator-plugin' }],
+  ['di', { pkg: 'di-plugin' }],
+  ['events', { pkg: 'events-plugin' }],
+  ['feature-flags', { pkg: 'feature-flags-plugin' }],
+  ['graphql', { pkg: 'graphql-plugin' }],
+  ['grpc', { pkg: 'grpc-plugin' }],
+  ['health', { pkg: 'health-plugin' }],
+  ['http-security', { pkg: 'http-security-plugin' }],
+  ['logger', { pkg: 'logger-plugin' }],
+  ['mail', { pkg: 'mail-plugin' }],
+  ['messaging', { pkg: 'messaging-plugin' }],
+  ['metrics', { pkg: 'metrics-plugin' }],
+  ['multi-tenancy', { pkg: 'multi-tenancy-plugin' }],
+  ['notification', { pkg: 'notification-plugin' }],
+  ['openapi', { pkg: 'openapi-plugin' }],
+  ['queue', { pkg: 'queue-plugin' }],
+  ['react-router', { pkg: 'react-router-plugin' }],
+  ['realtime-backplane', { pkg: 'realtime-backplane-plugin' }],
+  ['resilience', { pkg: 'resilience-plugin' }],
+  ['scheduler', { pkg: 'scheduler-plugin' }],
+  ['secrets', { pkg: 'secrets-plugin' }],
+  ['sdk', { pkg: 'sdk' }],
+  ['service-discovery', { pkg: 'service-discovery-plugin' }],
+  ['session', { pkg: 'session-plugin' }],
+  ['sse', { pkg: 'sse-plugin' }],
+  ['static', { pkg: 'static-plugin' }],
+  ['storage', { pkg: 'storage-plugin' }],
+  ['testing', { pkg: 'testing', section: 'dev' }],
+  ['telemetry', { pkg: 'telemetry-plugin' }],
+  ['validation', { pkg: 'validation-plugin' }],
+  ['websocket', { pkg: 'websocket-plugin' }],
+  ['worker-pool', { pkg: 'worker-pool-plugin' }],
 ]);
 
 const RUNTIME_RESTRICTIONS: ReadonlyMap<
@@ -152,8 +159,8 @@ const INGRESS_PROVIDER_WIRINGS: ReadonlyMap<string, IngressProviderWiring> = new
  */
 export function resolveAddablePackage(input: string): string | undefined {
   const bare = input.startsWith('@setu-ts/') ? input.slice('@setu-ts/'.length) : input;
-  if ([...ADDABLE.values()].includes(bare)) return bare;
-  return ADDABLE.get(bare);
+  if ([...ADDABLE.values()].some((entry) => entry.pkg === bare)) return bare;
+  return ADDABLE.get(bare)?.pkg;
 }
 
 /** Every short name this command accepts, sorted, for a refusal to list. */
@@ -362,7 +369,9 @@ export async function runAddCommand(
     { file: 'deno.jsonc', section: 'imports', range: `jsr:${specifier}@^${VERSION}` },
     {
       file: 'package.json',
-      section: 'dependencies',
+      section: [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.section === 'dev'
+        ? 'devDependencies'
+        : 'dependencies',
       range: `npm:@jsr/setu-ts__${bare}@^${VERSION}`,
     },
   ];

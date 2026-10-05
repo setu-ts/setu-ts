@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Scaffold testing (M101g, V8-12, V8-39).** Generated factories return `IKernelApplication`, or
+  its promise for starter compositions, so `createTestApp({ app: await createApp() })` type-checks.
+  `setu add testing` pins `@setu-ts/testing` in Deno's import map or npm's `devDependencies`. New
+  Deno, Node, and Bun scaffolds include a smoke test of the real application composition; Workers
+  requires its platform environment and permits an empty test suite. Devtool factory-upgrade
+  instructions name the kernel type and import. **Existing projects:** replace the factory's
+  `IApplication` return annotation with `IKernelApplication` from `@setu-ts/kernel` (see
+  `docs/upgrading.md`).
+
 - **Devtool lifecycle (M101f).** Enabling verifies both composition spreads and refuses mismatched
   framework pins. Pin and edited-entry refusals escape project-controlled fields so embedded
   newlines cannot forge additional CLI output lines. The entry detects dropped composition and stops

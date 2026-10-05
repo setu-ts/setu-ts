@@ -12,6 +12,19 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Return `IKernelApplication` from scaffold factories (M101g, V8-12)
+
+In `setu.config.ts`, replace `createApp`'s `IApplication` return annotation with
+`IKernelApplication`, imported as a type from `@setu-ts/kernel`. For an async starter factory, use
+`Promise<IKernelApplication>`. Remove the old common type import if nothing else reads it. The value
+already has this type; the old annotation hid `inject`, `unregister`, and `hasPlugin` from
+`createTestApp({ app: await createApp() })`. Workers' `boot` and `ensureBooted` helpers follow the
+same type change in new scaffolds.
+
+`setu add testing` now accepts `@setu-ts/testing`, putting it in Deno's import map or npm's
+`devDependencies`. New socket-target scaffolds include `test/app.test.ts`; an existing project can
+add the same composition-root smoke test using its runtime's test harness.
+
 ### Replace links inside a project before running a writing `setu` command
 
 `setu` now refuses to write through, or `adopt` to move, a path reached through a symbolic link
