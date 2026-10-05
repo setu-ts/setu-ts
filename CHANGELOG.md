@@ -349,11 +349,12 @@ All notable changes to this project are documented here. The format follows
   `generate app`, `generate library` and the legacy `src/routes/` notice), `add`, the member
   reconcile refusal, the duplicate-port refusals, the unreadable-runtime-marker error and the
   interrupted-run retry hint is now escaped to `\uXXXX` and stays on one line. The file and failure
-  lines of `new`, every file, refusal and failure line of `adopt`, the interrupted-rollback message,
-  and the plugin-command missing-config refusal and application-load errors are escaped the same
-  way; an error raised by the project's own plugin code is printed as written, since that code can
-  already print anything. Messages keep their intended line breaks, and legitimate output is
-  unchanged.
+  lines of `new`, every file, refusal and failure line of `adopt` (which now also refuses by name,
+  instead of crashing, when an adopted directory holds an entry it cannot stat, such as a committed
+  dangling symlink), the interrupted-rollback message, and the plugin-command missing-config refusal
+  and application-load errors are escaped the same way; an error raised by the project's own plugin
+  code is printed as written, since that code can already print anything. Messages keep their
+  intended line breaks, and legitimate output is unchanged.
 - **Generated image pruning step pinned and scoped (M101f security audit).** The step that removes
   the development-only diagnostics pin ran `deno eval` with every permission against a floating
   `jsr:@std/jsonc@^1.0.2`, the one unlocked fetch in the image. It now runs `deno run` against

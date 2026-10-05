@@ -143,8 +143,22 @@ export async function planAdoption(
       continue;
     }
 
-    for (const nested of await walk(fs, project, entry)) {
-      files.push({ from: nested, to: joinPath(memberRoot, nested) });
+    // A walk fails on an entry it cannot stat — a dangling symlink, which git
+    // commits happily, or an unreadable directory. Reported as a refusal, not
+    // left to escape as an uncaught error that prints the raw path.
+    let nested: readonly string[];
+    try {
+      nested = await walk(fs, project, entry);
+    } catch (cause) {
+      return {
+        ok: false,
+        message: `Cannot read every file under ${escapeName(joinPath(project, entry))}: ${
+          escapeName(cause instanceof Error ? cause.message : String(cause))
+        }. Fix or remove that entry (a dangling symlink is the usual cause), then run this again.`,
+      };
+    }
+    for (const path of nested) {
+      files.push({ from: path, to: joinPath(memberRoot, path) });
     }
   }
 

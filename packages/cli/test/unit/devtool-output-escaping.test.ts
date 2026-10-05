@@ -21,7 +21,7 @@ import { runAppCommand } from '../../src/commands/app.ts';
 import { runGenerateCommand } from '../../src/commands/generate.ts';
 import { runLibraryCommand } from '../../src/commands/library.ts';
 import { runAdoptCommand } from '../../src/commands/adopt.ts';
-import { runCommandsListing } from '../../src/commands/plugin-commands.ts';
+import { dispatchPluginCommand, runCommandsListing } from '../../src/commands/plugin-commands.ts';
 import { loadApp } from '../../src/app-loader.ts';
 import { devtoolRunnerRefusal } from '../../src/devtool/planner.ts';
 import { interruptedRunRetryHint } from '../../src/utils/file-writer.ts';
@@ -401,6 +401,43 @@ describe('project-controlled text stays on one output line', () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).toContain('boom\\u000asetu: FORGED');
     expect(lines[1]).toContain('Plugin commands are unavailable');
+  });
+
+  it('setu commands and dispatch print the loader hint as its two lines (re-audit N7)', async () => {
+    // N6 lived at the PRINT site: re-escaping a caught message there flattened the
+    // loader's deliberate line break. Driven through both commands that print it.
+    const dir = '/p';
+    const throwing = () =>
+      Promise.resolve({
+        createApp: () => {
+          throw new Error('boom\nsetu: FORGED');
+        },
+      });
+    for (
+      const run of [
+        (deps: Parameters<typeof runCommandsListing>[1]) => runCommandsListing(parseArgs([]), deps),
+        (deps: Parameters<typeof runCommandsListing>[1]) =>
+          dispatchPluginCommand('demo:hello', parseArgs([]), deps),
+      ]
+    ) {
+      const out = createRecorder();
+      expect(
+        await run({
+          fs: createFakeFs({ [`${dir}/setu.config.ts`]: 'export function createApp() {}' }),
+          cwd: dir,
+          log: out.sink,
+          error: out.sink,
+          loadApp: throwing,
+        }),
+      ).toBe(1);
+      const printed = out.lines.find((line) => line.includes('threw:'));
+      expect(printed).toBeDefined();
+      const lines = printed!.split('\n');
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toContain('boom\\u000asetu: FORGED');
+      expect(lines[1]).toContain('Plugin commands are unavailable');
+      expectNoForgedLine(out);
+    }
   });
 });
 
