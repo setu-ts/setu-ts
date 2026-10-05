@@ -150,6 +150,38 @@ When `csrf` is enabled, this `POST` is itself an unsafe method and needs the for
 can run — a bare `POST /login` is refused `403` before it can mint a session. See the sequence in
 [Form CSRF](#form-csrf): a safe request first, then the mutation carrying the token.
 
+## Tenant binding
+
+When the application is multi-tenant, a session should stay bound to the tenant it was minted under.
+`tenantBinding` (default `true`) does that:
+
+- **Seal.** When a tenant is resolved for the request and the session carries no binding yet, the
+  tenant id is written into the session on commit. A session is sealed exactly once — a session
+  already bound to a tenant is never re-bound, even if a later request resolves a different one.
+- **Compare.** On a later request, the session's tenant is compared with the tenant resolved for
+  that request. A mismatch is refused with `403` (`Tenant Mismatch`) before the handler runs.
+
+The compare runs on **whichever side sees the tenant second**, so the middleware priority the tenant
+resolver runs at does not matter: when the tenant is resolved before the session loads (the shipped
+resolvers, at the default priority 40) the session middleware compares; when the tenant is resolved
+after the session loads (a custom resolver that needs the authenticated principal, at a priority
+above 300) the tenant middleware compares the session it finds in `ctx.state`. Both call sites share
+one implementation and answer the identical `403`.
+
+One case stays at commit: a tenant written by application code **inside** a handler is seen by
+neither middleware before the handler runs. On an unbound session the seal records it and the NEXT
+request compares; on a bound session it is not re-sealed, so the next request under the handler's
+tenant is refused. No middleware can precede the handler's own write, so this is documented rather
+than fixed.
+
+When either the session or the request carries no tenant, nothing is compared, so an application
+without tenancy is inert. `false` restores the previous behaviour (no seal, no compare).
+
+```typescript
+SessionPlugin({ secret, tenantBinding: true }); // default: seal the tenant on commit
+SessionPlugin({ secret, tenantBinding: false }); // opt out: no seal, no compare
+```
+
 ## Form CSRF
 
 This is the **synchronizer-token** strategy, and it is a _different mechanism_ from
@@ -324,6 +356,7 @@ must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareM
 | `cookie.secure`   | `true`           | Set `false` only for plain-HTTP local development                            |
 | `cookie.httpOnly` | `true`           |                                                                              |
 | `csrf`            | —                | Presence enables form CSRF                                                   |
+| `tenantBinding`   | `true`           | Seal the tenant on commit and refuse a session presented under another       |
 
 ## Health
 

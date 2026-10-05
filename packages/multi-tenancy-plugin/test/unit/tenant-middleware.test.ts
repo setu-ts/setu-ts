@@ -6,8 +6,13 @@ import { expect } from '@std/expect';
 import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/tenant-middleware.ts';
 import { SubdomainResolver } from '../../src/resolvers/subdomain-resolver.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
-import type { ITenantResolver } from '@setu-ts/common';
-import { sealRequestIdentity } from '@setu-ts/common';
+import type { ISession, ITenantResolver } from '@setu-ts/common';
+import {
+  sealRequestIdentity,
+  SESSION_STATE_KEY,
+  SESSION_TENANT_BINDING_KEY,
+  SESSION_TENANT_BINDING_STATE_KEY,
+} from '@setu-ts/common';
 
 // Fake ITenantResolver for tests that need a custom one.
 type FakeResolverResult = { present: boolean; value?: { id: string } };
@@ -487,6 +492,104 @@ describe('tenant middleware', () => {
       await mw(made.ctx as never, made.next);
       await mw(made.ctx as never, made.next);
       expect((made.ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('tenant-2');
+    });
+  });
+
+  describe('tenant-side binding compare (M101c, V8-7)', () => {
+    // A minimal `ISession` the session middleware would have parked in
+    // `ctx.state`, carrying (or not) the sealed tenant binding.
+    function parkedSession(bound: string | undefined): ISession {
+      return {
+        get: (key: string) => (key === SESSION_TENANT_BINDING_KEY ? bound : undefined),
+      } as unknown as ISession;
+    }
+
+    function resolvingResolver(id: string): ITenantResolver {
+      return toITenantResolver({
+        resolve: () => Promise.resolve({ present: true, value: { id } }),
+      });
+    }
+
+    it('refuses 403 and skips next when a parked session is bound to a different tenant', async () => {
+      let capturedStatus: number | undefined;
+      let capturedBody: unknown;
+      const response = {
+        status: (code: number) => {
+          capturedStatus = code;
+          return response;
+        },
+        json: (body: unknown) => {
+          capturedBody = body;
+          return undefined;
+        },
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      };
+      let nextCalled = false;
+      const state = new Map<string, unknown>();
+      state.set(SESSION_STATE_KEY, parkedSession('a'));
+      state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
+      const { ctx } = makeContext({ state });
+      (ctx as { response: unknown }).response = response;
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [resolvingResolver('b')],
+        options: {},
+      });
+      await mw(
+        ctx as never,
+        (() => {
+          nextCalled = true;
+          return Promise.resolve();
+        }) as never,
+      );
+      expect(nextCalled).toBe(false);
+      expect(capturedStatus).toEqual(403);
+      const body = capturedBody as Record<string, unknown>;
+      expect(body.error).toBe('Tenant Mismatch');
+    });
+
+    it('proceeds when the parked session is bound to the SAME tenant', async () => {
+      const state = new Map<string, unknown>();
+      state.set(SESSION_STATE_KEY, parkedSession('a'));
+      state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
+      const { ctx, next, getNextCalled } = makeContext({ state });
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [resolvingResolver('a')],
+        options: {},
+      });
+      await mw(ctx as never, next);
+      expect(getNextCalled()).toBe(true);
+      expect((ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('a');
+    });
+
+    it('does not compare when the session middleware did not publish binding ON', async () => {
+      // `SessionPlugin({ tenantBinding: false })` parks the session but never
+      // sets the binding-on key: a session sealed before the opt-out must not
+      // be refused here, exactly as the session side would not refuse it.
+      const state = new Map<string, unknown>();
+      state.set(SESSION_STATE_KEY, parkedSession('a'));
+      const { ctx, next, getNextCalled } = makeContext({ state });
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [resolvingResolver('b')],
+        options: {},
+      });
+      await mw(ctx as never, next);
+      expect(getNextCalled()).toBe(true);
+      expect((ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('b');
+    });
+
+    it('is unchanged when no session is parked in ctx.state', async () => {
+      const { ctx, next, getNextCalled } = makeContext(); // empty state
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [resolvingResolver('a')],
+        options: {},
+      });
+      await mw(ctx as never, next);
+      expect(getNextCalled()).toBe(true);
+      expect((ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('a');
     });
   });
 });

@@ -611,4 +611,130 @@ describe('MemoryAdapter', () => {
       expect(afterRollback.length).toBe(3);
     });
   });
+
+  describe('primary-key uniqueness (M101c security audit F1)', () => {
+    const ALL = { where: {}, orderBy: {}, limit: -1, offset: 0, select: [] } as const;
+    it('refuses a create whose caller-supplied key is already stored, without echoing it', async () => {
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'canary-key-7', name: 'first' });
+      await expect(ds.create({ id: 'canary-key-7', name: 'second' })).rejects.toThrow(
+        /already has a row with this primary key/,
+      );
+      const refusal = await ds.create({ id: 'canary-key-7' }).catch((error: Error) => error);
+      expect((refusal as Error).message).not.toContain('canary-key-7');
+      // The first row is untouched and still addressable.
+      expect(await ds.findById('canary-key-7')).toMatchObject({ name: 'first' });
+      expect(await ds.findAll(ALL)).toHaveLength(1);
+    });
+
+    it('refuses a duplicate composite key and accepts a distinct one', async () => {
+      const ds = adapter.createDataSource('Enrollment', ['courseId', 'personId']);
+      await ds.create({ courseId: 'c1', personId: 'p1' });
+      await expect(ds.create({ courseId: 'c1', personId: 'p1' })).rejects.toThrow(/primary key/);
+      await ds.create({ courseId: 'c1', personId: 'p2' });
+      expect(await ds.findAll(ALL)).toHaveLength(2);
+    });
+
+    it('generated keys never collide (no scan needed)', async () => {
+      const ds = adapter.createDataSource('User');
+      await ds.create({ name: 'a' });
+      await ds.create({ name: 'b' });
+      expect(await ds.findAll(ALL)).toHaveLength(2);
+    });
+
+    it('refuses a commit whose buffered create collides with a row committed since', async () => {
+      await adapter.connect();
+      const all = () => adapter.createDataSource('User').findAll(ALL);
+      // Two overlapping transactions buffering the same key.
+      const t1 = await adapter.beginTransaction();
+      const t2 = await adapter.beginTransaction();
+      await (t1 as IAdapterTransaction).createDataSource('User').create({ id: 'X', by: 't1' });
+      await (t2 as IAdapterTransaction).createDataSource('User').create({ id: 'X', by: 't2' });
+      await t1.commit();
+      await expect(t2.commit()).rejects.toThrow(/primary key/);
+      expect(await all()).toEqual([{ id: 'X', by: 't1' }]);
+      // A transaction overlapping a direct create of the same key.
+      const t3 = await adapter.beginTransaction();
+      await (t3 as IAdapterTransaction).createDataSource('User').create({ id: 'Y', by: 't3' });
+      await adapter.createDataSource('User').create({ id: 'Y', by: 'direct' });
+      await expect(t3.commit()).rejects.toThrow(/primary key/);
+      expect((await all()).filter((r) => r.id === 'Y')).toEqual([{ id: 'Y', by: 'direct' }]);
+    });
+
+    it('refuses an update that changes the primary key, direct and in a transaction', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'own', v: 1 });
+      await ds.create({ id: 'victim', v: 2 });
+      await expect(ds.update('own', { id: 'victim' })).rejects.toThrow(
+        /cannot change the primary key/,
+      );
+      expect(await ds.update('own', { id: 'own', v: 3 })).toMatchObject({ id: 'own', v: 3 });
+      const txn = await adapter.beginTransaction();
+      const tds = (txn as IAdapterTransaction).createDataSource('User');
+      await expect(tds.update('own', { id: 'victim' })).rejects.toThrow(/primary key/);
+      await txn.rollback();
+      expect((await ds.findAll(ALL)).map((r) => r.id).sort()).toEqual(['own', 'victim']);
+    });
+
+    it('one transaction cannot commit a duplicate through delete-then-recreate (R3-F1)', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      // C1: a stored K, deleted then created twice.
+      await ds.create({ id: 'K', v: 0 });
+      const t1 = await adapter.beginTransaction();
+      const d1 = (t1 as IAdapterTransaction).createDataSource('User');
+      await d1.delete('K');
+      await d1.create({ id: 'K', v: 1 });
+      await expect(d1.create({ id: 'K', v: 2 })).rejects.toThrow(/primary key/);
+      await t1.commit();
+      expect((await ds.findAll(ALL)).filter((r) => r.id === 'K')).toEqual([{ id: 'K', v: 1 }]);
+      // C2: nothing stored; create, delete, create, create.
+      const t2 = await adapter.beginTransaction();
+      const d2 = (t2 as IAdapterTransaction).createDataSource('User');
+      await d2.create({ id: 'J', v: 1 });
+      await d2.delete('J');
+      await d2.create({ id: 'J', v: 2 });
+      await expect(d2.create({ id: 'J', v: 3 })).rejects.toThrow(/primary key/);
+      await t2.commit();
+      expect((await ds.findAll(ALL)).filter((r) => r.id === 'J')).toEqual([{ id: 'J', v: 2 }]);
+    });
+
+    it('a row created then updated in a transaction commits updated', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'S', v: 0 });
+      const txn = await adapter.beginTransaction();
+      const tds = (txn as IAdapterTransaction).createDataSource('User');
+      await tds.update('S', { v: 9 }); // shadow on a stored row, then
+      await tds.delete('S'); // delete it (the shadow must not resurface)
+      await tds.create({ id: 'S', v: 1 });
+      await tds.update('S', { v: 2 }); // updates the buffered row in place
+      expect(await tds.findById('S')).toEqual({ id: 'S', v: 2 });
+      await txn.commit();
+      expect((await ds.findAll(ALL)).filter((r) => r.id === 'S')).toEqual([{ id: 'S', v: 2 }]);
+    });
+
+    it('allows a commit that deletes a stored row and recreates its key', async () => {
+      await adapter.connect();
+      await adapter.createDataSource('User').create({ id: 'Z', v: 1 });
+      const txn = await adapter.beginTransaction();
+      const ds = (txn as IAdapterTransaction).createDataSource('User');
+      await ds.delete('Z');
+      await ds.create({ id: 'Z', v: 2 });
+      await txn.commit();
+      expect(await adapter.createDataSource('User').findAll(ALL)).toEqual([{ id: 'Z', v: 2 }]);
+    });
+
+    it('refuses a duplicate inside a transaction, against committed and buffered rows', async () => {
+      await adapter.connect();
+      await adapter.createDataSource('User').create({ id: 'u1', name: 'committed' });
+      const txn = await adapter.beginTransaction();
+      const ds = (txn as IAdapterTransaction).createDataSource('User');
+      await expect(ds.create({ id: 'u1' })).rejects.toThrow(/primary key/);
+      await ds.create({ id: 'u2' });
+      await expect(ds.create({ id: 'u2' })).rejects.toThrow(/primary key/);
+      await txn.rollback();
+    });
+  });
 });

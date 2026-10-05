@@ -11,6 +11,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { ISession, ITenant } from '@setu-ts/common';
+import { SESSION_TENANT_BINDING_KEY as COMMON_TENANT_BINDING_KEY } from '@setu-ts/common';
 
 import { deriveKeyRing } from '../../src/codec/crypto.ts';
 import { sessionMiddleware } from '../../src/middleware/session-middleware.ts';
@@ -55,6 +56,13 @@ function withTenant(ctx: ReturnType<typeof makeContext>['ctx'], id: string): voi
 }
 
 describe('session tenant binding (X4-3)', () => {
+  it("re-exports common's tenant-binding key byte-identically (M101c, V8-7)", () => {
+    // The reserved key two packages must agree on byte-for-byte lives in
+    // `common`; the session plugin re-exports it rather than redeclaring it.
+    expect(TENANT_BINDING_KEY).toBe(COMMON_TENANT_BINDING_KEY);
+    expect(TENANT_BINDING_KEY).toBe('__setu_tenant');
+  });
+
   it('seals the tenant id into the session on commit', async () => {
     const { middleware } = await makeMiddleware();
     const { ctx, response } = makeContext();

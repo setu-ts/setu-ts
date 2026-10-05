@@ -133,6 +133,14 @@ export { decodeCursor, encodeCursor, keysetPredicate } from '@setu-ts/common';
 // Services
 export { DatabaseService } from './services/database-service.ts';
 
+// Tenant data-store bridge (M101c, V8-8) — the one shipped `ITenantDataStore`
+// over `IDatabaseService`, for the multi-tenancy plugin's `dataStore` option.
+export {
+  createDatabaseTenantDataStore,
+  DatabaseTenantDataStore,
+  TenantStoreStrategyUnsupportedError,
+} from './tenancy/database-tenant-data-store.ts';
+
 // Typed native Drizzle query access
 export {
   createDrizzleDatabase,

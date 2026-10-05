@@ -12926,6 +12926,47 @@ re-filed.
 
 ---
 
+## Milestone 105: Conditional Writes on `IRepository`
+
+**Package(s):** `packages/database-plugin`, `packages/cloudflare-plugin` (`D1Adapter`), with
+`packages/common` only if a filter type must move there.
+
+**Objective:** a write that applies only when a predicate still holds, so a check and the write it
+guards are one operation rather than two.
+
+**Why (raised in review of M101c, PR #411).** `DatabaseTenantDataStore.update` and `.delete` check
+that a row belongs to the tenant, then write by key alone, because `IRepository.update(id, data)`
+and `delete(id)` take no predicate. If tenant A's row is deleted in that window and tenant B creates
+a row with the SAME caller-supplied key, the write lands on B's row: `update` refuses to return it
+but has already written, and `delete` returns `true` with nothing to check. The row hit is always
+one created inside the window, so the race cannot be aimed at existing data, and generated keys
+never produce it — which is why M101c shipped the limit documented (the bridge's class JSDoc) rather
+than fixed. A transaction does not close it in general: PostgreSQL's default read-committed
+isolation lets it through, and D1, DynamoDB and Cosmos defer writes until commit.
+
+**Scope.**
+
+- `updateWhere(id, where, data)` and `deleteWhere(id, where)` on `IRepository`, each applied as ONE
+  native operation per adapter (a `WHERE key = ? AND col = ?` statement, a Mongo filter, a DynamoDB
+  `ConditionExpression`, a Cosmos/Bigtable conditional mutation), returning "not matched" rather
+  than writing when the predicate fails. An adapter that cannot express it atomically refuses by
+  name — never an emulated check-then-write, which would reproduce the defect.
+- Per the versioning policy below, the members ship OPTIONAL (a required member is breaking for
+  every out-of-repo implementor), with the required form deferred to a named minor; the plan records
+  that choice.
+- `DatabaseTenantDataStore` uses them when present and keeps today's documented two-call path
+  otherwise, so the bridge's JSDoc limit narrows to adapters lacking the member.
+
+**Deliverables**
+
+- [ ] The two members, implemented natively by every built-in adapter or refused by name
+- [ ] A per-adapter conformance table (the `filter-conformance.test.ts` shape) driving a predicate
+      that fails between read and write, against the real backend where CI has one
+- [ ] The tenant bridge switched over, with a negative control reproducing the M101c race
+- [ ] PUBLIC_API.md, the database-plugin README, and the bridge JSDoc updated
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -13148,7 +13189,7 @@ patch by construction and gains nothing new here.
 | 100f      | ✅     | auth-plugin — SAML 2.0 service provider (PR #393)                                                                                                                                                                                             |
 | 101a      | ✅     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
 | 101b      | ✅     | messaging-plugin — message transports that fail against the real broker (PR #404)                                                                                                                                                             |
-| 101c      | ⬜     | session + multi-tenancy + database + auth + http-security — tenancy and identity features that do not compose                                                                                                                                 |
+| 101c      | ✅     | session + multi-tenancy + database + auth + http-security — tenancy and identity features that do not compose ([#411](https://github.com/setu-ts/setu-ts/pull/411))                                                                           |
 | 101d      | ✅     | sdk + telemetry + react-router + full-stack-starter — two sides of a service call that disagree ([#403](https://github.com/setu-ts/setu-ts/pull/403))                                                                                         |
 | 101e      | ✅     | cli — CLI commands that write where or when they should not                                                                                                                                                                                   |
 | 101f      | ⬜     | cli + common + diagnostics sources — the devtool lifecycle                                                                                                                                                                                    |
@@ -13157,3 +13198,4 @@ patch by construction and gains nothing new here.
 | 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |
 | 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |
 | 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
+| 105       | ⬜     | database-plugin + cloudflare-plugin — conditional writes on `IRepository` (closes the M101c tenant-bridge check-then-write race)                                                                                                              |

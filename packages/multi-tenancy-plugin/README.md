@@ -67,8 +67,16 @@ whenever the resolved chain contains a `JwtResolver`.
 A strategy NAMES the isolation an `ITenantDataStore` is expected to implement — selecting one does
 not by itself create schemas or databases. The shipped `MemoryTenantDataStore` uses the strategy's
 label as its partition-map key, so all three isolate correctly on it, and a store may ignore
-isolation metadata entirely (see `ITenantDataStore.useIsolation`). No shipped database adapter is
-told the strategy.
+isolation metadata entirely (see `ITenantDataStore.useIsolation`).
+
+The shipped database bridge, `createDatabaseTenantDataStore` from `@setu-ts/database-plugin`, is the
+one store told the strategy over a real backend. It supports **`'column-per-tenant'` only**: it
+conjoins the tenant column to every read and stamps it on every write. Selecting
+`'schema-per-tenant'` or `'database-per-tenant'` with it throws
+`TenantStoreStrategyUnsupportedError` at startup, because `IRepository` offers no schema or database
+switch — a silent accept would be a store that claims isolation it does not deliver.
+`'schema-per-tenant'` and `'database-per-tenant'` therefore still require a store you inject
+yourself.
 
 | `database`              | Strategy names                                      |
 | ----------------------- | --------------------------------------------------- |
@@ -84,15 +92,15 @@ selection is flagged rather than silently logical-only.
 
 ## Options
 
-| Option               | Type                                               | Default                 | Description                              |
-| -------------------- | -------------------------------------------------- | ----------------------- | ---------------------------------------- |
-| `resolver`           | `ResolverConfig`                                   | **required**            | Resolver or ordered chain.               |
-| `database`           | `DatabaseStrategyKind \| ITenantIsolationStrategy` | `'column-per-tenant'`   | Isolation strategy.                      |
-| `dataStore`          | `ITenantDataStore`                                 | `MemoryTenantDataStore` | Backing store for tenant records.        |
-| `cache`              | `TenantCacheOptions`                               | —                       | Cache-prefix behaviour.                  |
-| `required`           | `boolean`                                          | `false`                 | Short-circuit when no tenant resolves.   |
-| `rejectionStatus`    | `number`                                           | `400`                   | Status used when short-circuiting.       |
-| `middlewarePriority` | `number`                                           | `40`                    | Priority passed to `ctx.middleware.add`. |
+| Option               | Type                                                    | Default                 | Description                                                                                                                                                                            |
+| -------------------- | ------------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolver`           | `ResolverConfig`                                        | **required**            | Resolver or ordered chain.                                                                                                                                                             |
+| `database`           | `DatabaseStrategyKind \| ITenantIsolationStrategy`      | `'column-per-tenant'`   | Isolation strategy.                                                                                                                                                                    |
+| `dataStore`          | `ITenantDataStore \| RegistryFactory<ITenantDataStore>` | `MemoryTenantDataStore` | Backing store for tenant records. A factory (for example `createDatabaseTenantDataStore()`) is resolved once at `onInit`, so it may read a capability such as `CAPABILITIES.DATABASE`. |
+| `cache`              | `TenantCacheOptions`                                    | —                       | Cache-prefix behaviour.                                                                                                                                                                |
+| `required`           | `boolean`                                               | `false`                 | Short-circuit when no tenant resolves.                                                                                                                                                 |
+| `rejectionStatus`    | `number`                                                | `400`                   | Status used when short-circuiting.                                                                                                                                                     |
+| `middlewarePriority` | `number`                                                | `40`                    | Priority passed to `ctx.middleware.add`.                                                                                                                                               |
 
 An **empty resolver chain** and a **malformed injected `dataStore`** both fail at `register()`, not
 per request.
@@ -150,6 +158,7 @@ middleware publishes the active prefix under `TENANT_CACHE_PREFIX_STATE_KEY`, re
 | `PathResolver`                  | class     |
 | `SchemaPerTenant`               | class     |
 | `SubdomainResolver`             | class     |
+| `TenantDataStoreNotReadyError`  | class     |
 | `TenantNotResolvedError`        | class     |
 | `CAPABILITIES`                  | const     |
 | `TENANT_CACHE_PREFIX_STATE_KEY` | const     |

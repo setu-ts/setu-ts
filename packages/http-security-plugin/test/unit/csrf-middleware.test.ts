@@ -282,4 +282,95 @@ describe('csrfMiddleware', () => {
       expect(response.statuses).toContain(403);
     });
   });
+
+  describe('exclude (M101c, V8-9)', () => {
+    it('an excluded path is checked before the method test and never inspected', async () => {
+      // A SAFE method on an excluded path still passes, and the exclusion is
+      // what lets an UNSAFE method with an untrusted Origin pass: the path is
+      // exempt before the origin is read.
+      const { ctx, nextCalled } = createFakeContext({
+        request: {
+          method: 'POST',
+          path: '/auth/corp/acs',
+          url: 'https://api.example.com/auth/corp/acs',
+          headers: { Origin: 'https://evil.com' },
+        },
+      });
+      const mw = csrfMiddleware({ exclude: ['/auth/corp/acs'] });
+      await mw(ctx, async () => {
+        nextCalled.push(true);
+      });
+      expect(nextCalled).toHaveLength(1);
+    });
+
+    it('a literal-excluded path with Origin: null passes while a non-excluded path is 403', async () => {
+      // The Keycloak reproduction: the IdP serves `Referrer-Policy: no-referrer`,
+      // so the browser posts the ACS with `Origin: null`. The exemption admits
+      // it; the same header on a non-excluded route is refused.
+      const excluded = createFakeContext({
+        request: {
+          method: 'POST',
+          path: '/auth/corp/acs',
+          url: 'https://api.example.com/auth/corp/acs',
+          headers: { Origin: 'null' },
+        },
+      });
+      const mw = csrfMiddleware({ exclude: ['/auth/corp/acs'] });
+      await mw(excluded.ctx, async () => {
+        excluded.nextCalled.push(true);
+      });
+      expect(excluded.nextCalled).toHaveLength(1);
+
+      const notExcluded = createFakeContext({
+        request: {
+          method: 'POST',
+          path: '/login',
+          url: 'https://api.example.com/login',
+          headers: { Origin: 'null' },
+        },
+      });
+      await mw(notExcluded.ctx, async () => {
+        notExcluded.nextCalled.push(true);
+      });
+      expect(notExcluded.nextCalled).toHaveLength(0);
+      expect(notExcluded.response.statuses).toContain(403);
+    });
+
+    it('a RegExp-excluded path matches by test, including a `g`-flagged pattern twice in a row', async () => {
+      // `createPathMatcher` owns the `lastIndex` reset a `g`/`y`-flagged
+      // pattern needs; the second request must match identically.
+      const mw = csrfMiddleware({ exclude: [/^\/auth\/[a-z]+\/acs$/] });
+      for (let i = 0; i < 2; i++) {
+        const { ctx, nextCalled } = createFakeContext({
+          request: {
+            method: 'POST',
+            path: '/auth/corp/acs',
+            url: 'https://api.example.com/auth/corp/acs',
+            headers: { Origin: 'https://evil.com' },
+          },
+        });
+        await mw(ctx, async () => {
+          nextCalled.push(true);
+        });
+        expect(nextCalled).toHaveLength(1);
+      }
+    });
+
+    it('exclude: [] is byte-identical to today — nothing is exempt', async () => {
+      const { ctx, nextCalled, response } = createFakeContext({
+        request: {
+          method: 'POST',
+          path: '/auth/corp/acs',
+          url: 'https://api.example.com/auth/corp/acs',
+          headers: { Origin: 'https://evil.com' },
+        },
+      });
+      const mw = csrfMiddleware({ exclude: [] });
+      await mw(ctx, async () => {
+        nextCalled.push(true);
+      });
+      expect(nextCalled).toHaveLength(0);
+      expect(response.statuses).toContain(403);
+    });
+  });
 });

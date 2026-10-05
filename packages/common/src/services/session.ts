@@ -12,6 +12,49 @@
 import type { IRequestContext } from '../http.ts';
 
 /**
+ * The reserved session key holding the tenant id a session was minted under,
+ * sealed by `SessionPlugin({ tenantBinding: true })` (the default).
+ *
+ * Exported from `common` because two packages must agree on the value
+ * byte-for-byte: `session-plugin` seals and compares it, and
+ * `multi-tenancy-plugin`'s tenant middleware reads it for the tenant-binding
+ * compare that runs on whichever side sees the tenant second (M101c, V8-7).
+ *
+ * Application code must not read or write this key — `clear()` and
+ * `regenerate()` drop it and the next commit re-binds it, which is correct
+ * because a regenerated session is a new session and should adopt the current
+ * tenant.
+ *
+ * @since 0.9.0
+ */
+export const SESSION_TENANT_BINDING_KEY = '__setu_tenant';
+
+/**
+ * The pure tenant-binding compare shared by the two compare sites
+ * (M101c, V8-7): the session middleware's load-time compare and the
+ * multi-tenancy middleware's tenant-side compare.
+ *
+ * A mismatch is only possible when BOTH sides carry a tenant: an unbound
+ * session (no binding sealed yet) or a tenant-less request (no tenancy in
+ * effect) is inert — nothing is compared, so an application without tenancy
+ * is unaffected.
+ *
+ * @param session - The session to read the binding from
+ * @param tenantId - The tenant id resolved for the request, or `undefined`
+ * @returns `true` when the session is bound to a DIFFERENT tenant than the
+ *   one resolved for the request
+ * @since 0.9.0
+ */
+export function tenantBindingMismatch(
+  session: ISession,
+  tenantId: string | undefined,
+): boolean {
+  const value = session.get(SESSION_TENANT_BINDING_KEY);
+  const bound = typeof value === 'string' ? value : undefined;
+  return bound !== undefined && tenantId !== undefined && bound !== tenantId;
+}
+
+/**
  * Arbitrary serializable session payload.
  *
  * Values must survive `JSON.stringify`/`JSON.parse`, because both strategies

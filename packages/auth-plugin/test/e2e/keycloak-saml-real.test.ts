@@ -10,22 +10,37 @@
  * Keycloak's auto-submitting POST-binding form, and the ACS — verified by the
  * real node-saml against the realm's real key.
  *
+ * M101c (V8-9) adds the CSRF composition against the REAL IdP: Keycloak serves
+ * `Referrer-Policy: no-referrer`, so a real browser posts the ACS with
+ * `Origin: null`. The documented recipe — the ACS path in BOTH the session
+ * plugin's form-CSRF `exclude` and `HttpSecurityPlugin`'s CSRF `exclude` —
+ * signs in under that post; the same post without the exclusions answers `403`.
+ * This harness has no headless browser of its own, so the `Origin: null` header
+ * is synthesised exactly as the browser sends it; the unit-level fourth cell in
+ * `saml-csrf-composition.test.ts` carries the same reproduction without a live
+ * IdP.
+ *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
+import type { CsrfOptions } from '@setu-ts/http-security-plugin';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { SessionPlugin } from '@setu-ts/session-plugin';
+import type { CsrfFormOptions } from '@setu-ts/session-plugin';
 
 import { AuthPlugin, requireAuth } from '../../src/index.ts';
+import { SAML_BINDING_COOKIE } from '../../src/saml/binding-cookie.ts';
 import { MultiCookieJar, postAcs } from '../fixtures/saml-idp.ts';
 import type { SamlHarness } from '../fixtures/saml-idp.ts';
 
 const BASE = Deno.env.get('KEYCLOAK_URL');
 const REALM = `${BASE}/realms/setu`;
 const NAME = 'keycloak-saml';
+const ACS_PATH = `/auth/${NAME}/acs`;
 
 async function realmCert(): Promise<string> {
   const descriptor = await (await fetch(`${REALM}/protocol/saml/descriptor`)).text();
@@ -34,11 +49,22 @@ async function realmCert(): Promise<string> {
   return `-----BEGIN CERTIFICATE-----\n${match[1]}\n-----END CERTIFICATE-----\n`;
 }
 
-async function buildApp(): Promise<IKernelApplication> {
+/** The two CSRF option blocks the composition tests drive. */
+interface CsrfComposition {
+  readonly session: CsrfFormOptions;
+  readonly http: CsrfOptions;
+}
+
+async function buildApp(csrf?: CsrfComposition): Promise<IKernelApplication> {
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
-      SessionPlugin({ secret: 'keycloak-saml-session-secret-at-least-32', store: 'memory' }),
+      ...(csrf === undefined ? [] : [HttpSecurityPlugin({ csrf: csrf.http })]),
+      SessionPlugin({
+        secret: 'keycloak-saml-session-secret-at-least-32',
+        store: 'memory',
+        ...(csrf === undefined ? {} : { csrf: csrf.session }),
+      }),
       AuthPlugin({
         signIn: {
           providers: [{
@@ -139,6 +165,79 @@ describe('Keycloak SAML sign-in (real)', { ignore: BASE === undefined }, () => {
       const replay = await postAcs(harness, new MultiCookieJar(), samlResponse, {}, NAME);
       expect(replay.status).toBe(401);
       await replay.body?.cancel();
+    } finally {
+      await app.stop();
+    }
+  });
+
+  /**
+   * Posts as a browser returning from the IdP does: only the
+   * `SameSite=None` binding cookie accompanies a cross-site POST, and
+   * Keycloak's `Referrer-Policy: no-referrer` makes the browser send
+   * `Origin: null`. The browser keeps whatever the ACS sets alongside its
+   * existing cookies.
+   */
+  async function crossSitePost(
+    harness: SamlHarness,
+    jar: MultiCookieJar,
+    body: string,
+  ): Promise<Response> {
+    const crossSite = new MultiCookieJar();
+    crossSite.cookies.set(SAML_BINDING_COOKIE, jar.cookies.get(SAML_BINDING_COOKIE) ?? '');
+    const response = await postAcs(harness, crossSite, body, { origin: 'null' }, NAME);
+    crossSite.cookies.delete(SAML_BINDING_COOKIE);
+    jar.cookies.delete(SAML_BINDING_COOKIE);
+    for (const [name, value] of crossSite.cookies) {
+      jar.cookies.set(name, value);
+    }
+    return response;
+  }
+
+  it('signs in with the documented exclude recipe under a real Origin: null post (M101c, V8-9)', async () => {
+    // Keycloak serves `Referrer-Policy: no-referrer`, so a real browser posts
+    // the ACS with `Origin: null`. The documented recipe — the ACS path in
+    // BOTH the session plugin's form-CSRF `exclude` and http-security's CSRF
+    // `exclude` — signs in, because the excluded path is checked before any
+    // origin is inspected.
+    const app = await buildApp({
+      session: { exclude: [ACS_PATH] },
+      http: { exclude: [ACS_PATH] },
+    });
+    try {
+      const harness = { app } as SamlHarness;
+      const jar = new MultiCookieJar();
+      const login = await jar.fetch(app, `/auth/${NAME}/login?returnTo=/me`);
+      expect(login.status).toBe(302);
+      const authn = login.headers.get('location') ?? '';
+      const samlResponse = await providerLogin(authn);
+      const done = await crossSitePost(harness, jar, samlResponse);
+      expect(done.status).toBe(302);
+      expect(done.headers.get('location')).toBe('/me');
+      const me = await jar.fetch(app, '/me');
+      expect(me.status).toBe(200);
+      const user = ((await me.json()) as { user: Record<string, unknown> }).user;
+      expect(user.id).toBe('keycloak-saml:alice');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('refuses the Origin: null post without the exclusions (M101c, V8-9)', async () => {
+    // The same real post, with neither CSRF check exempting the ACS: the
+    // http-security Origin check sees `Origin: null`, which no origin
+    // allowlist admits, and answers 403 — the reproduction that motivated
+    // the `exclude` option.
+    const app = await buildApp({ session: {}, http: {} });
+    try {
+      const harness = { app } as SamlHarness;
+      const jar = new MultiCookieJar();
+      const login = await jar.fetch(app, `/auth/${NAME}/login?returnTo=/me`);
+      expect(login.status).toBe(302);
+      const authn = login.headers.get('location') ?? '';
+      const samlResponse = await providerLogin(authn);
+      const refused = await crossSitePost(harness, jar, samlResponse);
+      expect(refused.status).toBe(403);
+      await refused.body?.cancel();
     } finally {
       await app.stop();
     }
