@@ -55,6 +55,12 @@ All notable changes to this project are documented here. The format follows
   address. Every real backend already refuses this; a test that relied on inserting the same key
   twice must use distinct keys or let the adapter generate them.
 
+- **The memory adapter's primary key is immutable (M101c).** An `update` whose payload changes a
+  primary-key value now rejects (`Entity '<name>': an update cannot change the primary key`), in and
+  out of a transaction; restating the same value is allowed. Rewriting a key onto another row's key
+  recreated the duplicate the entry above refuses. To change an identifier, delete and recreate the
+  row.
+
 - **The tenant data-store bridge's `find` accepts equality filters only (M101c).** A filter key
   starting with `$` or a non-scalar value rejects with a `TypeError`, because MongoDB read them as
   query operators (`$where` ran server-side JavaScript). An `update` whose written row turns out to

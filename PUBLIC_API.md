@@ -1495,10 +1495,11 @@ cannot tell an unknown column from one absent on every row, and matching nothing
 answer.
 
 A `create` whose caller-supplied primary key is already stored is **refused** — the key is the one
-constraint this adapter knows, and a duplicate would leave a row no lookup by id can address. Other
-uniqueness, column types, foreign keys, checks and defaults are **not enforced** and cannot be by a
-schema-less store. Use this adapter for development and tests, and run integration tests against the
-backend you deploy on.
+constraint this adapter knows, and a duplicate would leave a row no lookup by id can address; for
+the same reason an `update` cannot change a primary-key value (MongoDB's immutable `_id` rule).
+Other uniqueness, column types, foreign keys, checks and defaults are **not enforced** and cannot be
+by a schema-less store. Use this adapter for development and tests, and run integration tests
+against the backend you deploy on.
 
 ### Custom Adapters (external backends)
 

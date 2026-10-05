@@ -708,6 +708,7 @@ Drizzle, and an unenforced rule becomes a 500 in production.
 | Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name  |
 | Unknown `where` / `filter` field    | Matches nothing                               | Refused          |
 | Duplicate primary key               | **Refused** (a caller-supplied key)           | Refused          |
+| Changing a primary key by `update`  | **Refused**                                   | Refused (Mongo)  |
 | Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced         |
 | Column types                        | Not enforced — a string into an Int is stored | Enforced         |
 | Foreign keys, checks, defaults      | Not enforced                                  | Enforced         |

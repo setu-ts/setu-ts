@@ -118,4 +118,13 @@ describe('DatabaseTenantDataStore — real DatabaseService over MemoryAdapter', 
     expect(await store.findById('b', 'Doc', 'X')).toMatchObject({ body: 'b-owned' });
     expect(await store.findById('a', 'Doc', 'X')).toBeNull();
   });
+
+  it("refuses an update that moves a tenant's own row onto another tenant's key (R3-F2)", async () => {
+    store = await makeStore();
+    await store.create('b', 'Doc', { id: 'b-own', body: 'b' });
+    await store.create('a', 'Doc', { id: 'X', body: 'a-secret' });
+    await expect(store.update('b', 'Doc', 'b-own', { id: 'X' })).rejects.toThrow(/primary key/);
+    expect(await store.findById('a', 'Doc', 'X')).toMatchObject({ body: 'a-secret' });
+    expect(await store.findById('b', 'Doc', 'b-own')).toMatchObject({ body: 'b' });
+  });
 });
