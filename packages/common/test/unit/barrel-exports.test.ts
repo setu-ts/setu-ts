@@ -488,7 +488,7 @@ describe('@setu-ts/common barrel — M101c identity composition', () => {
     expect(common.tenantBindingMismatch(session, undefined)).toBe(false);
   });
 
-  it('exports the promoted tenancy ports (declared against the barrel)', () => {
+  it('exports the promoted tenancy ports (declared against the barrel)', async () => {
     // Compile-time: the two ports resolve from the barrel. A fixture assigned
     // against them proves the re-export carries the full member set.
     const strategy: common.ITenantIsolationStrategy = {
@@ -512,7 +512,7 @@ describe('@setu-ts/common barrel — M101c identity composition', () => {
       // deno-lint-ignore require-await
       delete: async () => false,
     };
-    expect(store.findAll('a', 'User')).resolves.toEqual([]);
+    await expect(store.findAll('a', 'User')).resolves.toEqual([]);
   });
 });
 
