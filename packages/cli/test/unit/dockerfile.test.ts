@@ -95,3 +95,21 @@ describe('generated Dockerfile lockfile verification', () => {
     expect(dockerfile()).toContain('CMD ["run", "--frozen"');
   });
 });
+
+describe('generated Dockerfile development-pin pruning (M101f audit F3)', () => {
+  it('runs an exactly pinned parser with read and write limited to /srv', () => {
+    // The only step in the image that fetches without the lockfile: a floating
+    // range or an all-permission `deno eval` would let it change underneath an
+    // unchanged project, or reach beyond the two manifests it edits.
+    const pruning = dockerfile()
+      .split('\n')
+      .find((line) => line.includes('@setu-ts/diagnostics-plugin'));
+    expect(pruning).toBeDefined();
+    expect(pruning).toContain('"jsr:@std/jsonc@1.0.3"');
+    expect(pruning).not.toMatch(/jsr:@std\/jsonc@[\^~]/);
+    expect(pruning).not.toContain('deno eval');
+    expect(pruning).toContain('deno run --no-config --no-lock --no-prompt');
+    expect(pruning).toContain('--allow-read=/srv --allow-write=/srv -');
+    expect(pruning).not.toMatch(/--allow-all|\s-A\s/);
+  });
+});

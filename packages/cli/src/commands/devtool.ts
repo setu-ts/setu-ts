@@ -184,12 +184,18 @@ async function readWritableDenoManifest(
     const read = await readJsonManifest(fs, path);
     if (read.kind === 'missing') continue;
     if (read.kind === 'unreadable') {
-      return { kind: 'refused', message: `Cannot read ${path} as JSON: ${read.reason}` };
+      return {
+        kind: 'refused',
+        message: `Cannot read ${escapeName(path)} as JSON: ${escapeName(read.reason)}`,
+      };
     }
     if (read.format === 'jsonc' || file === 'deno.jsonc') {
       return {
         kind: 'refused',
-        message: `${path} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+        message:
+          `${
+            escapeName(path)
+          } is JSONC (comments, trailing commas); rewriting it would discard them. ` +
           `Add this line under "imports" yourself: ` +
           `"${DEVTOOL_DEPENDENCY}": "${DEVTOOL_IMPORT}"`,
       };
@@ -199,7 +205,9 @@ async function readWritableDenoManifest(
     } catch (cause) {
       return {
         kind: 'refused',
-        message: `Cannot read ${path}: ${cause instanceof Error ? cause.message : String(cause)}`,
+        message: `Cannot read ${escapeName(path)}: ${
+          escapeName(cause instanceof Error ? cause.message : String(cause))
+        }`,
       };
     }
   }
@@ -226,8 +234,8 @@ function mergeTask(
   if (current === expected) return undefined;
   if (current !== undefined) {
     return (
-      `Refusing to replace the existing "${key}" task in ${handle.path}:\n` +
-      `  current: ${current}\n` +
+      `Refusing to replace the existing "${key}" task in ${escapeName(handle.path)}:\n` +
+      `  current: ${escapeName(current)}\n` +
       `  would write: ${expected}\n` +
       `A task you wrote is yours to change; update it to match, or remove it, and run this again.`
     );
@@ -259,8 +267,10 @@ function mergeImport(
   if (current === expected) return undefined;
   if (current !== undefined) {
     return (
-      `Refusing to replace the existing "${DEVTOOL_DEPENDENCY}" import in ${handle.path}:\n` +
-      `  current: ${current}\n` +
+      `Refusing to replace the existing "${DEVTOOL_DEPENDENCY}" import in ${
+        escapeName(handle.path)
+      }:\n` +
+      `  current: ${escapeName(current)}\n` +
       `  would write: ${expected}\n` +
       `A pin you rewrote is yours to change; update it to match, or remove it, and run this again.`
     );
@@ -352,9 +362,11 @@ export async function runDevtoolCommand(
   // directory. Refused with the same treatment every other command gives it.
   if (read.problem.kind !== 'absent') {
     deps.error(
-      `A ${WORKSPACE_MANIFEST} exists in ${dir} but cannot be read (version` +
+      `A ${WORKSPACE_MANIFEST} exists in ${escapeName(dir)} but cannot be read (version` +
         ` ${
-          read.problem.kind === 'unsupported-version' ? read.problem.version : 'unknown or invalid'
+          read.problem.kind === 'unsupported-version'
+            ? escapeName(String(read.problem.version))
+            : 'unknown or invalid'
         }),` +
         ` so the devtool cannot tell whether this is a workspace. Fix or remove the manifest first.`,
     );
@@ -395,7 +407,9 @@ async function enableInWorkspace(
   if (memberName === undefined) {
     deps.error(
       `A member name is required inside a workspace: \`${PROGRAM_NAME} devtool enable <member>\`.` +
-        ` Members: ${manifest.members.map((member) => member.name).join(', ') || 'none'}.`,
+        ` Members: ${
+          manifest.members.map((member) => escapeName(member.name)).join(', ') || 'none'
+        }.`,
     );
     return EXIT_USAGE;
   }
@@ -404,7 +418,9 @@ async function enableInWorkspace(
   if (member === undefined) {
     deps.error(
       `Workspace member "${escapeName(memberName)}" is not in ${WORKSPACE_MANIFEST}.` +
-        ` Members: ${manifest.members.map((entry) => entry.name).join(', ') || 'none'}.`,
+        ` Members: ${
+          manifest.members.map((entry) => escapeName(entry.name)).join(', ') || 'none'
+        }.`,
     );
     return EXIT_ERROR;
   }
@@ -417,7 +433,9 @@ async function enableInWorkspace(
   } catch {
     return reportInapplicable(
       deps,
-      `No ${CONFIG_MODULE} in ${joinPath(memberRoot)} — this is not a Setu-TS project member.`,
+      `No ${CONFIG_MODULE} in ${
+        escapeName(joinPath(memberRoot))
+      } — this is not a Setu-TS project member.`,
     );
   }
   // Starter FIRST. `LEGACY_FACTORY_SHAPES` carries the pre-devtool starter
@@ -441,7 +459,7 @@ async function enableInWorkspace(
   if (memberRead.kind === 'missing') {
     return reportInapplicable(
       deps,
-      `No deno.json in ${joinPath(memberRoot)} — this is not a Setu-TS project member.`,
+      `No deno.json in ${escapeName(joinPath(memberRoot))} — this is not a Setu-TS project member.`,
     );
   }
   if (memberRead.kind === 'refused') {
@@ -458,7 +476,9 @@ async function enableInWorkspace(
   if (start === undefined) {
     return reportInapplicable(
       deps,
-      `The member has no "start" task in ${memberManifestPath}; the devtool derives the` +
+      `The member has no "start" task in ${
+        escapeName(memberManifestPath)
+      }; the devtool derives the` +
         ` \`dev\` task from it, and there is nothing to derive from.`,
     );
   }
@@ -467,7 +487,7 @@ async function enableInWorkspace(
     return reportInapplicable(
       deps,
       `Cannot derive a "dev" task from the current "start" task:\n` +
-        `  ${start}\n` +
+        `  ${escapeName(start)}\n` +
         `The devtool requires a start task that runs main.ts directly, so the two tasks` +
         ` differ only in the entry module. Change the entry, then run this again.`,
     );
@@ -491,7 +511,9 @@ async function enableInWorkspace(
   if (rootRead.kind === 'missing') {
     return reportInapplicable(
       deps,
-      `No deno.json in ${dir}: a Deno workspace root declares one, and the root \`dev\`` +
+      `No deno.json in ${
+        escapeName(dir)
+      }: a Deno workspace root declares one, and the root \`dev\`` +
         ` task's grant must be widened in place for the devtool to run.`,
     );
   }
@@ -515,8 +537,8 @@ async function enableInWorkspace(
   } else {
     return reportInapplicable(
       deps,
-      `Refusing to replace the existing "dev" task in ${rootManifestPath}:\n` +
-        `  current: ${currentRunAll ?? '(none)'}\n` +
+      `Refusing to replace the existing "dev" task in ${escapeName(rootManifestPath)}:\n` +
+        `  current: ${currentRunAll === undefined ? '(none)' : escapeName(currentRunAll)}\n` +
         `  would write: ${expectedRunAll}\n` +
         `A task you wrote is yours to change; update it to match, or remove it, and run this again.`,
     );
@@ -544,7 +566,9 @@ async function enableInWorkspace(
   ) {
     return reportInapplicable(
       deps,
-      `Member ${member.name} already uses devtool port ${member.devtoolPort}; use ports --reallocate to move it.`,
+      `Member ${
+        escapeName(member.name)
+      } already uses devtool port ${member.devtoolPort}; use ports --reallocate to move it.`,
     );
   }
   const devtoolPort = member.devtoolPort ?? await resolveDevtoolPort(manifest, requestedPort, deps);
@@ -564,7 +588,9 @@ async function enableInWorkspace(
   if (existingEntry !== undefined && !devEntryVariants(devtoolPort).includes(existingEntry)) {
     return reportInapplicable(
       deps,
-      `Refusing to overwrite ${joinPath(memberRoot, DEVTOOL_ENTRY_MODULE)}: it exists with` +
+      `Refusing to overwrite ${
+        escapeName(joinPath(memberRoot, DEVTOOL_ENTRY_MODULE))
+      }: it exists with` +
         ` different contents. The file is yours once written — review it, remove it, and` +
         ` run this again.`,
     );
@@ -617,7 +643,7 @@ async function enableInWorkspace(
   }
   if (args.flags['dry-run'] === true) {
     for (const write of planned) {
-      deps.log(`${write.creating ? 'would create' : 'would update'} ${write.path}`);
+      deps.log(`${write.creating ? 'would create' : 'would update'} ${escapeName(write.path)}`);
     }
     return EXIT_OK;
   }
@@ -640,19 +666,23 @@ async function enableInWorkspace(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to enable the devtool: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to enable the devtool: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
 
-  for (const write of planned) deps.log(`${write.creating ? 'created' : 'updated'} ${write.path}`);
+  for (const write of planned) {
+    deps.log(`${write.creating ? 'created' : 'updated'} ${escapeName(write.path)}`);
+  }
   deps.log('');
   deps.log(
-    `Enabled the devtool for ${member.name}: the connector listens on` +
+    `Enabled the devtool for ${escapeName(member.name)}: the connector listens on` +
       ` 127.0.0.1:${devtoolPort} while the member runs.`,
   );
   deps.log('Next, from the workspace root:');
-  deps.log(`  SETU_DEVTOOL_MEMBER=${member.name} deno task dev`);
+  deps.log(`  SETU_DEVTOOL_MEMBER=${escapeName(member.name)} deno task dev`);
   deps.log('The launcher supplies the session credentials through the environment.');
   return EXIT_OK;
 }
@@ -677,7 +707,7 @@ async function enableStandalone(
   if (memberName !== undefined) {
     deps.error(
       `\`${PROGRAM_NAME} devtool enable\` takes no member name outside a workspace:` +
-        ` ${dir} carries no ${WORKSPACE_MANIFEST}, so there is no member to name.`,
+        ` ${escapeName(dir)} carries no ${WORKSPACE_MANIFEST}, so there is no member to name.`,
     );
     return EXIT_USAGE;
   }
@@ -686,14 +716,17 @@ async function enableStandalone(
     const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir));
     if (refusal !== undefined) return reportInapplicable(deps, refusal);
   } catch (cause) {
-    return reportInapplicable(deps, cause instanceof Error ? cause.message : String(cause));
+    return reportInapplicable(
+      deps,
+      escapeName(cause instanceof Error ? cause.message : String(cause)),
+    );
   }
 
   const manifestRead = await readWritableDenoManifest(deps.fs, dir);
   if (manifestRead.kind === 'missing') {
     return reportInapplicable(
       deps,
-      `No deno.json in ${dir} — this is not a Setu-TS project.`,
+      `No deno.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
     );
   }
   if (manifestRead.kind === 'refused') {
@@ -712,7 +745,7 @@ async function enableStandalone(
   } catch {
     return reportInapplicable(
       deps,
-      `No ${CONFIG_MODULE} in ${dir} — this is not a Setu-TS project.`,
+      `No ${CONFIG_MODULE} in ${escapeName(dir)} — this is not a Setu-TS project.`,
     );
   }
   // Starter FIRST, for the reason spelled out at the workspace site above.
@@ -725,7 +758,7 @@ async function enableStandalone(
   if (start === undefined) {
     return reportInapplicable(
       deps,
-      `This project has no "start" task in ${manifestPath}; the devtool derives the` +
+      `This project has no "start" task in ${escapeName(manifestPath)}; the devtool derives the` +
         ` \`dev\` task from it, and there is nothing to derive from.`,
     );
   }
@@ -734,7 +767,7 @@ async function enableStandalone(
     return reportInapplicable(
       deps,
       `Cannot derive a "dev" task from the current "start" task:\n` +
-        `  ${start}\n` +
+        `  ${escapeName(start)}\n` +
         `The devtool requires a start task that runs main.ts directly, so the two tasks` +
         ` differ only in the entry module. Change the entry, then run this again.`,
     );
@@ -786,7 +819,7 @@ async function enableStandalone(
 
   if (args.flags['dry-run'] === true) {
     for (const write of planned) {
-      deps.log(`${write.creating ? 'would create' : 'would update'} ${write.path}`);
+      deps.log(`${write.creating ? 'would create' : 'would update'} ${escapeName(write.path)}`);
     }
     return EXIT_OK;
   }
@@ -809,12 +842,16 @@ async function enableStandalone(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to enable the devtool: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to enable the devtool: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
 
-  for (const write of planned) deps.log(`${write.creating ? 'created' : 'updated'} ${write.path}`);
+  for (const write of planned) {
+    deps.log(`${write.creating ? 'created' : 'updated'} ${escapeName(write.path)}`);
+  }
   deps.log('');
   deps.log(
     `Enabled the devtool: the connector listens on 127.0.0.1:${devtoolPort} while the project runs.`,
@@ -848,7 +885,9 @@ async function resolveDevtoolPort(
     );
     if (taken !== undefined) {
       return (
-        `Port ${requestedPort} is already used by the member "${taken.name}" in this workspace` +
+        `Port ${requestedPort} is already used by the member "${
+          escapeName(taken.name)
+        }" in this workspace` +
         `${taken.devtoolPort === requestedPort ? ' (its devtool port)' : ''}. Two listeners on` +
         ` one port cannot both bind, and the launcher would connect to whichever process won.`
       );

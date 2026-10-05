@@ -176,7 +176,7 @@ export async function runWorkspaceCommand(
   }
   const files = managedFiles(next).map((file) => ({ ...file, path: joinPath(dir, file.path) }));
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would update ${file.path}`);
+    for (const file of files) deps.log(`would update ${escapeName(file.path)}`);
     return EXIT_OK;
   }
   try {
@@ -185,7 +185,7 @@ export async function runWorkspaceCommand(
       files,
       deps.interrupt === undefined ? {} : { signal: deps.interrupt },
     );
-    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {

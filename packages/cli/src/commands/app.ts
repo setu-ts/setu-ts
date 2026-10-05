@@ -516,7 +516,7 @@ export async function runAppCommand(
     const devtoolHeld = taken.devtoolPort === requested.port && taken.port !== requested.port;
     deps.error(
       `Port ${requested.port} is already ${devtoolHeld ? 'the devtool port of' : 'bound by'} ` +
-        `the member "${taken.name}" in this workspace.`,
+        `the member "${escapeName(taken.name)}" in this workspace.`,
     );
     deps.error(
       `Two listeners on one port cannot both bind, and the launcher or a sibling would ` +

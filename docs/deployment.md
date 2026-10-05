@@ -376,8 +376,10 @@ grace period is real because the generated entry handles `SIGTERM`, and the star
 The generated Deno image first removes the development-only diagnostics-plugin pin from the member
 and root import maps. It accepts comments and trailing commas in `deno.json` or `deno.jsonc`, and a
 member may inherit imports from the root. This changes only the copies inside the image. The parser
-runs with `--no-config --no-lock` in a temporary build cache, removed in the same layer; it does not
-alter the project lockfile or add parser modules to the production cache.
+is pinned to an exact `@std/jsonc` version and runs through `deno run --no-config --no-lock` with
+read and write limited to `/srv`, in a temporary build cache removed in the same layer: it cannot
+float to a newer release, reach beyond the manifests it edits, alter the project lockfile, or add
+parser modules to the production cache.
 
 The build then runs
 `deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen`.
@@ -411,7 +413,7 @@ member generation also refreshes these files. For a Dockerfile maintained by han
 following two build steps after `WORKDIR /srv/apps/${MEMBER}` (the generated image uses UID 1000):
 
 ```dockerfile
-RUN DENO_DIR=/srv/.setu-build-cache deno eval --no-config --no-lock 'import { parse } from "jsr:@std/jsonc@^1.0.2"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' && rm -rf /srv/.setu-build-cache
+RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=/srv --allow-write=/srv - && rm -rf /srv/.setu-build-cache
 RUN deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R 1000:1000 /srv /deno-dir
 ```
 
