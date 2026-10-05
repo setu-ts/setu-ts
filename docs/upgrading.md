@@ -15,7 +15,40 @@ cutting a release renames that heading to the version and is a rename, not a rec
 The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, the `database` and
 `queue` health data, `commandTimeoutMs`) do not fail to compile; each is a default that now applies
 to a running application. The three M102 mail entries can. The three M101b messaging entries do not
-fail to compile; each changes what a running broker names or refuses.
+fail to compile; each changes what a running broker names or refuses. The two M101c entries do not
+fail to compile: one changes a documented recipe that otherwise refuses an IdP posting
+`Origin: null`, the other makes the memory adapter refuse writes it used to accept.
+
+### Give memory-adapter rows distinct keys, and do not change a key by `update` (M101c)
+
+The memory adapter now refuses a `create` whose caller-supplied primary key is already stored, and
+an `update` whose payload changes a primary-key value — every real backend already refuses both. A
+test that inserted the same key twice, or renamed a row's id through `update`, now rejects: give
+each row its own key (or let the adapter generate one), and delete and recreate a row to change its
+id.
+
+### Change the SAML CSRF recipe to use `CsrfOptions.exclude` instead of trusting the IdP origin (M101c)
+
+If you run a SAML provider behind both CSRF defences, the documented recipe now exempts the ACS path
+on **both** plugins rather than trusting the IdP's origin on `http-security-plugin`:
+
+```diff
+  SessionPlugin({
+    secret: '…',
+    csrf: { exclude: ['/auth/corp/acs'] },
+  });
+- HttpSecurityPlugin({ csrf: { trustedOrigins: ['https://sts.example.com'] } });
++ HttpSecurityPlugin({ csrf: { exclude: ['/auth/corp/acs'] } });
+```
+
+Why the change: an IdP that serves `Referrer-Policy: no-referrer` (Keycloak does) makes the browser
+post the ACS with `Origin: null`. The old recipe's `trustedOrigins` admits only a REAL origin, so
+under `Origin: null` the ACS answers `403` and sign-in is broken. The one allowlist answer —
+`trustedOrigins: ['null']` — is worse than the exemption, because it admits every opaque-origin
+`POST` on every route. `exclude` is path-scoped: it exempts the ACS, whose signed assertion,
+single-use request and binding cookie are the defences the CSRF check would otherwise add. Nothing
+to do if you do not run both CSRF defences in front of a SAML ACS, or if your IdP sends a real
+origin and you keep `trustedOrigins` for it.
 
 ### Regenerate clients whose OpenAPI document declares `3xx` responses
 

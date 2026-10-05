@@ -56,10 +56,14 @@ function composed(documented: boolean): SamlAppOptions {
  * Posts as a browser returning from the IdP does: the `Lax` session cookie is
  * NOT sent on a cross-site POST, the `SameSite=None` binding cookie is.
  */
-async function crossSitePost(jar: MultiCookieJar, body: string): Promise<Response> {
+async function crossSitePost(
+  jar: MultiCookieJar,
+  body: string,
+  origin: string = IDP_ORIGIN,
+): Promise<Response> {
   const crossSite = new MultiCookieJar();
   crossSite.cookies.set(SAML_BINDING_COOKIE, jar.cookies.get(SAML_BINDING_COOKIE) ?? '');
-  const response = await postAcs(harness!, crossSite, body, { origin: IDP_ORIGIN });
+  const response = await postAcs(harness!, crossSite, body, { origin });
   // The browser keeps whatever the ACS set, alongside its existing cookies.
   crossSite.cookies.delete(SAML_BINDING_COOKIE);
   jar.cookies.delete(SAML_BINDING_COOKIE);
@@ -116,5 +120,43 @@ describe('SAML ACS with both CSRF defences', () => {
     expect(((await me.json()) as { user: { id: string } }).user.id).toBe('corp:alice');
     const remembered = await jar.fetch(harness.app, '/_remembered');
     expect(await remembered.json()).toEqual({ value: null });
+  });
+
+  it('signs in with the documented exclude recipe under an Origin: null post (M101c, V8-9)', async () => {
+    // Keycloak serves `Referrer-Policy: no-referrer`, so Chrome posts the ACS
+    // with `Origin: null`. The documented recipe — the ACS path in BOTH the
+    // session plugin's form-CSRF exclude and http-security's CSRF exclude —
+    // signs in, because the excluded path is checked before any origin is
+    // inspected. This is the composition cell `trustedOrigins: ['null']` cannot
+    // deliver: that would admit every opaque-origin POST on every route.
+    harness = await buildSamlApp(key, {
+      session: { csrf: { exclude: [ACS_PATH] } },
+      plugins: [HttpSecurityPlugin({ csrf: { exclude: [ACS_PATH] } })],
+    });
+    const jar = new MultiCookieJar();
+    const requestId = await startLogin(harness, jar);
+    const response = await crossSitePost(jar, signedResponse(key, requestId), 'null');
+    expect(response.status).toBe(302);
+    await response.body?.cancel();
+
+    const me = await jar.fetch(harness.app, '/me');
+    expect(me.status).toBe(200);
+    expect(((await me.json()) as { user: { id: string } }).user.id).toBe('corp:alice');
+  });
+
+  it('answers 403 with the old trustedOrigins recipe under an Origin: null post (M101c, V8-9)', async () => {
+    // The pre-M101c recipe trusted the IdP's real origin. Under `Origin: null`
+    // (Keycloak's no-referrer post) that origin is not present, so the
+    // http-security Origin check refuses — the exact reproduction that motivated
+    // the `exclude` option.
+    harness = await buildSamlApp(key, {
+      session: { csrf: { exclude: [ACS_PATH] } },
+      plugins: [HttpSecurityPlugin({ csrf: { trustedOrigins: [IDP_ORIGIN] } })],
+    });
+    const jar = new MultiCookieJar();
+    const requestId = await startLogin(harness, jar);
+    const response = await crossSitePost(jar, signedResponse(key, requestId), 'null');
+    expect(response.status).toBe(403);
+    await response.body?.cancel();
   });
 });

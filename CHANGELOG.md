@@ -8,6 +8,42 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Tenant data-store bridge (M101c, V8-8).** `@setu-ts/database-plugin` now ships the one
+  `ITenantDataStore` over a real backend: `createDatabaseTenantDataStore()` returns a
+  `RegistryFactory` the multi-tenancy plugin resolves in `onInit`, so `DatabasePlugin` may be
+  registered before or after the tenancy plugin. It returns a `DatabaseTenantDataStore` over
+  `service.getRepository(entity)`, supporting the `'column-per-tenant'` strategy only — the tenant
+  column is conjoined to every read (spread last, so a caller's filter cannot override it) and
+  stamped on every write, and stripped from every `update` payload so no write can move a row
+  between tenants. The column comes from the plugin's isolation strategy (`'tenant_id'` by default,
+  `database: new ColumnPerTenant('org_id')` for another), and `'schema'`/`'database'` throw
+  `TenantStoreStrategyUnsupportedError` because `IRepository` offers no schema or database switch.
+  Lookups by key go through the repository's own `findById`, so an entity whose primary key is not
+  `id` is addressed the way its adapter is configured, and the tenant column is checked on the row.
+  `MultiTenancyPluginOptions.dataStore` widens to
+  `ITenantDataStore | RegistryFactory<ITenantDataStore>`; a factory is resolved once at `onInit`,
+  validated, and handed the strategy, and the service's late-binding slot throws
+  `TenantDataStoreNotReadyError` for a repository call made before `onInit`. The port types
+  `ITenantDataStore` and `ITenantIsolationStrategy` move to `@setu-ts/common` (the multi-tenancy
+  plugin re-exports both), so the two plugins can type the bridge across the §2.2 boundary.
+
+- **Session tenant binding, two-sided (M101c, V8-7).** The binding compare now runs on whichever
+  side sees the tenant second: the session middleware keeps its load-time compare, and the tenant
+  middleware compares the session it finds in `ctx.state` right after it resolves a tenant. Both
+  sites share the pure `tenantBindingMismatch(session, tenantId)` in `@setu-ts/common`, which also
+  owns the keys the two packages must agree on byte-for-byte: `SESSION_STATE_KEY`,
+  `SESSION_TENANT_BINDING_KEY`, and `SESSION_TENANT_BINDING_STATE_KEY`, which the session middleware
+  sets to `true` when `tenantBinding` is on. The tenant side compares only then, so
+  `SessionPlugin({ tenantBinding: false })` disables both compare sites in every middleware order.
+
+- **CSRF path exclusion (M101c, V8-9).** `CsrfOptions.exclude` (http-security) lists paths — exact
+  string or `RegExp` — that skip the CSRF check entirely, checked before the method test so an
+  excluded path is never inspected; it matches the session plugin's existing
+  `CsrfFormOptions.exclude`. The documented SAML recipe becomes `exclude: ['/auth/<provider>/acs']`
+  on BOTH plugins, because an origin allowlist cannot admit an IdP that serves
+  `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS with `Origin: null`, and
+  `trustedOrigins: ['null']` would admit every opaque-origin `POST` on every route.
+
 - **Versioning policy from `0.9.0`, with two gates.** A patch is the normal release and breaking
   changes are batched into an occasional minor (README "Versioning", ROADMAP "Versioning Policy From
   `0.9.0`"). `release:verify` gains check 10 (`scripts/release-shape.ts`): it classifies the bump
@@ -106,6 +142,41 @@ All notable changes to this project are documented here. The format follows
   field is validated at construction, `factor` (kafkajs's jitter) included, held to [0, 1].
 
 ### Changed
+
+- **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
+  primary key is already stored now rejects
+  (`Entity '<name>' already has a row with this primary
+  key`), in and out of a transaction — a
+  commit re-checks its buffered creates against rows committed since and writes nothing on a
+  collision — where it used to store a second row that no `findById`, `update` or `delete` could
+  address. Every real backend already refuses this; a test that relied on inserting the same key
+  twice must use distinct keys or let the adapter generate them.
+
+- **The memory adapter's primary key is immutable (M101c).** An `update` whose payload changes a
+  primary-key value now rejects (`Entity '<name>': an update cannot change the primary key`), in and
+  out of a transaction; restating the same value is allowed. Rewriting a key onto another row's key
+  recreated the duplicate the entry above refuses. To change an identifier, delete and recreate the
+  row.
+
+- **The tenant data-store bridge's `find` accepts equality filters only (M101c).** A filter key
+  starting with `$` or a non-scalar value rejects with a `TypeError`, because MongoDB read them as
+  query operators (`$where` ran server-side JavaScript). An `update` whose written row turns out to
+  belong to another tenant — possible only if a key is reused across tenants between the ownership
+  check and the write — rejects instead of returning the row.
+
+- **A tenant-bound session is never re-bound (M101c, V8-7).** The session plugin now seals the
+  tenant only into a session that carries no binding yet. Previously a session whose tenant was
+  resolved after the session loaded could be re-sealed to a different tenant on commit, so a refused
+  request re-bound the session to the tenant it was refused under. A regenerated session still
+  adopts the current tenant, since `regenerate()` drops the binding.
+
+- **SAML ACS binding checked before the request is consumed (M101c, V8-25).** The binding compare
+  moves into the per-request request-cache adapter's `getAsync`, the first point at which the
+  library has parsed the response's `InResponseTo` and before any consumption. A refused peek sets a
+  per-request flag that makes `removeAsync` return without consuming — load-bearing, because
+  node-saml calls `removeAsync` on its failure path and on an unmatched `InResponseTo`, which is how
+  a foreign post consumed the victim's request. A refused peek now answers `state-invalid` (the code
+  the case already uses) instead of `assertion-invalid`.
 
 - **`cloudflare-plugin`'s `cacheApiMiddleware` keys a localized request on its locale (M103).** Its
   key is a URL string, which the Cache API matches with no request headers, so `Vary` could never
@@ -237,6 +308,11 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **SAML binding cookie cleared only on consumption (M101c).** The ACS cleared the browser-binding
+  cookie on every outcome, so a cross-site `POST` of an empty or junk body to the CSRF-exempt ACS,
+  carrying the victim's `SameSite=None` cookie, burned the victim's in-flight login. It is now
+  cleared exactly when a pending request is consumed.
 
 - **`cloudflare-plugin`'s `cacheApiMiddleware` keys on the resolved tenant (#407).** The default key
   carried the locale (M103) and not the tenant, so with multi-tenancy tenant A's cached page was

@@ -42,6 +42,7 @@ interface MockContext {
     register(name: string, checkFn: () => Promise<unknown>): void;
   };
   lifecycle: {
+    onInit(cb: () => void | Promise<void>): void;
     onClose(cb: () => Promise<void>): void;
   };
   logger?: ILogger;
@@ -53,6 +54,7 @@ interface MockContext {
   addedMiddlewares: MiddlewareRegistration[];
   healthRegistrations: HealthRegistration[];
   onCloseCallbacks: Array<() => Promise<void>>;
+  onInitCallbacks: Array<() => void | Promise<void>>;
   warnCalls: string[];
 }
 
@@ -68,6 +70,7 @@ function makeMockContext(): MockContext {
   const addedMiddlewares: MiddlewareRegistration[] = [];
   const healthRegistrations: HealthRegistration[] = [];
   const onCloseCallbacks: Array<() => Promise<void>> = [];
+  const onInitCallbacks: Array<() => void | Promise<void>> = [];
   const warnCalls: string[] = [];
 
   return {
@@ -94,6 +97,9 @@ function makeMockContext(): MockContext {
       },
     },
     lifecycle: {
+      onInit: (cb: () => void | Promise<void>) => {
+        onInitCallbacks.push(cb);
+      },
       onClose: (cb: () => Promise<void>) => {
         onCloseCallbacks.push(cb);
       },
@@ -120,6 +126,7 @@ function makeMockContext(): MockContext {
     addedMiddlewares,
     healthRegistrations,
     onCloseCallbacks,
+    onInitCallbacks,
     warnCalls,
   };
 }
@@ -752,8 +759,76 @@ describe('multi tenancy plugin', () => {
     // @ts-expect-error store is private but accessible for testing
     const mockStore = service.store;
     expect(mockStore != null).toBeTruthy();
+    if (mockStore === null) throw new Error('expected the store to be bound');
 
     await mockStore.create('tenant1', 'User', { name: 'test-user' });
     expect(uuidCalled).toBeTruthy();
+  });
+
+  describe('factory dataStore arm (M101c, V8-8)', () => {
+    it('resolves the factory in onInit with the resolveRegistryEntry label', async () => {
+      const ctx = makeMockContext();
+      const factoryStore = makeCompleteFakeStore();
+      const factory = (services: import('@setu-ts/common').IServiceRegistry): ITenantDataStore => {
+        // The factory resolves a capability from the registry it is handed —
+        // the M70d arm — so it must receive the real `ctx.services`.
+        services.has(CAPABILITIES.MULTI_TENANCY); // touch it to prove it is live
+        return factoryStore;
+      };
+      const plugin = MultiTenancyPlugin({
+        resolver: 'header',
+        database: 'column-per-tenant',
+        dataStore: factory,
+      });
+      await plugin.register(ctxAsPlugin(ctx));
+
+      // The onInit hook is registered, not run, during register().
+      expect(ctx.onInitCallbacks).toHaveLength(1);
+
+      // The health indicator reports 'factory' before the factory is bound.
+      const health = ctx.healthRegistrations.find((h) => h.name === 'multi-tenancy');
+      expect(health).toBeDefined();
+      const before = (await health!.checkFn()) as { data: { store: string } };
+      expect(before.data.store).toBe('factory');
+
+      // Fire onInit: the factory is resolved through resolveRegistryEntry with
+      // the 'MultiTenancyPlugin.dataStore' label, validated, and bound.
+      await ctx.onInitCallbacks[0]!();
+
+      // After binding the health indicator flips to 'custom'.
+      const after = (await health!.checkFn()) as { data: { store: string } };
+      expect(after.data.store).toBe('custom');
+    });
+
+    it('does NOT fire the X18-5 warning for a factory dataStore', async () => {
+      const ctx = makeMockContext();
+      const factory = (): ITenantDataStore => makeCompleteFakeStore();
+      const plugin = MultiTenancyPlugin({
+        resolver: 'header',
+        database: 'schema-per-tenant',
+        dataStore: factory,
+      });
+      await plugin.register(ctxAsPlugin(ctx));
+      // A factory IS a store of a kind (resolved in onInit and handed the
+      // strategy), so the "no dataStore" warning must not fire.
+      expect(ctx.warnCalls.some((w) => w.includes('no dataStore'))).toBe(false);
+    });
+
+    it('runs assertUsableStore on the factory-resolved store', async () => {
+      const ctx = makeMockContext();
+      // A factory that hands back an unusable store must be rejected in onInit.
+      const factory = (): ITenantDataStore =>
+        ({ findAll: () => Promise.resolve([]) }) as unknown as ITenantDataStore;
+      const plugin = MultiTenancyPlugin({
+        resolver: 'header',
+        dataStore: factory,
+      });
+      await plugin.register(ctxAsPlugin(ctx));
+      expect(ctx.onInitCallbacks).toHaveLength(1);
+      // The onInit callback is synchronous, so the refusal throws on invocation.
+      expect(() => ctx.onInitCallbacks[0]!()).toThrow(
+        'missing required ITenantDataStore method(s)',
+      );
+    });
   });
 });

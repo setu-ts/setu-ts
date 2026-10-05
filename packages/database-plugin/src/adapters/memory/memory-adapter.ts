@@ -206,6 +206,60 @@ function findRecordIndex(store: EntityStore, id: EntityKey): number {
 }
 
 /**
+ * A row's own primary key, built from the store's key columns — a scalar for
+ * a single-column key, a record for a composite one.
+ */
+function recordKey(store: EntityStore, record: Record<string, unknown>): EntityKey {
+  if (store.primaryKey.length === 1) return record[store.primaryKey[0]] as EntityKey;
+  const key: Record<string, string | number> = {};
+  for (const col of store.primaryKey) key[col] = record[col] as string | number;
+  return key;
+}
+
+/**
+ * Whether a caller-supplied primary key is already carried by a visible row.
+ *
+ * The primary key is the one constraint this schema-less adapter KNOWS, and
+ * every row lookup (`findById`/`update`/`delete`) addresses the first match,
+ * so a duplicate key makes the second row unaddressable and lets a write by
+ * id land on a row the caller never checked. A generated key cannot collide,
+ * so the scan runs only when the caller supplied a key column.
+ */
+function duplicatesKey(
+  records: readonly Record<string, unknown>[],
+  store: EntityStore,
+  data: Partial<Record<string, unknown>>,
+  record: Record<string, unknown>,
+): boolean {
+  if (!store.primaryKey.some((col) => data[col] !== undefined)) return false;
+  return findRecordIndexForRecords(records, store, recordKey(store, record)) !== -1;
+}
+
+/**
+ * Whether an update payload would change the row's primary key. A key is
+ * immutable here (MongoDB's `_id` rule): a key rewritten onto another row's
+ * key would recreate exactly the duplicate {@linkcode duplicatesKey} refuses.
+ * Restating the same value is allowed.
+ */
+function changesKey(
+  store: EntityStore,
+  row: Record<string, unknown>,
+  data: Partial<Record<string, unknown>>,
+): boolean {
+  return store.primaryKey.some((col) => col in data && data[col] !== row[col]);
+}
+
+/** The refusal for an update that would change a primary key. */
+function immutableKeyError(entity: string): Error {
+  return new Error(`Entity '${entity}': an update cannot change the primary key`);
+}
+
+/** The refusal for a duplicate primary key; never echoes the key's value. */
+function duplicateKeyError(entity: string): Error {
+  return new Error(`Entity '${entity}' already has a row with this primary key`);
+}
+
+/**
  * In-memory implementation of {@linkcode IDatabaseAdapter}.
  *
  * Stores entities in plain `Map` structures, supporting basic CRUD,
@@ -330,13 +384,29 @@ export class MemoryAdapter implements IDatabaseAdapter {
           throw new Error('Transaction already finalized');
         }
         assertActiveGeneration();
+        // A buffered create was checked against THIS transaction's view when it
+        // was buffered; a row committed since — by another transaction or a
+        // direct create — may now hold the same key. Re-check against the
+        // stored rows (ignoring rows this transaction deletes) BEFORE writing
+        // anything, and refuse the whole commit on a collision, so a duplicate
+        // key can never reach the store (M101c security audit R2-F1).
+        for (const entry of overlay.creates) {
+          const store = this.getStore(entry.entity);
+          const key = recordKey(store, entry.record);
+          const deletedHere = overlay.tombstones.has(
+            overlayKey(entry.entity, key, store.primaryKey),
+          );
+          // Two buffered creates never share a key: each is refused at buffer
+          // time against the rows this transaction already holds, and an
+          // update cannot change a key — so only stored rows are re-checked.
+          if (!deletedHere && findRecordIndex(store, key) !== -1) {
+            rolledBack = true;
+            releaseOnce();
+            return Promise.reject(duplicateKeyError(entry.entity));
+          }
+        }
         committed = true;
         try {
-          // Flush creates
-          for (const entry of overlay.creates) {
-            const store = this.getStore(entry.entity);
-            store.records.push({ ...entry.record });
-          }
           // Flush update shadows
           for (const shadow of overlay.shadows.values()) {
             const store = this.getStore(shadow.entity);
@@ -356,6 +426,12 @@ export class MemoryAdapter implements IDatabaseAdapter {
             if (idx !== -1) {
               store.records.splice(idx, 1);
             }
+          }
+          // Flush creates LAST: shadows and tombstones address stored rows only,
+          // so applying them first keeps every lookup unambiguous.
+          for (const entry of overlay.creates) {
+            const store = this.getStore(entry.entity);
+            store.records.push({ ...entry.record });
           }
         } finally {
           releaseOnce();
@@ -467,31 +543,33 @@ export class MemoryAdapter implements IDatabaseAdapter {
       assertActiveGeneration();
       const store = this.getStore(entity);
       // The overlay's own key for a row, derived from the row's key columns.
-      const keyOf = (row: Record<string, unknown>): string => {
-        const id = store.primaryKey.length === 1 ? row[store.primaryKey[0]] as EntityKey : (() => {
-          const rec: Record<string, string | number> = {};
-          for (const c of store.primaryKey) rec[c] = row[c] as string | number;
-          return rec;
-        })();
-        return overlayKey(entity, id, store.primaryKey);
-      };
-      // Shadows and tombstones apply to EVERY row a transaction can see, not
-      // only to committed ones. Buffered creates used to be appended raw, so a
-      // row created and then updated in the same transaction read back with its
-      // original values — `update()` returned the new record while the next
-      // read returned the old one — and a created row that was then deleted
-      // stayed visible until commit. Both committed correctly, so the
-      // divergence was confined to reads inside the transaction, which is
-      // where a caller is least likely to be suspicious of them.
+      const keyOf = (row: Record<string, unknown>): string =>
+        overlayKey(entity, recordKey(store, row), store.primaryKey);
+      // Shadows and tombstones describe STORED rows only. A buffered create is
+      // its own record: an update edits it in place and a delete removes it
+      // from `overlay.creates` (see `update`/`delete` below), so a row created
+      // and then updated reads back updated, and one created and then deleted
+      // disappears. A tombstone used to hide buffered creates carrying its key
+      // as well, so after `delete(K)` every later `create(K)` passed the
+      // duplicate check and one transaction could commit two rows keyed `K`
+      // (M101c security audit R3-F1).
       const applyOverlay = (row: Record<string, unknown>): Record<string, unknown> | null => {
         const key = keyOf(row);
         if (overlay.tombstones.has(key)) return null; // deleted
         return overlay.shadows.get(key)?.record ?? row;
       };
       return store.records
-        .concat(overlay.creates.filter((c) => c.entity === entity).map((c) => c.record))
         .map(applyOverlay)
-        .filter((r): r is Record<string, unknown> => r !== null);
+        .filter((r): r is Record<string, unknown> => r !== null)
+        .concat(overlay.creates.filter((c) => c.entity === entity).map((c) => c.record));
+    };
+
+    /** The index in `overlay.creates` of this entity's buffered row keyed `id`, or `-1`. */
+    const bufferedCreateIndex = (id: EntityKey): number => {
+      const store = this.getStore(entity);
+      return overlay.creates.findIndex((c) =>
+        c.entity === entity && findRecordIndexForRecords([c.record], store, id) === 0
+      );
     };
 
     return {
@@ -541,6 +619,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
             record[col] = crypto.randomUUID();
           }
         }
+        if (duplicatesKey(effectiveRecords(), store, data, record)) {
+          return Promise.reject(duplicateKeyError(entity));
+        }
         overlay.creates.push({ entity, record });
         return Promise.resolve({ ...record });
       },
@@ -555,11 +636,20 @@ export class MemoryAdapter implements IDatabaseAdapter {
           return Promise.reject(new Error(`Entity '${entity}' with id not found`));
         }
         const target = effective[targetIndex];
+        if (changesKey(store, target, data)) {
+          return Promise.reject(immutableKeyError(entity));
+        }
         const newRecord = { ...target, ...data };
-        overlay.shadows.set(
-          overlayKey(entity, id, store.primaryKey),
-          { entity, id, record: newRecord },
-        );
+        const buffered = bufferedCreateIndex(id);
+        if (buffered !== -1) {
+          // A row this transaction created is edited in place, never shadowed.
+          overlay.creates[buffered] = { entity, record: newRecord };
+        } else {
+          overlay.shadows.set(
+            overlayKey(entity, id, store.primaryKey),
+            { entity, id, record: newRecord },
+          );
+        }
         return Promise.resolve({ ...newRecord });
       },
 
@@ -569,7 +659,15 @@ export class MemoryAdapter implements IDatabaseAdapter {
         const effective = effectiveRecords();
         const targetIndex = findRecordIndexForRecords(effective, store, id);
         if (targetIndex === -1) return Promise.resolve(false);
-        overlay.tombstones.set(overlayKey(entity, id, store.primaryKey), { entity, id });
+        const buffered = bufferedCreateIndex(id);
+        if (buffered !== -1) {
+          // A row this transaction created is simply dropped from the buffer.
+          overlay.creates.splice(buffered, 1);
+          return Promise.resolve(true);
+        }
+        const key = overlayKey(entity, id, store.primaryKey);
+        overlay.shadows.delete(key);
+        overlay.tombstones.set(key, { entity, id });
         return Promise.resolve(true);
       },
 
@@ -693,7 +791,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
    *
    * @param entity - Entity name
    * @param data - Entity data
-   * @returns The inserted entity
+   * @returns The inserted entity; rejects when a caller-supplied primary key
+   *   is already carried by a stored row
    */
   insertEntity(
     entity: string,
@@ -706,6 +805,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
       if (record[col] === undefined) {
         record[col] = crypto.randomUUID();
       }
+    }
+    if (duplicatesKey(store.records, store, data, record)) {
+      return Promise.reject(duplicateKeyError(entity));
     }
     store.records.push(record);
     return Promise.resolve({ ...record });
@@ -729,6 +831,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
     const index = findRecordIndex(store, id);
     if (index === -1) {
       return Promise.reject(new Error(`Entity '${entity}' with id not found`));
+    }
+    if (changesKey(store, store.records[index], data)) {
+      return Promise.reject(immutableKeyError(entity));
     }
     store.records[index] = { ...store.records[index], ...data };
     return Promise.resolve({ ...store.records[index] });

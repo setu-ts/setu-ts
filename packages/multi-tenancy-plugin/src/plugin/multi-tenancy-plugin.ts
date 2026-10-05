@@ -10,6 +10,7 @@ import {
   type IPluginContext,
   type ITenantResolver,
   PLUGIN_PRIORITY,
+  resolveRegistryEntry,
 } from '@setu-ts/common';
 import type {
   ITenantDataStore,
@@ -232,9 +233,14 @@ export function MultiTenancyPlugin(
       // X18-5: a non-`column` strategy NAMES isolation that only a store whose
       // backend implements it can deliver. The shipped MemoryTenantDataStore
       // uses the strategy's label as a partition-map key — it creates no
-      // schemas and no databases, and no shipped adapter is told the strategy.
-      // Selecting one without an injected backend therefore warns instead of
-      // leaving the isolation silently logical-only.
+      // schemas and no databases. The shipped DatabaseTenantDataStore bridge
+      // is told the strategy and implements `'column'`, throwing for
+      // `'schema'`/`'database'` (M101c, V8-8). Selecting a non-`column`
+      // strategy with no store of any kind therefore warns instead of leaving
+      // the isolation silently logical-only. A `RegistryFactory` (M101c, V8-8)
+      // IS a store of a kind — it is resolved in `onInit` and handed the
+      // strategy — so it must not fire the warning. `providedStore === undefined`
+      // is exactly "no instance AND no factory".
       if (strategy.kind !== 'column' && providedStore === undefined) {
         // Name the OPTION spelling the developer writes in
         // MultiTenancyPluginOptions ('schema-per-tenant'/'database-per-tenant'),
@@ -253,22 +259,60 @@ export function MultiTenancyPlugin(
         );
       }
 
-      // Build data store.
-      const store = providedStore ?? new MemoryTenantDataStore({
-        generateId: () => ctx.runtime.uuid(),
-      });
-      assertUsableStore(store);
+      // Build data store. A `RegistryFactory` (M101c, V8-8) is resolved in
+      // `onInit` — the first phase at which the registry holds every
+      // capability (M70d) — so a store that must read a capability, such as
+      // `createDatabaseTenantDataStore()` resolving `CAPABILITIES.DATABASE`,
+      // works even when `DatabasePlugin` is registered after this plugin:
+      // every `register()` phase completes before any `onInit`, so no
+      // ordering edge is needed.
+      const storeFactory = typeof providedStore === 'function' ? providedStore : undefined;
+      const immediateStore = typeof providedStore === 'function'
+        ? undefined
+        : providedStore ?? new MemoryTenantDataStore({
+          generateId: () => ctx.runtime.uuid(),
+        });
 
-      // Hand off isolation metadata.
-      if (store.useIsolation) {
-        store.useIsolation(strategy);
+      // The SAME two calls both store paths make: validate the shape, then
+      // hand off isolation metadata.
+      const bindStore = (store: ITenantDataStore): void => {
+        assertUsableStore(store);
+        if (store.useIsolation) {
+          store.useIsolation(strategy);
+        }
+      };
+
+      if (immediateStore !== undefined) {
+        bindStore(immediateStore);
       }
 
-      // Build multi-tenancy service.
+      // Build multi-tenancy service. With a factory the store slot is bound
+      // in `onInit`; a repository call before then throws
+      // `TenantDataStoreNotReadyError` (unreachable on the HTTP path).
       const service = new MultiTenancyService({
-        store,
+        ...(immediateStore !== undefined && { store: immediateStore }),
         ...(options.cache?.separator != null && { separator: options.cache.separator }),
       });
+
+      // The resolved store, once known: the immediate store, or the factory's
+      // result after `onInit`. The health indicator and `onClose` read through
+      // this so both arms see the same value.
+      let resolvedStore: ITenantDataStore | undefined = immediateStore;
+
+      if (storeFactory !== undefined) {
+        ctx.lifecycle.onInit(() => {
+          const store = resolveRegistryEntry(
+            storeFactory,
+            ctx.services,
+            'MultiTenancyPlugin.dataStore',
+          );
+          bindStore(store);
+          service.bindStore(store);
+          // The factory is now bound: the health indicator flips from
+          // `'factory'` to `'custom'`, and `onClose` closes the real store.
+          resolvedStore = store;
+        });
+      }
 
       // Register the service.
       ctx.services.register(CAPABILITIES.MULTI_TENANCY, service);
@@ -285,23 +329,25 @@ export function MultiTenancyPlugin(
         { priority: middlewarePriority, name: 'tenant' },
       );
 
-      // Determine store type for health indicator.
-      const storeType: 'custom' | 'memory' = providedStore ? 'custom' : 'memory';
-
-      // Register health indicator.
+      // Register health indicator. The `store` field reports `'factory'`
+      // until the factory is bound in `onInit`, then `'custom'`; the memory
+      // arm reports `'memory'` (M101c, V8-8).
       ctx.health.register('multi-tenancy', (): Promise<HealthCheckResult> =>
         Promise.resolve({
           status: 'up',
           data: {
             resolver: getResolverType(options.resolver),
             strategy: strategy.kind,
-            store: storeType,
+            store: resolvedStore === undefined ? 'factory' : resolvedStore === immediateStore &&
+                providedStore === undefined
+              ? 'memory'
+              : 'custom',
           },
         }));
 
-      // Register lifecycle close.
+      // Register lifecycle close. Closes whatever store ended up bound.
       ctx.lifecycle.onClose(async () => {
-        await store.close?.();
+        await resolvedStore?.close?.();
       });
     },
   };

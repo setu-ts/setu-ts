@@ -97,7 +97,11 @@ export {
   replaceTenant,
   sealRequestIdentity,
 } from './request-identity.ts';
-export { CLIENT_IP_STATE_KEY } from './state-keys.ts';
+export {
+  CLIENT_IP_STATE_KEY,
+  SESSION_STATE_KEY,
+  SESSION_TENANT_BINDING_STATE_KEY,
+} from './state-keys.ts';
 
 // Path-exclusion matcher (M90a) — the one matcher four middlewares share
 export { createPathMatcher } from './path-matcher.ts';
@@ -325,6 +329,8 @@ export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
 export type {
   IMultiTenancyService,
   ITenant,
+  ITenantDataStore,
+  ITenantIsolationStrategy,
   ITenantRepository,
   ITenantResolver,
 } from './services/tenancy.ts';
@@ -551,6 +557,7 @@ export type {
 } from './services/localization.ts';
 
 // Session contracts
+export { SESSION_TENANT_BINDING_KEY, tenantBindingMismatch } from './services/session.ts';
 export type {
   ISession,
   ISessionService,

@@ -2,25 +2,31 @@
  * Tenant binding for a session — seal on commit, compare on load.
  *
  * The binding is ordinary session data under a reserved key, so `ISession`
- * gains no member and `common` is not widened. Reading and writing live in
- * one module so the commit path and the load path cannot disagree about the
- * key.
+ * gains no member. The key and the compare live in `common`
+ * (`SESSION_TENANT_BINDING_KEY`, `tenantBindingMismatch`) because a second
+ * compare site in `multi-tenancy-plugin` must agree with this one byte-for-
+ * byte (M101c, V8-7); this module aliases the key and keeps the seal so
+ * the commit path and the load path cannot disagree about the key.
  *
  * @module
  */
 import type { ISession } from '@setu-ts/common';
+import { SESSION_TENANT_BINDING_KEY } from '@setu-ts/common';
 
 /**
  * The reserved session key holding the tenant id a session was minted under.
  *
- * Reserved by `SessionPlugin({ tenantBinding: true })` (the default): when a
- * tenant is resolved for the request, the id is sealed here on commit.
- * Application code must not read or write this key — `clear()` and
- * `regenerate()` drop it and the next commit re-binds it, which is correct
- * because a regenerated session is a new session and should adopt the current
- * tenant.
+ * Re-exported from `@setu-ts/common`, where it is defined so the
+ * multi-tenancy plugin's tenant-side compare reads the same key. Reserved by
+ * `SessionPlugin({ tenantBinding: true })` (the default): when a tenant is
+ * resolved for the request, the id is sealed here on commit. Application code
+ * must not read or write this key — `clear()` and `regenerate()` drop it and
+ * the next commit re-binds it, which is correct because a regenerated session
+ * is a new session and should adopt the current tenant.
+ *
+ * @since 0.2.0
  */
-export const TENANT_BINDING_KEY = '__setu_tenant';
+export const TENANT_BINDING_KEY = SESSION_TENANT_BINDING_KEY;
 
 /**
  * Reads the tenant id a session is bound to, or `undefined` when unbound.

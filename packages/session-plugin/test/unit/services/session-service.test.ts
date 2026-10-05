@@ -5,7 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, SESSION_STATE_KEY as COMMON_SESSION_STATE_KEY } from '@setu-ts/common';
 import type { ISessionStore, SessionData } from '@setu-ts/common';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
@@ -18,6 +18,14 @@ import { getSession } from '../../../src/services/get-session.ts';
 import { makeClock, makeContext } from '../../fixtures/context.ts';
 
 const SECRET = 's'.repeat(32);
+
+describe('SessionService state key (M101c, V8-7)', () => {
+  it("re-exports common's SESSION_STATE_KEY byte-identically", () => {
+    // The key two packages must agree on byte-for-byte lives in `common`;
+    // the session plugin re-exports it rather than redeclaring it.
+    expect(SESSION_STATE_KEY).toBe(COMMON_SESSION_STATE_KEY);
+  });
+});
 const NOW = 1_700_000_000_000;
 
 /** A recording store, so writes are asserted rather than assumed. */

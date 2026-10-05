@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
-import { TenantNotResolvedError } from '../../src/errors.ts';
+import { TenantDataStoreNotReadyError, TenantNotResolvedError } from '../../src/errors.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import type { ITenantDataStore } from '../../src/interfaces/index.ts';
 
@@ -102,5 +102,50 @@ describe('multi tenancy service', () => {
       signal: undefined as AbortSignal | undefined,
     } as unknown as import('@setu-ts/common').IRequestContext;
     expect(service.getCurrentTenant(ctx)?.id).toEqual('resolved-tenant');
+  });
+
+  it('MultiTenancyService — getRepositoryFor before binding throws TenantDataStoreNotReadyError (M101c, V8-8)', () => {
+    // A factory `dataStore` constructs the service with no store; the resolved
+    // one arrives via `bindStore` from the plugin's `onInit`. A repository
+    // request before that point must fail loudly with the named error.
+    const service = new MultiTenancyService({});
+    expect(() => service.getRepositoryFor('acme', 'User')).toThrow(TenantDataStoreNotReadyError);
+  });
+
+  it('MultiTenancyService — getRepositoryFor after binding delegates to the store (M101c, V8-8)', () => {
+    const service = new MultiTenancyService({});
+    const store = {} as unknown as ITenantDataStore;
+    service.bindStore(store);
+    // A bound store means the repository is produced (the store is reached);
+    // it no longer throws the not-ready refusal.
+    const repo = service.getRepositoryFor('acme', 'User');
+    expect(typeof repo.findAll === 'function').toBeTruthy();
+  });
+
+  it('MultiTenancyService — getRepository before binding throws TenantDataStoreNotReadyError (M101c, V8-8)', () => {
+    const service = new MultiTenancyService({});
+    const fakeRequest = {
+      method: 'GET' as const,
+      url: 'https://example.com/' as string,
+      path: '/' as string,
+      headers: new Headers(),
+      json: () => Promise.resolve({}),
+      text: () => Promise.resolve(''),
+      bytes: () => Promise.resolve(new Uint8Array()),
+    };
+    const ctx = {
+      id: 'test-id',
+      request: { ...fakeRequest, tenant: { id: 'acme' } },
+      response: {} as import('@setu-ts/common').IResponse,
+      services: new Map(),
+      params: {},
+      query: {},
+      state: new Map(),
+      startTime: Date.now(),
+      signal: undefined as AbortSignal | undefined,
+    } as unknown as import('@setu-ts/common').IRequestContext;
+    expect(() => service.getRepository<unknown, string>(ctx, 'User')).toThrow(
+      TenantDataStoreNotReadyError,
+    );
   });
 });

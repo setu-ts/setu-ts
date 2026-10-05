@@ -5726,6 +5726,28 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   sixth found that a locale-less request carrying the reserved parameter keyed like a localized one,
   and it is served uncached too. All `src` files at 100% branch/function/line; twenty negative
   controls observed failing — complete (PR #405)
+- **Milestone 101c** (`packages/session-plugin` + `packages/common` +
+  `packages/multi-tenancy-plugin` + `packages/database-plugin` + `packages/http-security-plugin` +
+  `packages/auth-plugin` — tenancy and identity features that do not compose; V8-7, V8-8, V8-9,
+  V8-25): a session's tenant binding compares on whichever side sees the tenant second — the session
+  middleware's load-time compare and a new tenant-side compare share one pure
+  `tenantBindingMismatch`, the session plugin publishes `SESSION_TENANT_BINDING_STATE_KEY` so
+  `tenantBinding: false` disables both, and a bound session is never re-bound (V8-7).
+  `ITenantDataStore` moves to `common` and a `DatabaseTenantDataStore` bridge
+  (`createDatabaseTenantDataStore()`, resolved at `onInit`) makes the tenant repository read and
+  write the application's real database; key lookups go through the repository's own `findById`, so
+  a primary key not named `id` works (V8-8). `csrfMiddleware` gains `exclude` and the SAML recipe
+  stops trusting `Origin: null` (V8-9); the SAML ACS checks the binding before consuming the pending
+  request (V8-25). Verification found the bridge hardcoding `id` (a silent not-found on a real
+  MongoDB `primaryKey: 'user_id'`) and a dead `tenantColumn` factory option; code review found
+  `tenantBinding: false` ignored at the tenant-side compare. The security audit (plan §11, recorded
+  after implementation) ran four fresh-context rounds: round 1 found a cross-tenant overwrite
+  through duplicate memory-adapter keys (High), a cross-site POST burning a victim's SAML login, and
+  `$`-operators reaching MongoDB through `find`; round 2 found the commit path still admitting
+  duplicates; round 3 found an `update` able to rewrite a key onto another row's key (High) and a
+  transaction committing a duplicate through delete-then-recreate. The memory adapter now refuses
+  duplicate and changed primary keys in and out of transactions. Round 4 passed on `c011db69` —
+  complete (PR #411).
 - **Next milestone** — M101e (in progress on `feat/m101e-cli-write-safety`), then M101f, M101g (now
   carrying the full-stack browser gate, §3.10 of its plan), M101h; M104 — the `v0.9.0` client-brief
   run — follows the `v0.9.0` cut; see ROADMAP.md.

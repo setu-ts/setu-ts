@@ -88,6 +88,48 @@ isolation through the database service; an omitted declaration is refused rather
 the adapter default. Prisma needs a resolved `provider` for an isolation request: when its client
 provider cannot be detected, set `options.provider` explicitly.
 
+## Tenant data-store bridge
+
+`createDatabaseTenantDataStore` is the one shipped `ITenantDataStore` over `IDatabaseService`. Pass
+it to the multi-tenancy plugin's `dataStore` option and tenant-scoped repositories read and write
+through this backend:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createDatabaseTenantDataStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DatabasePlugin({ type: 'memory' }),
+    MultiTenancyPlugin({
+      resolver: 'header',
+      database: 'column-per-tenant',
+      dataStore: createDatabaseTenantDataStore(),
+    }),
+  ],
+});
+await app.start({ port: 3000 });
+```
+
+The factory is resolved in `onInit`, so `DatabasePlugin` may be registered before OR after the
+tenancy plugin — every `register()` phase completes before any `onInit`.
+
+The bridge supports the **`'column-per-tenant'`** strategy only: it conjoins the tenant column to
+every read and stamps it on every write (the column is spread LAST, so a caller's filter cannot
+override it, and stripped from every `update` payload, so no write can move a row between tenants).
+`'schema-per-tenant'` and `'database-per-tenant'` throw `TenantStoreStrategyUnsupportedError` at
+startup, because `IRepository` offers no schema or database switch. The tenant column comes from
+that strategy — `'tenant_id'` by default, `database: new ColumnPerTenant('org_id')` for another — so
+there is one place to name it. Lookups by key go through the repository's own `findById`, so an
+entity whose primary key is not `id` (a MongoDB `primaryKey: 'user_id'`, a composite key) is
+addressed the way its adapter is configured; the tenant column is then checked on the row that comes
+back. `DatabaseTenantDataStore` is also exported for an application that holds its own
+`IDatabaseService` and constructs the store directly; its optional second constructor argument names
+the column for a store used outside the multi-tenancy plugin.
+
 ## Options
 
 | Option    | Type                                                                                                 | Default     | Description                              |
@@ -665,16 +707,20 @@ Drizzle, and an unenforced rule becomes a 500 in production.
 | ----------------------------------- | --------------------------------------------- | ---------------- |
 | Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name  |
 | Unknown `where` / `filter` field    | Matches nothing                               | Refused          |
+| Duplicate primary key               | **Refused** (a caller-supplied key)           | Refused          |
+| Changing a primary key by `update`  | **Refused**                                   | Refused (Mongo)  |
 | Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced         |
 | Column types                        | Not enforced — a string into an Int is stored | Enforced         |
 | Foreign keys, checks, defaults      | Not enforced                                  | Enforced         |
 
-Only the first row is something this adapter can decide, and it does: a `select` or `orderBy` field
-that **no stored row carries** is refused with the entity, the clause and the observed column list,
-matching what Drizzle answers for the same call. Two consequences of measuring rather than declaring
-are worth knowing: a field carried by at least one row counts as known (so a sparse optional column
-works), and an entity holding no rows at all accepts anything, because there is nothing to observe
-and nothing to return.
+The first two rows are things this adapter can decide, and it does. The primary key is the one
+constraint it knows, and every lookup by id addresses the first match, so a `create` whose
+caller-supplied key is already stored is refused instead of leaving a second, unaddressable row. For
+`select`/`orderBy`: a `select` or `orderBy` field that **no stored row carries** is refused with the
+entity, the clause and the observed column list, matching what Drizzle answers for the same call.
+Two consequences of measuring rather than declaring are worth knowing: a field carried by at least
+one row counts as known (so a sparse optional column works), and an entity holding no rows at all
+accepts anything, because there is nothing to observe and nothing to return.
 
 `where` and `filter` are deliberately **not** checked. Without a schema this adapter cannot tell an
 unknown column from one that is absent on every row, and returning no rows is a defensible answer to
@@ -822,6 +868,7 @@ imperative begin/commit.
 
 | Export                                    | Kind      |
 | ----------------------------------------- | --------- |
+| `createDatabaseTenantDataStore`           | function  |
 | `createDrizzleDatabase`                   | function  |
 | `createDrizzleDataSource`                 | function  |
 | `createInjectedBigtableLoader`            | function  |
@@ -843,6 +890,7 @@ imperative begin/commit.
 | `CosmosConcurrentModificationError`       | class     |
 | `CosmosTransactionScopeError`             | class     |
 | `DatabaseService`                         | class     |
+| `DatabaseTenantDataStore`                 | class     |
 | `DatabaseUnavailableError`                | class     |
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
@@ -853,6 +901,7 @@ imperative begin/commit.
 | `PrismaAdapter`                           | class     |
 | `PrismaRepository`                        | class     |
 | `SerializationConflictError`              | class     |
+| `TenantStoreStrategyUnsupportedError`     | class     |
 | `UnitOfWork`                              | class     |
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedIsolationLevelError`          | class     |
