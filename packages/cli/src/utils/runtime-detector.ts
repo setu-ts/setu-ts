@@ -22,20 +22,52 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { TargetRuntime } from '../constants.ts';
 import { joinPath } from './file-writer.ts';
+import { isMissingPath } from './filesystem-errors.ts';
 import { readJsonManifest } from './manifest-reader.ts';
 
 /**
- * Reads a file, or reports absence.
+ * A runtime marker exists but could not be read, so the runtime cannot be
+ * decided. Thrown rather than read as absence: an unreadable `wrangler.jsonc`
+ * beside a `wrangler dev` start script would otherwise classify a Workers
+ * project as Node, and the caller would act on that guess.
+ */
+export class RuntimeMarkerUnreadableError extends Error {
+  /** The marker that could not be read. */
+  readonly path: string;
+  /** Why it could not be read. */
+  readonly reason: string;
+
+  /**
+   * @param path - The marker that could not be read
+   * @param reason - Why it could not be read
+   */
+  constructor(path: string, reason: string) {
+    super(`Cannot read ${path}: ${reason}`);
+    this.name = 'RuntimeMarkerUnreadableError';
+    this.path = path;
+    this.reason = reason;
+  }
+}
+
+/**
+ * Reports whether a marker file exists. Only a missing path counts as absent;
+ * any other failure (an access error, an I/O error) is unknown, not absent.
  *
  * @param fs - The filesystem to read through
  * @param path - The absolute path
- * @returns The contents, or `undefined` when the file cannot be read
+ * @returns Whether the file is present
+ * @throws {RuntimeMarkerUnreadableError} When the file exists but cannot be read
  */
-async function readText(fs: IFileSystem, path: string): Promise<string | undefined> {
+async function markerPresent(fs: IFileSystem, path: string): Promise<boolean> {
   try {
-    return new TextDecoder().decode(await fs.readFile(path));
-  } catch {
-    return undefined;
+    await fs.readFile(path);
+    return true;
+  } catch (cause) {
+    if (isMissingPath(cause)) return false;
+    throw new RuntimeMarkerUnreadableError(
+      path,
+      cause instanceof Error ? cause.message : String(cause),
+    );
   }
 }
 
@@ -62,16 +94,23 @@ const WRANGLER_CONFIGS = ['wrangler.toml', 'wrangler.json', 'wrangler.jsonc'] as
  * @returns The detected runtime: `'deno'` when no `package.json` marks another
  *   target, and for a `package.json` with no `start` only when a `deno.json`
  *   sits beside it
+ * @throws {RuntimeMarkerUnreadableError} When a marker exists but cannot be
+ *   read
  */
 export async function detectTargetRuntime(
   fs: IFileSystem,
   dir: string,
 ): Promise<TargetRuntime> {
   for (const config of WRANGLER_CONFIGS) {
-    if (await readText(fs, joinPath(dir, config)) !== undefined) return 'cloudflare-workers';
+    if (await markerPresent(fs, joinPath(dir, config))) return 'cloudflare-workers';
   }
 
-  const packageJson = await readJsonManifest(fs, joinPath(dir, 'package.json'));
+  // Presence is decided first so an access failure is refused, while a file
+  // that reads but does not parse keeps the deno fallback: the plugin detector
+  // reports a malformed manifest, and this must not throw on the way there.
+  const packagePath = joinPath(dir, 'package.json');
+  if (!await markerPresent(fs, packagePath)) return 'deno';
+  const packageJson = await readJsonManifest(fs, packagePath);
   if (packageJson.kind !== 'ok') return 'deno';
 
   // The `start` script is the marker, because it is what the two targets
@@ -92,11 +131,11 @@ export async function detectTargetRuntime(
   // decides it; otherwise the lockfile tells Bun from Node, the rule
   // `detectProjectRuntime` already uses for `setu adopt`.
   if (
-    await readText(fs, joinPath(dir, 'deno.json')) !== undefined ||
-    await readText(fs, joinPath(dir, 'deno.jsonc')) !== undefined
+    await markerPresent(fs, joinPath(dir, 'deno.json')) ||
+    await markerPresent(fs, joinPath(dir, 'deno.jsonc'))
   ) return 'deno';
   for (const lockfile of ['bun.lock', 'bun.lockb']) {
-    if (await readText(fs, joinPath(dir, lockfile)) !== undefined) return 'bun';
+    if (await markerPresent(fs, joinPath(dir, lockfile))) return 'bun';
   }
   return 'node';
 }

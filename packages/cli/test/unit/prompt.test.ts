@@ -102,6 +102,22 @@ describe('createTerminalPrompter', () => {
     expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
   });
 
+  it('never opens the prompt when printing the menu is where the interrupt lands', async () => {
+    const controller = new AbortController();
+    let asked = false;
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => {
+        asked = true;
+        return 'rest';
+      },
+      () => controller.abort(),
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+    expect(asked).toBe(false);
+  });
+
   it('stops re-asking once the interrupt fires between attempts', async () => {
     const controller = new AbortController();
     let calls = 0;

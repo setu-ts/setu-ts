@@ -13,7 +13,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
-import { detectTargetRuntime } from '../../../src/utils/runtime-detector.ts';
+import {
+  detectTargetRuntime,
+  RuntimeMarkerUnreadableError,
+} from '../../../src/utils/runtime-detector.ts';
 
 /** A `package.json` carrying the `start` script a target scaffolds with. */
 function pkg(start: string): string {
@@ -63,6 +66,65 @@ describe('detectTargetRuntime', () => {
       expect(await detectTargetRuntime(fs, '/app')).toBe('cloudflare-workers');
     });
   }
+
+  describe('a marker that exists but cannot be read', () => {
+    /** Wraps a fake filesystem so one path fails with a non-missing error. */
+    function denying(files: Record<string, string>, denied: string) {
+      const fs = createFakeFs(files);
+      return {
+        ...fs,
+        readFile: (path: string) =>
+          path === denied
+            ? Promise.reject(Object.assign(new Error('EACCES: permission denied'), {
+              code: 'EACCES',
+            }))
+            : fs.readFile(path),
+      };
+    }
+
+    for (const config of ['wrangler.toml', 'wrangler.json', 'wrangler.jsonc']) {
+      it(`refuses an unreadable ${config} rather than reading the start script`, async () => {
+        // A `wrangler dev` start script would otherwise classify a Workers
+        // project as Node because its config could not be read.
+        const fs = denying(
+          { [`/app/${config}`]: '{}', '/app/package.json': pkg('wrangler dev') },
+          `/app/${config}`,
+        );
+        const failure = await detectTargetRuntime(fs, '/app').catch((cause) => cause);
+        expect(failure).toBeInstanceOf(RuntimeMarkerUnreadableError);
+        expect(failure.path).toBe(`/app/${config}`);
+        expect(failure.message).toContain('EACCES');
+      });
+    }
+
+    it('refuses an unreadable package.json rather than answering deno', async () => {
+      const fs = denying({ '/app/package.json': pkg('bun run main.ts') }, '/app/package.json');
+      await expect(detectTargetRuntime(fs, '/app')).rejects.toBeInstanceOf(
+        RuntimeMarkerUnreadableError,
+      );
+    });
+
+    it('refuses an unreadable deno.json or bun lockfile', async () => {
+      for (const denied of ['/app/deno.json', '/app/bun.lock']) {
+        const fs = denying(
+          { '/app/package.json': '{}', [denied]: '{}' },
+          denied,
+        );
+        await expect(detectTargetRuntime(fs, '/app')).rejects.toBeInstanceOf(
+          RuntimeMarkerUnreadableError,
+        );
+      }
+    });
+
+    it('stringifies a non-Error failure', async () => {
+      const fs = createFakeFs({ '/app/wrangler.toml': '' });
+      const failure = await detectTargetRuntime(
+        { ...fs, readFile: () => Promise.reject('disk gone') },
+        '/app',
+      ).catch((cause) => cause);
+      expect(failure.reason).toBe('disk gone');
+    });
+  });
 
   it('reads deno when there is no package.json at all', async () => {
     // Deno is the only target with no second marker: it deliberately has no

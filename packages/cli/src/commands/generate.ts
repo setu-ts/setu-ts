@@ -30,7 +30,7 @@ import {
   overlongComponent,
 } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
-import { detectTargetRuntime } from '../utils/runtime-detector.ts';
+import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { detectProject } from '../utils/project-detector.ts';
 import {
   findExisting,
@@ -298,7 +298,14 @@ export async function runGenerateCommand(
   // knows: `setu new svc --runtime bun` records the choice once and nobody
   // repeats it on every `generate`. An explicit flag still wins, so a custom
   // schematic can be driven for another target deliberately.
-  const runtime: TargetRuntime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
+  let runtime: TargetRuntime;
+  try {
+    runtime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
+  } catch (cause) {
+    if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
+    deps.error(cause.message);
+    return EXIT_ERROR;
+  }
 
   // Read unconditionally, like `detectPlugins` above: the `module` schematic
   // needs it to render its aggregate barrel, and branching on the schematic name

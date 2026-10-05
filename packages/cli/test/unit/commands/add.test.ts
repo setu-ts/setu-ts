@@ -198,6 +198,26 @@ describe('withIngressProviderWiring', () => {
 });
 
 describe('runAddCommand', () => {
+  it('refuses with exit 1 and writes nothing when a runtime marker is unreadable', async () => {
+    const fs = createFakeFs({ '/app/deno.json': DENO_MANIFEST, '/app/wrangler.jsonc': '{}' });
+    const err: string[] = [];
+    const code = await runAddCommand(parseArgs(['cloudflare-plugin']), {
+      fs: {
+        ...fs,
+        readFile: (path: string) =>
+          path === '/app/wrangler.jsonc'
+            ? Promise.reject(new Error('EACCES: permission denied'))
+            : fs.readFile(path),
+      },
+      cwd: '/app',
+      log: () => {},
+      error: (m) => err.push(m),
+    });
+    expect(code).toBe(1);
+    expect(err.join('\n')).toContain('Cannot read /app/wrangler.jsonc: EACCES');
+    expect(fs.writes).toEqual([]);
+  });
+
   it('refuses plugins that cannot register on the detected runtime', async () => {
     const node = harness({
       '/app/package.json': JSON.stringify({ scripts: { start: 'node main.ts' } }),

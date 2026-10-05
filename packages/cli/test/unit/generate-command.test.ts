@@ -496,6 +496,27 @@ describe('runGenerateCommand', () => {
     expect(err.text()).toContain('Failed to write: read-only fs');
   });
 
+  it('refuses with exit 1 and writes nothing when a runtime marker is unreadable', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}', '/app/bun.lock': '' });
+    const err = createRecorder();
+    const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
+      fs: {
+        ...fs,
+        readFile: (path: string) =>
+          path === '/app/bun.lock'
+            ? Promise.reject(new Error('EIO: i/o error'))
+            : fs.readFile(path),
+      },
+      cwd: '/app',
+      now: () => 0,
+      log: () => {},
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('Cannot read /app/bun.lock: EIO');
+    expect(fs.writes).toEqual([]);
+  });
+
   describe('--runtime validation', () => {
     it('rejects an unknown runtime with exit 2 and zero writes', async () => {
       const h = harness();

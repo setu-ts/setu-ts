@@ -105,6 +105,9 @@ export function createTerminalPrompter(
         // already fired must not open a blocking read it would then wait on.
         if (interrupted()) return Promise.resolve({ kind: 'cancelled' });
         print(menu);
+        // Again after printing: the write itself can be where the interrupt
+        // lands, and the read below would then block on input nobody sends.
+        if (interrupted()) return Promise.resolve({ kind: 'cancelled' });
         const answer = promptFn(`${question} [${fallback.value}] `);
         // Both "stdin was never a terminal" and "the user pressed Ctrl-D"
         // arrive here; both mean stop asking, never "take the default".

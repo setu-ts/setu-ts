@@ -29,7 +29,7 @@ import {
 } from '../constants.ts';
 import { joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { stringFlag } from '../args.ts';
-import { detectTargetRuntime } from '../utils/runtime-detector.ts';
+import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
@@ -333,7 +333,14 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
 
-  const runtime = await detectTargetRuntime(deps.fs, dir);
+  let runtime: TargetRuntime;
+  try {
+    runtime = await detectTargetRuntime(deps.fs, dir);
+  } catch (cause) {
+    if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
+    deps.error(cause.message);
+    return EXIT_ERROR;
+  }
   const restriction = RUNTIME_RESTRICTIONS.get(bare);
   if (restriction !== undefined && !restriction.runtimes.includes(runtime)) {
     deps.error(`Cannot add ${specifier} to a ${runtime} project: ${restriction.reason}.`);
