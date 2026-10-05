@@ -278,6 +278,27 @@ describe('SAML ACS (real node-saml)', () => {
     expect(await signedInUser(originator)).toMatchObject({ id: 'corp:alice' });
   });
 
+  it("a cross-site junk POST carrying the victim's cookie does not burn the victim's login", async () => {
+    // The ACS is CSRF-exempt and the binding cookie is `SameSite=None`, so a
+    // cross-site page can make the victim's browser POST garbage here WITH
+    // the cookie. That must not clear the binding: the cookie is cleared only
+    // when a pending request is actually consumed (M101c security audit F2).
+    harness = await buildSamlApp(key);
+    const victim = new MultiCookieJar();
+    const requestId = await startLogin(harness, victim);
+    for (const junk of ['', encode('<not-saml/>')]) {
+      const refused = await postAcs(harness, victim, junk);
+      expect(refused.status).toBe(401);
+      await refused.body?.cancel();
+      expect(victim.cookies.has(SAML_BINDING_COOKIE)).toBe(true);
+    }
+    // Positive control: the victim's real IdP post still signs in, and the
+    // binding is then cleared (single use).
+    expect((await postAcs(harness, victim, signedResponse(key, requestId))).status).toBe(302);
+    expect(victim.cookies.has(SAML_BINDING_COOKIE)).toBe(false);
+    expect(await signedInUser(victim)).toMatchObject({ id: 'corp:alice' });
+  });
+
   it("refuses a response whose InResponseTo names another browser's login", async () => {
     harness = await buildSamlApp(key);
     const alice = new MultiCookieJar();

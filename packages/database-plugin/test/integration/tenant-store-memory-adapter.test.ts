@@ -105,4 +105,17 @@ describe('DatabaseTenantDataStore — real DatabaseService over MemoryAdapter', 
     expect(deletedA).toBe(true);
     expect(await store.findById<Row, string>('a', 'Patient', id)).toBeNull();
   });
+
+  it("refuses a second tenant's create under a key another tenant already holds", async () => {
+    // M101c security audit F1: the memory adapter used to accept a duplicate
+    // primary key, so tenant `a` could create `X` while tenant `b` held `X`,
+    // and a later write by id from `b` could land on `a`'s row.
+    store = await makeStore();
+    await store.create('b', 'Doc', { id: 'X', body: 'b-owned' });
+    await expect(store.create('a', 'Doc', { id: 'X', body: 'a-owned' })).rejects.toThrow(
+      /primary key/,
+    );
+    expect(await store.findById('b', 'Doc', 'X')).toMatchObject({ body: 'b-owned' });
+    expect(await store.findById('a', 'Doc', 'X')).toBeNull();
+  });
 });

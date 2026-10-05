@@ -206,6 +206,41 @@ function findRecordIndex(store: EntityStore, id: EntityKey): number {
 }
 
 /**
+ * A row's own primary key, built from the store's key columns — a scalar for
+ * a single-column key, a record for a composite one.
+ */
+function recordKey(store: EntityStore, record: Record<string, unknown>): EntityKey {
+  if (store.primaryKey.length === 1) return record[store.primaryKey[0]] as EntityKey;
+  const key: Record<string, string | number> = {};
+  for (const col of store.primaryKey) key[col] = record[col] as string | number;
+  return key;
+}
+
+/**
+ * Whether a caller-supplied primary key is already carried by a visible row.
+ *
+ * The primary key is the one constraint this schema-less adapter KNOWS, and
+ * every row lookup (`findById`/`update`/`delete`) addresses the first match,
+ * so a duplicate key makes the second row unaddressable and lets a write by
+ * id land on a row the caller never checked. A generated key cannot collide,
+ * so the scan runs only when the caller supplied a key column.
+ */
+function duplicatesKey(
+  records: readonly Record<string, unknown>[],
+  store: EntityStore,
+  data: Partial<Record<string, unknown>>,
+  record: Record<string, unknown>,
+): boolean {
+  if (!store.primaryKey.some((col) => data[col] !== undefined)) return false;
+  return findRecordIndexForRecords(records, store, recordKey(store, record)) !== -1;
+}
+
+/** The refusal for a duplicate primary key; never echoes the key's value. */
+function duplicateKeyError(entity: string): Error {
+  return new Error(`Entity '${entity}' already has a row with this primary key`);
+}
+
+/**
  * In-memory implementation of {@linkcode IDatabaseAdapter}.
  *
  * Stores entities in plain `Map` structures, supporting basic CRUD,
@@ -467,14 +502,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
       assertActiveGeneration();
       const store = this.getStore(entity);
       // The overlay's own key for a row, derived from the row's key columns.
-      const keyOf = (row: Record<string, unknown>): string => {
-        const id = store.primaryKey.length === 1 ? row[store.primaryKey[0]] as EntityKey : (() => {
-          const rec: Record<string, string | number> = {};
-          for (const c of store.primaryKey) rec[c] = row[c] as string | number;
-          return rec;
-        })();
-        return overlayKey(entity, id, store.primaryKey);
-      };
+      const keyOf = (row: Record<string, unknown>): string =>
+        overlayKey(entity, recordKey(store, row), store.primaryKey);
       // Shadows and tombstones apply to EVERY row a transaction can see, not
       // only to committed ones. Buffered creates used to be appended raw, so a
       // row created and then updated in the same transaction read back with its
@@ -540,6 +569,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
           if (record[col] === undefined) {
             record[col] = crypto.randomUUID();
           }
+        }
+        if (duplicatesKey(effectiveRecords(), store, data, record)) {
+          return Promise.reject(duplicateKeyError(entity));
         }
         overlay.creates.push({ entity, record });
         return Promise.resolve({ ...record });
@@ -693,7 +725,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
    *
    * @param entity - Entity name
    * @param data - Entity data
-   * @returns The inserted entity
+   * @returns The inserted entity; rejects when a caller-supplied primary key
+   *   is already carried by a stored row
    */
   insertEntity(
     entity: string,
@@ -706,6 +739,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
       if (record[col] === undefined) {
         record[col] = crypto.randomUUID();
       }
+    }
+    if (duplicatesKey(store.records, store, data, record)) {
+      return Promise.reject(duplicateKeyError(entity));
     }
     store.records.push(record);
     return Promise.resolve({ ...record });

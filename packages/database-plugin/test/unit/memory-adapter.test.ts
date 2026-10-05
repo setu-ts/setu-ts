@@ -611,4 +611,46 @@ describe('MemoryAdapter', () => {
       expect(afterRollback.length).toBe(3);
     });
   });
+
+  describe('primary-key uniqueness (M101c security audit F1)', () => {
+    const ALL = { where: {}, orderBy: {}, limit: -1, offset: 0, select: [] } as const;
+    it('refuses a create whose caller-supplied key is already stored, without echoing it', async () => {
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'canary-key-7', name: 'first' });
+      await expect(ds.create({ id: 'canary-key-7', name: 'second' })).rejects.toThrow(
+        /already has a row with this primary key/,
+      );
+      const refusal = await ds.create({ id: 'canary-key-7' }).catch((error: Error) => error);
+      expect((refusal as Error).message).not.toContain('canary-key-7');
+      // The first row is untouched and still addressable.
+      expect(await ds.findById('canary-key-7')).toMatchObject({ name: 'first' });
+      expect(await ds.findAll(ALL)).toHaveLength(1);
+    });
+
+    it('refuses a duplicate composite key and accepts a distinct one', async () => {
+      const ds = adapter.createDataSource('Enrollment', ['courseId', 'personId']);
+      await ds.create({ courseId: 'c1', personId: 'p1' });
+      await expect(ds.create({ courseId: 'c1', personId: 'p1' })).rejects.toThrow(/primary key/);
+      await ds.create({ courseId: 'c1', personId: 'p2' });
+      expect(await ds.findAll(ALL)).toHaveLength(2);
+    });
+
+    it('generated keys never collide (no scan needed)', async () => {
+      const ds = adapter.createDataSource('User');
+      await ds.create({ name: 'a' });
+      await ds.create({ name: 'b' });
+      expect(await ds.findAll(ALL)).toHaveLength(2);
+    });
+
+    it('refuses a duplicate inside a transaction, against committed and buffered rows', async () => {
+      await adapter.connect();
+      await adapter.createDataSource('User').create({ id: 'u1', name: 'committed' });
+      const txn = await adapter.beginTransaction();
+      const ds = (txn as IAdapterTransaction).createDataSource('User');
+      await expect(ds.create({ id: 'u1' })).rejects.toThrow(/primary key/);
+      await ds.create({ id: 'u2' });
+      await expect(ds.create({ id: 'u2' })).rejects.toThrow(/primary key/);
+      await txn.rollback();
+    });
+  });
 });

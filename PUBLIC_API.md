@@ -1494,7 +1494,9 @@ to return. An unknown `where` or `filter` field is **not** refused: without a sc
 cannot tell an unknown column from one absent on every row, and matching nothing is a defensible
 answer.
 
-Uniqueness, column types, foreign keys, checks and defaults are **not enforced** and cannot be by a
+A `create` whose caller-supplied primary key is already stored is **refused** — the key is the one
+constraint this adapter knows, and a duplicate would leave a row no lookup by id can address. Other
+uniqueness, column types, foreign keys, checks and defaults are **not enforced** and cannot be by a
 schema-less store. Use this adapter for development and tests, and run integration tests against the
 backend you deploy on.
 

@@ -413,6 +413,14 @@ Recorded here rather than edited into §3.3, which stays as the design that was 
   column is named on the strategy instead (`database: new ColumnPerTenant('org_id')`).
   `DatabaseTenantDataStoreOptions` is no longer exported; the constructor's optional `tenantColumn`
   argument stays for a store used outside the plugin.
+- **§8's "two calls are acceptable" claim was incomplete** (security audit F1). Stripping the tenant
+  column stops a write MOVING a row between tenants; it does not stop the row under an id CHANGING
+  between the ownership check and the write. On the memory adapter, which accepted a duplicate
+  primary key, that let tenant `b` overwrite and read back tenant `a`'s row. Fixed by refusing a
+  duplicate key in the memory adapter and refusing to return an update whose row carries another
+  tenant's column; the residual (a key deleted and reused across tenants inside the window) is
+  documented in the bridge's JSDoc. Audit F2 (SAML cookie cleared before consumption) and F3
+  (`$`-operators in `find` filters) are fixed in the same pass.
 
 ## 11. Design security review (recorded after implementation)
 

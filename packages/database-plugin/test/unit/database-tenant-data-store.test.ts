@@ -235,6 +235,39 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
     expect(repo().calls.map((c) => c.method)).toEqual(['findById', 'delete']);
   });
 
+  it('refuses to return an update the race retargeted to another tenant', async () => {
+    // The ownership check and the write are two calls; if the row under the id
+    // changed tenant in between, the written row must not be handed back.
+    const { store, repo } = storeWith();
+    const fake = repo();
+    fake.update = (id: EntityKey, data: Partial<Record<string, unknown>>) => {
+      fake.calls.push({ method: 'update', arg: { id, data } });
+      return Promise.resolve({ id, name: 'secret-of-b', tenant_id: 'b', ...data });
+    };
+    const refusal = await store.update('a', 'Patient', '1', { name: 'x' }).catch((e: Error) => e);
+    expect(refusal).toBeInstanceOf(Error);
+    expect((refusal as Error).message).toMatch(/changed tenant/);
+    expect((refusal as Error).message).not.toContain('secret-of-b');
+  });
+
+  it('find refuses operator-shaped filters and accepts scalar equality', async () => {
+    const { store, repo } = storeWith();
+    for (
+      const filter of [{ $where: 'sleep(1) || true' }, { name: { $ne: null } }, { name: ['a'] }]
+    ) {
+      await expect(store.find('a', 'Patient', filter)).rejects.toThrow(TypeError);
+    }
+    expect(repo().calls).toEqual([]); // nothing reached the backend
+    await store.find('a', 'Patient', {
+      name: 'alpha',
+      at: new Date(0),
+      gone: null,
+      n: 1,
+      ok: true,
+    });
+    expect(repo().calls).toHaveLength(1);
+  });
+
   it('addresses an entity whose primary key is not `id` (findById, update, delete)', async () => {
     // A repository keyed by `user_id`, the shape a Mongo `primaryKey: 'user_id'`
     // mapping has. A bridge that wrote `where: { id }` answered not-found for

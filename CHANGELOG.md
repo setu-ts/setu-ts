@@ -46,6 +46,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
+  primary key is already stored now rejects
+  (`Entity '<name>' already has a row with this primary
+  key`), in and out of a transaction, where
+  it used to store a second row that no `findById`, `update` or `delete` could address. Every real
+  backend already refuses this; a test that relied on inserting the same key twice must use distinct
+  keys or let the adapter generate them.
+
+- **The tenant data-store bridge's `find` accepts equality filters only (M101c).** A filter key
+  starting with `$` or a non-scalar value rejects with a `TypeError`, because MongoDB read them as
+  query operators (`$where` ran server-side JavaScript). An `update` whose written row turns out to
+  belong to another tenant — possible only if a key is reused across tenants between the ownership
+  check and the write — rejects instead of returning the row.
+
+- **SAML binding cookie cleared only on consumption (M101c).** The ACS cleared the browser-binding
+  cookie on every outcome, so a cross-site `POST` of an empty or junk body to the CSRF-exempt ACS,
+  carrying the victim's `SameSite=None` cookie, burned the victim's in-flight login. It is now
+  cleared exactly when a pending request is consumed.
+
 - **A tenant-bound session is never re-bound (M101c, V8-7).** The session plugin now seals the
   tenant only into a session that carries no binding yet. Previously a session whose tenant was
   resolved after the session loaded could be re-sealed to a different tenant on commit, so a refused

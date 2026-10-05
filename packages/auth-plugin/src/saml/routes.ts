@@ -355,8 +355,11 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
     provider.acsPath,
     flowRoute(async (ctx) => {
       const presented = readBindingCookie(ctx);
-      // Cleared on every outcome: a binding is single use, like its request.
-      clearBindingCookie(ctx);
+      // The binding is single use, like its request — so it is cleared exactly
+      // when a pending request is consumed (inside `consume` below), never
+      // before. Clearing it on every outcome let a cross-site POST of an empty
+      // or junk body to this CSRF-exempt route, carrying the victim's
+      // `SameSite=None` cookie, burn the victim's in-flight login (M101c audit).
       const encoded = await readSamlResponse(ctx);
       if (encoded === null) {
         return fail(provider, ctx, 'assertion-invalid');
@@ -371,6 +374,9 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         if (!consumed) {
           consumed = true;
           captured = await provider.store.consumeRequest(requestId, deps.runtime.now());
+          if (captured !== null) {
+            clearBindingCookie(ctx);
+          }
         }
         return captured;
       };

@@ -707,16 +707,19 @@ Drizzle, and an unenforced rule becomes a 500 in production.
 | ----------------------------------- | --------------------------------------------- | ---------------- |
 | Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name  |
 | Unknown `where` / `filter` field    | Matches nothing                               | Refused          |
+| Duplicate primary key               | **Refused** (a caller-supplied key)           | Refused          |
 | Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced         |
 | Column types                        | Not enforced — a string into an Int is stored | Enforced         |
 | Foreign keys, checks, defaults      | Not enforced                                  | Enforced         |
 
-Only the first row is something this adapter can decide, and it does: a `select` or `orderBy` field
-that **no stored row carries** is refused with the entity, the clause and the observed column list,
-matching what Drizzle answers for the same call. Two consequences of measuring rather than declaring
-are worth knowing: a field carried by at least one row counts as known (so a sparse optional column
-works), and an entity holding no rows at all accepts anything, because there is nothing to observe
-and nothing to return.
+The first two rows are things this adapter can decide, and it does. The primary key is the one
+constraint it knows, and every lookup by id addresses the first match, so a `create` whose
+caller-supplied key is already stored is refused instead of leaving a second, unaddressable row. For
+`select`/`orderBy`: a `select` or `orderBy` field that **no stored row carries** is refused with the
+entity, the clause and the observed column list, matching what Drizzle answers for the same call.
+Two consequences of measuring rather than declaring are worth knowing: a field carried by at least
+one row counts as known (so a sparse optional column works), and an entity holding no rows at all
+accepts anything, because there is nothing to observe and nothing to return.
 
 `where` and `filter` are deliberately **not** checked. Without a schema this adapter cannot tell an
 unknown column from one that is absent on every row, and returning no rows is a defensible answer to

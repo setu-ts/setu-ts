@@ -23,8 +23,21 @@
  * column to its `where`, the tenant column is spread/stamped LAST so a caller's
  * filter or payload cannot override it, and every `update` payload has the
  * tenant column STRIPPED. `update` and `delete` look the row up under the
- * tenant first (two calls) so a foreign tenant's id is a no-op, not a mutation
- * of another tenant's row.
+ * tenant first, so a foreign tenant's id is a no-op.
+ *
+ * **The ownership check and the write are two calls, not one.** `IRepository`
+ * has no conditional write, so between them another request can delete the
+ * checked row and a row from another tenant can take its id; the write then
+ * addresses that row. That needs a primary key REUSED across tenants, which a
+ * backend refuses while the original row exists (the memory adapter does too
+ * since M101c) and which a generated key never produces — so let the backend
+ * generate keys, or treat a caller-supplied key as tenant-scoped data. An
+ * `update` whose returned row carries another tenant's column is refused
+ * rather than returned, so the race can never read a foreign row back.
+ *
+ * **`find` filters are equality only.** A filter key starting with `$` or a
+ * non-scalar value is refused, because some backends (MongoDB) read those as
+ * query operators rather than as values.
  *
  * **Lookup by key goes through the repository's own `findById`.** The bridge
  * never names the key field itself: an entity whose primary key is not `id`
@@ -67,6 +80,32 @@ export class TenantStoreStrategyUnsupportedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'TenantStoreStrategyUnsupportedError';
+  }
+}
+
+/**
+ * Refuses a `find` filter that is not a plain equality map.
+ *
+ * `ITenantDataStore.find` is equality matching (the memory store's semantics),
+ * but the filter reaches the backend's `where`, and MongoDB reads a `$`-prefixed
+ * key (`$where`, `$or`) or an object value (`{ $ne: … }`) as a QUERY OPERATOR —
+ * server-side JavaScript in the `$where` case. Neither the key nor the value is
+ * echoed: a filter is often request-derived.
+ */
+function assertEqualityFilter(filter: Readonly<Record<string, unknown>>): void {
+  for (const [key, value] of Object.entries(filter)) {
+    if (key.startsWith('$')) {
+      throw new TypeError(
+        "DatabaseTenantDataStore.find: a filter key may not start with '$' (equality only)",
+      );
+    }
+    const scalar = value === null || value instanceof Date ||
+      ['string', 'number', 'boolean', 'bigint'].includes(typeof value);
+    if (!scalar) {
+      throw new TypeError(
+        'DatabaseTenantDataStore.find: filter values must be scalars (equality only)',
+      );
+    }
   }
 }
 
@@ -185,6 +224,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     filter: Readonly<Record<string, unknown>>,
   ): Promise<readonly E[]> {
     const col = this.#column();
+    assertEqualityFilter(filter);
     // The tenant column is spread LAST so a caller's filter cannot override it.
     const rows = await this.#repo(entity).findAll({ where: { ...filter, [col]: tenantId } });
     return rows as unknown as readonly E[];
@@ -220,6 +260,14 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
       if (key !== col) stripped[key] = value;
     }
     const updated = await repo.update(id as EntityKey, stripped);
+    // The check and the write are two calls (see the class JSDoc); never hand
+    // back a row the race retargeted to another tenant.
+    if (updated[col] !== tenantId) {
+      throw new Error(
+        `DatabaseTenantDataStore: the '${entity}' row changed tenant between the ownership ` +
+          `check and the update; the write was not returned`,
+      );
+    }
     return updated as unknown as E;
   }
 
