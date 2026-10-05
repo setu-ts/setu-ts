@@ -275,6 +275,11 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const port = record['port'];
   const dependsOn = record['dependsOn'];
   if (typeof name !== 'string' || name === '') return undefined;
+  // A member name becomes one directory under apps/: a separator or a dot
+  // segment would put a member, and every write for it, somewhere else.
+  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+    return undefined;
+  }
   if (typeof port !== 'number') return undefined;
   if (
     dependsOn !== undefined &&

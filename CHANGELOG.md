@@ -362,6 +362,9 @@ All notable changes to this project are documented here. The format follows
   linking a barrel, `deno.json` or `main.dev.ts` there. Every CLI write, and every file `adopt`
   moves, must now resolve to exactly its place under the project or workspace root; a path reached
   through a link inside the project, or a dangling link, is refused by name with nothing written. A
+  path holding a backslash below the root is refused too (on POSIX it is an ordinary filename
+  character, so it names a different file on each platform), and a workspace member name must be one
+  path segment — no `/`, no `\\`, not `.` or `..` — or the manifest is refused as unreadable. A
   project reached through a linked PARENT directory is unaffected. If you deliberately link a file
   into a project (a shared `deno.json`, for example), replace the link with a copy before running a
   writing command.

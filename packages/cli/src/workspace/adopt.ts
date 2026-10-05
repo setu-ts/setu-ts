@@ -141,12 +141,15 @@ export async function planAdoption(
       continue;
     }
 
+    // Checked whatever its kind: a linked DIRECTORY with nothing inside it would
+    // otherwise never be checked, since a directory is reached through its children.
+    try {
+      await assertInsideProject(fs, project, joinPath(project, entry));
+    } catch (cause) {
+      return { ok: false, message: cause instanceof Error ? cause.message : String(cause) };
+    }
+
     if (!isDirectory) {
-      try {
-        await assertInsideProject(fs, project, joinPath(project, entry));
-      } catch (cause) {
-        return { ok: false, message: cause instanceof Error ? cause.message : String(cause) };
-      }
       files.push({ from: entry, to: joinPath(memberRoot, entry) });
       continue;
     }
@@ -161,8 +164,8 @@ export async function planAdoption(
       return {
         ok: false,
         message: `Cannot read every file under ${escapeName(joinPath(project, entry))}: ${
-          escapeName(cause instanceof Error ? cause.message : String(cause))
-        }. Fix or remove that entry (a dangling symlink is the usual cause), then run this again.`,
+          escapeName((cause instanceof Error ? cause.message : String(cause)).replace(/\.$/, ''))
+        }. Fix or remove that entry, then run this again.`,
       };
     }
     for (const path of nested) {

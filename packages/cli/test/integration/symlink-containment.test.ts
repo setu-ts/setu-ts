@@ -140,6 +140,67 @@ describe('commands refuse to follow a link inside a project', () => {
     expect(await Deno.readTextFile(`${outside}/main.dev.ts`)).toBe(entry);
   });
 
+  it('adopt refuses a link whose name carries a backslash (N11)', async () => {
+    // On POSIX `\\` is an ordinary filename character; a check that rewrote it
+    // into a separator verified a different path from the one then moved.
+    const dir = `${base}/app`;
+    await project(dir);
+    await Deno.writeTextFile(`${outside}/precious.txt`, 'keep me');
+    await Deno.symlink(outside, `${dir}/src/ext\\x`);
+    for (const dryRun of [true, false]) {
+      const { out, deps: d } = deps(dir);
+      expect(
+        await runAdoptCommand(parseArgs(['--name', 'orders', ...(dryRun ? ['--dry-run'] : [])]), d),
+      ).toBe(1);
+      expect(out.text()).toContain('backslash');
+    }
+    expect(await Deno.readTextFile(`${outside}/precious.txt`)).toBe('keep me');
+    await expect(Deno.stat(`${dir}/setu.workspace.json`)).rejects.toThrow();
+  });
+
+  it('a manifest member name that is not one path segment is refused (N11)', async () => {
+    const ws = `${base}/ws`;
+    await Deno.mkdir(`${ws}/apps`, { recursive: true });
+    await Deno.mkdir(`${outside}/src/discovery`, { recursive: true });
+    await Deno.writeTextFile(`${outside}/src/discovery/services.ts`, 'untouched');
+    for (const name of ['evil\\x', 'a/b', '..']) {
+      if (name === 'evil\\x') await Deno.symlink(outside, `${ws}/apps/${name}`);
+      await Deno.writeTextFile(
+        `${ws}/setu.workspace.json`,
+        JSON.stringify({
+          version: 1,
+          basePort: 8600,
+          runtime: 'deno',
+          transport: 'http',
+          members: [{ name, port: 8600 }],
+        }),
+      );
+      const out = createRecorder();
+      expect(
+        await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+          fs,
+          cwd: ws,
+          log: out.sink,
+          error: out.sink,
+          portAvailable: () => Promise.resolve(true),
+        }),
+      ).toBe(1);
+    }
+    expect(await Deno.readTextFile(`${outside}/src/discovery/services.ts`)).toBe('untouched');
+  });
+
+  it('adopt refuses a linked top-level directory even when it is empty (N12)', async () => {
+    const dir = `${base}/app`;
+    await project(dir);
+    await Deno.mkdir(`${outside}/empty`);
+    await Deno.symlink(`${outside}/empty`, `${dir}/test`);
+    const { out, deps: d } = deps(dir);
+    expect(await runAdoptCommand(parseArgs(['--name', 'orders']), d)).toBe(1);
+    expect(out.text()).toContain('through a symbolic link');
+    // Nothing pruned: the committed link is still there.
+    expect((await Deno.lstat(`${dir}/test`)).isSymlink).toBe(true);
+  });
+
   it('still works for a project reached through a LINKED parent directory', async () => {
     // The root is resolved the same way as each target, so only links INSIDE
     // the project are refused; a project under a linked path is ordinary.

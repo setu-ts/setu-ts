@@ -218,6 +218,16 @@ export async function assertInsideProject(
   root: string,
   target: string,
 ): Promise<void> {
+  // `\\` is an ordinary filename character on POSIX, so rewriting it into a
+  // separator would check a different path from the one then written. The CLI
+  // never plans one below a root, so any there is project-supplied: refused.
+  const below = target.startsWith(root) ? target.slice(root.length) : target;
+  if (below.includes('\\')) {
+    throw new PathEscapesProjectError(
+      `${escapeName(target)} contains a backslash below ${escapeName(root)}; Setu refuses ` +
+        'such paths because they name a different file on each platform.',
+    );
+  }
   const lexicalRoot = normalizeAbsolute(root);
   const lexicalTarget = normalizeAbsolute(target);
   const prefix = lexicalRoot === '/' ? '/' : `${lexicalRoot}/`;

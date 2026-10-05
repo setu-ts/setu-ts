@@ -270,6 +270,10 @@ describe('assertInsideProject (M101f re-audit N9/N10)', () => {
     await expect(assertInsideProject(base, '/p', '/p/../q/a.ts')).rejects.toThrow('is outside');
   });
 
+  it('refuses a backslash below the root instead of rewriting it (N11)', async () => {
+    await expect(assertInsideProject(base, '/p', '/p/bs\\x/f.ts')).rejects.toThrow('backslash');
+  });
+
   it('fails closed when the filesystem cannot resolve links', async () => {
     const bare: IFileSystem = { ...base };
     delete bare.realPath;
