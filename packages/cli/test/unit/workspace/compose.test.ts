@@ -121,8 +121,13 @@ describe('workspaceContainerFiles', () => {
     // M99b: runtime must retain the exact versions cached at build time, while
     // refusing lockfile writes on the generated read-only root.
     it('starts with --frozen and retains the shipped dependency resolutions', () => {
-      expect(dockerfile()).toContain('"run", "--frozen"');
-      expect(dockerfile()).not.toContain('--no-lock');
+      const lines = dockerfile().split('\n');
+      const command = lines.find((line) => line.startsWith('CMD '));
+      expect(command).toContain('"run", "--frozen"');
+      expect(command).not.toContain('--no-lock');
+      const install = lines.find((line) => line.startsWith('RUN deno cache main.ts'));
+      expect(install).toContain('deno install --frozen');
+      expect(install).not.toContain('--no-lock');
     });
 
     // Considered and rejected (plan §3.5), then MEASURED: with a cold cache and

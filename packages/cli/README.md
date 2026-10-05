@@ -227,7 +227,8 @@ retains the entry's recorded port, including while the connector runs. `--devtoo
 explicitly. `ports --reallocate` updates an untouched CLI entry along with the manifest; an edited
 entry refuses the whole operation before writing. Production images exclude the entry and remove the
 development connector pin before installing the remaining import map. See the
-[deployment recipe](../../docs/deployment.md) for the complete build sequence and JSONC support.
+[deployment recipe](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#the-image-is-the-members-only-dependency-source-at-runtime)
+for the complete build sequence and JSONC support.
 
 ## Generated modules
 
