@@ -49,10 +49,11 @@ All notable changes to this project are documented here. The format follows
 - **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
   primary key is already stored now rejects
   (`Entity '<name>' already has a row with this primary
-  key`), in and out of a transaction, where
-  it used to store a second row that no `findById`, `update` or `delete` could address. Every real
-  backend already refuses this; a test that relied on inserting the same key twice must use distinct
-  keys or let the adapter generate them.
+  key`), in and out of a transaction — a
+  commit re-checks its buffered creates against rows committed since and writes nothing on a
+  collision — where it used to store a second row that no `findById`, `update` or `delete` could
+  address. Every real backend already refuses this; a test that relied on inserting the same key
+  twice must use distinct keys or let the adapter generate them.
 
 - **The tenant data-store bridge's `find` accepts equality filters only (M101c).** A filter key
   starting with `$` or a non-scalar value rejects with a `TypeError`, because MongoDB read them as
