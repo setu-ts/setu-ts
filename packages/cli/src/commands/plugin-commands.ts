@@ -170,7 +170,7 @@ function reportMissingConfig(
   config: string | undefined,
   error: (message: string) => void,
 ): void {
-  error(`No ${CONFIG_MODULE} found at ${configModulePath(dir, config)}.`);
+  error(`No ${CONFIG_MODULE} found at ${escapeName(configModulePath(dir, config))}.`);
   error(
     `Plugin commands are read from your application, which \`${PROGRAM_NAME}\` loads through a ` +
       `${CONFIG_MODULE} exporting \`${CONFIG_EXPORT}()\`. Scaffold one with \`${PROGRAM_NAME} new\`, ` +
@@ -219,7 +219,10 @@ export async function runCommandsListing(
       deps.error('Interrupted; plugin command stopped.');
       return EXIT_INTERRUPTED;
     }
-    deps.error(escapeName(cause instanceof Error ? cause.message : String(cause)));
+    // Printed as written: CLI-built messages escape their own interpolations (and
+    // keep their intended line breaks); anything else comes from the project's
+    // own plugin code, which can already print whatever it likes.
+    deps.error(cause instanceof Error ? cause.message : String(cause));
     return EXIT_ERROR;
   }
 }
@@ -286,7 +289,10 @@ export async function dispatchPluginCommand(
       deps.error('Interrupted; plugin command stopped.');
       return EXIT_INTERRUPTED;
     }
-    deps.error(escapeName(cause instanceof Error ? cause.message : String(cause)));
+    // Printed as written: CLI-built messages escape their own interpolations (and
+    // keep their intended line breaks); anything else comes from the project's
+    // own plugin code, which can already print whatever it likes.
+    deps.error(cause instanceof Error ? cause.message : String(cause));
     return EXIT_ERROR;
   }
 }

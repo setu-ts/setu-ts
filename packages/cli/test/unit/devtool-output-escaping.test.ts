@@ -20,6 +20,9 @@ import { runAddCommand } from '../../src/commands/add.ts';
 import { runAppCommand } from '../../src/commands/app.ts';
 import { runGenerateCommand } from '../../src/commands/generate.ts';
 import { runLibraryCommand } from '../../src/commands/library.ts';
+import { runAdoptCommand } from '../../src/commands/adopt.ts';
+import { runCommandsListing } from '../../src/commands/plugin-commands.ts';
+import { loadApp } from '../../src/app-loader.ts';
 import { devtoolRunnerRefusal } from '../../src/devtool/planner.ts';
 import { interruptedRunRetryHint } from '../../src/utils/file-writer.ts';
 import { InterruptedError, interruptionMessage } from '../../src/utils/interruption.ts';
@@ -335,6 +338,69 @@ describe('project-controlled text stays on one output line', () => {
       expect(out.text()).toContain(dryRun ? 'would create' : 'created');
       expectNoForgedLine(out);
     }
+  });
+
+  it('adopt escapes committed file names and the project path (re-audit N5)', async () => {
+    for (const dir of ['/p', '/p\nsetu: FORGED']) {
+      for (const dryRun of [true, false]) {
+        const out = createRecorder();
+        await runAdoptCommand(parseArgs(['--name', 'orders', ...(dryRun ? ['--dry-run'] : [])]), {
+          fs: createFakeFs({
+            [`${dir}/deno.json`]: JSON.stringify({ tasks: { start: 'deno run -A main.ts' } }),
+            [`${dir}/setu.config.ts`]: 'export function createApp() {}',
+            [`${dir}/main.ts`]: "import { createApp } from './setu.config.ts';\n",
+            [`${dir}/src/evil\nsetu: FORGED.ts`]: 'export const x = 1;\n',
+          }),
+          cwd: dir,
+          log: out.sink,
+          error: out.sink,
+        });
+        expect(out.text()).toContain('evil\\u000asetu: FORGED.ts');
+        expectNoForgedLine(out);
+      }
+    }
+    for (
+      const files of [
+        { '/p\nsetu: FORGED/setu.workspace.json': '{}' },
+        { '/p\nsetu: FORGED/deno.json': '{}' },
+      ]
+    ) {
+      const out = createRecorder();
+      await runAdoptCommand(parseArgs(['--name', 'orders']), {
+        fs: createFakeFs(files),
+        cwd: '/p\nsetu: FORGED',
+        log: out.sink,
+        error: out.sink,
+      });
+      expect(out.text()).toMatch(/already exists: this IS a workspace|is not a Setu project/);
+      expectNoForgedLine(out);
+    }
+  });
+
+  it('the plugin-command missing-config refusal escapes the path (re-audit N5)', async () => {
+    const out = createRecorder();
+    await runCommandsListing(parseArgs([]), {
+      fs: createFakeFs(),
+      cwd: '/p\nsetu: FORGED',
+      log: out.sink,
+      error: out.sink,
+    });
+    expectNoForgedLine(out);
+  });
+
+  it('a loader failure keeps its own line break and escapes only what it embeds (re-audit N6)', async () => {
+    const message = await loadApp('/p\nsetu: FORGED', undefined, () =>
+      Promise.resolve({
+        createApp: () => {
+          throw new Error('boom\nsetu: FORGED');
+        },
+      })).then(() => '', (error: Error) => error.message);
+    const lines = message.split('\n');
+    // Exactly the CLI's own two lines: the detail and the path are escaped,
+    // the hint after the deliberate break is intact.
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('boom\\u000asetu: FORGED');
+    expect(lines[1]).toContain('Plugin commands are unavailable');
   });
 });
 

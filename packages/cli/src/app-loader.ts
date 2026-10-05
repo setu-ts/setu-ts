@@ -170,7 +170,9 @@ export async function loadApp(
   const factory = module[CONFIG_EXPORT];
   if (typeof factory !== 'function') {
     throw new Error(
-      `${url} must export a '${CONFIG_EXPORT}' function returning the application; ` +
+      `${
+        escapeName(String(url))
+      } must export a '${CONFIG_EXPORT}' function returning the application; ` +
         `found ${typeof factory}.`,
     );
   }
@@ -182,9 +184,9 @@ export async function loadApp(
     // runtime from here without reading a second manifest.
     app = await (factory as (env: Readonly<Record<string, unknown>>) => unknown)(discoveryEnv());
   } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
+    const detail = escapeName(cause instanceof Error ? cause.message : String(cause));
     throw new Error(
-      `${CONFIG_EXPORT}() in ${url} threw: ${detail}\n` +
+      `${CONFIG_EXPORT}() in ${escapeName(String(url))} threw: ${detail}\n` +
         `  Plugin commands are unavailable in this project because building the ` +
         `application failed. \`setu\` constructs it to discover them, with inert ` +
         `platform bindings — anything a plugin READS at construction time will not ` +
@@ -195,7 +197,7 @@ export async function loadApp(
 
   if (!isApplication(app)) {
     throw new Error(
-      `${CONFIG_EXPORT}() in ${url} must return the application from ` +
+      `${CONFIG_EXPORT}() in ${escapeName(String(url))} must return the application from ` +
         `createApplication(); got ${app === null ? 'null' : typeof app}.`,
     );
   }

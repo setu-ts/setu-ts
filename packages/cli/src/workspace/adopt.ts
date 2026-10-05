@@ -25,6 +25,7 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import { CONFIG_MODULE } from '../constants.ts';
 import { joinPath } from '../utils/file-writer.ts';
+import { escapeName } from '../utils/names.ts';
 
 /**
  * The files and directories a conversion relocates into the member.
@@ -122,7 +123,7 @@ export async function planAdoption(
   } catch {
     return {
       ok: false,
-      message: `No ${CONFIG_MODULE} in ${project}, so this is not a Setu project. ` +
+      message: `No ${CONFIG_MODULE} in ${escapeName(project)}, so this is not a Setu project. ` +
         `A conversion needs one: it becomes the first member's application factory.`,
     };
   }
@@ -185,7 +186,7 @@ export async function moveFile(
     if (written.byteLength !== bytes.byteLength) {
       return {
         ok: false,
-        message: `Copied ${file.from} to ${file.to} but the copy is ` +
+        message: `Copied ${escapeName(file.from)} to ${escapeName(file.to)} but the copy is ` +
           `${written.byteLength} bytes against ${bytes.byteLength} — the original is untouched.`,
       };
     }
@@ -197,8 +198,8 @@ export async function moveFile(
   } catch (cause) {
     return {
       ok: false,
-      message: `Failed to move ${file.from}: ${
-        cause instanceof Error ? cause.message : String(cause)
+      message: `Failed to move ${escapeName(file.from)}: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
       }`,
     };
   }

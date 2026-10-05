@@ -120,7 +120,9 @@ export async function runAdoptCommand(
   // would write a second root over the first.
   const existing = await readWorkspaceManifest(deps.fs, project);
   if (existing.ok) {
-    deps.error(`${joinPath(project, WORKSPACE_MANIFEST)} already exists: this IS a workspace.`);
+    deps.error(
+      `${escapeName(joinPath(project, WORKSPACE_MANIFEST))} already exists: this IS a workspace.`,
+    );
     deps.error(`Add a service to it with \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`.`);
     return EXIT_ERROR;
   }
@@ -229,7 +231,7 @@ export async function runAdoptCommand(
 
   if (args.flags['dry-run'] === true) {
     for (const file of plan.files) {
-      deps.log(`would move ${file.from} -> ${file.to}`);
+      deps.log(`would move ${escapeName(file.from)} -> ${escapeName(file.to)}`);
     }
     for (const file of planned) deps.log(`would create ${escapeName(file.path)}`);
     // Reported here too: a dry run that prints a clean plan for a conversion the
@@ -260,7 +262,7 @@ export async function runAdoptCommand(
         );
         return EXIT_ERROR;
       }
-      deps.log(`moved ${file.from} -> ${file.to}`);
+      deps.log(`moved ${escapeName(file.from)} -> ${escapeName(file.to)}`);
     }
 
     // The directories those files came out of: `moveFile` removes files, so an
@@ -321,8 +323,8 @@ export async function runAdoptCommand(
           throw cause;
         }
         deps.error(
-          `Failed to rewrite ${entryPath}: ${
-            cause instanceof Error ? cause.message : String(cause)
+          `Failed to rewrite ${escapeName(entryPath)}: ${
+            escapeName(cause instanceof Error ? cause.message : String(cause))
           }`,
         );
         deps.error(
