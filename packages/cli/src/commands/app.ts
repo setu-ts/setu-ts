@@ -591,7 +591,7 @@ export async function runAppCommand(
         deps.error(
           `Port ${devtoolPortFlag.port} is already ` +
             `${devtoolHeld ? 'the devtool port of' : 'bound by'} the member ` +
-            `"${devtoolTaken.name}" in this workspace.`,
+            `"${escapeName(devtoolTaken.name)}" in this workspace.`,
         );
         deps.error(
           'Two listeners on one port cannot both bind, and the launcher would connect to ' +
@@ -718,8 +718,10 @@ export async function runAppCommand(
     for (const outcome of await classifyFiles(deps.fs, files)) {
       deps.log(
         outcome.outcome === 'unchanged'
-          ? `unchanged ${outcome.path}`
-          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${outcome.path}`,
+          ? `unchanged ${escapeName(outcome.path)}`
+          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${
+            escapeName(outcome.path)
+          }`,
       );
     }
     return EXIT_OK;
@@ -740,7 +742,7 @@ export async function runAppCommand(
       files,
       deps.interrupt === undefined ? {} : { signal: deps.interrupt },
     );
-    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {

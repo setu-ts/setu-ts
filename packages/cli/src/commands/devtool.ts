@@ -236,7 +236,7 @@ function mergeTask(
     return (
       `Refusing to replace the existing "${key}" task in ${escapeName(handle.path)}:\n` +
       `  current: ${escapeName(current)}\n` +
-      `  would write: ${expected}\n` +
+      `  would write: ${escapeName(expected)}\n` +
       `A task you wrote is yours to change; update it to match, or remove it, and run this again.`
     );
   }
@@ -271,7 +271,7 @@ function mergeImport(
         escapeName(handle.path)
       }:\n` +
       `  current: ${escapeName(current)}\n` +
-      `  would write: ${expected}\n` +
+      `  would write: ${escapeName(expected)}\n` +
       `A pin you rewrote is yours to change; update it to match, or remove it, and run this again.`
     );
   }
@@ -539,7 +539,7 @@ async function enableInWorkspace(
       deps,
       `Refusing to replace the existing "dev" task in ${escapeName(rootManifestPath)}:\n` +
         `  current: ${currentRunAll === undefined ? '(none)' : escapeName(currentRunAll)}\n` +
-        `  would write: ${expectedRunAll}\n` +
+        `  would write: ${escapeName(expectedRunAll)}\n` +
         `A task you wrote is yours to change; update it to match, or remove it, and run this again.`,
     );
   }

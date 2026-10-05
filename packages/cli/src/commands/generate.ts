@@ -256,12 +256,16 @@ export async function runGenerateCommand(
     return EXIT_ERROR;
   }
   if (project.kind === 'workspace-root') {
-    deps.error(`${dir} is a workspace root (${project.marker}); generate inside a member instead.`);
+    deps.error(
+      `${escapeName(dir)} is a workspace root (${
+        escapeName(project.marker)
+      }); generate inside a member instead.`,
+    );
     deps.error(`  Pass --dir apps/<member>.`);
     return EXIT_USAGE;
   }
   if (project.kind === 'unreadable') {
-    deps.error(`Cannot read ${project.path}: ${project.reason}`);
+    deps.error(`Cannot read ${escapeName(project.path)}: ${escapeName(project.reason)}`);
     return EXIT_ERROR;
   }
 

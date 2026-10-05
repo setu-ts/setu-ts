@@ -391,7 +391,7 @@ export async function runAddCommand(
             `"${specifier}": "${target.range}"`,
         );
       } else {
-        deps.error(`Cannot read ${path} as JSON; fix it and run this again.`);
+        deps.error(`Cannot read ${escapeName(path)} as JSON; fix it and run this again.`);
       }
       return EXIT_ERROR;
     }
@@ -419,17 +419,19 @@ export async function runAddCommand(
   }
 
   if (!found) {
-    deps.error(`No deno.json or package.json in ${dir} — this is not a Setu-TS project.`);
+    deps.error(
+      `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
+    );
     return EXIT_ERROR;
   }
 
   if (edits.length === 0 && alreadyPresent) {
-    deps.log(`${specifier} is already installed in ${dir}.`);
+    deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     return EXIT_OK;
   }
 
   if (args.flags['dry-run'] === true) {
-    for (const edit of edits) deps.log(`would update ${edit.path}`);
+    for (const edit of edits) deps.log(`would update ${escapeName(edit.path)}`);
     return EXIT_OK;
   }
 
@@ -447,11 +449,13 @@ export async function runAddCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to update the manifest: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to update the manifest: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
-  for (const outcome of outcomes) deps.log(`${outcome.outcome} ${outcome.path}`);
+  for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);

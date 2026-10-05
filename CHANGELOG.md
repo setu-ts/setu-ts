@@ -344,14 +344,16 @@ All notable changes to this project are documented here. The format follows
 - **CLI output cannot be forged by project-controlled text (M101f security audit).** A member name,
   path, task value or parser message carrying a line feed, carriage return, U+2028/U+2029 or a bidi
   control printed raw, so a hostile workspace could make `setu` print a line that read as the CLI's
-  own. Every such value in `devtool enable`, `workspace ports --reallocate`, the member reconcile
-  refusal, the duplicate-port refusal and the unreadable-runtime-marker error is now escaped to
-  `\uXXXX` and stays on one line; legitimate output is unchanged.
+  own. Every such value in `devtool enable` (including the task value a refused merge would write),
+  `workspace ports --reallocate`, `generate app`, `generate`, `add`, the member reconcile refusal,
+  the duplicate-port refusals and the unreadable-runtime-marker error is now escaped to `\uXXXX` and
+  stays on one line; legitimate output is unchanged.
 - **Generated image pruning step pinned and scoped (M101f security audit).** The step that removes
   the development-only diagnostics pin ran `deno eval` with every permission against a floating
-  `jsr:@std/jsonc@^1.0.2`, the one unlocked fetch in the image. It now runs `deno run` with read and
-  write limited to `/srv` against `jsr:@std/jsonc@1.0.3`. Regenerate the managed Dockerfile with
-  `setu generate app`, `setu devtool enable` or `setu workspace ports --reallocate`.
+  `jsr:@std/jsonc@^1.0.2`, the one unlocked fetch in the image. It now runs `deno run` against
+  `jsr:@std/jsonc@1.0.3`, with read and write granted only to the member's and the root's
+  `deno.json`/`deno.jsonc`. Regenerate the managed Dockerfile with `setu generate app`,
+  `setu devtool enable` or `setu workspace ports --reallocate`.
 
 - **SAML binding cookie cleared only on consumption (M101c).** The ACS cleared the browser-binding
   cookie on every outcome, so a cross-site `POST` of an empty or junk body to the CSRF-exempt ACS,

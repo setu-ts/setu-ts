@@ -16,6 +16,9 @@ import { createFakeFs, createRecorder, type Recorder } from '../fixtures/fake-fs
 import { parseArgs } from '../../src/args.ts';
 import { runDevtoolCommand } from '../../src/commands/devtool.ts';
 import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
+import { runAddCommand } from '../../src/commands/add.ts';
+import { runAppCommand } from '../../src/commands/app.ts';
+import { runGenerateCommand } from '../../src/commands/generate.ts';
 import { devEntryVariants } from '../../src/devtool/dev-entry.ts';
 import { RuntimeMarkerUnreadableError } from '../../src/utils/runtime-detector.ts';
 import { describeReconcileFailure } from '../../src/workspace/reconcile.ts';
@@ -143,5 +146,77 @@ describe('project-controlled text stays on one output line', () => {
       }),
     ).not.toBe(0);
     expectNoForgedLine(error);
+  });
+
+  it('a refused task merge escapes the value it would write (re-audit N1)', async () => {
+    // The `dev` task is derived from the project's own `start` task, so the
+    // "would write" line carries project-controlled text too.
+    const fs = createFakeFs({
+      '/p/deno.json': JSON.stringify({
+        tasks: { start: 'deno run -A\nsetu: FORGED main.ts', dev: 'deno run other.ts' },
+      }),
+      '/p/setu.config.ts': CONFIG,
+    });
+    const error = createRecorder();
+    await runDevtoolCommand(parseArgs(['enable']), {
+      fs,
+      cwd: '/p',
+      log: () => {},
+      error: error.sink,
+    });
+    expect(error.text()).toContain('would write:');
+    expectNoForgedLine(error);
+  });
+
+  it('generate app escapes sibling paths and the devtool-port conflict', async () => {
+    for (
+      const argv of [
+        ['app', 'beta', '--dry-run'],
+        ['app', 'beta'],
+        ['app', 'beta', '--devtool', '--devtool-port', '6500'],
+      ]
+    ) {
+      const fs = workspace(FORGED, { devtoolPort: 6500 });
+      const out = createRecorder();
+      await runAppCommand(parseArgs(argv), {
+        fs,
+        dir: '/ws',
+        log: out.sink,
+        error: out.sink,
+      });
+      expectNoForgedLine(out);
+    }
+  });
+
+  it('add, generate and workspace refusals escape a hostile project directory', async () => {
+    const dir = '/p\nsetu: FORGED';
+    const add = createRecorder();
+    const addFs = createFakeFs({ [`${dir}/deno.json`]: JSON.stringify({ imports: {} }) });
+    for (const argv of [['cache', '--dry-run'], ['cache'], ['cache']]) {
+      await runAddCommand(parseArgs(argv), { fs: addFs, cwd: dir, log: add.sink, error: add.sink });
+    }
+    expectNoForgedLine(add);
+
+    const generate = createRecorder();
+    await runGenerateCommand(parseArgs(['service', 'x']), {
+      fs: createFakeFs({
+        [`${dir}/deno.json`]: JSON.stringify({ workspace: ['./apps/*'] }),
+        [`${dir}/setu.workspace.json`]: '{}',
+      }),
+      cwd: dir,
+      now: () => 0,
+      log: generate.sink,
+      error: generate.sink,
+    });
+    expectNoForgedLine(generate);
+
+    const ports = createRecorder();
+    await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+      fs: createFakeFs(),
+      cwd: dir,
+      log: ports.sink,
+      error: ports.sink,
+    });
+    expectNoForgedLine(ports);
   });
 });

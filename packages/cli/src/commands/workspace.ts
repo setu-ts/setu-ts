@@ -131,7 +131,9 @@ export async function runWorkspaceCommand(
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const read = await readWorkspaceManifest(deps.fs, dir);
   if (!read.ok) {
-    deps.error(`No usable ${WORKSPACE_MANIFEST} in ${dir}, so this is not a Setu workspace.`);
+    deps.error(
+      `No usable ${WORKSPACE_MANIFEST} in ${escapeName(dir)}, so this is not a Setu workspace.`,
+    );
     return EXIT_ERROR;
   }
   const reconciliation = await reconcileMembers(deps.fs, dir, read.manifest);
@@ -193,7 +195,9 @@ export async function runWorkspaceCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to update workspace ports: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to update workspace ports: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
