@@ -3,6 +3,8 @@ import { expect } from '@std/expect';
 
 import { parseArgs } from '../../src/args.ts';
 import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
+import { runCli } from '../../src/cli.ts';
+import { devEntryVariants } from '../../src/devtool/dev-entry.ts';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import {
   renderWorkspaceManifest,
@@ -12,6 +14,46 @@ import {
 import { reconcileMembers } from '../../src/workspace/reconcile.ts';
 
 describe('runWorkspaceCommand', () => {
+  it('escapes edited-entry refusal paths and reallocates restored entries on the same path', async () => {
+    for (const control of ['\n', '\r', '\0', '\t', '\u001b', '\u2028', '\u2029', '\u202e']) {
+      const cwd = `/ws${control}FORGED-PATH`;
+      const entryPath = `${cwd}/apps/orders/main.dev.ts`;
+      const ownedEntry = devEntryVariants(6000)[0]!;
+      const fs = createFakeFs({
+        [`${cwd}/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
+          version: WORKSPACE_VERSION,
+          runtime: 'deno',
+          basePort: 3000,
+          devtoolBasePort: 6000,
+          transport: 'http',
+          members: [{ name: 'orders', port: 3000, devtoolPort: 6000 }],
+        }),
+        [`${cwd}/apps/orders/.setu-member`]: '',
+        [entryPath]: `${ownedEntry}\n// developer edit\n`,
+      });
+      const err = createRecorder();
+      const deps = {
+        fs,
+        cwd,
+        now: () => 0,
+        log: createRecorder().sink,
+        error: err.sink,
+        portAvailable: (port: number) => Promise.resolve(port !== 6000),
+      };
+      expect(await runCli(['workspace', 'ports', '--reallocate'], deps)).toBe(1);
+      expect(err.text().split('\n')).toHaveLength(1);
+      const escaped = `\\u${control.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      expect(err.text()).toBe(
+        `/ws${escaped}FORGED-PATH/apps/orders/main.dev.ts: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run setu devtool enable orders) or move the port literal yourself.`,
+      );
+      expect(fs.writes).toEqual([]);
+      await fs.writeFile(entryPath, new TextEncoder().encode(ownedEntry));
+      expect(await runCli(['workspace', 'ports', '--reallocate'], deps)).toBe(0);
+      expect(fs.read(entryPath)).toContain('port: 6001, // IPv4 loopback only');
+      expect(fs.read(`${cwd}/${WORKSPACE_MANIFEST}`)).toContain('"devtoolPort": 6001');
+    }
+  });
+
   it('reallocates every member to a bindable port and refreshes discovery maps', async () => {
     const fs = createFakeFs({
       [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({

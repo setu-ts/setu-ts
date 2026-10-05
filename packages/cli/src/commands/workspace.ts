@@ -7,6 +7,7 @@ import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
+import { escapeName } from '../utils/names.ts';
 import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import {
@@ -149,7 +150,11 @@ export async function runWorkspaceCommand(
     }
     if (source === undefined || !devEntryVariants(member.devtoolPort).includes(source)) {
       deps.error(
-        `${path}: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run setu devtool enable ${member.name}) or move the port literal yourself.`,
+        `${
+          escapeName(path)
+        }: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run setu devtool enable ${
+          escapeName(member.name)
+        }) or move the port literal yourself.`,
       );
       return EXIT_ERROR;
     }

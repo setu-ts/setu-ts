@@ -9,7 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **Devtool lifecycle (M101f).** Enabling verifies both composition spreads and refuses mismatched
-  framework pins. Pin refusals escape manifest-controlled paths, keys and values so embedded
+  framework pins. Pin and edited-entry refusals escape project-controlled fields so embedded
   newlines cannot forge additional CLI output lines. The entry detects dropped composition and stops
   with a named error. Workspace connectors use a recorded `devtoolBasePort` range; reallocation
   updates CLI-rendered development entries and refuses edited entries before writes. Standalone
