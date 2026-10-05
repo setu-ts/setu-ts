@@ -7,7 +7,7 @@ import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { runAppCommand } from '../../src/commands/app.ts';
 import { factoryRefusal, standaloneDevtoolPort } from '../../src/devtool/planner.ts';
-import { devEntryVariants } from '../../src/devtool/dev-entry.ts';
+import { devEntryVariants, renderDevEntry } from '../../src/devtool/dev-entry.ts';
 import {
   allocateDevtoolPort,
   devtoolRangeStart,
@@ -248,6 +248,41 @@ describe('M101f lifecycle refusals and allocation', () => {
       expect(fs.read('/ws/apps/orders/main.dev.ts')).toContain('port: 6000,');
       expect(log.text()).toContain('updated /ws/apps/orders/main.dev.ts');
     }
+  });
+
+  it('upgrades an entry the 0.8.0 CLI rendered instead of calling it edited', async () => {
+    // The devtool first shipped in 0.8.0, so its rendering — which predates the
+    // composition probe — is what every existing member carries. The fixtures
+    // are that release's renderer output, captured byte for byte.
+    const fixture = (name: string) =>
+      Deno.readTextFileSync(new URL(`../fixtures/dev-entry-0.8.0-${name}.txt`, import.meta.url));
+    expect(devEntryVariants(5123)).toContain(fixture('member'));
+    expect(devEntryVariants(4919, false)).toContain(fixture('standalone'));
+
+    const fs = createFakeFs({
+      ...seed,
+      '/ws/setu.workspace.json': renderWorkspaceManifest({
+        ...manifest,
+        members: [{ name: 'orders', port: 5869, devtoolPort: 5123 }],
+      }),
+      '/ws/apps/orders/main.dev.ts': fixture('member'),
+    });
+    const log = createRecorder();
+    expect(
+      await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+        fs,
+        cwd: '/ws',
+        log: log.sink,
+        error: () => {},
+      }),
+    ).toBe(0);
+    expect(fs.read('/ws/apps/orders/main.dev.ts')).toBe(
+      renderDevEntry({
+        devtoolPort: 6000,
+        port: { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
+      }),
+    );
+    expect(log.text()).toContain('updated /ws/apps/orders/main.dev.ts');
   });
 
   it('keeps application ports in their own sequence across devtool members', async () => {

@@ -17,7 +17,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 Upgrade every `@setu-ts/*` pin together before `setu devtool enable`; mixed versions are refused.
 Apply the complete factory edit in the CLI README: the second parameter AND both usage spreads. The
 development entry now stops when composition is discarded. Restore an edited entry before
-`ports --reallocate`; only CLI-rendered entries are rewritten. Workspace manifests record
+`ports --reallocate`; only CLI-rendered entries are rewritten, and an unedited 0.8.0 entry counts as
+one — the next reallocation or `devtool enable` upgrades it. Workspace manifests record
 `devtoolBasePort` on first allocation, defaulting to `basePort + 1000` (capped at 65535). Standalone
 defaults probe 4919–5019; read the reported port or pass `--devtool-port`.
 

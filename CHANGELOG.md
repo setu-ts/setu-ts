@@ -16,14 +16,15 @@ All notable changes to this project are documented here. The format follows
   connector port); reallocation updates CLI-rendered development entries and refuses edited entries
   before writes. Standalone defaults probe 4919–5019; the generated README reports the selected
   port; subsequent enablement retains the existing entry port even when availability changes. New
-  entries are formatted, with previous M101f renderings still accepted. Production images exclude
-  `main.dev.ts` and remove the development connector pin before installing the remaining import map,
-  including JSONC and inherited-import layouts. Diagnostics aliases now refuse Unicode format (Cf)
-  characters through `hasForbiddenAliasCharacter` in common, in addition to controls (Cc); replace
-  bidi and zero-width aliases with printable names. **Launcher dependency:** the `setu-ts-devtool`
-  framework pin must be updated to the merge commit and its recipe catalog must retain the previous
-  entry renderings, because the probe changes the generated entry text. This repository does not
-  change that pin.
+  entries are formatted; an unedited entry rendered by the 0.8.0 CLI is still recognized as
+  CLI-owned, so reallocation and re-enabling upgrade it instead of refusing it as edited. Production
+  images exclude `main.dev.ts` and remove the development connector pin before installing the
+  remaining import map, including JSONC and inherited-import layouts. Diagnostics aliases now refuse
+  Unicode format (Cf) characters through `hasForbiddenAliasCharacter` in common, in addition to
+  controls (Cc); replace bidi and zero-width aliases with printable names. **Launcher dependency:**
+  the `setu-ts-devtool` framework pin must be updated to the merge commit and its recipe catalog
+  must retain the previous entry renderings, because the probe changes the generated entry text.
+  This repository does not change that pin.
 
 - **CLI write safety (M101e).** Writing commands now cooperate with SIGINT and roll back partial
   batches, interactive cancellation exits `130`, generation refuses non-project directories and

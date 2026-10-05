@@ -63,6 +63,15 @@ export interface DevEntryInput {
  * @returns The file contents
  */
 export function renderDevEntry(input: DevEntryInput): string {
+  return renderEntry(input, true);
+}
+
+/**
+ * Renders the entry with or without the composition probe. Without it, the output is
+ * byte-identical to the 0.8.0 CLI's rendering, which predates the probe; that shape is
+ * still a CLI-owned file, so reallocation and re-enabling may rewrite it.
+ */
+function renderEntry(input: DevEntryInput, probe: boolean): string {
   const portImport = input.port === undefined
     ? ''
     : `import { ${input.port.symbol} } from '${input.port.from}';\n`;
@@ -79,7 +88,7 @@ export function renderDevEntry(input: DevEntryInput): string {
 import { createApp } from './setu.config.ts';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { ILogger, IPlugin } from '@setu-ts/common';
+import type { ${probe ? 'ILogger, IPlugin' : 'ILogger'} } from '@setu-ts/common';
 import { DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
 ${portImport}
 const runtime = createRuntimeServices();
@@ -120,7 +129,17 @@ const diagnostics = DiagnosticsPlugin({
   maxSessionLifetimeMs: 28_800_000,
 });
 
-let devtoolRegistered = false;
+${probe ? PROBE_DECLARATION : ''}const app = await createApp(undefined, {
+  plugins: [diagnostics${probe ? ', devtoolProbe' : ''}],
+  diagnostics: {},
+});
+
+await app.start({ port: ${appPort} });
+${probe ? PROBE_CHECK : ''}${shutdownBlock('deno')}`;
+}
+
+/** Records the probe plugin's registration, so a dropped composition is observable. */
+const PROBE_DECLARATION = `let devtoolRegistered = false;
 const devtoolProbe: IPlugin = {
   name: 'setu-devtool-probe',
   version: '0.0.0',
@@ -129,13 +148,10 @@ const devtoolProbe: IPlugin = {
   },
 };
 
-const app = await createApp(undefined, {
-  plugins: [diagnostics, devtoolProbe],
-  diagnostics: {},
-});
+`;
 
-await app.start({ port: ${appPort} });
-if (!devtoolRegistered || app.diagnostics === undefined) {
+/** Stops the entry when the factory discarded the composition. */
+const PROBE_CHECK = `if (!devtoolRegistered || app.diagnostics === undefined) {
   console.error(
     'setu devtool: setu.config.ts did not pass the devtool composition to createApplication — ' +
       'the connector is not running. Re-run \`setu devtool enable\`, which names the two lines to add.',
@@ -143,20 +159,25 @@ if (!devtoolRegistered || app.diagnostics === undefined) {
   await app.stop();
   Deno.exit(1);
 }
-${shutdownBlock('deno')}`;
-}
+`;
 
 /** The module path of the generated development entry, relative to a project root. */
 export { DEVTOOL_ENTRY_MODULE };
 
-/** The formatted rendering and previous compact rendering of a CLI-owned entry. */
+/**
+ * Every rendering of a CLI-owned entry at this port: the current one, its earlier
+ * compact form, and the 0.8.0 rendering that predates the composition probe — the
+ * shape every workspace created before this release carries.
+ */
 export function devEntryVariants(devtoolPort: number, member = true): readonly string[] {
-  const raw = renderDevEntry({
+  const input: DevEntryInput = {
     devtoolPort,
     ...(member ? { port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER } } : {}),
-  });
+  };
+  const raw = renderEntry(input, true);
   return [
     raw,
+    renderEntry(input, false),
     raw.replace(
       '  register() {\n    devtoolRegistered = true;\n  },',
       '  register() { devtoolRegistered = true; },',
