@@ -11,7 +11,11 @@ All notable changes to this project are documented here. The format follows
 - **CLI write safety (M101e).** Writing commands now cooperate with SIGINT and roll back partial
   batches, interactive cancellation exits `130`, generation refuses non-project directories and
   workspace roots, JSONC manifests are read safely, and `setu add` refuses runtime-incompatible
-  plugins. `Prompter.select` now returns the discriminated `PromptSelection` type.
+  plugins.
+- **BREAKING: Programmatic CLI prompts (M101e).** `Prompter.select` now returns the discriminated
+  `PromptSelection` type instead of a string or `undefined`. Implementors must wrap answers as
+  `{ kind: 'answer', value }` and return `unavailable` or `cancelled` for the two no-answer cases.
+  This change ships in the `0.9.0` minor.
 - **Versioning policy from `0.9.0`, with two gates.** A patch is the normal release and breaking
   changes are batched into an occasional minor (README "Versioning", ROADMAP "Versioning Policy From
   `0.9.0`"). `release:verify` gains check 10 (`scripts/release-shape.ts`): it classifies the bump

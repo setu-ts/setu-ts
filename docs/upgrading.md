@@ -16,7 +16,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 `Prompter.select` now returns `PromptSelection`. Replace a string result with
 `{ kind: 'answer', value }`, inability to prompt with `{ kind: 'unavailable' }`, and user
-cancellation with `{ kind: 'cancelled' }`. Cancellation stops scaffolding and exits `130`.
+cancellation with `{ kind: 'cancelled' }`. Cancellation stops scaffolding and exits `130`. This is a
+breaking change for programmatic `Prompter` implementors and ships in `0.9.0`.
 
 The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, the `database` and
 `queue` health data, `commandTimeoutMs`) do not fail to compile; each is a default that now applies

@@ -8427,9 +8427,9 @@ The two exported types:
 
 | Export            | Kind      | Members                                                                                                         |
 | ----------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
-| `Prompter`        | interface | `select(question, choices): Promise<PromptSelection>` — answer, unavailable, or cancelled.                      |
+| `Prompter`        | interface | Since 0.9.0, `select(question, choices): Promise<PromptSelection>` — answer, unavailable, or cancelled.         |
 | `PromptChoice`    | interface | `{ value, label }` — the value written into the flag record, and one descriptive line shown above the question. |
-| `PromptSelection` | type      | `{ kind: 'answer', value } \| { kind: 'unavailable' } \| { kind: 'cancelled' }`.                                |
+| `PromptSelection` | type      | Since 0.9.0, `{ kind: 'answer', value } \| { kind: 'unavailable' } \| { kind: 'cancelled' }`.                   |
 
 `createTerminalPrompter` is deliberately NOT exported: its only consumer is the executable entry
 point, which imports it directly.

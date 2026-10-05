@@ -30,7 +30,11 @@ export interface PromptChoice {
   readonly label: string;
 }
 
-/** The outcome of asking one interactive CLI question. */
+/**
+ * The outcome of asking one interactive CLI question.
+ *
+ * @since 0.9.0
+ */
 export type PromptSelection =
   | { readonly kind: 'answer'; readonly value: string }
   | { readonly kind: 'unavailable' }
@@ -44,6 +48,9 @@ export interface Prompter {
    * @param question - The question text; the default is rendered inside it
    * @param choices - The acceptable answers, first being the default
    * @returns The answer, cancellation, or inability to ask
+   *
+   * In 0.9.0 the return changed to {@linkcode PromptSelection}; earlier versions returned a string
+   * or `undefined`.
    */
   select(question: string, choices: readonly PromptChoice[]): Promise<PromptSelection>;
 }
