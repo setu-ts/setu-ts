@@ -256,7 +256,10 @@ describe('Redis Streams redelivery', () => {
       seen.push({ body, meta });
       if (seen.length < 3) throw Error('retry');
     });
-    await broker.publishWithHeaders('t', { m: 'm1' }, { traceparent: 'canary', __proto__: 'safe' });
+    await broker.publishWithHeaders('t', { m: 'm1' }, {
+      traceparent: 'canary',
+      ['__proto__']: 'safe',
+    });
     await clock.advance(5);
     expect(seen).toHaveLength(1);
     expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toEqual([[
@@ -275,6 +278,9 @@ describe('Redis Streams redelivery', () => {
     expect(seen).toHaveLength(3);
     expect(seen[1]).toEqual(seen[0]);
     expect(seen[2]).toEqual(seen[0]);
+    const headers = (seen[0] as { meta: { headers?: Record<string, string> } }).meta.headers;
+    expect(Object.getOwnPropertyDescriptor(headers, '__proto__')?.value).toBe('safe');
+    expect(Object.getPrototypeOf(headers)).toBe(Object.prototype);
     expect(client.calls.filter((c) => c.method === 'xack')).toHaveLength(1);
     await broker.disconnect();
     expect(clock.timerCount()).toBe(0);
