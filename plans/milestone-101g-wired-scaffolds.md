@@ -651,3 +651,14 @@ or one plain object literal (no spread, computed key, escape or template literal
 at most once as a bare key with a plain literal other than `custom`. Everything else withholds it.
 Boundary, stated rather than implied: the CLI reads `setu.config.ts` only, so a plugin constructed
 in another module is invisible to both checks.
+
+Security-audit corrections (round 3): the round-2 checks still read only part of the file, and a
+registration could hide in the part they skipped. Now: (1) the package specifier must appear exactly
+once in any quote style, as the one recognized import (zero when the factory is not imported), so a
+namespace or double-quoted import cannot use the package unseen; (2) uses are read with only
+comments masked, so a use inside a string or a `${…}` template substitution counts, and for the
+backplane a reference visible there but blanked in the fully masked text withholds the policy; (3)
+`__proto__` in a backplane argument withholds it, since a prototype can carry the custom transport;
+(4) import declarations are blanked by a linear, bounded clause scanner instead of a regex that
+backtracked cubically (10,000 spaces: 104 s). Scanning past the bound, or any non-import syntax,
+leaves the text visible to the use checks — the fail-closed direction.

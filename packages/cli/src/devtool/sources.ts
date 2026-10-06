@@ -100,9 +100,28 @@ const ROWS: readonly ISourceRow[] = [
  * @returns Code-only text, or undefined for an incomplete literal/comment
  */
 export function maskSourceCode(source: string): string | undefined {
+  return maskSource(source, true);
+}
+
+/**
+ * Masks comments only, keeping string and template literals — including code
+ * inside a `${…}` substitution — verbatim. Same classification as
+ * {@linkcode maskSourceCode}: undefined exactly when that is. A use of a binding
+ * hidden inside a literal is visible here and not there, which is how the checks
+ * that must not miss a use (plan §10, audit round 3) detect one.
+ * @param source - Developer-owned configuration text
+ * @returns Text with comments blanked, or undefined for unclassified source
+ */
+export function maskComments(source: string): string | undefined {
+  return maskSource(source, false);
+}
+
+/** The one masking state machine; `blankLiterals` selects which mask it emits. */
+function maskSource(source: string, blankLiterals: boolean): string | undefined {
   let mode: 'code' | 'line' | 'block' | "'" | '"' | '`' = 'code';
   const result: string[] = [];
   const blank = (c: string) => c === '\n' || c === '\r' ? c : ' ';
+  const literal = (c: string) => blankLiterals ? blank(c) : c;
   for (let i = 0; i < source.length; i++) {
     const c = source[i]!;
     const next = source[i + 1];
@@ -115,7 +134,7 @@ export function maskSourceCode(source: string): string | undefined {
         return undefined;
       } else if (c === "'" || c === '"' || c === '`') {
         mode = c;
-        result.push(' ');
+        result.push(literal(c));
       } else result.push(c);
     } else if (mode === 'line') {
       result.push(blank(c));
@@ -127,9 +146,9 @@ export function maskSourceCode(source: string): string | undefined {
         mode = 'code';
       } else result.push(blank(c));
     } else {
-      result.push(blank(c));
+      result.push(literal(c));
       if (c === '\\' && next !== undefined) {
-        result.push(blank(next));
+        result.push(literal(next));
         i++;
       } else if (c === mode) mode = 'code';
     }
@@ -167,23 +186,87 @@ export function factoryScope(source: string): {
   return undefined;
 }
 
+/** Longest import clause the scanner follows before treating text as non-import. */
+const MAX_IMPORT_CLAUSE = 4096;
+
 /**
- * Blanks every static import declaration in masked code, preserving offsets, so a
- * reference search sees uses of a binding and never its own import. The match
- * follows the import-clause grammar — optional `type`, an optional default binding,
- * then `{ … }` or `* as name`, then `from` — so it can never run across unrelated
- * code: a lazy match up to the next `from` would, after a semicolon-less side-effect
- * import, swallow everything up to an `Array.from(…)` and hide real references. The
- * module specifier is already blanked to spaces in masked code.
+ * End of the import clause starting after the `import` keyword at `from`, or -1.
+ * Follows the clause grammar — optional `type`, a default binding, `,`, `{ … }` or
+ * `* as name` — up to the `from` keyword, refusing any other character. Linear and
+ * bounded: a regex here backtracked cubically on long runs of whitespace (audit
+ * round 3, N1). Refusing means "not an import", which leaves the text visible to
+ * the use checks — the fail-closed direction.
+ */
+function importClauseEnd(code: string, start: number): number {
+  const limit = Math.min(code.length, start + MAX_IMPORT_CLAUSE);
+  let i = start;
+  let tokens = 0;
+  while (i < limit) {
+    const c = code[i]!;
+    if (/\s/.test(c)) {
+      i += 1;
+    } else if (c === ',' || c === '*') {
+      i += 1;
+      tokens += 1;
+    } else if (c === '{') {
+      const close = code.indexOf('}', i);
+      if (close < 0 || close >= limit) return -1;
+      i = close + 1;
+      tokens += 1;
+    } else if (/[A-Za-z_$]/.test(c)) {
+      let end = i + 1;
+      while (end < limit && /[\w$]/.test(code[end]!)) end += 1;
+      if (code.slice(i, end) === 'from' && tokens > 0) return end;
+      i = end;
+      tokens += 1;
+    } else {
+      return -1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Blanks every static import declaration in masked text, preserving offsets, so a
+ * reference search sees uses of a binding and never its own import. Each line
+ * starting with the `import` keyword (not `import(`) is scanned by
+ * {@linkcode importClauseEnd}; only a well-formed clause up to `from` is blanked.
  *
- * @param code - Masked source from {@linkcode maskSourceCode}
- * @returns The same text with import declarations replaced by spaces
+ * @param code - Masked source from {@linkcode maskSourceCode} or {@linkcode maskComments}
+ * @returns The same text with import clauses replaced by spaces
  */
 export function maskImportDeclarations(code: string): string {
-  return code.replace(
-    /^[ \t]*import\s+(?:type\s+)?(?:[\w$]+\s*,?\s*)?(?:\{[^}]*\}|\*\s*as\s+[\w$]+)?\s*from\b[ \t]*;?/gm,
-    (declaration) => declaration.replace(/[^\n]/g, ' '),
-  );
+  const out = code.split('');
+  for (let line = 0; line < code.length; line = code.indexOf('\n', line) + 1 || code.length) {
+    let i = line;
+    while (code[i] === ' ' || code[i] === '\t') i += 1;
+    if (!code.startsWith('import', i) || /[\w$(]/.test(code[i + 6] ?? '')) continue;
+    const end = importClauseEnd(code, i + 6);
+    if (end < 0) continue;
+    for (let k = i; k < end; k++) if (out[k] !== '\n') out[k] = ' ';
+  }
+  return out.join('');
+}
+
+/**
+ * How many times a framework package is named as a module specifier, in any quote
+ * style. A check that trusts one recognized import requires this to be exactly one:
+ * a second import form (`import * as ns`, double quotes) could otherwise use the
+ * package unseen (audit round 3).
+ *
+ * @param source - Raw configuration text
+ * @param pkg - Bare package name, e.g. `cache-plugin`
+ * @returns The occurrence count
+ */
+export function packageSpecifierCount(source: string, pkg: string): number {
+  const specifier = `@setu-ts/${pkg}`;
+  let count = 0;
+  for (let at = source.indexOf(specifier); at >= 0; at = source.indexOf(specifier, at + 1)) {
+    if (/['"`]/.test(source[at - 1] ?? '') && /['"`]/.test(source[at + specifier.length] ?? '')) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /**
@@ -196,8 +279,13 @@ export function maskImportDeclarations(code: string): string {
  * @returns Whether a reference exists
  */
 export function referencesIdentifier(code: string, name: string): boolean {
+  return identifierPattern(name).test(code);
+}
+
+/** The reference pattern shared by every use check, global for counting. */
+function identifierPattern(name: string, flags = ''): RegExp {
   const escaped = name.replace(/[$]/g, '\\$&');
-  return new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${escaped}(?![\\w$])`).test(code);
+  return new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${escaped}(?![\\w$])`, flags);
 }
 
 /** Index of the bracket closing the one at `open`, counted over masked code. */
@@ -230,7 +318,9 @@ function supportedBackplaneArgument(raw: string, masked: string): boolean {
   if (!trimmed.startsWith('{') || matchingClose(masked, open) !== masked.trimEnd().length - 1) {
     return false;
   }
-  if (/\\|\.\.\.|\[|`/.test(raw)) return false;
+  // `__proto__` in an object literal sets the PROTOTYPE, which can carry a custom
+  // transport without the literal naming one (audit round 3).
+  if (/\\|\.\.\.|\[|`|__proto__/.test(raw)) return false;
   const mentions = raw.match(/transport/g)?.length ?? 0;
   if (mentions === 0) return true;
   if (mentions > 1) return false;
@@ -259,13 +349,12 @@ function supportedBackplaneArgument(raw: string, masked: string): boolean {
  * confirms anything.
  */
 function backplaneConfirmedSupported(source: string, code: string): boolean {
-  const specifier = "'@setu-ts/realtime-backplane-plugin'";
   const declaration = /^import \{ ([^}\n]+) \} from '@setu-ts\/realtime-backplane-plugin';$/m
     .exec(source);
   if (
     declaration === null ||
     code.slice(declaration.index, declaration.index + 6) !== 'import' ||
-    source.indexOf(specifier) !== source.lastIndexOf(specifier)
+    packageSpecifierCount(source, 'realtime-backplane-plugin') !== 1
   ) {
     return false;
   }
@@ -274,12 +363,14 @@ function backplaneConfirmedSupported(source: string, code: string): boolean {
   const name = binding?.[1] ?? binding?.[0];
   if (name === undefined || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) return false;
   const uses = maskImportDeclarations(code);
-  const pattern = new RegExp(
-    `(?<![\\w$])(?<!(?:^|[^.])\\.)${name.replace(/[$]/g, '\\$&')}(?![\\w$])`,
-    'g',
-  );
+  const pattern = identifierPattern(name, 'g');
+  const references = [...uses.matchAll(pattern)];
+  // A use inside a string or a template substitution is blanked from `uses`; seen
+  // with literals kept, it must not exist (audit round 3).
+  const visible = maskImportDeclarations(maskComments(source)!);
+  if ([...visible.matchAll(pattern)].length !== references.length) return false;
   let calls = 0;
-  for (const reference of uses.matchAll(pattern)) {
+  for (const reference of references) {
     let at = reference.index + name.length;
     while (/\s/.test(uses[at] ?? '')) at += 1;
     if (uses[at] !== '(') return false;

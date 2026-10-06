@@ -276,6 +276,21 @@ describe('withPluginWiring', () => {
         [`${imported}const cp = CachePlugin.call(undefined);\n`, 'cp,'],
         [`${imported}const make = CachePlugin;\n`, 'make(),'],
         ["import { CachePlugin } from './local.ts';\n", 'CachePlugin(),'],
+        // Audit round 3: a second import form, a use hidden in a template
+        // substitution, or a mention in a string all block the insert.
+        [
+          `${imported}import * as ns from '@setu-ts/cache-plugin';\nconst c = ns.CachePlugin();\n`,
+          'c,',
+        ],
+        [
+          `${imported}import * as ns from "@setu-ts/cache-plugin";\nconst c = ns.CachePlugin();\n`,
+          'c,',
+        ],
+        [
+          `${imported}const extra: unknown[] = [];\nconst t = \`\${extra.push(CachePlugin())}\`;\n`,
+          '...extra,',
+        ],
+        [`${imported}const label = 'CachePlugin';\n`, ''],
       ] as const
     ) expect(withPluginWiring(listed(prefix, item), 'cache-plugin'), prefix).toBeUndefined();
     // Its own import is not a use, and a commented call is not one either.

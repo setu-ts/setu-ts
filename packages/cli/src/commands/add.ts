@@ -37,8 +37,10 @@ import { detectPlugins } from '../utils/plugin-detector.ts';
 import {
   DEVTOOL_SOURCES_MODULE,
   factoryScope,
+  maskComments,
   maskImportDeclarations,
   maskSourceCode,
+  packageSpecifierCount,
   readDevtoolSourceNames,
   referencesIdentifier,
   renderDevtoolSources,
@@ -290,7 +292,7 @@ function printWiringNote(
   const binding = source === undefined || factory === undefined
     ? undefined
     : providerBinding(source, bare, factory);
-  const code = source === undefined ? undefined : maskSourceCode(source);
+  const code = source === undefined ? undefined : maskComments(source);
   if (
     binding !== undefined && code !== undefined &&
     referencesIdentifier(maskImportDeclarations(code), binding)
@@ -463,7 +465,12 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   }
   const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
   const importedBinding = providerBinding(source, bare, provider.symbol);
-  if (importedBinding === undefined && source.includes(`'@setu-ts/${bare}'`)) return undefined;
+  // Exactly the one recognized import, or none: any other import form (`* as ns`,
+  // double quotes, a second declaration) can use the package without the binding
+  // checked below ever appearing.
+  if (packageSpecifierCount(source, bare) !== (importedBinding === undefined ? 0 : 1)) {
+    return undefined;
+  }
   const factory = importedBinding ?? provider.symbol;
   // Any reference anywhere in the file, not only a call in the factory body: a
   // plugin built at module scope, through an alias, an optional call or `.call`, and
@@ -473,7 +480,11 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   // another module, say) also blocks the insert, since adding the import would then
   // declare the identifier twice. A plugin constructed in a DIFFERENT module is not
   // visible from here — that boundary is stated in plan §10.
-  const uses = importedBinding === undefined ? scope!.code : maskImportDeclarations(scope!.code);
+  //
+  // Read with only comments masked, so a use inside a string or a template
+  // substitution (`${list.push(CachePlugin())}`) is seen too (audit round 3).
+  const visible = maskComments(source)!;
+  const uses = importedBinding === undefined ? visible : maskImportDeclarations(visible);
   if (!source.includes(anchor) || referencesIdentifier(uses, factory)) {
     return undefined;
   }

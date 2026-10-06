@@ -5,8 +5,10 @@ import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { DEVTOOL_SOURCES } from '../fixtures/devtool-source-shapes.ts';
 import {
   factoryScope,
+  maskComments,
   maskImportDeclarations,
   maskSourceCode,
+  packageSpecifierCount,
   readDevtoolSourceNames,
   referencesIdentifier,
   renderDevtoolSources,
@@ -277,6 +279,43 @@ describe('development source policies', () => {
     expect(uses('const spread = [...CachePlugin()];\n')).toBe(true);
   });
 
+  it('keeps literals in the comment-only mask and classifies like the full mask', () => {
+    const source = "const a = 'x'; // note\nconst b = `${f(CachePlugin())}`;\n";
+    expect(maskComments(source)).toBe("const a = 'x';        \nconst b = `${f(CachePlugin())}`;\n");
+    expect(maskSourceCode(source)).not.toContain('CachePlugin');
+    expect(maskComments("const a = 'unterminated")).toBeUndefined();
+    expect(maskComments('const a = 8 / 2;')).toBeUndefined();
+  });
+
+  it('counts a package specifier in every quote style and nothing longer', () => {
+    expect(packageSpecifierCount("import { A } from '@setu-ts/cache-plugin';", 'cache-plugin'))
+      .toBe(1);
+    expect(
+      packageSpecifierCount(
+        'import * as a from "@setu-ts/cache-plugin";\nawait import(`@setu-ts/cache-plugin`);',
+        'cache-plugin',
+      ),
+    ).toBe(2);
+    expect(packageSpecifierCount("import x from '@setu-ts/cache-plugin-x';", 'cache-plugin'))
+      .toBe(0);
+    expect(packageSpecifierCount('// @setu-ts/cache-plugin is installed', 'cache-plugin')).toBe(0);
+  });
+
+  it('scans import clauses in linear time and refuses non-import text', () => {
+    // A regex here backtracked cubically: 10,000 spaces took 104 s (audit round 3).
+    const hostile = 'import X' + ' '.repeat(100_000) + '\n' +
+      ('import ' + ' '.repeat(50) + '\n').repeat(2000);
+    const started = performance.now();
+    maskImportDeclarations(hostile);
+    expect(performance.now() - started).toBeLessThan(5000);
+    // Past the scan bound, or not import syntax: left visible (fail closed).
+    expect(maskImportDeclarations('import X' + ' '.repeat(5000) + 'from x')).toContain('import X');
+    expect(maskImportDeclarations('import X = require("y");')).toContain('import X');
+    expect(maskImportDeclarations('import from;')).toContain('import from');
+    expect(maskImportDeclarations("import('x');")).toContain('import');
+    expect(maskImportDeclarations("import { a } from 'x';").trim()).toBe("'x';");
+  });
+
   it('withholds the backplane policy for call shapes it cannot classify', async () => {
     const fs = createFakeFs({});
     const custom = async (config: string) =>
@@ -348,6 +387,21 @@ describe('development source policies', () => {
     for (const call of withheld) {
       expect(await custom(`${imported}const p = [${call}];`), call).toBe(true);
     }
+    // Audit round 3: a custom call hidden in a template substitution, a second
+    // import form, a prototype carrying the transport, or a non-call reference
+    // BESIDE a confirmed call each withholds the policy.
+    for (
+      const config of [
+        `${imported}const p = [RealtimeBackplanePlugin()];\n` +
+        "const t = `${RealtimeBackplanePlugin({ transport: 'custom', backplane })}`;",
+        `${imported}import { RealtimeBackplanePlugin as X } from "@setu-ts/realtime-backplane-plugin";\n` +
+        "const p = [RealtimeBackplanePlugin(), X({ transport: 'custom' })];",
+        `${imported}const p = [RealtimeBackplanePlugin({ __proto__: proto })];`,
+        `${imported}const make = RealtimeBackplanePlugin;\n` +
+        "const p = [RealtimeBackplanePlugin(), make({ transport: 'custom' })];",
+        `${imported}type T = typeof RealtimeBackplanePlugin;\nconst p = [RealtimeBackplanePlugin()];`,
+      ]
+    ) expect(await custom(config), config).toBe(true);
     // An alias, a second import form, or no import at all confirms nothing.
     expect(await custom(`${imported}const make = RealtimeBackplanePlugin;\nmake({});`)).toBe(true);
     expect(
