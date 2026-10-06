@@ -14,8 +14,8 @@
  * lazily imports into `node_modules` — the AWS SDK, the Kafka and Redis clients,
  * `nodemailer` — none of which that member uses at runtime. A workspace with no
  * frontend member would pay for all of it on its first type-check. So the field
- * arrives with the member that needs it, which makes this the one file
- * `generate app` may edit.
+ * arrives with the member that needs it. Its companion ignore edit prevents
+ * an older workspace from tracking those installed dependencies.
  *
  * The edit is a single-key merge on a file the CLI itself wrote, reported like
  * any other write, and it refuses rather than guesses whenever the root is not
@@ -49,7 +49,11 @@ export type RootManifestPlan =
   /** The root already allows it; nothing to write. */
   | { readonly kind: 'unchanged' }
   /** The root needs this file written in place of its current contents. */
-  | { readonly kind: 'update'; readonly file: GeneratedFile }
+  | {
+    readonly kind: 'update';
+    readonly file: GeneratedFile;
+    readonly extra?: readonly GeneratedFile[];
+  }
   /** The root cannot be edited safely; print this and stop. */
   | { readonly kind: 'refused'; readonly message: string };
 
@@ -63,9 +67,14 @@ export type RootManifestPlan =
  *
  * @param contents - The root manifest as it is on disk
  * @param member - The member whose build needs the field, named in refusals
+ * @param gitignore - Existing root ignore contents, when present
  * @returns Whether to write, and what
  */
-export function planRootNodeModulesDir(contents: string, member: string): RootManifestPlan {
+export function planRootNodeModulesDir(
+  contents: string,
+  member: string,
+  gitignore?: string,
+): RootManifestPlan {
   let parsed: unknown;
   try {
     parsed = JSON.parse(contents);
@@ -92,7 +101,18 @@ export function planRootNodeModulesDir(contents: string, member: string): RootMa
   const current = record[NODE_MODULES_DIR];
 
   // Already answered, and answered the same way: nothing to do.
-  if (current === NODE_MODULES_AUTO) return { kind: 'unchanged' };
+  const ignore = gitignore === undefined || gitignore.split(/\r?\n/).includes('node_modules/')
+    ? undefined
+    : {
+      path: '.gitignore',
+      contents: `${gitignore}${
+        gitignore === '' || gitignore.endsWith('\n') ? '' : '\n'
+      }node_modules/\n`,
+      managed: true,
+    };
+  if (current === NODE_MODULES_AUTO) {
+    return ignore === undefined ? { kind: 'unchanged' } : { kind: 'update', file: ignore };
+  }
 
   // Answered differently, and by a human — `none` in particular is a deliberate
   // choice to keep every dependency in Deno's global cache. Overwriting it would
@@ -109,6 +129,7 @@ export function planRootNodeModulesDir(contents: string, member: string): RootMa
 
   return {
     kind: 'update',
+    ...(ignore === undefined ? {} : { extra: [ignore] }),
     file: {
       path: ROOT_MANIFEST,
       contents: `${

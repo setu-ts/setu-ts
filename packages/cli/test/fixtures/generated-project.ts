@@ -334,6 +334,7 @@ export interface ProbeOutcome {
 export async function withGeneratedServer<T>(
   project: string,
   drive: (origin: string) => Promise<T>,
+  workspacePort?: number,
 ): Promise<{ readonly result: T; readonly output: string }> {
   const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
     tasks?: Record<string, string>;
@@ -350,7 +351,7 @@ export async function withGeneratedServer<T>(
   // boots a file the CLI never emitted. It also proves `--allow-env` is in the
   // generated permission set: without it this boot fails with NotCapable
   // rather than silently binding a default.
-  const port = unusedPort();
+  const port = workspacePort ?? unusedPort();
   const entry = `${project}/main.ts`;
 
   const child = new Deno.Command(Deno.execPath(), {

@@ -130,7 +130,7 @@ const LEGACY_FACTORY_SHAPES: readonly string[] = [
 const EXPECTED_SIGNATURE = `export function createApp(\n` +
   `  _env?: Readonly<Record<string, unknown>>,\n` +
   `  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n` +
-  `): IApplication {`;
+  `): IKernelApplication {`;
 
 /**
  * Refuses known legacy signatures and devtool parameters missing either usage
@@ -156,6 +156,7 @@ export function factoryRefusal(source: string): string | undefined {
     ` silence: \`deno run\` drops both arguments, the application carries no` +
     ` connector, and nothing else in the project reports why. Edit setu.config.ts so` +
     ` the factory takes the devtool composition as its SECOND parameter:\n\n` +
+    `Import type IKernelApplication and KernelDiagnosticsOptions from '@setu-ts/kernel', and IPlugin from '@setu-ts/common'.\n\n` +
     `${EXPECTED_SIGNATURE}\n\n` +
     `Inside createApplication({ … }), add the diagnostics spread; inside its plugins array, add the plugins spread:\n` +
     `${fragments.join(',\n')},\n\n` +

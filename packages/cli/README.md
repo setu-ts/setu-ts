@@ -36,6 +36,13 @@ Every project gets a `setu.config.ts` exporting `createApp()` — the one place 
 `main.ts` imports it to start the server, and `setu` imports it to find plugin commands, so the two
 cannot disagree. The factory does **not** start the application.
 
+The factory returns `IKernelApplication` (or `Promise<IKernelApplication>` for a starter), so it
+works directly with `createTestApp({ app: await createApp() })`. Every Deno, Node, and Bun scaffold
+includes `test/app.test.ts`, which starts this composition without a socket, checks `/health` (`/`
+on the minimal host), and stops it. Workers needs the platform environment and emits no smoke test;
+its `test` task permits an empty suite. For an existing project, `setu add testing` pins the testing
+package in Deno's import map or npm's `devDependencies`.
+
 On Deno, Node, and Bun, config-backed templates emit a gitignored `.env` and tracked `.env.example`,
 and load the selected path through `ConfigPlugin({ envFilePath })`. Use `--env-file <path>` to
 select another relative path. Cloudflare Workers use request bindings and therefore emit no dotenv
@@ -106,23 +113,23 @@ setu generate service user-profile
 setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
-| Schematic          | Emits                                                                                                         | Requires           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                  |
-| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin` |
-| `service`          | `src/services/<name>.service.ts`                                                                              | —                  |
-| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                  |
-| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`       |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin` |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                  |
-| `job`              | `src/jobs/<name>.job.ts`                                                                                      | —                  |
-| `guard`            | `src/guards/<name>.guard.ts`                                                                                  | `auth-plugin`      |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`    |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`   |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`      |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`      |
-| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`    |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`  |
+| Schematic          | Emits                                                                                                         | Requires                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                                      |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin`                     |
+| `service`          | `src/services/<name>.service.ts`                                                                              | —                                      |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                                      |
+| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`                           |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin`                     |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                                      |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: ingress processor                                                      | `queue-plugin` in class-based projects |
+| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                               | `auth-plugin`                          |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`                        |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`                       |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`                          |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`                          |
+| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`                        |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`                      |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.
@@ -207,10 +214,13 @@ construction), and a factory scaffolded before the devtool existed, which needs 
 widened AND its composition passed to createApplication before the command proceeds.
 
 ```typescript
+import type { IPlugin } from '@setu-ts/common';
+import type { IKernelApplication, KernelDiagnosticsOptions } from '@setu-ts/kernel';
+
 export function createApp(
   _env?: Readonly<Record<string, unknown>>,
   devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
-): IApplication {
+): IKernelApplication {
   return createApplication({
     plugins: [RuntimePlugin(), ...(devtool?.plugins ?? [])],
     ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
@@ -411,3 +421,17 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#cli-setu-tscli).
+
+## Development source policies and registration guidance
+
+Opted-in Deno scaffolds and `setu devtool enable` write the CLI-managed `src/devtool/diagnostics.ts`
+approval module. `setu add` refreshes an existing module, using artifact names and env-example keys
+rather than values. Source options activate only when the factory receives its devtool argument;
+production keeps disabled defaults. Unknown source shapes receive manual guidance, including the
+`DEVTOOL_SOURCES` import and the `sources` declaration those lines read. The module is regenerated,
+so preserve application-specific policy outside that file.
+
+Adding one of the twelve safe zero-configuration providers wires its emitted plugin-list anchor in
+either style. Starter compositions instead name their option arm; configure that arm to avoid a
+duplicate registration. Manifest updates preserve existing key order. Deno frontend projects update
+imports without adding unused framework dependencies to their frontend package.json.

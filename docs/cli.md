@@ -48,6 +48,13 @@ imports it to start the server and the CLI imports it to discover plugin-contrib
 the plugin list has exactly one home. The factory does not start the app: importing a module that
 binds a socket would make command discovery bind one too.
 
+Socket targets also receive `test/app.test.ts`, using the target runtime's test harness and
+`createTestApp({ app: await createApp() })`. It starts the real composition, checks `/health` (`/`
+on the minimal host), and stops it. The factory returns `IKernelApplication`, or its promise on a
+starter. Workers requires the platform environment and emits no smoke test; its `test` task permits
+an empty suite. Use `setu add testing` on an existing project to pin `@setu-ts/testing` in Deno's
+import map or npm's `devDependencies`.
+
 ### Style is its own axis: decorators and DI are one choice, and functional is the default
 
 Decorators are optional and dependency injection is optional — and they are one axis with two
@@ -240,11 +247,27 @@ Install it, then run this command again.
 Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
 ```
 
-For a generated class-based project, `setu add cqrs`, `events`, `messaging`, `queue`, `scheduler`,
-or `websocket` also activates that provider's safe in-memory default in `setu.config.ts`. This keeps
-the ingress barrel runnable after the matching decorated artifact is generated. Other `setu add`
-packages remain manifest-only, and a config that does not retain this generated ingress shape is
-never rewritten.
+For generated projects in either style, `setu add` registers the safe zero-configuration defaults
+for cqrs, events, messaging, queue, scheduler, websocket, cache, health, metrics, openapi, sse and
+realtime-backplane above the emitted development-plugin anchor. Other shapes receive registration
+guidance. Starter compositions receive their named option arm and a link to the starter README;
+configure that arm rather than registering the same plugin twice.
+
+Class-based `generate job` requires queue; functional projects keep the standalone job recipe.
+Generated guards use `requirePermission` from auth-plugin. The permission is evaluated by the
+authorization service `AuthPlugin` registers only when given an `rbac` option, which is why
+`setu add auth` prints `AuthPlugin({ jwt: { … }, rbac: { roles: {} } })`; without it, every
+authenticated request to a guarded route answers `501` and the handler never runs.
+
+`new --devtool`, `app --devtool` and `devtool enable` write the CLI-managed
+`src/devtool/diagnostics.ts` policy. `add` refreshes it only when it already exists. Recognized
+plugin calls receive source options only when the factory receives its devtool argument; production
+defaults remain disabled. Discovery copies artifact names and env-example key names, never values.
+Empty job/operation/role/permission maps approve no observations. This module is regenerated:
+application-specific policies belong in application-owned configuration.
+
+Dependency additions preserve existing key order. Deno projects update imports only, including
+full-stack projects with a frontend package.json; Node, Bun and Workers update both manifests.
 
 ### Managed barrels
 

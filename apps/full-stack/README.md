@@ -82,16 +82,23 @@ executes. That task exists because neither of the obvious candidates covers thos
 none of the `.tsx`, and `vite build` does not type-check at all — rolldown strips types without
 checking them, so a pure type error builds green.
 
-`check:apps` runs no browser. Hydration, static-asset delivery and client-side navigation were
-verified manually against Chrome via Playwright when this example was written — 11/11 checks,
-including that all 8 referenced assets are served by the framework's own handler, that a `<Form>`
-submit is a client-side transition rather than a document reload, and that the session cookie is
-`HttpOnly`. Aborting the client entry bundle flips the hydration and transition checks to failing
-while the SSR content still renders, which is how that suite was shown to discriminate — and which
-also demonstrates that the login form degrades to a real POST with JavaScript disabled.
+The dedicated `deno task check:browser` gate at the repository root builds and tests this example
+and a fresh CLI full-stack scaffold in real Chromium. It checks SSR, hydration, asset delivery,
+link/Form transitions, HttpOnly cookies and native no-JavaScript login. Aborting the client entry
+proves transition checks fail while SSR still renders; removing a referenced asset proves the asset
+check names the missing bundle.
 
-That suite is not committed, for the same reason M51b's npm-client interop suite for
-`apps/graphql-demo` is manual: it needs a browser CI does not install.
+Install the pinned browser with `deno run -A npm:playwright@1.63.0 install chromium`. A missing
+browser exits 77 locally and fails in CI, which installs Chromium in its dedicated job. The gate
+locates the browser through Playwright's own resolution, so `PLAYWRIGHT_BROWSERS_PATH`,
+`XDG_CACHE_HOME` and `LOCALAPPDATA` are honored; the task grants read access to the Linux and macOS
+default caches only, and a cache elsewhere fails with the exact `--allow-read` to rerun with rather
+than being reported as missing. Ordinary tests do not launch a browser. Set `PORT` to choose the
+application's listening port (default 3000).
+
+The full-stack configuration selects `Referrer-Policy: same-origin` so native form posts retain
+their origin for React Router's action check. Cross-origin referrers remain suppressed; both session
+CSRF and React Router origin verification remain active.
 
 ## Cloudflare Workers
 

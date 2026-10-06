@@ -577,6 +577,9 @@ describe('template scaffolding — end to end', () => {
       expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
       const project = `${root}/svc`;
 
+      if (schematics.includes('job')) {
+        expect(await run(['add', 'queue', '--dir', project])).toBe(0);
+      }
       for (const { name, accepted } of HOSTILE_NAMES) {
         if (!accepted) continue;
         for (const schematic of schematics) {

@@ -5761,8 +5761,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   rewriting the manifest. Production images exclude the development entry and connector cache, while
   completing lazy broker lockfile edges. All diagnostics aliases refuse Cc and Cf characters through
   the shared common predicate (SDK keeps its type-only import policy) — complete (PR #414).
-- **Next milestone** — M101g (now carrying the full-stack browser gate, §3.10 of its plan), M101h;
-  M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
+- **Milestone 101g** (`packages/cli` + the full-stack template — wired scaffolds) — in progress.
+  First implementation slice: generated factories return `IKernelApplication`; socket targets emit
+  composition-root smoke tests; `setu add testing` supports Deno imports and npm dev dependencies;
+  devtool upgrade instructions preserve the kernel type. Remaining wiring and browser deliverables
+  are implemented. Verification and code review are done (2026-10-06); they fixed a fresh full-stack
+  `deno task test` that still failed (V8-39), a guard registration that answered `501`, unformatted
+  `ws-route`/`sse` output and a production `@setu-ts/testing` pin. The security design review is in
+  plan §10. The independent committed-tree audit ran seven fresh-context rounds, all on how
+  `setu add` and `setu devtool enable` read a hand-edited `setu.config.ts`: each round found a
+  configuration the text classifier accepted and misread (a duplicate plugin insert, a wrong
+  backplane policy, silenced registration guidance), quadratic scanners, or — rounds 6 and 7 — a CLI
+  command sequence whose own output broke or silently changed the project. The fix narrowed what the
+  CLI classifies to a language it can decide from one file (ASCII code, static framework or relative
+  imports, no reflection identifiers or computed member access, no starter imports, no retargeted
+  import maps); everything else gets the printed registration line instead of an edit. Round 7
+  failed on four Low findings, fixed afterwards on this branch and NOT re-audited, at the
+  maintainer's limit of seven rounds — complete (PR #415).
+- **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
+  ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

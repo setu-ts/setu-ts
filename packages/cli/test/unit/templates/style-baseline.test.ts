@@ -1,9 +1,9 @@
 /**
- * M99e §3.7: the byte identity of every existing template's output.
+ * The byte identity of every existing template's output.
  *
  * `template-baseline.json` was captured by the NAMED script
  * `test/fixtures/capture-template-baseline.ts` BEFORE any template change in
- * this milestone:
+ * M99e, refreshed for M101g's reviewed factory and smoke-test changes:
  *
  *   deno run --allow-read --allow-write packages/cli/test/fixtures/capture-template-baseline.ts
  *

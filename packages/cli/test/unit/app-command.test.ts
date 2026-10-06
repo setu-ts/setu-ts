@@ -204,7 +204,7 @@ describe('runAppCommand', () => {
       expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
       expect(config).toContain('const app = await createFullStackAppFromConfig(');
       expect(config).toContain("app.register(GrpcPlugin({ basePath: '/grpc' }));");
-      expect(config).toContain('csrf: { exclude: [/^\\/grpc(?:\\/|$)/] },');
+      expect(config).toContain("csrf: { exclude: [new RegExp('^/grpc(?:/|$)')] },");
       expect(h.fs.writes).toContain('/ws/apps/web/setu.config.ts');
     });
 
