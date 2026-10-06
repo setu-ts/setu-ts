@@ -386,15 +386,17 @@ Every entry is `enabled: true`; the gate is the `devtool` parameter, not the opt
 
 ## 4. Exported surface — every symbol names its consumer
 
-**Breaking for implementors:** none — `SchematicMetadata.requiresPluginWhen?` is optional.
+**Breaking for implementors:** none.
 
-`packages/cli/src/index.ts` changes in one way: `SchematicMetadata.requiresPluginWhen?` (§3.6), an
-OPTIONAL addition on a published interface (the M58 `SchematicOptions.modules` precedent). No
-`common` change, no capability token, no `testing` change.
+`packages/cli/src/index.ts` does not change. `SchematicMetadata` — which carries the new optional
+`requiresPluginWhen` (§3.6) — is not exported from the barrel (`src/index.ts` exports `Schematic`
+and `SchematicOptions` only), so the field is internal. An earlier draft of this section called it
+an optional addition on a published interface; that was checked against the barrel during
+verification and corrected. No `common` change, no capability token, no `testing` change.
 
-| Exported symbol                        | Kind           | Consumer / real code path that READS it                               |
-| -------------------------------------- | -------------- | --------------------------------------------------------------------- |
-| `SchematicMetadata.requiresPluginWhen` | optional field | `runGenerateCommand`'s gate; `printSchematics`'s availability listing |
+| Exported symbol | Kind | Consumer / real code path that READS it |
+| --------------- | ---- | --------------------------------------- |
+| (none)          | —    | —                                       |
 
 Internal: `withPluginWiring`, `ZERO_CONFIG_WIRINGS`, `STARTER_ARMS`, `renderDevtoolSources`,
 `workspaceLibraryExternals` (emitted into the Vite config), the generated `test/app.test.ts`
@@ -413,7 +415,6 @@ No new CLI flag.
 
 | File                                                                                                                                      | Purpose                                                                                                                                                    |
 | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/cli/src/index.ts`                                                                                                               | `requiresPluginWhen` on the published metadata type                                                                                                        |
 | `packages/cli/src/templates/project-files.ts`                                                                                             | §3.1 annotation and `@setu-ts/kernel` type import; the generated test; Workers `--permit-no-files`; §3.3 ignore; §3.8 `sources` line and per-wiring spread |
 | `packages/cli/src/templates/full-stack-build-files.ts`                                                                                    | §3.2 function externals reading `libs/*/deno.json`                                                                                                         |
 | `packages/cli/src/templates/full-stack-app-files.ts`                                                                                      | §3.2 README boundary sentence                                                                                                                              |
@@ -450,7 +451,7 @@ No new CLI flag.
 | `packages/cli/test/e2e/generate-e2e.test.ts`                                                    | end to end (BOOTED)                                              | `add websocket` + `generate ws-route` boots and completes a handshake; the composed guard answers `401`/`403` through a real `AuthPlugin`                                                                                                                                                          |
 | `packages/cli/test/e2e/workspace-e2e.test.ts`                                                   | end to end (BOOTED)                                              | full-stack member importing a library builds and serves; `git status` lists no `node_modules`; `add storage` on the full-stack member prints the arm                                                                                                                                               |
 | `packages/cli/test/e2e/devtool-e2e.test.ts`                                                     | end to end (BOOTED)                                              | signed `/v1/health` and `/v1/cache` populated under `deno task dev`; `disabled` under `deno task start`                                                                                                                                                                                            |
-| `packages/cli/test/unit/barrel-exports.test.ts`                                                 | `src/index.ts`                                                   | the one optional field; nothing else                                                                                                                                                                                                                                                               |
+| `packages/cli/test/unit/barrel-exports.test.ts`                                                 | `src/index.ts`                                                   | unchanged — this milestone adds nothing to the barrel (§4)                                                                                                                                                                                                                                         |
 | `apps/full-stack/browser/full-stack.browser.test.ts` (REAL Chromium)                            | end to end (BOOTED, browser)                                     | the eleven M37c checks on the example AND a fresh `--template full-stack` scaffold; both §3.10 negative controls                                                                                                                                                                                   |
 | `test/browser-gate.test.ts`                                                                     | `apps/full-stack/browser/harness.ts`                             | browser present → runs; absent → exit 77 naming the install command; `ALLOW_SKIP` membership refused by `test/apps-gate.test.ts`                                                                                                                                                                   |
 
@@ -619,3 +620,13 @@ and scaffold now configure `httpSecurity.headers.referrerPolicy: 'same-origin'`:
 preserve same-origin identity, while cross-origin referrers remain suppressed. Session CSRF and
 React Router's origin verification remain enabled. The audit must probe valid native actions and
 invalid cross-origin actions.
+
+Verification corrections (2026-10-06): (1) on a configuration the masker cannot classify, the
+backplane policy is withheld like auth's, since the custom-transport discriminant cannot be
+confirmed. (2) A generated guard composes `requirePermission`, which answers `501` without an
+authorization provider, so `setu add auth` prints the registration WITH `rbac: { roles: {} }` and
+the emitted guard's JSDoc names the dependency; a committed type fixture
+(`test/fixtures/registration-lines.ts`) compiles every printed registration and `add.test.ts` pins
+that each printed line appears in it verbatim. (3) The `ws-route` and `sse` schematics emitted lines
+past the generated project's formatter width; both now emit `deno fmt` output, and the every-family
+formatting sweep in `workspace-e2e.test.ts` installs the plugins that unlock those gated families.

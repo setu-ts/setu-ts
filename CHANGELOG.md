@@ -20,8 +20,7 @@ All notable changes to this project are documented here. The format follows
 - **Wired scaffolds (M101g).** Workspace full-stack SSR builds externalize library package
   identities; projects that acquire npm dependencies ignore node_modules. Adding safe
   zero-configuration plugins wires both generator styles, starter compositions name their option
-  arm, generated guards enforce permissions, and class-based jobs require queue. Dependency
-  additions preserve order and Deno frontend manifests avoid unused framework copies.
+  arm, and dependency additions preserve the manifest's existing order.
 - **Development source policies and browser gate (M101g).** Opted-in scaffolds and devtool enable
   generate names-only diagnostics approval maps, gated off in production; adding a plugin refreshes
   an existing policy. A dedicated pinned Chromium gate exercises both the example and a fresh
@@ -196,6 +195,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Generated guards, class-based jobs and `setu add` on a Deno project (M101g, V8-32, V8-33,
+  V8-40).** These change what the CLI writes or refuses. `setu generate guard <name>` now emits
+  `requirePermission('<name>')` from `@setu-ts/auth-plugin` where it used to emit a stub that let
+  every authenticated caller through. The permission is evaluated by the authorization service
+  `AuthPlugin` registers only when given an `rbac` option, so without one every authenticated
+  request to a guarded route answers `501`. `setu add auth` therefore prints
+  `AuthPlugin({ jwt: { … }, rbac: { roles: {} } })`. Guards generated earlier are unchanged. In a
+  class-based project without `@setu-ts/queue-plugin`, `setu generate job` now refuses, naming
+  `setu add queue`, where it used to write an unwired function. On a Deno target `setu add` no
+  longer writes an `npm:@jsr/…` entry into `package.json`, which there holds only the frontend
+  build's own npm dependencies; a Node or Bun project is unchanged.
+
 - **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
   primary key is already stored now rejects
   (`Entity '<name>' already has a row with this primary
@@ -361,6 +372,12 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **Generated WebSocket and SSE routes fail the project's own `deno fmt --check` (M101g).**
+  `setu generate ws-route` emitted a `broadcast` line wider than the generated project's formatter
+  allows for every name, and `setu generate sse` emitted a one-line registrar signature that
+  overflowed for longer names. Both now emit what `deno fmt` produces, and the every-family
+  formatting sweep generates these families too.
 
 - **CLI output cannot be forged by project-controlled text (M101f security audit).** A member name,
   path, task value or parser message carrying a line feed, carriage return, U+2028/U+2029 or a bidi

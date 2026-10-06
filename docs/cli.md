@@ -254,7 +254,10 @@ guidance. Starter compositions receive their named option arm and a link to the 
 configure that arm rather than registering the same plugin twice.
 
 Class-based `generate job` requires queue; functional projects keep the standalone job recipe.
-Generated guards use `requirePermission` from auth-plugin, which enforces the installed provider.
+Generated guards use `requirePermission` from auth-plugin. The permission is evaluated by the
+authorization service `AuthPlugin` registers only when given an `rbac` option, which is why
+`setu add auth` prints `AuthPlugin({ jwt: { … }, rbac: { roles: {} } })`; without it, every
+authenticated request to a guarded route answers `501` and the handler never runs.
 
 `new --devtool`, `app --devtool` and `devtool enable` write the CLI-managed
 `src/devtool/diagnostics.ts` policy. `add` refreshes it only when it already exists. Recognized
