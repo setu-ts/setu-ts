@@ -5018,6 +5018,13 @@ properties/headers plus `x-setu-attempts`, `x-setu-topic`, and a 1 KiB UTF-8 `x-
 description. Changing the cap requires draining and deleting `Q.dead`. Private exclusive queues and
 RPC reply inboxes retain nack-and-discard. `consumerRetry: false` retains the operator-DLX path.
 Prefetch is re-applied on reconnect, which re-declares retry and dead queues before consuming.
+Retry/dead copies are mandatory; correlated `basic.return` rejects disposition despite a positive
+confirm. The framework replaces `x-setu-disposition-id` per copy, preserving the message ID.
+Recovery requires confirm channels with `on`/`off` return listeners, including injected clients.
+With retries enabled, group names ending in `.dead` or `.retry.<digits>ms` are reserved, and helper
+names must fit 255 UTF-8 bytes. Names are validated before declaration (at construction for
+declarative instances). Rename conflicting groups or set `consumerRetry: false`; migrate existing
+queues occupying helper names before enabling retries.
 
 **Redis Streams recovery (0.9.0).** Requires Redis ≥6.2 (`XPENDING IDLE`). Failed messages
 redeliver, including after restart, so handlers must be idempotent. The first retry delay must

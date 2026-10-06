@@ -41,6 +41,14 @@ left by a publish timeout on an otherwise live channel.
 `ConsumerRetryOptions` now names the shared RabbitMQ/Redis retry object type; Redis behavior and its
 existing option shape are unchanged.
 
+Group names ending in `.dead` or `.retry.<digits>ms` are reserved when retries are enabled, and
+generated helper names must fit 255 UTF-8 bytes. Rename conflicting groups, or set
+`consumerRetry: false` to retain existing names. Migrate queues already occupying helper names in
+the same vhost before enabling retries. Invalid names fail before declaration, so they cannot close
+the shared consumer channel with a 406. Injected recovery channels must support publisher confirms
+and `on`/`off` return listeners. Mandatory retry/dead publishes reject unroutable returns and leave
+the original unacked; `x-setu-disposition-id` is framework-owned and replaced on each copy.
+
 ### Update `IRedisStreamsClient` facades and Redis consumer handlers
 
 Injected messaging Redis facades must implement the required `xpending`, `xclaim`, and `xinfo`

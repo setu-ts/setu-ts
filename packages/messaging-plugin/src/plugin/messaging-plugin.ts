@@ -21,6 +21,7 @@ import {
   RabbitMqBroker,
   resolveConsumerOptions,
   resolvePublishTimeoutMs,
+  validateConsumerQueue,
 } from '../brokers/rabbitmq-broker.ts';
 import { NatsBroker } from '../brokers/nats-broker.ts';
 import { KafkaBroker } from '../brokers/kafka-broker.ts';
@@ -140,13 +141,14 @@ export function MessagingPlugin(
   options: MessagingPluginOptions = {},
 ): IPlugin {
   const brokerType: string = (options as { broker?: string }).broker ?? 'memory';
+  let rabbitConsumerOptions: ReturnType<typeof resolveConsumerOptions> | undefined;
   // Refused HERE, before any application exists, like every other bound
   // (the M90a/M101a rule) — not at `start()`, where a typo would surface as a
   // boot failure far from the line that caused it.
   if (brokerType === 'rabbitmq') {
     const rabbit = options as RabbitMqMessagingOptions;
     resolvePublishTimeoutMs(rabbit.publishTimeoutMs);
-    resolveConsumerOptions(rabbit);
+    rabbitConsumerOptions = resolveConsumerOptions(rabbit);
     if (
       rabbit.persistentMessages !== undefined && typeof rabbit.persistentMessages !== 'boolean'
     ) {
@@ -179,6 +181,11 @@ export function MessagingPlugin(
   const subscriptionInstances = subscriptions.filter(
     (entry): entry is SubscriptionDefinition => typeof entry !== 'function',
   );
+  if (rabbitConsumerOptions !== undefined) {
+    for (const subscription of subscriptionInstances) {
+      validateConsumerQueue(subscription.options?.queue, rabbitConsumerOptions);
+    }
+  }
   const subscriptionFactories = subscriptions
     .map((entry, index) => ({ entry, index }))
     .filter(

@@ -131,6 +131,28 @@ export function resolveConsumerOptions(options: RabbitMqOptions = {}): ConsumerO
   };
 }
 
+/** Refuses group names that occupy the retry topology's reserved namespace. */
+export function validateConsumerQueue(
+  queue: string | undefined,
+  policy: Pick<ConsumerOptions, 'retry' | 'delaysMs'>,
+  transient = false,
+): void {
+  if (queue === undefined || !policy.retry || transient) return;
+  if (/(?:\.dead|\.retry\.\d+ms)$/u.test(queue)) {
+    throw new RangeError(
+      'RabbitMQ consumer group names ending in .dead or .retry.<digits>ms are reserved; ' +
+        'rename the group or set consumerRetry: false',
+    );
+  }
+  const longest = `${queue}.retry.${policy.delaysMs[policy.delaysMs.length - 1]}ms`;
+  if (new TextEncoder().encode(longest).length > 255) {
+    throw new RangeError('RabbitMQ consumer group and helper queue names must fit 255 UTF-8 bytes');
+  }
+}
+
+/** Framework-owned identifier for correlating concurrent mandatory publish returns. */
+const DISPOSITION_ID = 'x-setu-disposition-id';
+
 /** Error description bounded to 1 KiB of UTF-8, without splitting a code point. */
 function deadLetterError(error: unknown): string {
   const encoder = new TextEncoder();
@@ -165,8 +187,8 @@ interface PublishingChannel {
  * relies on `publishTimeoutMs` alone to settle a confirm that never arrives.
  */
 interface CloseObservable {
-  on(event: 'close', listener: () => void): unknown;
-  off(event: 'close', listener: () => void): unknown;
+  on(event: 'close' | 'return', listener: (message?: unknown) => void): unknown;
+  off(event: 'close' | 'return', listener: (message?: unknown) => void): unknown;
 }
 
 /**
@@ -201,6 +223,8 @@ function isCloseObservable(channel: unknown): channel is CloseObservable {
  * @param routingKey - Routing key
  * @param content - Message body
  * @param properties - Publish properties
+ * @param dispositionId - Framework ID of a mandatory retry/dead copy, when routing is required
+ * @param signal - Deadline cancellation for a disposition
  * @returns Resolves once RabbitMQ accepts the message
  */
 function publishConfirmed(
@@ -209,6 +233,8 @@ function publishConfirmed(
   routingKey: string,
   content: Uint8Array,
   properties: Record<string, unknown>,
+  dispositionId?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const observable = isCloseObservable(channel) ? channel : null;
@@ -219,6 +245,8 @@ function publishConfirmed(
       }
       settled = true;
       observable?.off('close', onClose);
+      if (dispositionId !== undefined) observable?.off('return', onReturn);
+      signal?.removeEventListener('abort', onAbort);
       if (err === null || err === undefined) {
         resolve();
         return;
@@ -232,12 +260,38 @@ function publishConfirmed(
       );
     };
     const onClose = (): void => settle(new Error('channel closed before the confirm arrived'));
+    const onAbort = (): void => settle(signal?.reason);
+    const onReturn = (message: unknown): void => {
+      // amqplib decodes basic.return into the same message shape as a delivery.
+      // Only our own publish ID can reject this operation; routing keys and
+      // message IDs can be identical for several in-flight copies.
+      try {
+        const returned = message as { properties?: { headers?: Record<string, unknown> } } | null;
+        const headers = returned?.properties?.headers;
+        if (
+          headers && Object.hasOwn(headers, DISPOSITION_ID) &&
+          headers[DISPOSITION_ID] === dispositionId
+        ) {
+          settle(new Error('mandatory disposition publish was returned as unroutable'));
+        }
+      } catch {
+        settle(new Error('RabbitMQ supplied an invalid publish return'));
+      }
+    };
     observable?.on('close', onClose);
+    if (dispositionId !== undefined) observable?.on('return', onReturn);
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
     try {
       channel.publish(exchange, routingKey, content, properties, settle);
     } catch (error) {
       settled = true;
       observable?.off('close', onClose);
+      if (dispositionId !== undefined) observable?.off('return', onReturn);
+      signal?.removeEventListener('abort', onAbort);
       reject(error);
     }
   });
@@ -666,19 +720,42 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     routingKey: string,
     content: Uint8Array,
     properties: Record<string, unknown>,
+    requireRoute = false,
   ): Promise<void> {
+    // Normal pub/sub may legitimately have no interested queue. A disposition
+    // may not: a positive confirm also arrives for an unroutable publish.
+    if (requireRoute && (!confirmed || !isCloseObservable(channel))) {
+      throw new Error('RabbitMQ consumer recovery requires confirms and on/off return listeners');
+    }
+    const dispositionId = requireRoute ? this.#runtime.uuid() : undefined;
+    const outgoing = dispositionId === undefined ? properties : {
+      ...properties,
+      mandatory: true,
+      headers: Object.fromEntries([
+        ...Object.entries(properties.headers as Record<string, unknown>),
+        [DISPOSITION_ID, dispositionId],
+      ]),
+    };
     const timeoutMs = this.#publishTimeoutMs;
     await withDeadline(
-      async () => {
+      async (signal) => {
         // The default exchange already exists and cannot be declared.
         if (exchange !== '') {
           await channel.assertExchange(exchange, 'topic', { durable: true });
         }
         if (!confirmed) {
-          channel.publish(exchange, routingKey, content, properties);
+          channel.publish(exchange, routingKey, content, outgoing);
           return;
         }
-        await publishConfirmed(channel, exchange, routingKey, content, properties);
+        await publishConfirmed(
+          channel,
+          exchange,
+          routingKey,
+          content,
+          outgoing,
+          dispositionId,
+          requireRoute ? signal : undefined,
+        );
       },
       {
         timeoutMs,
@@ -711,6 +788,11 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    validateConsumerQueue(
+      options?.queue,
+      this.#consumerOptions,
+      (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true,
+    );
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }
@@ -1033,7 +1115,15 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
           );
           copied.headers = headers;
           copied.persistent = true;
-          await this.#publishOn(realChannel, confirmed, '', target, delivered.content, copied);
+          await this.#publishOn(
+            realChannel,
+            confirmed,
+            '',
+            target,
+            delivered.content,
+            copied,
+            true,
+          );
           realChannel.ack(msg);
           if (dead) {
             this.#logger?.error(

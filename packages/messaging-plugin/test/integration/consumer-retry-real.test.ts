@@ -28,7 +28,7 @@ async function fixture(delaysMs: number[] = [200, 800], prefetch = 3) {
   const queue = `fix2-${crypto.randomUUID()}`;
   const topic = `${queue}.topic`;
   const queues = new Set([queue, `${queue}.dead`, ...delaysMs.map((d) => `${queue}.retry.${d}ms`)]);
-  const application = (handler: MessageHandler, delays = delaysMs) => {
+  const application = (handler: MessageHandler, delays = delaysMs, maxAttempts = 3) => {
     for (const d of delays) queues.add(`${queue}.retry.${d}ms`);
     return createApplication({
       plugins: [
@@ -39,7 +39,7 @@ async function fixture(delaysMs: number[] = [200, 800], prefetch = 3) {
           tracing: false,
           prefetch,
           deadLetterMaxLength: 7,
-          consumerRetry: { maxAttempts: 3, delaysMs: delays },
+          consumerRetry: { maxAttempts, delaysMs: delays },
           subscriptions: [{ topic, handler, options: { queue } }],
         }),
       ],
@@ -96,6 +96,73 @@ async function waitForBroker(amqp: Amqp, url: string, containerId: string): Prom
 }
 
 describe('REAL RabbitMQ consumer retry', () => {
+  for (const kind of ['retry', 'dead'] as const) {
+    it(
+      `keeps the original when the ${kind} destination disappears before disposition`,
+      guard,
+      async () => {
+        const f = await fixture();
+        const held = Promise.withResolvers<void>();
+        let started = false;
+        const app = f.application(
+          async () => {
+            started = true;
+            await held.promise;
+            throw Error('temporary');
+          },
+          [200, 800],
+          kind === 'dead' ? 1 : 3,
+        );
+        let recovered = 0;
+        const next = f.application(() => {
+          recovered++;
+        });
+        try {
+          await app.start();
+          await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING).publish(f.topic, 'canary');
+          await until(() => started);
+          await f.channel.deleteQueue(
+            kind === 'dead' ? `${f.queue}.dead` : `${f.queue}.retry.200ms`,
+          );
+          held.resolve();
+          await wait(300);
+          await app.stop(); // Closing the owning channel must recover the unacked original.
+          expect((await f.channel.checkQueue(f.queue)).messageCount).toBe(1);
+          await next.start();
+          await until(() => recovered === 1);
+        } finally {
+          held.resolve();
+          await app.stop();
+          await next.stop();
+          await f.close();
+        }
+      },
+    );
+  }
+
+  it(
+    'refuses reserved group names without closing the active consumer channel',
+    guard,
+    async () => {
+      const f = await fixture();
+      let received = 0;
+      const app = f.application(() => {
+        received++;
+      });
+      try {
+        await app.start();
+        const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+        await expect(broker.subscribe('other', () => {}, { queue: `${f.queue}.dead` }))
+          .rejects.toThrow(RangeError);
+        await broker.publish(f.topic, 'canary');
+        await until(() => received === 1);
+      } finally {
+        await app.stop();
+        await f.close();
+      }
+    },
+  );
+
   it(
     'm1 redelivers after the first delay and a second failure uses the second tier',
     guard,

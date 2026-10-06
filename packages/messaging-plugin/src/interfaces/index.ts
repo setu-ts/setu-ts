@@ -438,6 +438,8 @@ export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
    * Durable group retries; false retains nack-and-discard for operator DLX policies.
    * Default maxAttempts 5, delaysMs [5000, 30000, 120000, 600000].
    * Deterministic failures dead-letter immediately. Private queues and RPC reply inboxes discard.
+   * With retries enabled, group suffixes .dead and .retry.<digits>ms are reserved.
+   * Generated helper names must fit 255 UTF-8 bytes; injected channels need confirms and returns.
    * @since 0.9.0
    */
   consumerRetry?: false | ConsumerRetryOptions;

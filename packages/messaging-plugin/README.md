@@ -206,6 +206,12 @@ For group queue `Q`, each distinct delay `d` creates durable `Q.retry.<d>ms`, wi
 queues without a 406 redeclaration conflict; old retry queues drain into `Q`. No per-message
 expiration is copied. The default budget gives about 12.6 minutes of backoff before dead-lettering.
 
+With retries enabled, group names ending in `.dead` or `.retry.<digits>ms` are reserved for helper
+queues. Every generated queue name must fit 255 UTF-8 bytes. Declarative names are checked at plugin
+construction; imperative and factory subscriptions are checked before declaring anything. Rename
+conflicting groups, or set `consumerRetry: false` to keep their existing names. Before enabling
+retries, migrate any existing queues occupying `Q.dead` or `Q.retry.<delay>ms` in the same vhost.
+
 Deserialize failures and `IntegrationEventRejectedError` go straight to `Q.dead`. Other failures run
 the application classifier, then retry below the total attempt budget or dead-letter when exhausted.
 Retry copies preserve body bytes, messageId, timestamp and transport headers (including
@@ -218,10 +224,15 @@ RabbitMQ drops its oldest ready messages. Drain and delete `Q.dead` before chang
 
 The copy is always persistent, even if original publishes use `persistentMessages: false`. It uses
 the same confirmed publish path and timeout as normal publishes, and the original is acked only
-after that publish succeeds. A failed disposition leaves the original unacked and logs the failure;
-closing the channel returns it to `Q`. If a timeout occurs while the channel remains open, reconnect
-it to recover those deliveries. Minimal injected clients without confirm channels retain the
-documented unconfirmed-publish limitation.
+after that publish succeeds. Copies use mandatory publishing: an unroutable `basic.return` rejects
+the disposition even if RabbitMQ sends a positive confirm. The framework-owned
+`x-setu-disposition-id` header is replaced for each copy and correlates concurrent returns without
+changing the original message ID. Return listeners are removed on confirm, return, close or timeout.
+A failed disposition leaves the original unacked and logs the failure; closing the channel returns
+it to `Q`. If a timeout occurs while the channel remains open, reconnect it to recover those
+deliveries. Recovery requires confirm channels and channel `on`/`off` return listeners; injected
+facades missing either leave failed originals unacked. Normal publishes retain their documented
+unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack behavior.
 
 Private exclusive fan-out queues and RPC reply inboxes keep nack with requeue disabled. Measured:
 TTL dead-lettering reaches an exclusive queue while its connection lives, but discards the copy once

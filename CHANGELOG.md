@@ -207,6 +207,9 @@ All notable changes to this project are documented here. The format follows
   deliveries to prefetch 32 per consumer. Handlers must be idempotent. Configure
   `consumerRetry: false` for the existing operator-DLX behavior; private queues and RPC reply
   inboxes retain discard behavior. `ConsumerRetryOptions` names the shared RabbitMQ/Redis shape.
+  Retry topology reserves group suffixes `.dead` and `.retry.<digits>ms`; rename conflicting groups
+  or disable retries. Generated names must fit 255 UTF-8 bytes. Injected recovery channels require
+  confirms and `on`/`off` return listeners.
 
 - **BREAKING: Redis Streams messaging recovery (#419).** Failed messages now retry across restarts;
   handlers must be idempotent. Redis ≥6.2 is required. Injected `IRedisStreamsClient` facades must
@@ -422,7 +425,9 @@ All notable changes to this project are documented here. The format follows
   retry/dead-letter copies before acknowledging the original, preserve message properties and
   prototype-safe transport headers, classify deterministic failures immediately, and replay
   retry/dead declarations plus prefetch on reconnect. Retry delays, attempt budget, classifier,
-  dead-letter cap and prefetch are configurable and validated at construction.
+  dead-letter cap and prefetch are configurable and validated at construction. Mandatory replacement
+  publishes now reject correlated unroutable returns before acknowledging; reserved/oversized group
+  names are refused before declarations can close the shared channel.
 
 - **Redis Streams stranded messages (`@setu-ts/messaging-plugin`, #419).** Failed entries are
   reclaimed with tiered idle backoff through one delivery path, instead of staying in the pending

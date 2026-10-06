@@ -43,6 +43,8 @@ export interface FakeAmqpOptions {
    * FakeAmqpChannel.releaseConfirms} — a broker that has stopped answering.
    */
   withholdConfirms?: boolean;
+  /** Return mandatory publishes before confirming, as RabbitMQ does for an absent queue. */
+  returnMandatory?: boolean;
 }
 
 /**
@@ -118,6 +120,11 @@ export class FakeAmqpChannel {
     }
   }
 
+  /** Delivers one basic.return to channel observers. */
+  emitReturn(message: unknown): void {
+    for (const listener of [...(this.#listeners.get('return') ?? [])]) listener(message);
+  }
+
   /** Delivers every withheld confirm (as accepted). */
   releaseConfirms(): void {
     const pending = this.#withheld;
@@ -156,6 +163,9 @@ export class FakeAmqpChannel {
     }
     if (this.confirmMode && confirm !== undefined) {
       const error = this.#options.confirmError ?? null;
+      if (this.#options.returnMandatory && (properties as { mandatory?: boolean })?.mandatory) {
+        queueMicrotask(() => this.emitReturn({ content, properties }));
+      }
       const deliver = (): void => confirm(error);
       if (this.#options.withholdConfirms) {
         this.#withheld.push(deliver);
