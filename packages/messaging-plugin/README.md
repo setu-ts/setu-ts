@@ -183,6 +183,48 @@ where losing in-flight messages on a restart is acceptable. An injected `client`
 stored anything — and the broker logs one warning saying so; a real amqplib connection always has
 it.
 
+### Redis Streams recovery
+
+Redis **6.2 or newer** is required (`XPENDING IDLE`). Handlers must be idempotent: failed messages
+now retry, including after an application restart. New and reclaimed entries use the same payload,
+headers, metadata, and acknowledgement path. Reclaim uses `XPENDING IDLE` and atomic `XCLAIM`; it
+reads at most ten pending entries per pass, rotating the cursor so later entries cannot starve.
+
+| Redis option                | Default                          | Behavior                                                                       |
+| --------------------------- | -------------------------------- | ------------------------------------------------------------------------------ |
+| `consumerRetry.maxAttempts` | `5`                              | Total delivery budget, including the initial attempt.                          |
+| `consumerRetry.delaysMs`    | `[30000, 60000, 300000, 600000]` | Delay indexed by deliveries minus one, clamped to the final tier.              |
+| `consumerRetry.isRetryable` | all handler failures retry       | `false` dead-letters immediately; a throwing classifier is logged and retries. |
+| `reclaimIntervalMs`         | `5000`                           | One reclaim pass per subscription per interval.                                |
+| `deadLetterMaxLen`          | `10000`                          | Approximate `MAXLEN ~` retention on each dead-letter stream.                   |
+| `consumerIdleSweepMs`       | `3600000`                        | Sweep inactive foreign consumers only with pending count zero.                 |
+
+Counts must be positive safe integers. Millisecond values must be positive integers no greater than
+`2147483647`; delays must be nonempty and nondecreasing. Invalid values, including `NaN`, throw
+`RangeError` at broker construction. There is no `consumerRetry: false` arm.
+
+The first delay is also the lease for in-flight handlers: set it above the longest handler runtime,
+or another replica may reclaim a slow handler's work and run it concurrently. Effective retry
+latency is the tier plus up to one reclaim interval when the pass keeps pace with the backlog;
+rotating through a larger backlog adds passes. Reclaimed entries may arrive after newer entries; use
+`aggregateVersion` when the application needs ordered effects.
+
+Deserialize failures, missing payloads, and `IntegrationEventRejectedError` go directly to
+`<topic>.dead.<group>`. Exhausted deliveries go there too. The stream carries the original fields
+plus `x-setu-source-id` and `x-setu-deliveries`, written with `XADD MAXLEN ~` **before** source
+`XACK`. A crash between those commands can duplicate a dead-letter entry; a failed write preserves
+the source pending entry. Approximate trimming can exceed the configured length by Redis allocation
+blocks. Dead-letter streams retain message data; apply suitable Redis ACLs and retention.
+
+Each pass adds a pending query, up to ten claims, and a consumer-info query; cleanup adds deletion
+commands as needed. Clean unsubscribe/disconnect deletes its own consumer only when pending count is
+zero. Pending consumers survive shutdown for another replica to reclaim. Redis 6.2 uses consumer
+`idle` for the sweep; Redis 7.2+ uses `inactive` (falling back to `idle` for consumers that have
+never delivered).
+
+Injected `IRedisStreamsClient` facades must supply `xpending`, `xclaim`, and `xinfo` as well as the
+existing methods, and support `xgroup('DELCONSUMER', ...)`.
+
 ### NATS prerequisites
 
 The nats broker **requires a JetStream-enabled server** — start it with the `-js` flag (or set
@@ -300,8 +342,8 @@ takes a few seconds.
 ## Request-reply
 
 `request()` / `respond()` carry correlation inside a message envelope over each broker's ordinary
-`publish`/`subscribe` — **not** transport headers, which the in-memory and Redis brokers do not
-populate.
+`publish`/`subscribe`. Correlation is carried in the message envelope independently of transport
+headers.
 
 RPC rides a channel derived from the topic, so it never collides with plain pub/sub: a
 `subscribe('orders', …)` consumer never sees a request envelope, and a `publish('orders', …)` is

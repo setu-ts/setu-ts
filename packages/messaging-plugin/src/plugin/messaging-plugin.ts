@@ -268,6 +268,10 @@ export function MessagingPlugin(
           defaultQueue?: string;
           pollIntervalMs?: number;
           blockSizeMs?: number;
+          consumerRetry?: RedisStreamsOptions['consumerRetry'];
+          reclaimIntervalMs?: number;
+          deadLetterMaxLen?: number;
+          consumerIdleSweepMs?: number;
         };
         const redisOptions: RedisStreamsOptions = {};
         if (opts.url !== undefined) redisOptions.url = opts.url;
@@ -275,6 +279,16 @@ export function MessagingPlugin(
         if (opts.defaultQueue !== undefined) redisOptions.defaultQueue = opts.defaultQueue;
         if (opts.pollIntervalMs !== undefined) redisOptions.pollIntervalMs = opts.pollIntervalMs;
         if (opts.blockSizeMs !== undefined) redisOptions.blockSizeMs = opts.blockSizeMs;
+        if (opts.consumerRetry !== undefined) redisOptions.consumerRetry = opts.consumerRetry;
+        if (opts.reclaimIntervalMs !== undefined) {
+          redisOptions.reclaimIntervalMs = opts.reclaimIntervalMs;
+        }
+        if (opts.deadLetterMaxLen !== undefined) {
+          redisOptions.deadLetterMaxLen = opts.deadLetterMaxLen;
+        }
+        if (opts.consumerIdleSweepMs !== undefined) {
+          redisOptions.consumerIdleSweepMs = opts.consumerIdleSweepMs;
+        }
         if (logger !== undefined) redisOptions.logger = logger;
         // The built client's reconnect failures go to the logger (read at call
         // time) rather than ioredis's own console fallback.

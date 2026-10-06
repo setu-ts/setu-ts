@@ -24,6 +24,9 @@ describe('RedisStreamsBroker', () => {
         xadd: () => Promise.resolve(''),
         xgroup: () => Promise.resolve('OK'),
         xreadgroup: () => Promise.resolve(null),
+        xpending: () => Promise.resolve([]),
+        xclaim: () => Promise.resolve([]),
+        xinfo: () => Promise.resolve([]),
         xack: () => Promise.resolve(0),
         quit: () => Promise.resolve(),
         connect: () => Promise.resolve(),
@@ -595,7 +598,10 @@ describe('RedisStreamsBroker', () => {
     // Override xgroup to throw a different error
     const originalXgroup = fakeClient.xgroup.bind(fakeClient);
     // deno-lint-ignore require-await
-    fakeClient.xgroup = async (command: 'CREATE' | 'DELETE' | 'SETID', ...args: string[]) => {
+    fakeClient.xgroup = async (
+      command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
+      ...args: string[]
+    ) => {
       if (command === 'CREATE') {
         throw new Error('Some other error');
       }

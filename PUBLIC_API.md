@@ -4990,6 +4990,27 @@ app.register(MessagingPlugin({
 the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
 semantics are unchanged; the indicator still reports the outage.
 
+**Redis Streams recovery (0.8.0).** Requires Redis ≥6.2 (`XPENDING IDLE`). Failed messages
+redeliver, including after restart, so handlers must be idempotent. The first retry delay must
+exceed the longest handler runtime: it also guards against another replica stealing in-flight work.
+Reclaim atomically claims up to ten idle pending entries per pass; delivery metadata and
+acknowledgement share the new-entry path. Deserialize/missing-payload failures and
+`IntegrationEventRejectedError` dead-letter immediately. Other failures use the classifier and total
+delivery budget. Dead-letter `XADD MAXLEN ~` to `<topic>.dead.<group>` precedes source `XACK`, with
+original fields plus `x-setu-source-id` and `x-setu-deliveries`; crashes between writes can
+duplicate entries. Pending consumers survive shutdown, while empty consumers are deleted and old
+foreign empty consumers are swept.
+
+All counts are positive safe integers; all new millisecond options are positive integers
+≤2147483647. Empty/decreasing delay arrays and invalid numeric values throw `RangeError` at
+construction. No `consumerRetry: false` arm exists. Injected `IRedisStreamsClient` facades require
+`xpending(...args)` returning `[id, owner, idleMs, deliveries][]`, `xclaim(...args)` returning
+`([id, fields] | null)[]`, and `xinfo(...args)` returning consumer field/value arrays, plus `xgroup`
+accepting `DELCONSUMER` and returning a number for that command. Redis 6.2 null claims of trimmed
+entries are acknowledged; Redis 7 removes them server-side. Empty race-loser claims are never
+acknowledged. See the [messaging README](packages/messaging-plugin/README.md#redis-streams-recovery)
+for defaults, retention, ordering, and command cost.
+
 ### Plugin Options
 
 `MessagingPluginOptions` is a **discriminated union keyed on `broker`** — exactly mirroring
@@ -5039,6 +5060,20 @@ interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
   pollIntervalMs?: number;
   /** XREADGROUP block timeout in ms. */
   blockSizeMs?: number;
+  /** Total delivery budget, including initial delivery. Default 5. */
+  consumerRetry?: {
+    maxAttempts?: number;
+    /** Nonempty, nondecreasing. Default [30000, 60000, 300000, 600000]. */
+    delaysMs?: readonly number[];
+    /** False dead-letters immediately; throwing logs and retries. */
+    isRetryable?: (error: unknown) => boolean;
+  };
+  /** Pending reclaim interval, default 5000 ms. */
+  reclaimIntervalMs?: number;
+  /** Approximate per-group dead-letter MAXLEN, default 10000. */
+  deadLetterMaxLen?: number;
+  /** Foreign empty consumer inactivity threshold, default 3600000 ms. */
+  consumerIdleSweepMs?: number;
 }
 
 // ── RabbitMQ ─────────────────────────────────────────────────────────────────────────

@@ -31,11 +31,23 @@ export interface IRedisStreamsClient {
   ): Promise<string>;
   /** Create or manage consumer groups. */
   xgroup(
-    command: 'CREATE' | 'DELETE' | 'SETID',
+    command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
     ...args: string[]
-  ): Promise<string | 'OK'>;
+  ): Promise<string | number>;
   /** Read messages from consumer groups. */
   xreadgroup(...args: string[]): Promise<unknown[][] | null>;
+  /** Extended PEL query: [id, owner, idle milliseconds, delivery count]. */
+  xpending(...args: string[]): Promise<Array<[string, string, number, number]>>;
+  /** Atomically claims idle entries, returning [id, field/value list]. */
+  xclaim(...args: string[]): Promise<Array<[string, string[]] | null>>;
+  /** Consumer information as alternating field/value arrays (ioredis RESP2). */
+  xinfo(...args: string[]): Promise<unknown[][]>;
+  /**
+   * Optional ioredis command surface, used for an atomic foreign-consumer sweep.
+   * Without it, foreign consumers are retained: a snapshot followed by
+   * DELCONSUMER could drop work delivered in between. Self-cleanup still runs.
+   */
+  call?(command: string, ...args: string[]): Promise<unknown>;
   /** Acknowledge processed messages. */
   xack(name: string, group: string, ...ids: string[]): Promise<number>;
   /** Quit/close the connection. */
@@ -256,7 +268,7 @@ export interface MessagingCommonOptions {
    * the topic as `name`, the delivered message as `payload`, and the
    * transport `headers` from `MessageMetadata` (absent when the transport
    * carried no channel — there is deliberately NO `attempt`: brokers
-   * redeliver and none tracks a delivery count), and runs in declared order
+   * redeliver, but their delivery counts are not exposed by MessageMetadata), and runs in declared order
    * ahead of the handler. A behaviour that returns without calling `next()`
    * short-circuits: the handler never sees the message. A behaviour that
    * throws follows the messaging handler's existing rejection path. The chain
@@ -378,6 +390,29 @@ export interface MemoryMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
+  /**
+   * Consumer retry policy. maxAttempts includes the initial delivery (default 5).
+   * delaysMs defaults to [30000, 60000, 300000, 600000]; a nonempty,
+   * nondecreasing list of positive integer milliseconds ≤2147483647.
+   * The first delay must exceed the longest handler run to avoid concurrent
+   * processing by another replica. No false arm: failed messages are retried.
+   * @since 0.8.0
+   */
+  consumerRetry?: {
+    /** Positive safe integer delivery budget, including the initial attempt. */
+    readonly maxAttempts?: number;
+    /** Tier indexed by deliveries - 1, clamped to the final tier. */
+    readonly delaysMs?: readonly number[];
+    /** False dead-letters immediately; a throwing classifier is logged and retries. */
+    readonly isRetryable?: (error: unknown) => boolean;
+  };
+  /** Reclaim timer in positive integer ms ≤2147483647. Default 5000. @since 0.8.0 */
+  reclaimIntervalMs?: number;
+  /** Approximate DLQ MAXLEN, a positive safe integer. Default 10000. @since 0.8.0 */
+  deadLetterMaxLen?: number;
+  /** Foreign-consumer inactivity in positive integer ms ≤2147483647. Default 3600000. @since 0.8.0 */
+  consumerIdleSweepMs?: number;
+
   broker: 'redis-streams';
   url?: string;
   client?: IRedisStreamsClient;
@@ -664,6 +699,14 @@ export type MessagingPluginOptions =
  * @since 0.1.0
  */
 export interface RedisStreamsOptions {
+  /** Shared retry shape used by the Redis plugin arm. */
+  consumerRetry?: RedisStreamsMessagingOptions['consumerRetry'];
+  /** Reclaim interval; see RedisStreamsMessagingOptions. */
+  reclaimIntervalMs?: number;
+  /** Approximate dead-letter retention; see RedisStreamsMessagingOptions. */
+  deadLetterMaxLen?: number;
+  /** Foreign idle-consumer sweep threshold; see RedisStreamsMessagingOptions. */
+  consumerIdleSweepMs?: number;
   /** Redis connection URL. */
   url?: string;
   /** Injected Redis client. */
