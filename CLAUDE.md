@@ -5765,8 +5765,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   First implementation slice: generated factories return `IKernelApplication`; socket targets emit
   composition-root smoke tests; `setu add testing` supports Deno imports and npm dev dependencies;
   devtool upgrade instructions preserve the kernel type. Remaining wiring and browser deliverables
-  are implemented; full verification and independent audit remain open. The security design review
-  is recorded in plan §10 at the maintainer's request.
+  are implemented. Verification and code review are done (2026-10-06); they fixed a fresh full-stack
+  `deno task test` that still failed (V8-39), a guard registration that answered `501`, unformatted
+  `ws-route`/`sse` output and a production `@setu-ts/testing` pin. The independent committed-tree
+  audit remains open; the security design review is recorded in plan §10.
 - **Next milestone** — M101g (now carrying the full-stack browser gate, §3.10 of its plan), M101h;
   M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
 
