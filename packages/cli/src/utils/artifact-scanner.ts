@@ -28,7 +28,10 @@ import { joinPath } from './file-writer.ts';
  * barrel that changed (register rows X4-4 and F2).
  *
  * Adoption itself is not refused — it is usually what the developer wants — so it is
- * REPORTED, once, at the moment it happens. Membership in the existing barrel is the
+ * REPORTED, once, at the moment it happens: only into a barrel that registers
+ * something ({@linkcode SeamSpec.exports} non-empty, the same rule as
+ * {@linkcode ManuallyWiredArtifact}), and by `setu generate` only when that barrel is
+ * one the command writes. Membership in the existing barrel is the
  * signal: a file the barrel already names was claimed on some earlier run and is not
  * news. That needs no marker in the artifact, which matters because no artifact the
  * CLI has ever emitted carries one; requiring a marker would un-wire every artifact
@@ -261,7 +264,13 @@ export async function readArtifactNames(
       continue;
     }
 
-    if (!symbols.some((symbol) => mentionsSymbol(barrelSource, symbol))) {
+    // Reported only into a barrel that registers something. The report exists for
+    // the double-registration hazard above, and a re-export barrel has none — its
+    // "now registered" wording would be false, and since a fresh functional scaffold
+    // never writes that barrel, the claim repeated on every generate.
+    if (
+      spec.exports.length > 0 && !symbols.some((symbol) => mentionsSymbol(barrelSource, symbol))
+    ) {
       adopted.push({ path: relative, barrel: spec.barrel });
     }
     names.push(name);

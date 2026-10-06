@@ -48,7 +48,7 @@ import {
 } from '../schematics/registry.ts';
 import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
 import { scanModules } from '../utils/module-scanner.ts';
-import { scanArtifacts } from '../utils/artifact-scanner.ts';
+import { type AdoptedArtifact, scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
@@ -374,20 +374,6 @@ export async function runGenerateCommand(
     );
   }
 
-  // X4-4/F2: the barrel just claimed a file the CLI did not write. Reported once —
-  // the next scan sees it in the barrel and stays quiet — because the alternative,
-  // requiring a provenance marker in the artifact, would un-wire every artifact in
-  // every project generated before this release.
-  for (const claim of scan.adopted) {
-    deps.error(
-      `Adopted ${escapeName(claim.path)} into ${
-        escapeName(claim.barrel)
-      }: it matches this family's naming ` +
-        `convention, so it is now registered by the generated barrel.`,
-    );
-    deps.error(`  Remove any manual registration of it, or rename the file.`);
-  }
-
   // The half that breaks the boot: adopted AND already registered by hand is a
   // duplicate `METHOD path`, which the kernel has refused since M68. The developer's
   // own wiring wins and the barrel steps aside, rather than the command reporting
@@ -498,8 +484,19 @@ export async function runGenerateCommand(
     return EXIT_USAGE;
   }
 
+  // X4-4/F2: adoption happens only when a barrel this command WRITES claims a file
+  // the CLI did not write. A claim into any other barrel is not an adoption — that
+  // barrel does not change — so the scan's candidates are filtered by the plan. A
+  // custom schematic is excluded outright: a matching path says nothing about what
+  // it wrote there, so the CLI cannot vouch that its barrel registers the file.
+  const planned = new Set(generated.map((file) => file.path));
+  const adoptions = customName === undefined
+    ? scan.adopted.filter((claim) => planned.has(claim.barrel))
+    : [];
+
   if (args.flags['dry-run'] === true) {
     for (const file of files) deps.log(`would create ${escapeName(file.path)}`);
+    reportAdoptions(adoptions, 'Would adopt', deps.error);
     return EXIT_OK;
   }
 
@@ -517,6 +514,11 @@ export async function runGenerateCommand(
       deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+    // After the write, so a refused or failed run never reports a claim it did not
+    // make. Reported once — the next scan finds the file in the barrel — because the
+    // alternative, a provenance marker in the artifact, would un-wire every artifact
+    // in every project generated before this release.
+    reportAdoptions(adoptions, 'Adopted', deps.error);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {
@@ -530,4 +532,25 @@ export async function runGenerateCommand(
   }
 
   return EXIT_OK;
+}
+
+/**
+ * Reports each file a generated barrel claimed that the CLI did not write.
+ *
+ * @param adoptions - The claims into barrels this command writes
+ * @param verb - `Adopted`, or `Would adopt` for a dry run
+ * @param error - The command's error channel
+ */
+function reportAdoptions(
+  adoptions: readonly AdoptedArtifact[],
+  verb: 'Adopted' | 'Would adopt',
+  error: (message: string) => void,
+): void {
+  for (const claim of adoptions) {
+    error(
+      `${verb} ${escapeName(claim.path)} into ${escapeName(claim.barrel)}: it matches this ` +
+        `family's naming convention, so the generated barrel registers it.`,
+    );
+    error(`  Remove any manual registration of it, or rename the file.`);
+  }
 }

@@ -207,6 +207,23 @@ describe('a barrel that registers nothing', () => {
     expect(scan.names).toEqual(['widget']);
   });
 
+  // The adoption report exists because a newly claimed artifact that is ALSO wired by
+  // hand is registered twice. A re-export barrel registers nothing, so claiming a file
+  // into it carries no such risk, and its "now registered by the generated barrel"
+  // wording would be false. A fresh functional scaffold ships a service the CLI wrote
+  // and never scaffolds this barrel, so reporting it put the claim on every generate.
+  it('reports no adoption into a re-export barrel, which registers nothing', async () => {
+    const fs = fsWith(['greeting.service.ts'], {
+      'src/services/greeting.service.ts':
+        'export function describeGreeting(): string { return ""; }',
+    });
+
+    const scan = await readArtifactNames(fs, '/app', FUNCTIONAL_SERVICES_SEAM);
+
+    expect(scan.names).toEqual(['greeting']);
+    expect(scan.adopted).toEqual([]);
+  });
+
   it('still reports a hand registration for a barrel that IS a registration site', () => {
     // The distinction is the seam's own `exports`: a registration barrel exports an
     // AGGREGATE, so a per-artifact symbol in the config can only be a direct import
