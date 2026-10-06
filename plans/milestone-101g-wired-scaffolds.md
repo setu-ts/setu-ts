@@ -639,3 +639,15 @@ resulting `Duplicate plugin name` boot failure, a regression against `develop`'s
 other than `custom`; a template literal, a binding or any expression withholds the policy, which is
 the §10 rule ("unsupported custom backplanes receive no automatic source policy") applied to values
 the CLI cannot classify without evaluating the configuration.
+
+Security-audit corrections (round 2): both round-1 fixes recognized spellings and were bypassed by
+others, so both now fail closed. (L1) any reference to the plugin's factory in `setu.config.ts` —
+optional call, comma call, `.call`, alias — other than its own import declaration counts as already
+registered; when the factory is not imported, any binding of that name blocks the insert. Import
+declarations are blanked by the import-clause grammar, never by a match to the next `from`. (L2) the
+backplane policy is emitted only when the configuration CONFIRMS a supported transport: the
+recognized named import, at least one reference, and every reference a call whose argument is empty
+or one plain object literal (no spread, computed key, escape or template literal) naming `transport`
+at most once as a bare key with a plain literal other than `custom`. Everything else withholds it.
+Boundary, stated rather than implied: the CLI reads `setu.config.ts` only, so a plugin constructed
+in another module is invisible to both checks.

@@ -259,6 +259,31 @@ describe('withPluginWiring', () => {
     expect(withPluginWiring(source, 'cache-plugin')).toBeUndefined();
   });
 
+  // Security audit L1 (round 2): any reference is a use, not only a direct call.
+  // Each spelling was a real bypass that registered the plugin twice.
+  it('does not wire a provider the file already uses in any spelling', () => {
+    const imported = "import { CachePlugin } from '@setu-ts/cache-plugin';\n";
+    const listed = (prefix: string, item: string) =>
+      prefix +
+      CLASS_BASED_INGRESS_CONFIG.replace(
+        '...(devtool?.plugins ?? []),',
+        `${item}\n      ...(devtool?.plugins ?? []),`,
+      );
+    for (
+      const [prefix, item] of [
+        [`${imported}const cp = CachePlugin?.();\n`, 'cp,'],
+        [`${imported}const cp = (0, CachePlugin)();\n`, 'cp,'],
+        [`${imported}const cp = CachePlugin.call(undefined);\n`, 'cp,'],
+        [`${imported}const make = CachePlugin;\n`, 'make(),'],
+        ["import { CachePlugin } from './local.ts';\n", 'CachePlugin(),'],
+      ] as const
+    ) expect(withPluginWiring(listed(prefix, item), 'cache-plugin'), prefix).toBeUndefined();
+    // Its own import is not a use, and a commented call is not one either.
+    expect(withPluginWiring(listed(imported, ''), 'cache-plugin')).toContain('CachePlugin(),');
+    expect(withPluginWiring(listed(imported, '// CachePlugin(),'), 'cache-plugin'))
+      .toContain('      CachePlugin(),\n      ...(devtool?.plugins ?? []),');
+  });
+
   it('is not satisfied by a call to a different factory whose name ends the same', () => {
     // `RedisCachePlugin()` is not a `CachePlugin()` registration; a substring
     // match left the provider unwired AND suppressed the guidance line.

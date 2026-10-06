@@ -168,25 +168,129 @@ export function factoryScope(source: string): {
 }
 
 /**
- * Whether any `transport:` option at a code position might name the custom
- * backplane transport. Only a plain `'…'`/`"…"` literal other than `custom` is
- * confirmed otherwise; a template literal, a binding or any expression cannot be
- * classified without evaluating the configuration, so it counts as custom and the
- * policy is withheld — the direction that never wires an unsupported source.
+ * Blanks every static import declaration in masked code, preserving offsets, so a
+ * reference search sees uses of a binding and never its own import. The match
+ * follows the import-clause grammar — optional `type`, an optional default binding,
+ * then `{ … }` or `* as name`, then `from` — so it can never run across unrelated
+ * code: a lazy match up to the next `from` would, after a semicolon-less side-effect
+ * import, swallow everything up to an `Array.from(…)` and hide real references. The
+ * module specifier is already blanked to spaces in masked code.
+ *
+ * @param code - Masked source from {@linkcode maskSourceCode}
+ * @returns The same text with import declarations replaced by spaces
  */
-function mayUseCustomTransport(source: string, code: string): boolean {
-  // Matched in the masked code (so a commented example is ignored), then read from
-  // the raw source: masking blanks a literal to spaces, so a trailing `\s*` in the
-  // masked match would run on through the literal itself.
-  for (const match of code.matchAll(/\btransport\s*:/g)) {
-    let start = match.index + match[0].length;
-    while (/\s/.test(source[start] ?? '')) start += 1;
-    const quote = source[start];
-    if (quote !== "'" && quote !== '"') return true;
-    const end = source.indexOf(quote, start + 1);
-    if (end < 0 || source.slice(start + 1, end) === 'custom') return true;
+export function maskImportDeclarations(code: string): string {
+  return code.replace(
+    /^[ \t]*import\s+(?:type\s+)?(?:[\w$]+\s*,?\s*)?(?:\{[^}]*\}|\*\s*as\s+[\w$]+)?\s*from\b[ \t]*;?/gm,
+    (declaration) => declaration.replace(/[^\n]/g, ' '),
+  );
+}
+
+/**
+ * Whether masked code refers to `name` as an identifier — called, aliased, passed,
+ * spread or exported — anywhere other than as a member (`x.name`) or inside a longer
+ * identifier (`RedisName`). Any such reference means the binding is already used.
+ *
+ * @param code - Masked source
+ * @param name - An identifier
+ * @returns Whether a reference exists
+ */
+export function referencesIdentifier(code: string, name: string): boolean {
+  const escaped = name.replace(/[$]/g, '\\$&');
+  return new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${escaped}(?![\\w$])`).test(code);
+}
+
+/** Index of the bracket closing the one at `open`, counted over masked code. */
+function matchingClose(code: string, open: number): number {
+  const pairs: Readonly<Record<string, string>> = { '(': ')', '{': '}', '[': ']' };
+  const stack: string[] = [];
+  for (let i = open; i < code.length; i++) {
+    const c = code[i]!;
+    if (c in pairs) stack.push(pairs[c]!);
+    else if (c === ')' || c === '}' || c === ']') {
+      if (stack.pop() !== c) return -1;
+      if (stack.length === 0) return i;
+    }
   }
-  return false;
+  return -1;
+}
+
+/**
+ * Whether one backplane call argument is confirmed to select a supported
+ * transport: empty, or a single plain object literal with no spread, computed key,
+ * escape or template literal, naming `transport` at most once — as a bare key whose
+ * value is exactly one plain quoted literal other than `custom`.
+ */
+function supportedBackplaneArgument(raw: string, masked: string): boolean {
+  // Emptiness is judged on the RAW text: masking blanks a string argument to
+  // spaces, so `('memory')` would otherwise read as no argument at all.
+  if (raw.trim() === '') return true;
+  const trimmed = masked.trim();
+  const open = masked.indexOf('{');
+  if (!trimmed.startsWith('{') || matchingClose(masked, open) !== masked.trimEnd().length - 1) {
+    return false;
+  }
+  if (/\\|\.\.\.|\[|`/.test(raw)) return false;
+  const mentions = raw.match(/transport/g)?.length ?? 0;
+  if (mentions === 0) return true;
+  if (mentions > 1) return false;
+  const key = /(?:^|[{,])\s*transport\s*:/.exec(masked);
+  if (key === null) return false;
+  let at = key.index + key[0].length;
+  while (/\s/.test(raw[at] ?? '')) at += 1;
+  const quote = raw[at];
+  if (quote !== "'" && quote !== '"') return false;
+  const close = raw.indexOf(quote, at + 1);
+  if (close < 0 || raw.slice(at + 1, close) === 'custom') return false;
+  let after = close + 1;
+  while (/\s/.test(raw[after] ?? '')) after += 1;
+  return raw[after] === ',' || raw[after] === '}';
+}
+
+/**
+ * Whether the configuration is CONFIRMED to give the realtime backplane a
+ * supported transport. Fails closed: the policy is emitted only when the plugin is
+ * imported through the one recognized named import, referenced at least once, and
+ * every reference is a call whose argument {@linkcode supportedBackplaneArgument}
+ * accepts. An alias, a spread of options built elsewhere, a second import form or
+ * any shape the CLI cannot classify without evaluating the file withholds it, since
+ * the custom transport accepts no diagnostics policy (plan §10). A backplane
+ * constructed in another module is not visible from `setu.config.ts`, so it never
+ * confirms anything.
+ */
+function backplaneConfirmedSupported(source: string, code: string): boolean {
+  const specifier = "'@setu-ts/realtime-backplane-plugin'";
+  const declaration = /^import \{ ([^}\n]+) \} from '@setu-ts\/realtime-backplane-plugin';$/m
+    .exec(source);
+  if (
+    declaration === null ||
+    code.slice(declaration.index, declaration.index + 6) !== 'import' ||
+    source.indexOf(specifier) !== source.lastIndexOf(specifier)
+  ) {
+    return false;
+  }
+  const binding = declaration[1]!.split(',').map((item) => item.trim().split(/\s+as\s+/))
+    .find(([symbol]) => symbol === 'RealtimeBackplanePlugin');
+  const name = binding?.[1] ?? binding?.[0];
+  if (name === undefined || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) return false;
+  const uses = maskImportDeclarations(code);
+  const pattern = new RegExp(
+    `(?<![\\w$])(?<!(?:^|[^.])\\.)${name.replace(/[$]/g, '\\$&')}(?![\\w$])`,
+    'g',
+  );
+  let calls = 0;
+  for (const reference of uses.matchAll(pattern)) {
+    let at = reference.index + name.length;
+    while (/\s/.test(uses[at] ?? '')) at += 1;
+    if (uses[at] !== '(') return false;
+    const close = matchingClose(uses, at);
+    if (close < 0) return false;
+    if (!supportedBackplaneArgument(source.slice(at + 1, close), uses.slice(at + 1, close))) {
+      return false;
+    }
+    calls += 1;
+  }
+  return calls > 0;
 }
 
 /** Reads literal policy discriminants only at code positions, never within examples. */
@@ -196,7 +300,7 @@ function policyFlags(
   const code = maskSourceCode(source);
   return {
     authorization: code !== undefined && /\brbac\s*:/.test(code),
-    customBackplane: code === undefined || mayUseCustomTransport(source, code),
+    customBackplane: code === undefined || !backplaneConfirmedSupported(source, code),
   };
 }
 

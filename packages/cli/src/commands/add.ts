@@ -37,8 +37,10 @@ import { detectPlugins } from '../utils/plugin-detector.ts';
 import {
   DEVTOOL_SOURCES_MODULE,
   factoryScope,
+  maskImportDeclarations,
   maskSourceCode,
   readDevtoolSourceNames,
+  referencesIdentifier,
   renderDevtoolSources,
   withDevtoolSourceWiring,
 } from '../devtool/sources.ts';
@@ -231,11 +233,6 @@ function startsAtIdentifier(text: string, pattern: string): boolean {
   return new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${pattern}`).test(text);
 }
 
-/** Whether `code` calls the factory bound to `name` (an identifier). */
-function callsFactory(code: string, name: string): boolean {
-  return startsAtIdentifier(code, `${escapeRegExp(name)}\\s*\\(`);
-}
-
 /** The concrete registration to show when configuration belongs to the application. */
 function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
@@ -294,7 +291,10 @@ function printWiringNote(
     ? undefined
     : providerBinding(source, bare, factory);
   const code = source === undefined ? undefined : maskSourceCode(source);
-  if (binding !== undefined && code !== undefined && callsFactory(code, binding)) {
+  if (
+    binding !== undefined && code !== undefined &&
+    referencesIdentifier(maskImportDeclarations(code), binding)
+  ) {
     return;
   }
   if (
@@ -465,13 +465,16 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   const importedBinding = providerBinding(source, bare, provider.symbol);
   if (importedBinding === undefined && source.includes(`'@setu-ts/${bare}'`)) return undefined;
   const factory = importedBinding ?? provider.symbol;
-  // The whole file, not just the factory body: a plugin built once at module scope
-  // (`const cache = CachePlugin();`) and listed by name is already registered, and
-  // inserting a second call makes the kernel refuse a duplicate plugin name.
-  if (
-    !source.includes(anchor) ||
-    callsFactory(scope!.code, factory)
-  ) {
+  // Any reference anywhere in the file, not only a call in the factory body: a
+  // plugin built at module scope, through an alias, an optional call or `.call`, and
+  // listed by name is already registered, and inserting a second call makes the
+  // kernel refuse a duplicate plugin name. When the factory is imported, its own
+  // import is not a use; when it is NOT imported, any binding of that name (from
+  // another module, say) also blocks the insert, since adding the import would then
+  // declare the identifier twice. A plugin constructed in a DIFFERENT module is not
+  // visible from here — that boundary is stated in plan §10.
+  const uses = importedBinding === undefined ? scope!.code : maskImportDeclarations(scope!.code);
+  if (!source.includes(anchor) || referencesIdentifier(uses, factory)) {
     return undefined;
   }
 

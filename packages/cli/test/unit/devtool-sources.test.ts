@@ -5,8 +5,10 @@ import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { DEVTOOL_SOURCES } from '../fixtures/devtool-source-shapes.ts';
 import {
   factoryScope,
+  maskImportDeclarations,
   maskSourceCode,
   readDevtoolSourceNames,
+  referencesIdentifier,
   renderDevtoolSources,
   withDevtoolSourceWiring,
   withSourceArgs,
@@ -245,37 +247,119 @@ describe('development source policies', () => {
       expect(policy).not.toContain('authorizationDiagnostics');
       expect(policy).toContain('  cache:');
     }
+    // Commented examples are not configuration: a real, confirmed backplane call
+    // beside a commented custom one still emits the policy.
     const examples = await readDevtoolSourceNames(
       fs,
       '/shop',
       packages,
-      '// rbac: {}\n// transport: "custom"',
+      "import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n" +
+        '// rbac: {}\n// RealtimeBackplanePlugin({ transport: "custom" })\n' +
+        'const plugins = [RealtimeBackplanePlugin()];',
     );
     expect(examples.authorization).toBe(false);
     expect(examples.customBackplane).toBe(false);
   });
 
-  // Audit L2: only a plain quoted literal other than `custom` confirms a supported
-  // transport. A template literal or a binding cannot be classified without running
-  // the configuration, so it withholds the policy rather than wiring a source the
-  // custom arm does not support.
-  it('withholds the backplane policy unless every transport is a known literal', async () => {
+  it('masks import declarations by grammar, never across unrelated code', () => {
+    const uses = (src: string) =>
+      referencesIdentifier(maskImportDeclarations(maskSourceCode(src)!), 'CachePlugin');
+    expect(uses("import { CachePlugin } from 'x';\n")).toBe(false);
+    expect(uses("import {\n  CachePlugin,\n  Other,\n} from 'x';\n")).toBe(false);
+    expect(uses("import type { CachePlugin } from 'x';\nimport D, * as ns from 'y';\n")).toBe(
+      false,
+    );
+    // A lazy match to the next `from` would swallow this reference.
+    expect(uses("import './x.ts'\nconst c = CachePlugin;\nconst a = Array.from([]);\n")).toBe(true);
+    expect(uses("import { CachePlugin } from 'x';\nconst c = CachePlugin();\n")).toBe(true);
+    expect(uses("const m = await import('x');\nm.CachePlugin();\n")).toBe(false);
+    expect(uses('const RedisCachePlugin = 1;\nconst y = CachePluginX;\n')).toBe(false);
+    expect(uses('const spread = [...CachePlugin()];\n')).toBe(true);
+  });
+
+  it('withholds the backplane policy for call shapes it cannot classify', async () => {
     const fs = createFakeFs({});
-    const classify = async (config: string) =>
+    const custom = async (config: string) =>
       (await readDevtoolSourceNames(fs, '/shop', packages, config)).customBackplane === true;
-    for (const config of ['transport: `custom`', 'transport: kind', "transport: pick('x')"]) {
-      expect(await classify(config), config).toBe(true);
-      const policy = renderDevtoolSources(packages, {
-        project: 'shop',
-        customBackplane: await classify(config),
-      }).contents;
-      expect(policy, config).not.toContain('  backplane:');
+    const head = "import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n";
+    for (
+      const tail of [
+        'const p = RealtimeBackplanePlugin(',
+        'const p = RealtimeBackplanePlugin(]',
+        "const p = RealtimeBackplanePlugin('memory');",
+        'const p = RealtimeBackplanePlugin({}, extra);',
+        "const p = RealtimeBackplanePlugin({ transport: 'redis' } as Options);",
+        'type T = typeof RealtimeBackplanePlugin;',
+      ]
+    ) expect(await custom(head + tail), tail).toBe(true);
+    for (
+      const declaration of [
+        "import { RealtimeBackplanePlugin as 1x } from '@setu-ts/realtime-backplane-plugin';\n",
+        "import { Other } from '@setu-ts/realtime-backplane-plugin';\n",
+        "// import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n",
+      ]
+    ) {
+      expect(await custom(`${declaration}const p = RealtimeBackplanePlugin();`), declaration).toBe(
+        true,
+      );
     }
-    for (const config of ["transport: 'custom'", 'transport:"custom"']) {
-      expect(await classify(config), config).toBe(true);
+    // An alias that is a valid identifier is followed through.
+    expect(
+      await custom(
+        "import { RealtimeBackplanePlugin as Rb } from '@setu-ts/realtime-backplane-plugin';\n" +
+          'const p = Rb();',
+      ),
+    ).toBe(false);
+  });
+
+  // Security audit L2 (rounds 1 and 2): the policy is emitted only when the
+  // configuration CONFIRMS a supported transport. Each spelling below was a real
+  // bypass of a narrower recognizer, so the table is the specification.
+  it('emits the backplane policy only for a confirmed supported transport', async () => {
+    const fs = createFakeFs({});
+    const imported =
+      "import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n";
+    const custom = async (config: string) =>
+      (await readDevtoolSourceNames(fs, '/shop', packages, config)).customBackplane === true;
+    const confirmed: readonly string[] = [
+      'RealtimeBackplanePlugin()',
+      "RealtimeBackplanePlugin({ transport: 'redis', url: 'redis://127.0.0.1:6379' })",
+      'RealtimeBackplanePlugin({ transport: "memory" })',
+      'RealtimeBackplanePlugin({})',
+    ];
+    for (const call of confirmed) {
+      expect(await custom(`${imported}const p = [${call}];`), call).toBe(false);
     }
-    for (const config of ["transport: 'redis'", 'transport: "memory"', '', "x: 'custom'"]) {
-      expect(await classify(config), config).toBe(false);
+    const withheld: readonly string[] = [
+      "RealtimeBackplanePlugin({ transport: 'custom', backplane })",
+      "RealtimeBackplanePlugin({ 'transport': 'custom' })",
+      'RealtimeBackplanePlugin({ "transport": "custom" })',
+      "RealtimeBackplanePlugin({ ['transport']: 'custom' })",
+      'RealtimeBackplanePlugin({ transport })',
+      'RealtimeBackplanePlugin({ ...opts })',
+      "RealtimeBackplanePlugin({ transport: '\\x63ustom' })",
+      "RealtimeBackplanePlugin({ transport: '' as string || 'custom' })",
+      'RealtimeBackplanePlugin({ transport: `custom` })',
+      'RealtimeBackplanePlugin(opts)',
+      "RealtimeBackplanePlugin({ get transport() { return 'custom'; } })",
+      "RealtimeBackplanePlugin({ tr\\u0061nsport: 'custom' })",
+      'RealtimeBackplanePlugin({ transport: kind })',
+    ];
+    for (const call of withheld) {
+      expect(await custom(`${imported}const p = [${call}];`), call).toBe(true);
     }
+    // An alias, a second import form, or no import at all confirms nothing.
+    expect(await custom(`${imported}const make = RealtimeBackplanePlugin;\nmake({});`)).toBe(true);
+    expect(
+      await custom(
+        `${imported}import * as rb from '@setu-ts/realtime-backplane-plugin';\n` +
+          'const p = [RealtimeBackplanePlugin()];',
+      ),
+    ).toBe(true);
+    expect(await custom('const p = [RealtimeBackplanePlugin()];')).toBe(true);
+    expect(await custom(`${imported}const unused = 1;`)).toBe(true);
+    const policy = renderDevtoolSources(packages, { project: 'shop', customBackplane: true })
+      .contents;
+    expect(policy).not.toContain('  backplane:');
   });
 });
