@@ -341,6 +341,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`setu generate` no longer reports adopting a file into a barrel it does not write.** On a fresh
+  `--template rest` project every `setu generate` printed "Adopted src/services/greeting.service.ts
+  into src/services/index.ts … Remove any manual registration of it", although no
+  `src/services/index.ts` was written and that barrel only re-exports, registering nothing. Adoption
+  is now reported only for a barrel the command writes, only for a barrel that registers something,
+  and only after the write succeeds; `--dry-run` previews it as "Would adopt".
+
 - **CLI output cannot be forged by project-controlled text (M101f security audit).** A member name,
   path, task value or parser message carrying a line feed, carriage return, U+2028/U+2029 or a bidi
   control printed raw, so a hostile workspace could make `setu` print a line that read as the CLI's

@@ -784,4 +784,42 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     expect(h.fs.read('/app/src/controllers/index.ts')).toContain('registerAdminRoutes');
     expect(h.err.lines.join('\n')).toContain('Adopted src/controllers/admin.routes.ts');
   });
+
+  it('reports no adoption into a barrel this command does not write', async () => {
+    // `g plugin` writes only the plugins barrel. The admin module is a controllers
+    // candidate, so that barrel is not rewritten and nothing was adopted — saying
+    // otherwise names a barrel that does not change, on every unrelated generate.
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST('kernel'),
+      '/app/setu.config.ts': 'export function createApp() {}\n',
+      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+    });
+
+    expect(await h.run(['plugin', 'audit'])).toBe(0);
+    expect(h.fs.has('/app/src/controllers/index.ts')).toBe(false);
+    expect(h.err.lines.join('\n')).not.toContain('Adopted');
+  });
+
+  it('adopts nothing when the generate is refused or only a dry run', async () => {
+    const seed = {
+      '/app/deno.json': DENO_MANIFEST('kernel'),
+      '/app/setu.config.ts': 'export function createApp() {}\n',
+      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+    };
+    // Refused: the planned route module already exists, so nothing is written.
+    const refused = harness({
+      ...seed,
+      '/app/src/controllers/report.routes.ts': 'export function registerReportRoutes(): void {}\n',
+    });
+    expect(await refused.run(['route', 'report'])).toBe(1);
+    expect(refused.err.lines.join('\n')).not.toContain('Adopted');
+
+    const dry = harness(seed);
+    expect(await dry.run(['route', 'report', '--dry-run'])).toBe(0);
+    expect(dry.err.lines.join('\n')).not.toContain('Adopted ');
+    expect(dry.err.lines.join('\n')).toContain(
+      'Would adopt src/controllers/admin.routes.ts into src/controllers/index.ts',
+    );
+    expect(dry.fs.has('/app/src/controllers/index.ts')).toBe(false);
+  });
 });
