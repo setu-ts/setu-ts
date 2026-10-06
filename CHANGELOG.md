@@ -218,7 +218,7 @@ All notable changes to this project are documented here. The format follows
   object that names no `transport` no longer receives the development policy, and a configuration
   that binds its own `sources` gets the printed line rather than the CLI's declaration.
 
-- **RabbitMQ `publish()` and `queue.add()` now wait for the broker.** They resolve only once
+- **RabbitMQ `publish()` and `queue.add()` now wait for the broker (#418).** They resolve only once
   RabbitMQ has accepted the message, which costs one broker round trip per publish, and they can now
   reject — when the broker refuses the message, the channel closes first, or `publishTimeoutMs`
   expires — where they used to resolve unconditionally. See `docs/upgrading.md`.
@@ -437,7 +437,7 @@ All notable changes to this project are documented here. The format follows
   `deno.json`/`deno.jsonc`. Regenerate the managed Dockerfile with `setu generate app`,
   `setu devtool enable` or `setu workspace ports --reallocate`.
 
-- **RabbitMQ messages and jobs survive a broker restart.** Both RabbitMQ publishers —
+- **RabbitMQ messages and jobs survive a broker restart (#418).** Both RabbitMQ publishers —
   `messaging-plugin`'s broker and `queue-plugin`'s adapter — declared durable queues and then
   published every message TRANSIENT on a plain channel, so a RabbitMQ restart silently emptied every
   queue of the messages and background jobs waiting in it, while `publish()`/`add()` had already
@@ -452,7 +452,7 @@ All notable changes to this project are documented here. The format follows
   it keeps a plain channel and logs one warning. Proven by restarting a real broker in CI, with the
   transient control losing its messages in the same restart.
 
-- **A paused RabbitMQ no longer hangs `publish()` or `add()` forever.** Each publish made an
+- **A paused RabbitMQ no longer hangs `publish()` or `add()` forever (#418).** Each publish made an
   unbounded broker round trip (an exchange assert in `messaging-plugin`, queue declarations in
   `queue-plugin`) that a paused broker — socket open, nothing answering — never completes. The new
   `publishTimeoutMs` option (default `15000`, `0` unbounded, out-of-range values refused with
