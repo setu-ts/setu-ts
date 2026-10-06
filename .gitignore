@@ -50,6 +50,9 @@ test/fixtures/snippets/deno.lock
 # added later (e.g. .claude/settings.json), un-ignore it with a negation.
 .claude/
 
+# Local agent state (same treatment as .claude/).
+.agents/
+
 # Compat suite installs the latest PUBLISHED packages on purpose; a committed
 # lockfile would pin them and defeat the check.
 compat/package-lock.json
