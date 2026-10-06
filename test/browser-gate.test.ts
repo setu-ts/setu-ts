@@ -35,6 +35,11 @@ describe('dedicated browser gate', () => {
       browserCacheDir('C:\\Users\\a\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome.exe'),
     )
       .toBe('C:\\Users\\a\\AppData\\Local\\ms-playwright');
+    // PR #415 review: a `chromium-` prefixed directory in the cache path is not the install.
+    expect(
+      browserCacheDir('/home/a/chromium-cache/ms-playwright/chromium-1243/chrome-linux64/chrome'),
+    )
+      .toBe('/home/a/chromium-cache/ms-playwright');
     expect(() => browserCacheDir('/usr/bin/chrome')).toThrow('Cannot locate');
     expect(() => browserCacheDir('chromium-1243/chrome')).toThrow('Cannot locate');
   });

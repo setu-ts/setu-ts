@@ -191,6 +191,12 @@ describe('development source policies', () => {
       'Add as the first statement of createApp, whose second parameter must be the devtool ' +
       `composition: ${declaration}`,
     ]);
+    // A commented-out copy of the import is not an import (PR #415 review).
+    const commented = withDevtoolSourceWiring(
+      `/*\n${importLine}\n*/\nhandwritten()`,
+      new Set(['cache-plugin']),
+    );
+    expect(commented.setup[0]).toBe(`Add the import: ${importLine}`);
     const imported = withDevtoolSourceWiring(
       `${importLine}\nhandwritten()`,
       new Set(['cache-plugin']),
@@ -202,6 +208,13 @@ describe('development source policies', () => {
       "import { HealthPlugin } from '@setu-ts/health-plugin';\n" + signature +
       '\n return createApplication({ plugins: [\n  CachePlugin(),\n  HealthPlugin(options),\n] });\n}';
     const partial = withDevtoolSourceWiring(mixed, new Set(['cache-plugin', 'health-plugin']));
+    // An automatic edit neither trusts a commented copy nor duplicates a live import.
+    const withComment = withDevtoolSourceWiring(
+      `/*\n${importLine}\n*/\n${importLine}\n${mixed}`,
+      new Set(['cache-plugin', 'health-plugin']),
+    );
+    expect(withComment.source.split(importLine).length - 1).toBe(2);
+    expect(withComment.setup).toEqual([]);
     expect(partial.manual).toHaveLength(1);
     expect(partial.source).toContain(declaration);
     expect(partial.setup).toEqual([]);

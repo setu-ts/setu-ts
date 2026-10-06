@@ -34,12 +34,15 @@ export const CACHE_LOCATION_VARIABLES = [
 /**
  * Derives the browser cache from the executable path Playwright itself resolved, so the gate never
  * restates Playwright's per-platform cache rules. The cache is the directory holding the
- * `chromium-<revision>` (or `chromium_headless_shell-<revision>`) install.
+ * `chromium-<revision>` (or `chromium_headless_shell-<revision>`) install: the LAST segment of
+ * exactly that shape, so a cache path containing e.g. `chromium-cache` is not mistaken for it.
  */
 export function browserCacheDir(executable: string): string {
   const separator = executable.includes('\\') && !executable.includes('/') ? '\\' : '/';
   const segments = executable.split(separator);
-  const install = segments.findIndex((segment) => /^chromium[-_]/.test(segment));
+  const install = segments.findLastIndex((segment) =>
+    /^chromium(?:_headless_shell)?-\d+$/.test(segment)
+  );
   if (install <= 0) {
     throw new Error(`Cannot locate the Playwright browser cache in '${executable}'.`);
   }

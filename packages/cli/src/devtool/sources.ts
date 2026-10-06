@@ -817,6 +817,26 @@ function supportedBackplaneArgument(raw: string, masked: string, trustSources: b
 /** The import {@linkcode withDevtoolSourceWiring} adds to the configuration. */
 const SOURCES_IMPORT = "import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';";
 
+/**
+ * Whether the configuration carries {@linkcode SOURCES_IMPORT} as live code. A copy inside a
+ * comment or a string does not count, and a configuration the lexer cannot classify reports
+ * `false`, so the caller adds or names the import rather than trusting text it cannot read.
+ *
+ * @param source - The whole configuration
+ */
+function hasActiveSourcesImport(source: string): boolean {
+  const mask = maskSourceCode(source);
+  if (mask === undefined) return false;
+  for (
+    const found of source.matchAll(
+      /^import \{ DEVTOOL_SOURCES \} from '\.\/src\/devtool\/diagnostics\.ts';$/gm,
+    )
+  ) {
+    if (mask.slice(found.index, found.index + 6) === 'import') return true;
+  }
+  return false;
+}
+
 /** The declaration {@linkcode withDevtoolSourceWiring} inserts into `createApp`. */
 const SOURCES_DECLARATION =
   'const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;';
@@ -1078,7 +1098,7 @@ function manualSetup(source: string, manual: readonly string[]): readonly string
   const scope = factoryScope(source);
   if (scope !== undefined && sourcesBindingTrusted(scope.code) === 'declared') return [];
   const setup: string[] = [];
-  if (!source.includes(SOURCES_IMPORT)) setup.push(`Add the import: ${SOURCES_IMPORT}`);
+  if (!hasActiveSourcesImport(source)) setup.push(`Add the import: ${SOURCES_IMPORT}`);
   setup.push(
     'Add as the first statement of createApp, whose second parameter must be the devtool ' +
       `composition: ${SOURCES_DECLARATION}`,
@@ -1157,14 +1177,7 @@ function wireSources(
       updated.slice(offset + call[0].length);
   }
   if (updated === source) return { source, manual };
-  const sourceImport = /^import \{ DEVTOOL_SOURCES \} from '\.\/src\/devtool\/diagnostics\.ts';$/m
-    .exec(updated);
-  if (
-    sourceImport === null ||
-    maskSourceCode(updated)?.slice(sourceImport.index, sourceImport.index + 6) !== 'import'
-  ) {
-    updated = `${SOURCES_IMPORT}\n` + updated;
-  }
+  if (!hasActiveSourcesImport(updated)) updated = `${SOURCES_IMPORT}\n` + updated;
   const finalScope = factoryScope(updated)!;
   if (
     !finalScope.code.slice(finalScope.start, finalScope.end).includes(
