@@ -174,7 +174,7 @@ function policyFlags(
   const code = maskSourceCode(source);
   return {
     authorization: code !== undefined && /\brbac\s*:/.test(code),
-    customBackplane: code !== undefined &&
+    customBackplane: code === undefined ||
       [...source.matchAll(/\btransport\s*:\s*(['"])custom\1/g)].some((match) =>
         code.slice(match.index, match.index + 'transport'.length) === 'transport'
       ),

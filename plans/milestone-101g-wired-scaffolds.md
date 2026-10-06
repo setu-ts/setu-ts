@@ -609,12 +609,13 @@ audit report. Any fix changes the audit target and requires a fresh re-audit bef
 Implementation clarifications: text rewrites mask comments and literals before recognizing
 standalone emitted calls/anchors within the recognized createApp body; module-level calls stay
 unchanged. Slash expressions outside comments/literals remain unclassified: distinguishing regex
-from division requires parsing, so these configurations receive manual wiring guidance. Incomplete
-source and unfamiliar calls retain their bytes and receive manual guidance. Source locals use
-`Partial<typeof DEVTOOL_SOURCES>` so production's empty policy type-checks; factories without
-applicable source calls emit no unused local. The browser gate exposed native form posts carrying
-`Origin: null` under the default `no-referrer` policy. Only the full-stack example and scaffold now
-configure `httpSecurity.headers.referrerPolicy: 'same-origin'`: native actions preserve same-origin
-identity, while cross-origin referrers remain suppressed. Session CSRF and React Router's origin
-verification remain enabled. The audit must probe valid native actions and invalid cross-origin
-actions.
+from division requires parsing, so these configurations receive manual wiring guidance. Unclassified
+configuration also omits auth and backplane policies because their required discriminants cannot be
+confirmed. Incomplete source and unfamiliar calls retain their bytes and receive manual guidance.
+Source locals use `Partial<typeof DEVTOOL_SOURCES>` so production's empty policy type-checks;
+factories without applicable source calls emit no unused local. The browser gate exposed native form
+posts carrying `Origin: null` under the default `no-referrer` policy. Only the full-stack example
+and scaffold now configure `httpSecurity.headers.referrerPolicy: 'same-origin'`: native actions
+preserve same-origin identity, while cross-origin referrers remain suppressed. Session CSRF and
+React Router's origin verification remain enabled. The audit must probe valid native actions and
+invalid cross-origin actions.

@@ -231,6 +231,20 @@ describe('development source policies', () => {
       'transport: "custom"',
     );
     expect(customTransport.customBackplane).toBe(true);
+    for (const expression of ['8 / 2', '/{/', "'unterminated"]) {
+      const unknown = await readDevtoolSourceNames(
+        fs,
+        '/shop',
+        packages,
+        "rbac: {}, transport: 'custom'; const expression = " + expression,
+      );
+      expect(unknown.customBackplane).toBe(true);
+      expect(unknown.authorization).toBe(false);
+      const policy = renderDevtoolSources(packages, unknown).contents;
+      expect(policy).not.toContain('  backplane:');
+      expect(policy).not.toContain('authorizationDiagnostics');
+      expect(policy).toContain('  cache:');
+    }
     const examples = await readDevtoolSourceNames(
       fs,
       '/shop',
