@@ -8987,14 +8987,13 @@ commands, so the two can never disagree. The factory deliberately does NOT start
 
 ```typescript
 // setu.config.ts (--template rest)
-import { createApplication } from '@setu-ts/kernel';
-import type { IApplication } from '@setu-ts/common';
+import { createApplication, type IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 // … logging, validation, security, health, metrics, OpenAPI, decorators
 import { errorHandler } from '@setu-ts/exceptions';
 
-export function createApp(): IApplication {
+export function createApp(): IKernelApplication {
   const app = createApplication({
     plugins: [RuntimePlugin(), ConfigPlugin({ envFilePath: '.env', envFileOptional: true })],
   });
@@ -9023,11 +9022,11 @@ flag for the other three is still deferred (see "Not in this release").
 ```typescript
 // setu.config.ts (--template full-stack)
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
-import type { IApplication } from '@setu-ts/common';
+import type { IKernelApplication } from '@setu-ts/kernel';
 import { getCsrfToken, getSession } from '@setu-ts/session-plugin';
 import { csrfContext, sessionContext } from './app/lib/context-keys.ts';
 
-export async function createApp(): Promise<IApplication> {
+export async function createApp(): Promise<IKernelApplication> {
   return await createFullStackAppFromConfig((config) => ({
     reactRouter: {
       serverBuildPath: './build/server/index.js',
