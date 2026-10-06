@@ -17,6 +17,8 @@ import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 import { SsePlugin } from '@setu-ts/sse-plugin';
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 import { withPluginWiring } from '../../src/commands/add.ts';
+import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
+import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 
 const factories: Readonly<Record<string, () => IPlugin>> = {
   'cqrs-plugin': CqrsPlugin,
@@ -36,7 +38,9 @@ const factories: Readonly<Record<string, () => IPlugin>> = {
 describe('zero-configuration add wiring', () => {
   for (const [name, factory] of Object.entries(factories)) {
     it(`registers, boots and stops ${name} with no options`, async () => {
-      expect(withPluginWiring('      ...(devtool?.plugins ?? []),', name)).toBeDefined();
+      const config = projectFiles('probe', 'deno', resolveHost(MINIMAL_HOST, 'deno'))
+        .find((file) => file.path === 'setu.config.ts')!.contents;
+      expect(withPluginWiring(config, name)).toContain(`${factory.name}(),`);
       const app = createApplication({ plugins: [RuntimePlugin(), factory()] });
       try {
         await app.start();

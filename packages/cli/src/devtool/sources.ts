@@ -93,7 +93,9 @@ const ROWS: readonly ISourceRow[] = [
 
 /**
  * Masks comments and literals, preserving positions and line breaks.
- * Incomplete comments/literals remain unclassified and must not be rewritten.
+ * Incomplete comments/literals and slash expressions remain unclassified.
+ * Distinguishing division from a regex requires syntax parsing; emitted factory
+ * shapes use neither, so unfamiliar expressions receive manual guidance.
  * @param source - Developer-owned configuration text
  * @returns Code-only text, or undefined for an incomplete literal/comment
  */
@@ -109,6 +111,8 @@ export function maskSourceCode(source: string): string | undefined {
         mode = next === '/' ? 'line' : 'block';
         result.push('  ');
         i++;
+      } else if (c === '/') {
+        return undefined;
       } else if (c === "'" || c === '"' || c === '`') {
         mode = c;
         result.push(' ');

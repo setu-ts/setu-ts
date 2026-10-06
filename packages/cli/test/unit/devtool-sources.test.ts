@@ -185,6 +185,20 @@ describe('development source policies', () => {
     expect(refused.manual.join('\n')).not.toContain('\u202e');
   });
 
+  it('refuses slash expressions rather than extending scope through regex braces', () => {
+    const imports = "import { CachePlugin as $Cache } from '@setu-ts/cache-plugin';\n";
+    for (const expression of ['/ { /', '/{/', '/}/', '/[{}]/', '8 / 2', '8 /= 2']) {
+      const source = imports + signature + '\n const expression = ' + expression +
+        ';\n return createApplication({ plugins: [$Cache(customOptions)] });\n}\n' +
+        'const reused = [\n $Cache(),\n];\nconst closing = /}/;';
+      const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
+      expect(result.source).toBe(source);
+      expect(result.manual).toEqual(['CachePlugin({ ...options, ...sources.cache })']);
+      expect(factoryScope(source)).toBeUndefined();
+      expect(maskSourceCode(source)).toBeUndefined();
+    }
+  });
+
   it('reads artifact, job and env names without executing the project', async () => {
     const fs = createFakeFs({
       '/shop/.env.example': '# credentials never copied\nPORT=3000\nSECRET=secret-value\n',
