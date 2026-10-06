@@ -196,7 +196,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **BREAKING: Redis Streams messaging recovery.** Failed messages now retry across restarts;
+- **BREAKING: Redis Streams messaging recovery (#419).** Failed messages now retry across restarts;
   handlers must be idempotent. Redis ≥6.2 is required. Injected `IRedisStreamsClient` facades must
   implement `xpending`, `xclaim`, `xinfo`, and `xgroup('DELCONSUMER', ...)`. Configure
   `consumerRetry`, `reclaimIntervalMs`, `deadLetterMaxLen`, and `consumerIdleSweepMs`; see
@@ -395,12 +395,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Redis Streams stranded messages (`@setu-ts/messaging-plugin`).** Failed entries are reclaimed
-  with tiered idle backoff through one delivery path, instead of staying in the pending list
-  forever. Terminal failures enter a bounded per-group dead-letter stream before acknowledgement.
-  Clean consumers are deleted only with no pending entries, and old foreign empty consumers are
-  swept. Real Redis tests cover restart recovery, competing replicas, dead-letter fields, and clean
-  stop.
+- **Redis Streams stranded messages (`@setu-ts/messaging-plugin`, #419).** Failed entries are
+  reclaimed with tiered idle backoff through one delivery path, instead of staying in the pending
+  list forever. Terminal failures enter a bounded per-group dead-letter stream before
+  acknowledgement. Clean consumers are deleted only with no pending entries, and old foreign empty
+  consumers are swept. Real Redis tests cover restart recovery, competing replicas, dead-letter
+  fields, and clean stop.
 
 - **Generated WebSocket and SSE routes fail the project's own `deno fmt --check` (M101g).**
   `setu generate ws-route` emitted a `broadcast` line wider than the generated project's formatter
