@@ -307,21 +307,13 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
 
-      // `full-stack` builds its React Router server before it can serve, and
-      // `start` depends on `build` — which is exactly what X5-3 added. Running
-      // the task here rather than letting `start` do it keeps the boot's own
-      // timeout measuring the boot.
-      if (template === 'full-stack') {
-        const built = await new Deno.Command(Deno.execPath(), {
-          args: ['task', 'build'],
-          cwd: project,
-          stdout: 'piped',
-          stderr: 'piped',
-        }).output();
-        expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
-      }
-
-      const tested = await denoRun(project, ['task', 'test']);
+      // No separate build first, even for `full-stack`: a fresh user runs
+      // `deno task test` on a project that has never been built, and the
+      // generated smoke test boots an app that loads the server build. The
+      // task must build it itself (V8-39) — pre-building here hid exactly that.
+      // The build it leaves behind is what the boot below serves. Retried like
+      // any install, since for `full-stack` this task now runs `deno install`.
+      const tested = await denoRunRetry(project, ['task', 'test']);
       expect(tested.code, tested.output).toBe(0);
       expect(tested.output).toContain('1 passed');
 

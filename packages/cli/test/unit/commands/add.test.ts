@@ -10,6 +10,7 @@ import { expect } from '@std/expect';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
   addableNames,
+  pinnedInOtherNpmSection,
   resolveAddablePackage,
   runAddCommand,
   withDependency,
@@ -128,6 +129,40 @@ describe('setu add testing', () => {
       expect(manifest.dependencies?.['@setu-ts/testing']).toBeUndefined();
     });
   }
+
+  it('does not pin a package twice when the other npm section already holds it', async () => {
+    // A scaffold may list a package in one section while `add` writes the
+    // other; writing it again would pin it in both.
+    const range = `npm:@jsr/setu-ts__testing@^${VERSION}`;
+    const npm = JSON.stringify(
+      { scripts: { start: 'tsx main.ts' }, dependencies: { '@setu-ts/testing': range } },
+      null,
+      2,
+    );
+    const h = harness({ '/app/package.json': npm });
+    expect(await h.run(['testing'])).toBe(0);
+    expect(h.read('/app/package.json')).toBe(npm);
+    expect(h.out.join('\n')).toContain('already installed');
+  });
+});
+
+describe('pinnedInOtherNpmSection', () => {
+  const range = 'npm:@jsr/setu-ts__x@^1';
+  it('answers only for package.json, the opposite section and the identical range', () => {
+    const both = JSON.stringify({ dependencies: { x: range }, devDependencies: { y: range } });
+    expect(pinnedInOtherNpmSection(both, 'package.json', 'devDependencies', 'x', range)).toBe(true);
+    expect(pinnedInOtherNpmSection(both, 'package.json', 'dependencies', 'y', range)).toBe(true);
+    expect(pinnedInOtherNpmSection(both, 'package.json', 'dependencies', 'x', range)).toBe(false);
+    expect(pinnedInOtherNpmSection(both, 'package.json', 'devDependencies', 'x', 'other')).toBe(
+      false,
+    );
+    expect(pinnedInOtherNpmSection(both, 'deno.json', 'devDependencies', 'x', range)).toBe(false);
+    expect(pinnedInOtherNpmSection('{}', 'package.json', 'devDependencies', 'x', range)).toBe(
+      false,
+    );
+    expect(pinnedInOtherNpmSection('{not json', 'package.json', 'dependencies', 'x', range))
+      .toBe(false);
+  });
 });
 
 describe('withDependency', () => {
@@ -210,6 +245,18 @@ describe('withPluginWiring', () => {
     const result = withPluginWiring(source, 'cache-plugin')!;
     expect(result).toContain('// ...(devtool?.plugins ?? []),\n');
     expect(result).toContain('      CachePlugin(),\n      ...(devtool?.plugins ?? []),');
+  });
+  it('is not satisfied by a call to a different factory whose name ends the same', () => {
+    // `RedisCachePlugin()` is not a `CachePlugin()` registration; a substring
+    // match left the provider unwired AND suppressed the guidance line.
+    const source = CLASS_BASED_INGRESS_CONFIG.replace(
+      '...(devtool?.plugins ?? []),',
+      'RedisCachePlugin(),\n      custom.CachePlugin(),\n      ...(devtool?.plugins ?? []),',
+    );
+    const result = withPluginWiring(source, 'cache-plugin');
+    expect(result).toContain("import { CachePlugin } from '@setu-ts/cache-plugin';");
+    expect(result).toContain('      CachePlugin(),\n      ...(devtool?.plugins ?? []),');
+    expect(withPluginWiring(result!, 'cache-plugin')).toBeUndefined();
   });
   for (
     const [bare, symbol] of [
@@ -311,7 +358,11 @@ describe('runAddCommand', () => {
         const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
         expect(await h.run([bare]), bare).toBe(0);
         expect(h.out.join('\n'), bare).toContain(`configure its ${arm} arm`);
-        expect(h.out.join('\n'), bare).toContain('duplicate plugin name');
+        // Scoped: a gated arm registers nothing until configured, so an
+        // unconditional "would fail" was false for it.
+        expect(h.out.join('\n'), bare).toContain(
+          'Once that arm is configured, registering a second instance with app.register fails',
+        );
         expect(h.read('/app/setu.config.ts')).toBe(config);
         count += 1;
       }

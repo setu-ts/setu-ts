@@ -45,6 +45,24 @@ describe('the scaffolded application smoke test', () => {
           file.path === (runtime === 'deno' ? 'deno.json' : 'package.json')
         )!.contents;
         expect(manifest).toContain(`setu-ts${runtime === 'deno' ? '/' : '__'}testing@^${VERSION}`);
+        const parsed = JSON.parse(manifest);
+        const buildsFirst = host.manifest?.npmBuild !== undefined;
+        if (runtime === 'deno') {
+          // The smoke test boots an app that loads the frontend build, so with
+          // one the test task must build first, as `start` does (V8-39).
+          expect(parsed.tasks.test.startsWith('deno task build && ')).toBe(buildsFirst);
+        } else {
+          // A test-only package is a devDependency, where `setu add testing`
+          // puts it; in `dependencies` it ships to production and gets pinned
+          // twice by a later add.
+          expect(parsed.devDependencies['@setu-ts/testing'])
+            .toBe(`npm:@jsr/setu-ts__testing@^${VERSION}`);
+          expect(parsed.dependencies['@setu-ts/testing']).toBeUndefined();
+          expect(
+            parsed.scripts.test.startsWith(`${runtime === 'bun' ? 'bun' : 'npm'} run build && `),
+          )
+            .toBe(buildsFirst);
+        }
       });
     }
   }

@@ -921,9 +921,38 @@ function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, 
 function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
+    if (DEV_FRAMEWORK_PACKAGES.has(pkg)) continue;
     deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
   }
   return { ...deps, ...host.manifest?.npmDependencies };
+}
+
+/**
+ * Framework packages only the generated tests import. On an npm manifest they
+ * belong under `devDependencies`, where `setu add testing` also puts them, so a
+ * production install does not carry the test harness and a later `add` does not
+ * pin it in a second section. Deno's import map has no such split.
+ */
+const DEV_FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set(['testing']);
+
+/**
+ * The framework packages an npm manifest lists under `devDependencies`.
+ *
+ * @param host - The resolved template host
+ * @param runtime - The target runtime
+ * @returns Specifier → `npm:@jsr/…` range
+ */
+function npmDevFrameworkDependencies(
+  host: ResolvedHost,
+  runtime: TargetRuntime,
+): Record<string, string> {
+  const deps: Record<string, string> = {};
+  for (const pkg of frameworkPackages(host, runtime)) {
+    if (DEV_FRAMEWORK_PACKAGES.has(pkg)) {
+      deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
+    }
+  }
+  return deps;
 }
 
 /**
@@ -980,7 +1009,10 @@ function denoTasks(
     install: 'deno install --allow-scripts --min-dep-age 0',
     build: `deno task install && ${manifest.npmBuild.denoCommand}`,
     start: `deno task build && ${start}`,
-    ...test,
+    // The generated smoke test boots `createApp()`, which loads the server
+    // build, so a fresh project's first `deno task test` needs it as much as
+    // `start` does — without it the test fails on a missing build (V8-39).
+    test: `deno task build && ${test.test}`,
     ...host.extraTasks,
   };
 }
@@ -1181,9 +1213,12 @@ function npmScripts(
   // test` for `bun:test`, and `node --test` under the same loader `start` uses,
   // since the generated test is TypeScript.
   const test = runtime === 'bun' ? 'bun test' : `${NODE_RUNNER} --test`;
+  // With a frontend build the smoke test boots an app that loads it, so the
+  // test script builds first, as the Deno `test` task does.
+  const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
   return manifest?.npmBuild === undefined
     ? { start, test }
-    : { build: manifest.npmBuild.script, start, test };
+    : { build: manifest.npmBuild.script, start, test: `${build} && ${test}` };
 }
 
 /**
@@ -1516,6 +1551,7 @@ describe('application composition', () => {
             // Bun-with-no-template case and became unreachable, so it is gone
             // rather than left as a branch no input can take.
             devDependencies: {
+              ...npmDevFrameworkDependencies(host, runtime),
               ...runtimeDevDependencies(runtime),
               ...manifest?.npmDevDependencies,
             },

@@ -217,6 +217,25 @@ const STARTER_ARMS = [
   { symbol: 'createFullStackAppFromConfig', pkg: 'full-stack-starter', arms: FULL_STACK_ARMS },
 ] as const;
 
+/** Escapes a literal for use inside a regular expression. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Whether `pattern` matches where no identifier character and no member-access
+ * dot precedes it, so `CachePlugin(` is not found inside `RedisCachePlugin(` or
+ * `custom.CachePlugin(`. A spread (`...CachePlugin()`) still matches.
+ */
+function startsAtIdentifier(text: string, pattern: string): boolean {
+  return new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${pattern}`).test(text);
+}
+
+/** Whether `code` calls the factory bound to `name` (an identifier). */
+function callsFactory(code: string, name: string): boolean {
+  return startsAtIdentifier(code, `${escapeRegExp(name)}\\s*\\(`);
+}
+
 /** The concrete registration to show when configuration belongs to the application. */
 function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
@@ -263,7 +282,8 @@ function printWiringNote(
         `  See https://github.com/setu-ts/setu-ts/blob/develop/packages/starters/${starter.pkg}/README.md`,
       );
       log(
-        '  Registering a second instance with app.register would fail with a duplicate plugin name.',
+        '  Once that arm is configured, registering a second instance with app.register fails' +
+          ' with a duplicate plugin name.',
       );
       return;
     }
@@ -274,10 +294,13 @@ function printWiringNote(
     ? undefined
     : providerBinding(source, bare, factory);
   const code = source === undefined ? undefined : maskSourceCode(source);
-  if (binding !== undefined && (code?.includes(`${binding}(`) || code?.includes(`${binding} (`))) {
+  if (binding !== undefined && code !== undefined && callsFactory(code, binding)) {
     return;
   }
-  if (registration !== undefined && (source === undefined || !source.includes(registration))) {
+  if (
+    registration !== undefined &&
+    (source === undefined || !startsAtIdentifier(source, escapeRegExp(registration)))
+  ) {
     log(
       starter === undefined
         ? `  Register ${registration} in setu.config.ts.`
@@ -301,6 +324,39 @@ export function resolveAddablePackage(input: string): string | undefined {
 /** Every short name this command accepts, sorted, for a refusal to list. */
 export function addableNames(): readonly string[] {
   return [...ADDABLE.keys()].sort();
+}
+
+/**
+ * Reports a `package.json` that already pins the package, at this range, in the
+ * npm section this command would NOT write. A scaffold may list a package under
+ * `dependencies` that `setu add` places under `devDependencies` (or the reverse);
+ * adding it to the second section would pin it twice. Malformed JSON answers
+ * `false` so the caller's own parse reports it.
+ *
+ * @param source - The manifest's current contents
+ * @param file - The manifest's file name
+ * @param section - The section this command would write
+ * @param specifier - The package specifier
+ * @param range - The range this command would record
+ * @returns Whether the other npm section already holds the identical pin
+ */
+export function pinnedInOtherNpmSection(
+  source: string,
+  file: string,
+  section: string,
+  specifier: string,
+  range: string,
+): boolean {
+  if (file !== 'package.json') return false;
+  const other = section === 'devDependencies' ? 'dependencies' : 'devDependencies';
+  try {
+    const parsed = JSON.parse(source) as Record<string, unknown>;
+    const map = parsed[other];
+    return map !== null && typeof map === 'object' &&
+      (map as Record<string, unknown>)[specifier] === range;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -411,8 +467,7 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   const factory = importedBinding ?? provider.symbol;
   if (
     !source.includes(anchor) ||
-    code.includes(`${factory}(`) ||
-    code.includes(`${factory} (`)
+    callsFactory(code, factory)
   ) {
     return undefined;
   }
@@ -540,6 +595,11 @@ export async function runAddCommand(
       continue;
     }
     found = true;
+
+    if (pinnedInOtherNpmSection(source, target.file, target.section, specifier, target.range)) {
+      alreadyPresent = true;
+      continue;
+    }
 
     let updated: string | undefined;
     try {
