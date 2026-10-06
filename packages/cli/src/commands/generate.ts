@@ -484,9 +484,13 @@ export async function runGenerateCommand(
 
   // X4-4/F2: adoption happens only when a barrel this command WRITES claims a file
   // the CLI did not write. A claim into any other barrel is not an adoption — that
-  // barrel does not change — so the scan's candidates are filtered by the plan.
+  // barrel does not change — so the scan's candidates are filtered by the plan. A
+  // custom schematic is excluded outright: a matching path says nothing about what
+  // it wrote there, so the CLI cannot vouch that its barrel registers the file.
   const planned = new Set(generated.map((file) => file.path));
-  const adoptions = scan.adopted.filter((claim) => planned.has(claim.barrel));
+  const adoptions = customName === undefined
+    ? scan.adopted.filter((claim) => planned.has(claim.barrel))
+    : [];
 
   if (args.flags['dry-run'] === true) {
     for (const file of files) deps.log(`would create ${escapeName(file.path)}`);

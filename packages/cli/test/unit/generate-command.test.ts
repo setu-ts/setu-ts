@@ -800,6 +800,26 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     expect(h.err.lines.join('\n')).not.toContain('Adopted');
   });
 
+  it('reports no adoption when a custom schematic writes the barrel path', async () => {
+    // PR #416 review: a custom schematic may write `src/controllers/index.ts` with
+    // contents that register nothing, so a matching path cannot imply adoption.
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST('kernel'),
+      '/app/setu.config.ts': 'export function createApp() {}\n',
+      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+    });
+    const load = () =>
+      Promise.resolve({
+        schematic: (): readonly GeneratedFile[] => [
+          { path: 'src/controllers/index.ts', contents: 'export {};\n', managed: true },
+        ],
+      });
+
+    expect(await h.run(['custom', 'barrel', 'thing'], load)).toBe(0);
+    expect(h.fs.read('/app/src/controllers/index.ts')).toBe('export {};\n');
+    expect(h.err.lines.join('\n')).not.toContain('Adopted');
+  });
+
   it('adopts nothing when the generate is refused or only a dry run', async () => {
     const seed = {
       '/app/deno.json': DENO_MANIFEST('kernel'),
