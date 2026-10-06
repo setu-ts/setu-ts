@@ -578,7 +578,11 @@ downstream suite as proof.
 - No new network protocol or cryptographic limit is introduced. Connector limits, loopback binding,
   credentials and expiry are inherited from the existing diagnostics design.
 - Browser checks use separate contexts, local ephemeral ports, a 10-second page action timeout and a
-  15-minute CI job timeout. Ordinary unit/application gates remain browser-free.
+  15-minute CI job timeout. Harness reads are scoped to the repository, Chromium cache and OS
+  identity files; writes to browser scratch/build outputs; network to loopback; subprocesses to Deno
+  and the resolved Chromium executable. Dependencies and child processes receive an emptied
+  environment with only browser prerequisites restored. Ordinary unit/application gates remain
+  browser-free.
 
 ### Findings and required resolutions
 
@@ -602,10 +606,13 @@ sweep. Use disposable local credentials and scoped permissions with an emptied e
 the implementing and auditing contexts, exact HEAD, probe source/output, findings and verdict in the
 audit report. Any fix changes the audit target and requires a fresh re-audit before completion.
 
-Implementation clarifications: source locals use `Partial<typeof DEVTOOL_SOURCES>` so production's
-empty policy type-checks; factories without applicable source calls emit no unused local. The
-browser gate exposed native form posts carrying `Origin: null` under the default `no-referrer`
-policy. Only the full-stack example and scaffold now configure
-`httpSecurity.headers.referrerPolicy: 'same-origin'`: native actions preserve same-origin identity,
-while cross-origin referrers remain suppressed. Session CSRF and React Router's origin verification
-remain enabled. The audit must probe valid native actions and invalid cross-origin actions.
+Implementation clarifications: text rewrites mask comments and literals before recognizing
+standalone emitted calls/anchors within the recognized createApp body; module-level calls stay
+unchanged. Incomplete source and unfamiliar calls retain their bytes and receive manual guidance.
+Source locals use `Partial<typeof DEVTOOL_SOURCES>` so production's empty policy type-checks;
+factories without applicable source calls emit no unused local. The browser gate exposed native form
+posts carrying `Origin: null` under the default `no-referrer` policy. Only the full-stack example
+and scaffold now configure `httpSecurity.headers.referrerPolicy: 'same-origin'`: native actions
+preserve same-origin identity, while cross-origin referrers remain suppressed. Session CSRF and
+React Router's origin verification remain enabled. The audit must probe valid native actions and
+invalid cross-origin actions.

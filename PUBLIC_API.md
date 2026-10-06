@@ -8844,13 +8844,16 @@ Notes on the three that are not wired, and one that is conditional:
   `app.router.get(path, { handler, middleware: [requireX()] })` or `@UseGuards(requireX())` on a
   controller or handler. `auth-plugin` publishes no guard list, and the only barrel-shaped
   alternative — the global pipeline — would answer `401` for `/health`, `/metrics` and every public
-  route, because the emitted guard rejects a request with no `ctx.request.user`. A wiring that must
-  not be applied is not a wiring.
-- **`job` is transport-agnostic on purpose.** Registering it as a queue processor would start a
-  worker loop polling for a job name nothing enqueues; scheduling it needs a cron expression the
-  artifact does not carry. `QueuePluginOptions.processors` can express a chosen queue registration,
-  but cannot infer which transport or scheduling details this artifact needs. The emitted JSDoc
-  shows both calls; pick one.
+  route. The emitted guard delegates to `requirePermission('<name>')`, enforcing the installed
+  authorization provider for anonymous and insufficient-permission requests. A wiring that must not
+  be applied is not a wiring.
+- **`job` is transport-agnostic in functional projects.** Class-based projects require queue and
+  emit a decorated processor through the ingress seam; without queue the command refuses before
+  writing and names `setu add queue`. In functional projects, registering it as a queue processor
+  would start a worker loop polling for a job name nothing enqueues; scheduling it needs a cron
+  expression the artifact does not carry. `QueuePluginOptions.processors` can express a chosen queue
+  registration, but cannot infer which transport or scheduling details this artifact needs. The
+  emitted JSDoc shows both calls; pick one.
 - **`migration` has no consumer.** No plugin registers a CLI command, so there is no
   `setu db:migrate` and nothing reads migration files. Apply them from your own script or your ORM's
   tooling.

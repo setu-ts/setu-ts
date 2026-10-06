@@ -22,6 +22,16 @@ export async function browserGateCode(
 }
 
 if (import.meta.main) {
+  // Dependency code and child builds receive only the local harness environment.
+  const retained: Record<string, string> = {};
+  for (const name of ['PATH', 'HOME', 'CI', 'PLAYWRIGHT_BROWSERS_PATH']) {
+    const value = Deno.env.get(name);
+    if (value !== undefined) retained[name] = value;
+  }
+  for (const name of Object.keys(Deno.env.toObject())) Deno.env.delete(name);
+  for (const [name, value] of Object.entries(retained)) Deno.env.set(name, value);
+  // Playwright's pinned WSL detector otherwise asks for all of /proc.
+  Deno.env.set('__IS_WSL_TEST__', '1');
   const { chromium } = await import('npm:playwright@1.63.0');
   const code = await browserGateCode(
     chromium.executablePath(),
@@ -40,17 +50,26 @@ if (import.meta.main) {
   }
   const root = new URL('../../../', import.meta.url).pathname;
   const scratch = `${root}.tmp/browser`;
+  const executable = chromium.executablePath();
+  const cache = retained['PLAYWRIGHT_BROWSERS_PATH'] ?? `${retained['HOME']}/.cache/ms-playwright`;
   await Deno.mkdir(scratch, { recursive: true });
   const result = await new Deno.Command(Deno.execPath(), {
     args: [
       'test',
-      '-A',
+      '--no-prompt',
+      `--allow-read=.,${cache},/etc/os-release,/etc/lsb-release`,
+      '--allow-write=.tmp/browser,apps/full-stack/build',
+      '--allow-net=127.0.0.1',
+      '--allow-env',
+      '--allow-sys=hostname,cpus,osRelease,uid,gid,homedir',
+      `--allow-run=${Deno.execPath()},${executable}`,
       '--config',
       'apps/full-stack/deno.json',
       'apps/full-stack/browser/full-stack.browser.test.ts',
     ],
     cwd: root,
-    env: { TMPDIR: scratch },
+    clearEnv: true,
+    env: { ...retained, __IS_WSL_TEST__: '1', TMPDIR: scratch },
     stdout: 'inherit',
     stderr: 'inherit',
   }).output();

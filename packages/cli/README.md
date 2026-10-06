@@ -113,23 +113,23 @@ setu generate service user-profile
 setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
-| Schematic          | Emits                                                                                                         | Requires           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                  |
-| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin` |
-| `service`          | `src/services/<name>.service.ts`                                                                              | —                  |
-| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                  |
-| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`       |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin` |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                  |
-| `job`              | `src/jobs/<name>.job.ts`                                                                                      | —                  |
-| `guard`            | `src/guards/<name>.guard.ts`                                                                                  | `auth-plugin`      |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`    |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`   |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`      |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`      |
-| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`    |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`  |
+| Schematic          | Emits                                                                                                         | Requires                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                                      |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin`                     |
+| `service`          | `src/services/<name>.service.ts`                                                                              | —                                      |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                                      |
+| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`                           |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin`                     |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                                      |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: ingress processor                                                      | `queue-plugin` in class-based projects |
+| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                               | `auth-plugin`                          |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`                        |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`                       |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`                          |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`                          |
+| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`                        |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`                      |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.
@@ -421,3 +421,16 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#cli-setu-tscli).
+
+## Development source policies and registration guidance
+
+Opted-in Deno scaffolds and `setu devtool enable` write the CLI-managed `src/devtool/diagnostics.ts`
+approval module. `setu add` refreshes an existing module, using artifact names and env-example keys
+rather than values. Source options activate only when the factory receives its devtool argument;
+production keeps disabled defaults. Unknown source shapes receive manual guidance. The module is
+regenerated, so preserve application-specific policy outside that file.
+
+Adding one of the twelve safe zero-configuration providers wires its emitted plugin-list anchor in
+either style. Starter compositions instead name their option arm; configure that arm to avoid a
+duplicate registration. Manifest updates preserve existing key order. Deno frontend projects update
+imports without adding unused framework dependencies to their frontend package.json.

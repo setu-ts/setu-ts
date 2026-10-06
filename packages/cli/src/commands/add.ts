@@ -36,6 +36,8 @@ import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import {
   DEVTOOL_SOURCES_MODULE,
+  factoryScope,
+  maskSourceCode,
   readDevtoolSourceNames,
   renderDevtoolSources,
   withDevtoolSourceWiring,
@@ -144,10 +146,10 @@ interface IPluginWiring {
 }
 
 /**
- * Provider plugins that a class-based ingress config can activate safely.
+ * Provider plugins that an emitted application config can activate safely.
  *
  * Every factory here has an in-memory, zero-configuration default. That makes
- * adding it to the CLI-generated class-based config a coherent development
+ * adding it to the CLI-generated config a coherent development
  * composition; providers that need credentials or a user-owned choice remain
  * manifest-only like every other `setu add` package.
  */
@@ -232,6 +234,11 @@ function registrationLine(bare: string): string | undefined {
   if (bare === 'react-router-plugin') {
     return "ReactRouterPlugin({ serverBuildPath: '<server-build-module>' })";
   }
+  if (bare === 'multi-tenancy-plugin') return "MultiTenancyPlugin({ resolver: 'header' })";
+  if (bare === 'service-discovery-plugin') {
+    return "ServiceDiscoveryPlugin({ provider: 'static', services: {} })";
+  }
+  if (bare === 'cloudflare-plugin') return 'CloudflarePlugin({ env })';
   return undefined;
 }
 
@@ -258,6 +265,14 @@ function printWiringNote(
     }
   }
   const registration = registrationLine(bare);
+  const factory = registration?.slice(0, registration.indexOf('('));
+  const binding = source === undefined || factory === undefined
+    ? undefined
+    : providerBinding(source, bare, factory);
+  const code = source === undefined ? undefined : maskSourceCode(source);
+  if (binding !== undefined && (code?.includes(`${binding}(`) || code?.includes(`${binding} (`))) {
+    return;
+  }
   if (registration !== undefined && (source === undefined || !source.includes(registration))) {
     log(
       starter === undefined
@@ -343,8 +358,14 @@ export function withDependency(
 function providerBinding(source: string, bare: string, symbol: string): string | undefined {
   const importStart = 'import {';
   const importEnd = `} from '@setu-ts/${bare}';`;
+  const code = maskSourceCode(source);
+  if (code === undefined) return undefined;
+  let offset = 0;
   for (const line of source.split('\n')) {
     const trimmed = line.trim();
+    const codeLine = code.slice(offset, offset + line.length).trim();
+    offset += line.length + 1;
+    if (!codeLine.startsWith('import {')) continue;
     if (!trimmed.startsWith(importStart) || !trimmed.endsWith(importEnd)) continue;
     const specifiers = trimmed.slice(importStart.length, -importEnd.length).split(',');
     for (const specifier of specifiers) {
@@ -372,20 +393,30 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   if (provider === undefined) return undefined;
 
   const anchor = '...(devtool?.plugins ?? []),';
+  const scope = factoryScope(source);
+  const code = scope?.code.slice(scope.start, scope.end);
+  const anchorMatch = code === undefined
+    ? null
+    : /^[ \t]*\.\.\.\(devtool\?\.plugins \?\? \[\]\),[ \t]*$/m.exec(code);
+  if (code === undefined || anchorMatch === null) {
+    return undefined;
+  }
   const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
   const importedBinding = providerBinding(source, bare, provider.symbol);
   if (importedBinding === undefined && source.includes(`'@setu-ts/${bare}'`)) return undefined;
   const factory = importedBinding ?? provider.symbol;
   if (
     !source.includes(anchor) ||
-    source.includes(`${factory}(`) ||
-    source.includes(`${factory} (`)
+    code.includes(`${factory}(`) ||
+    code.includes(`${factory} (`)
   ) {
     return undefined;
   }
 
   const withImport = importedBinding === undefined ? `${providerImport}\n${source}` : source;
-  const insertion = withImport.indexOf(anchor);
+  const insertion = anchorMatch.index + anchorMatch[0].indexOf(anchor) +
+    scope!.start +
+    (importedBinding === undefined ? providerImport.length + 1 : 0);
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
   const indentation = withImport.slice(lineStart, insertion);
   return `${withImport.slice(0, insertion)}${factory}(),\n${indentation}${
@@ -394,8 +425,8 @@ export function withPluginWiring(source: string, bare: string): string | undefin
 }
 
 /**
- * Adds a framework package to the project's manifest. For the six ingress
- * providers, it also activates the provider in an unmodified class-based
+ * Adds a framework package to the project's manifest. For zero-configuration
+ * providers, it also activates the provider in a recognized emitted
  * scaffold, whose `DecoratorPlugin` already receives the ingress barrel.
  *
  * Reports the install command rather than spawning it. That is deliberate: on

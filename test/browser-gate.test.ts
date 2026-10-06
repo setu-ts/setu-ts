@@ -20,6 +20,11 @@ describe('dedicated browser gate', () => {
   it('pins CI and the local installer to the suite version, without enrolling browser skips', async () => {
     const ci = await Deno.readTextFile('.github/workflows/ci.yml');
     const suite = await Deno.readTextFile('apps/full-stack/browser/full-stack.browser.test.ts');
+    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
+      tasks: Record<string, string>;
+    };
+    expect(manifest.tasks['check:browser']).not.toContain(' -A ');
+    expect(manifest.tasks['check:browser']).toContain('--allow-run=deno');
     expect(ci).toContain(`playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium`);
     expect(suite).toContain(`npm:playwright@${PLAYWRIGHT_VERSION}`);
     expect(BROWSER_INSTALL_COMMAND).toContain(`playwright@${PLAYWRIGHT_VERSION} install chromium`);

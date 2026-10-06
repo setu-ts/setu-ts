@@ -4,6 +4,8 @@ import { expect } from '@std/expect';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { DEVTOOL_SOURCES } from '../fixtures/devtool-source-shapes.ts';
 import {
+  factoryScope,
+  maskSourceCode,
   readDevtoolSourceNames,
   renderDevtoolSources,
   withDevtoolSourceWiring,
@@ -79,7 +81,7 @@ describe('development source policies', () => {
   it('gates known zero-option and object-option calls on the devtool argument', () => {
     const source = "import { CachePlugin as AppCache } from '@setu-ts/cache-plugin';\n" +
       "import { HealthPlugin } from '@setu-ts/health-plugin';\n" + signature +
-      '\n return createApplication({ plugins: [AppCache(), HealthPlugin({ indicators: [] }),] });\n}';
+      '\n return createApplication({ plugins: [\n  AppCache(),\n  HealthPlugin({ indicators: [] }),\n] });\n}';
     const wired = withDevtoolSourceWiring(source, new Set(['cache-plugin', 'health-plugin']));
     expect(wired.manual).toEqual([]);
     expect(wired.source).toContain('devtool === undefined ? {} : DEVTOOL_SOURCES');
@@ -87,6 +89,77 @@ describe('development source policies', () => {
     expect(wired.source).toContain('...{ indicators: [] }, ...sources.health');
     expect(withDevtoolSourceWiring(wired.source, new Set(['cache-plugin', 'health-plugin'])).source)
       .toBe(wired.source);
+  });
+
+  it('never rewrites plugin examples inside comments, literals or unfamiliar calls', () => {
+    const imports = "import { CachePlugin as $Cache } from '@setu-ts/cache-plugin';\n";
+    for (
+      const fake of [
+        '// $Cache(),',
+        '/*\n$Cache(),\n*/',
+        "const text = '\\n$Cache(),';",
+        'const text = `\n$Cache(),\n`;',
+      ]
+    ) {
+      const source = imports + signature + '\n' + fake + '\n $Cache(customOptions),\n}';
+      const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
+      expect(result.source).toBe(source);
+      expect(result.manual).toEqual(['$Cache({ ...options, ...sources.cache })']);
+    }
+    const source = imports + '// ): IKernelApplication {\n' + signature +
+      '\n // ...sources.cache\n $Cache(),\n}';
+    const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
+    expect(result.source).toContain('// ): IKernelApplication {\n');
+    expect(result.source).toContain('$Cache({ ...sources.cache })');
+  });
+
+  it('preserves source positions while refusing incomplete literals and comments', () => {
+    for (
+      const source of [
+        "'unterminated",
+        '"unterminated',
+        '`unterminated',
+        '/* unterminated',
+        "'trailing\\",
+      ]
+    ) {
+      expect(maskSourceCode(source)).toBeUndefined();
+    }
+    const source =
+      'const a = \'it\\\'s\'; /* block\r\ncomment */ const b = "double\\"quote"; // tail\r\nconst c = `template\\\nline`; // eof';
+    const masked = maskSourceCode(source)!;
+    expect(masked.length).toBe(source.length);
+    expect(masked.match(/[\r\n]/g)).toEqual(source.match(/[\r\n]/g));
+    expect(masked).toContain('const a =');
+    expect(masked).not.toContain('unterminated');
+    const commentedImport = "/*\nimport { CachePlugin } from '@setu-ts/cache-plugin';\n*/\n" +
+      signature + '\n CachePlugin(),\n}';
+    expect(withDevtoolSourceWiring(commentedImport, new Set(['cache-plugin'])).source).toBe(
+      commentedImport,
+    );
+  });
+
+  it('preserves module-scope calls and selects only the complete createApp body', () => {
+    const outside = 'const reusedCache = [\n  CachePlugin(),\n];\n';
+    const source = "import { CachePlugin } from '@setu-ts/cache-plugin';\n" + outside +
+      signature + '\n CachePlugin(customOptions),\n}\n' + outside;
+    const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
+    expect(result.source).toBe(source);
+    expect(result.manual).toEqual(['CachePlugin({ ...options, ...sources.cache })']);
+    for (
+      const incomplete of [
+        "'broken",
+        'export function createApp(',
+        'export function createApp(): Promise<IKernelApplication> {',
+        'export function createApp() {',
+      ]
+    ) {
+      expect(factoryScope(incomplete)).toBeUndefined();
+    }
+    const nested =
+      "export function createApp(env = read(() => ({ value: ')' }))) { return { literal: '}' }; }";
+    expect(factoryScope(nested)?.code.slice(factoryScope(nested)!.start, factoryScope(nested)!.end))
+      .toContain('return { literal:');
   });
 
   it('leaves unclassified factories and calls untouched and names the manual option', () => {
@@ -137,5 +210,20 @@ describe('development source policies', () => {
     expect(renderDevtoolSources(packages, custom).contents).not.toContain('canary-env-value');
     const escaped = await readDevtoolSourceNames(fs, '/shop', packages, "envFilePath: '../other'");
     expect(escaped.envKeys).toEqual(['PORT', 'SECRET']);
+    const customTransport = await readDevtoolSourceNames(
+      fs,
+      '/shop',
+      packages,
+      'transport: "custom"',
+    );
+    expect(customTransport.customBackplane).toBe(true);
+    const examples = await readDevtoolSourceNames(
+      fs,
+      '/shop',
+      packages,
+      '// rbac: {}\n// transport: "custom"',
+    );
+    expect(examples.authorization).toBe(false);
+    expect(examples.customBackplane).toBe(false);
   });
 });

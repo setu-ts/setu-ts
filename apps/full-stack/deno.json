@@ -7,7 +7,7 @@
     "start": "deno task build && deno run --allow-net --allow-env --allow-read main.ts",
     "smoke": "deno task build && deno run -A smoke.ts",
     "test": "deno task check:app && deno test -A test/",
-    "browser": "deno run -A browser/harness.ts"
+    "browser": "cd ../.. && deno run --allow-read=.,$HOME/.cache/ms-playwright,/etc/os-release,/etc/lsb-release --allow-write=.tmp/browser --allow-env --allow-sys=hostname,cpus,osRelease,uid,gid,homedir --allow-run=deno apps/full-stack/browser/harness.ts"
   },
   "compilerOptions": {
     "strict": true,

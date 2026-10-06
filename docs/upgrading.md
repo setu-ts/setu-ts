@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Preserve same-origin identity on native full-stack forms (M101g)
+### Set `referrerPolicy` for native full-stack forms (M101g)
 
 Existing full-stack starter compositions should configure
 `httpSecurity: { headers: { referrerPolicy: 'same-origin' } }` in `setu.config.ts`. The default
@@ -20,7 +20,7 @@ Existing full-stack starter compositions should configure
 refuses. The full-stack scaffold now sets `same-origin`: cross-origin referrers remain suppressed,
 and session CSRF and React Router origin checks remain enabled.
 
-### Enable development source policies (M101g)
+### Enable development policies with `setu devtool enable` (M101g)
 
 Run `setu devtool enable` on an eligible Deno project to generate the CLI-managed
 `src/devtool/diagnostics.ts` policy and wire recognized plugin calls. Manual configurations receive

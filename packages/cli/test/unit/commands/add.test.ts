@@ -196,6 +196,21 @@ describe('withDependency', () => {
 });
 
 describe('withPluginWiring', () => {
+  it('preserves inline, commented and incomplete anchors, and ignores commented calls', () => {
+    for (
+      const source of [
+        'const plugins = [...(devtool?.plugins ?? []),];',
+        '// ...(devtool?.plugins ?? []),',
+        '/*\n...(devtool?.plugins ?? []),\n*/',
+        "'unterminated\n...(devtool?.plugins ?? []),",
+      ]
+    ) expect(withPluginWiring(source, 'cache-plugin')).toBeUndefined();
+    const source = '// CachePlugin()\n// ...(devtool?.plugins ?? []),\n' +
+      CLASS_BASED_INGRESS_CONFIG;
+    const result = withPluginWiring(source, 'cache-plugin')!;
+    expect(result).toContain('// ...(devtool?.plugins ?? []),\n');
+    expect(result).toContain('      CachePlugin(),\n      ...(devtool?.plugins ?? []),');
+  });
   for (
     const [bare, symbol] of [
       ['cqrs-plugin', 'CqrsPlugin'],
@@ -348,12 +363,17 @@ describe('runAddCommand', () => {
         ['graphql', 'GraphqlPlugin'],
         ['static', 'StaticPlugin'],
         ['react-router', 'ReactRouterPlugin'],
+        ['multi-tenancy', 'MultiTenancyPlugin'],
+        ['service-discovery', 'ServiceDiscoveryPlugin'],
       ]
     ) {
       const h = harness({ '/app/deno.json': DENO_MANIFEST });
       expect(await h.run([pkg!]), h.err.join('\n')).toBe(0);
       expect(h.out.join('\n')).toContain(`Register ${factory}({`);
     }
+    const worker = harness({ '/app/deno.json': DENO_MANIFEST, '/app/wrangler.jsonc': '{}' });
+    expect(await worker.run(['cloudflare']), worker.err.join('\n')).toBe(0);
+    expect(worker.out.join('\n')).toContain('Register CloudflarePlugin({ env })');
   });
 
   it('refreshes an opted-in source module and gates the newly wired plugin', async () => {
@@ -369,6 +389,7 @@ describe('runAddCommand', () => {
     expect(await h.run(['cache'])).toBe(0);
     expect(h.read('/app/src/devtool/diagnostics.ts')).toContain('CacheDiagnosticsOptions');
     expect(h.read('/app/setu.config.ts')).toContain('...sources.cache');
+    expect(h.out.join('\n')).not.toContain('Register CachePlugin');
     const noDevtool = harness({ '/app/deno.json': DENO_MANIFEST });
     expect(await noDevtool.run(['cache'])).toBe(0);
     expect(noDevtool.fs.has('/app/src/devtool/diagnostics.ts')).toBe(false);

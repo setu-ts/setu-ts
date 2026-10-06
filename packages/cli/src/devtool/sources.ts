@@ -91,6 +91,92 @@ const ROWS: readonly ISourceRow[] = [
   },
 ];
 
+/**
+ * Masks comments and literals, preserving positions and line breaks.
+ * Incomplete comments/literals remain unclassified and must not be rewritten.
+ * @param source - Developer-owned configuration text
+ * @returns Code-only text, or undefined for an incomplete literal/comment
+ */
+export function maskSourceCode(source: string): string | undefined {
+  let mode: 'code' | 'line' | 'block' | "'" | '"' | '`' = 'code';
+  const result: string[] = [];
+  const blank = (c: string) => c === '\n' || c === '\r' ? c : ' ';
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]!;
+    const next = source[i + 1];
+    if (mode === 'code') {
+      if (c === '/' && (next === '/' || next === '*')) {
+        mode = next === '/' ? 'line' : 'block';
+        result.push('  ');
+        i++;
+      } else if (c === "'" || c === '"' || c === '`') {
+        mode = c;
+        result.push(' ');
+      } else result.push(c);
+    } else if (mode === 'line') {
+      result.push(blank(c));
+      if (c === '\n' || c === '\r') mode = 'code';
+    } else if (mode === 'block') {
+      if (c === '*' && next === '/') {
+        result.push('  ');
+        i++;
+        mode = 'code';
+      } else result.push(blank(c));
+    } else {
+      result.push(blank(c));
+      if (c === '\\' && next !== undefined) {
+        result.push(blank(next));
+        i++;
+      } else if (c === mode) mode = 'code';
+    }
+  }
+  return mode === 'code' || mode === 'line' ? result.join('') : undefined;
+}
+
+/** Returns the executable body of the recognized synchronous createApp factory. */
+export function factoryScope(source: string): {
+  readonly code: string;
+  readonly header: number;
+  readonly start: number;
+  readonly end: number;
+} | undefined {
+  const code = maskSourceCode(source);
+  if (code === undefined) return undefined;
+  const header = /^export function createApp\s*\(/m.exec(code);
+  if (header === null) return undefined;
+  let cursor = header.index + header[0].length;
+  let depth = 1;
+  for (; cursor < code.length && depth > 0; cursor++) {
+    if (code[cursor] === '(') depth++;
+    if (code[cursor] === ')') depth--;
+  }
+  const opening = /^\s*(?:: I(?:Kernel)?Application)?\s*\{/.exec(code.slice(cursor));
+  if (depth !== 0 || opening === null) return undefined;
+  const start = cursor + opening[0].length;
+  depth = 1;
+  for (cursor = start; cursor < code.length; cursor++) {
+    if (code[cursor] === '{') depth++;
+    if (code[cursor] === '}' && --depth === 0) {
+      return { code, header: header.index, start, end: cursor };
+    }
+  }
+  return undefined;
+}
+
+/** Reads literal policy discriminants only at code positions, never within examples. */
+function policyFlags(
+  source: string,
+): Required<Pick<IDevtoolSourceNames, 'authorization' | 'customBackplane'>> {
+  const code = maskSourceCode(source);
+  return {
+    authorization: code !== undefined && /\brbac\s*:/.test(code),
+    customBackplane: code !== undefined &&
+      [...source.matchAll(/\btransport\s*:\s*(['"])custom\1/g)].some((match) =>
+        code.slice(match.index, match.index + 'transport'.length) === 'transport'
+      ),
+  };
+}
+
 /** Restrict emitted aliases to bounded, printable identifiers and stable order. */
 function approved(names: readonly string[], limit: number): readonly string[] {
   return [...new Set(names.filter((name) => /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)))]
@@ -185,15 +271,19 @@ export function withDevtoolSourceWiring(source: string, installed: ReadonlySet<s
   readonly source: string;
   readonly manual: readonly string[];
 } {
+  const scope = factoryScope(source);
   const names = {
     project: 'app',
-    authorization: /\brbac\s*:/.test(source),
-    customBackplane: /transport:\s*'custom'/.test(source),
+    ...policyFlags(source),
   };
   const rows = sourceRows(installed, names);
   if (rows.length === 0) return { source, manual: [] };
-  const opening = /\): I(?:Kernel)?Application \{/;
-  if (!opening.test(source) || !source.includes('devtool?: { plugins?: readonly IPlugin[];')) {
+  if (
+    scope === undefined ||
+    !scope.code.slice(scope.header, scope.start).includes(
+      'devtool?: { plugins?: readonly IPlugin[];',
+    )
+  ) {
     return {
       source,
       manual: rows.map((row) => `${row.symbol}({ ...options, ...sources.${row.key} })`),
@@ -202,9 +292,16 @@ export function withDevtoolSourceWiring(source: string, installed: ReadonlySet<s
   let updated = source;
   const manual: string[] = [];
   for (const row of rows) {
-    const imported = new RegExp(`import \\{ ([^\\n]+) \\} from '@setu-ts/${row.pkg}';`).exec(
+    const imported = new RegExp(`^import \\{ ([^\\n]+) \\} from '@setu-ts/${row.pkg}';`, 'm').exec(
       updated,
     );
+    if (
+      imported !== null &&
+      maskSourceCode(updated)?.slice(imported.index, imported.index + 6) !== 'import'
+    ) {
+      manual.push(`${row.symbol}({ ...options, ...sources.${row.key} })`);
+      continue;
+    }
     const binding = imported?.[1]?.split(',').map((item) => item.trim().split(/\s+as\s+/))
       .find(([symbol]) => symbol === row.symbol);
     const symbol = binding?.[1] ?? binding?.[0];
@@ -212,27 +309,46 @@ export function withDevtoolSourceWiring(source: string, installed: ReadonlySet<s
       manual.push(`${row.symbol}({ ...options, ...sources.${row.key} })`);
       continue;
     }
-    if (updated.includes(`...sources.${row.key}`)) continue;
+    const currentScope = factoryScope(updated)!;
+    const updatedCode = currentScope.code.slice(currentScope.start, currentScope.end);
+    if (updatedCode.includes(`...sources.${row.key}`)) continue;
     const escapedSymbol = symbol.replaceAll('$', '\\$');
-    const call = new RegExp(`(?<![\\w$.])${escapedSymbol}\\((\\{[^()]*?\\}|)\\),`);
-    if (!call.test(updated)) {
+    const call = new RegExp(`^[ \\t]*${escapedSymbol}\\((\\{[^()]*?\\}|)\\),[ \\t]*$`, 'm').exec(
+      updatedCode,
+    );
+    if (call === null) {
       manual.push(`${symbol}({ ...options, ...sources.${row.key} })`);
       continue;
     }
-    updated = updated.replace(
-      call,
-      (_whole, args: string) => `${symbol}(${withSourceArgs(row.pkg, args, installed, names)}),`,
-    );
+    const offset = call.index + currentScope.start;
+    const originalCall = updated.slice(offset, offset + call[0].length);
+    const start = originalCall.indexOf('(') + 1;
+    const end = originalCall.lastIndexOf(')');
+    const replacement = originalCall.slice(0, start) +
+      withSourceArgs(row.pkg, originalCall.slice(start, end), installed, names) +
+      originalCall.slice(end);
+    updated = updated.slice(0, offset) + replacement +
+      updated.slice(offset + call[0].length);
   }
   if (updated === source) return { source, manual };
-  if (!source.includes("import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';")) {
+  const sourceImport = /^import \{ DEVTOOL_SOURCES \} from '\.\/src\/devtool\/diagnostics\.ts';$/m
+    .exec(updated);
+  if (
+    sourceImport === null ||
+    maskSourceCode(updated)?.slice(sourceImport.index, sourceImport.index + 6) !== 'import'
+  ) {
     updated = "import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';\n" + updated;
   }
-  if (!source.includes('const sources: Partial<typeof DEVTOOL_SOURCES>')) {
-    updated = updated.replace(
-      opening,
-      '$&\n  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;',
-    );
+  const finalScope = factoryScope(updated)!;
+  if (
+    !finalScope.code.slice(finalScope.start, finalScope.end).includes(
+      'const sources: Partial<typeof DEVTOOL_SOURCES>',
+    )
+  ) {
+    const offset = finalScope.start;
+    updated = updated.slice(0, offset) +
+      '\n  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;' +
+      updated.slice(offset);
   }
   return { source: updated, manual };
 }
@@ -270,7 +386,6 @@ export async function readDevtoolSourceNames(
     project: dir.split('/').at(-1) ?? 'app',
     artifacts,
     envKeys,
-    authorization: /\brbac\s*:/.test(config),
-    customBackplane: /transport:\s*'custom'/.test(config),
+    ...policyFlags(config),
   };
 }
