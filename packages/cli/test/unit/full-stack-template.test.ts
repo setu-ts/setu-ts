@@ -434,3 +434,22 @@ describe('full-stack app files | module-level shape', () => {
     expect(model).not.toContain('.server.ts');
   });
 });
+
+describe('full-stack gRPC csrf exclusion', () => {
+  // Audit round 5 (C-R5): the generated configuration must stay inside the language
+  // the CLI's own config reader classifies, so the exclusion is `new RegExp('…')`
+  // rather than a regex literal, and a base path that would need escaping is refused.
+  it('emits a RegExp constructor with no regex literal and no backslash', () => {
+    const args = FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath: '/grpc' });
+    expect(args).toContain("csrf: { exclude: [new RegExp('^/grpc(?:/|$)')] },");
+    expect(args).not.toContain('\\');
+    expect(args).not.toMatch(/\[\//);
+  });
+
+  it('refuses a base path that is not a single plain segment', () => {
+    for (const grpcBasePath of ['/a.b', '/a/b', 'grpc', '/']) {
+      expect(() => FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath }))
+        .toThrow('must be a single plain path segment');
+    }
+  });
+});

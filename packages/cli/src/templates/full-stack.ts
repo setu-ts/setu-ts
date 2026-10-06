@@ -78,9 +78,17 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const config = runtime === 'cloudflare-workers'
     ? ''
     : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
+  // `new RegExp('…')` rather than a regex literal: a generated configuration must
+  // stay inside the language the CLI's own config reader classifies (no regex
+  // literal, no backslash), or `setu add` and `setu devtool enable` would treat
+  // the CLI's own output as unfamiliar (audit round 5, C-R5). The base path is a
+  // fixed literal path segment, so it needs no escaping inside the pattern.
+  if (grpcBasePath !== undefined && !/^\/[A-Za-z0-9_-]+$/.test(grpcBasePath)) {
+    throw new Error(`gRPC base path ${grpcBasePath} must be a single plain path segment.`);
+  }
   const csrf = grpcBasePath === undefined
     ? '{}'
-    : `{ exclude: [/^${grpcBasePath.replaceAll('/', '\\/')}(?:\\/|$)/] }`;
+    : `{ exclude: [new RegExp('^${grpcBasePath}(?:/|$)')] }`;
 
   // The RETURN TYPE annotation is X5-2's whole fix, and it is load-bearing
   // rather than decorative. TypeScript does NOT apply excess-property checking

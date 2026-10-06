@@ -308,6 +308,19 @@ describe('withPluginWiring', () => {
           'c,',
         ],
         [`${imported}const opener = \`\${\`/*\`}\`;\nconst c = CachePlugin();\n// */\n`, 'c,'],
+        // Audit round 5: a call after a U+2028/U+2029-terminated comment, behind a
+        // hashbang or HTML-like comment, through a computed dynamic import, an
+        // import-map alias, or in a private field — all refused.
+        [`${imported}// note\u2028const c = CachePlugin();\n`, 'c,'],
+        [`${imported}// note\u2029const c = CachePlugin();\n`, 'c,'],
+        [`#!/* x\n${imported}const c = CachePlugin();\n// */\n`, 'c,'],
+        [`${imported}<!-- /*\nconst c = CachePlugin();\n// */\n`, 'c,'],
+        [
+          `${imported}const ns = await import('@setu-ts/' + 'cache-plugin');\nns.CachePlugin();\n`,
+          '',
+        ],
+        [`${imported}import * as cp from 'cachealias';\nconst c = cp.CachePlugin();\n`, 'c,'],
+        [imported, 'éCachePlugin(),'],
       ] as const
     ) expect(withPluginWiring(listed(prefix, item), 'cache-plugin'), prefix).toBeUndefined();
     // Its own import is not a use, and a commented call is not one either.
@@ -325,6 +338,31 @@ describe('withPluginWiring', () => {
     expect(await h.run(['cache'])).toBe(0);
     expect(h.read('/app/setu.config.ts')).toBe(config);
     expect(h.out.join('\n')).toContain('Register CachePlugin() in setu.config.ts.');
+  });
+
+  // Audit round 5 (G-R5): a string, a hashbang or a non-ASCII identifier holding
+  // the registration's text left the plugin unregistered with nothing printed.
+  // Each is now refused AND the guidance prints; the config is left untouched.
+  it('prints guidance and leaves the config alone for refused configurations', async () => {
+    const imported = "import { CachePlugin } from '@setu-ts/cache-plugin';\n";
+    for (
+      const config of [
+        imported + "export const note = 'CachePlugin()';\n" + CLASS_BASED_INGRESS_CONFIG,
+        '#! CachePlugin()\n' + imported + CLASS_BASED_INGRESS_CONFIG,
+        imported + 'const éCachePlugin = () => CachePlugin;\n' + CLASS_BASED_INGRESS_CONFIG,
+      ]
+    ) {
+      const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+      expect(await h.run(['cache']), config).toBe(0);
+      expect(h.read('/app/setu.config.ts'), config).toBe(config);
+      expect(h.out.join('\n'), config).toContain('Register CachePlugin() in setu.config.ts.');
+    }
+  });
+
+  it('counts the package only outside comments', () => {
+    // A comment naming the package is not an import; counting it refused the wire.
+    const source = '// install @setu-ts/cache-plugin first\n' + CLASS_BASED_INGRESS_CONFIG;
+    expect(withPluginWiring(source, 'cache-plugin')).toContain('CachePlugin(),');
   });
 
   it('is not satisfied by a call to a different factory whose name ends the same', () => {

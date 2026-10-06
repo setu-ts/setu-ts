@@ -222,20 +222,6 @@ const STARTER_ARMS = [
   { symbol: 'createFullStackAppFromConfig', pkg: 'full-stack-starter', arms: FULL_STACK_ARMS },
 ] as const;
 
-/** Escapes a literal for use inside a regular expression. */
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Whether `pattern` matches where no identifier character and no member-access
- * dot precedes it, so `CachePlugin(` is not found inside `RedisCachePlugin(` or
- * `custom.CachePlugin(`. A spread (`...CachePlugin()`) still matches.
- */
-function startsAtIdentifier(text: string, pattern: string): boolean {
-  return new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${pattern}`).test(text);
-}
-
 /** The concrete registration to show when configuration belongs to the application. */
 function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
@@ -303,10 +289,10 @@ function printWiringNote(
   ) {
     return;
   }
-  if (
-    registration !== undefined &&
-    (source === undefined || !startsAtIdentifier(source, escapeRegExp(registration)))
-  ) {
+  // No raw-text check here: a string or comment containing the registration's
+  // text silenced the guidance for a plugin nothing registers (audit round 5).
+  // Only a real call in classified code, checked above, suppresses it.
+  if (registration !== undefined) {
     log(
       starter === undefined
         ? `  Register ${registration} in setu.config.ts.`

@@ -122,42 +122,124 @@ export function maskComments(source: string): string | undefined {
   return maskSource(source, false);
 }
 
-/** The one masking state machine; `blankLiterals` selects which mask it emits. */
+/** Line terminators as JavaScript defines them; each ends a `//` comment. */
+function isLineTerminator(c: string): boolean {
+  return c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+}
+
+/** Code outside comments and strings is printable ASCII and plain whitespace. */
+function isCodeChar(c: string): boolean {
+  return (c >= ' ' && c <= '~') || c === '\t' || c === '\n' || c === '\r';
+}
+
+/**
+ * Identifiers whose presence in code takes the configuration out of what a lexer
+ * can decide: reflection, prototype mutation and global object access can change
+ * what an options object holds without the text saying so (audit round 5).
+ */
+const UNDECIDABLE_IDENTIFIERS: ReadonlySet<string> = new Set([
+  'Object',
+  'Reflect',
+  'Proxy',
+  'constructor',
+  'prototype',
+  '__proto__',
+  'setPrototypeOf',
+  'defineProperty',
+  'defineProperties',
+  'globalThis',
+  'self',
+  'window',
+  'eval',
+  'Function',
+  'require',
+]);
+
+/**
+ * Whether a static module specifier names something whose contents the CLI can
+ * reason about: a framework package or a relative file. A bare specifier can be
+ * remapped by an import map to anything (audit round 5).
+ */
+function isRecognizedSpecifier(specifier: string): boolean {
+  return specifier.startsWith('@setu-ts/') || specifier.startsWith('./') ||
+    specifier.startsWith('../');
+}
+
+/**
+ * The one masking state machine; `blankLiterals` selects which mask it emits.
+ *
+ * Returns undefined — unclassified — for anything outside the restricted language
+ * in which this lexer is exact and the configuration's meaning is decidable from
+ * its text: a template literal, an escape, a backslash, `#` (hashbang, private
+ * names), an HTML-like comment, a regex literal or division, a raw line terminator
+ * in a string, non-ASCII code, a dynamic `import(…)`, a static import of anything
+ * but a framework package or a relative file, or an identifier in
+ * {@linkcode UNDECIDABLE_IDENTIFIERS}. Comments may contain anything; a `//`
+ * comment ends at every JavaScript line terminator, U+2028 and U+2029 included.
+ */
 function maskSource(source: string, blankLiterals: boolean): string | undefined {
   let mode: 'code' | 'line' | 'block' | "'" | '"' = 'code';
-  const result: string[] = [];
+  const code: string[] = [];
+  const comments: string[] = [];
   const blank = (c: string) => c === '\n' || c === '\r' ? c : ' ';
-  const literal = (c: string) => blankLiterals ? blank(c) : c;
+  const push = (masked: string, kept: string) => {
+    code.push(masked);
+    comments.push(kept);
+  };
   for (let i = 0; i < source.length; i++) {
     const c = source[i]!;
     const next = source[i + 1];
     if (mode === 'code') {
       if (c === '/' && (next === '/' || next === '*')) {
         mode = next === '/' ? 'line' : 'block';
-        result.push('  ');
+        push('  ', '  ');
         i++;
-      } else if (c === '/' || c === '`' || c === '\\') {
+      } else if (
+        c === '/' || c === '`' || c === '\\' || c === '#' ||
+        source.startsWith('<!--', i) || source.startsWith('-->', i) || !isCodeChar(c)
+      ) {
         return undefined;
       } else if (c === "'" || c === '"') {
         mode = c;
-        result.push(literal(c));
-      } else result.push(c);
+        push(' ', c);
+      } else push(c, c);
     } else if (mode === 'line') {
-      result.push(blank(c));
-      if (c === '\n' || c === '\r') mode = 'code';
+      if (isLineTerminator(c)) {
+        mode = 'code';
+        // U+2028/U+2029 end the comment like a newline; keep offsets one-for-one.
+        push(blank(c), blank(c));
+      } else push(' ', ' ');
     } else if (mode === 'block') {
       if (c === '*' && next === '/') {
-        result.push('  ');
+        push('  ', '  ');
         i++;
         mode = 'code';
-      } else result.push(blank(c));
+      } else push(blank(c), blank(c));
     } else {
-      if (c === '\\' || c === '\n' || c === '\r') return undefined;
-      result.push(literal(c));
+      if (c === '\\' || isLineTerminator(c)) return undefined;
+      push(' ', c);
       if (c === mode) mode = 'code';
     }
   }
-  return mode === 'code' || mode === 'line' ? result.join('') : undefined;
+  if (mode !== 'code' && mode !== 'line') return undefined;
+  const masked = code.join('');
+  for (const word of masked.matchAll(/[A-Za-z_$][\w$]*/g)) {
+    if (UNDECIDABLE_IDENTIFIERS.has(word[0])) return undefined;
+  }
+  // Specifiers are read from the comment-only mask: comments there are spaces (so
+  // `from /* c */ 'x'` is seen) while string quotes survive — in the code mask the
+  // literal itself is blank and a whitespace skip would run straight through it.
+  const kept = comments.join('');
+  for (const keyword of masked.matchAll(/\b(?:import|from)\b/g)) {
+    let at = keyword.index + keyword[0].length;
+    while (kept[at] === ' ' || kept[at] === '\t' || kept[at] === '\n' || kept[at] === '\r') at += 1;
+    if (keyword[0] === 'import' && kept[at] === '(') return undefined;
+    const quote = kept[at];
+    if (quote !== "'" && quote !== '"') continue;
+    const close = kept.indexOf(quote, at + 1);
+    if (!isRecognizedSpecifier(kept.slice(at + 1, close))) return undefined;
+  }
+  return blankLiterals ? masked : kept;
 }
 
 /** Returns the executable body of the recognized synchronous createApp factory. */
@@ -177,9 +259,22 @@ export function factoryScope(source: string): {
     if (code[cursor] === '(') depth++;
     if (code[cursor] === ')') depth--;
   }
-  const opening = /^\s*(?:: I(?:Kernel)?Application)?\s*\{/.exec(code.slice(cursor));
-  if (depth !== 0 || opening === null) return undefined;
-  const start = cursor + opening[0].length;
+  if (depth !== 0) return undefined;
+  // Hand-scanned, not a regex: two `\s*` around an optional group backtracked
+  // quadratically on a long run of spaces (audit round 5, R-R5).
+  const skipSpace = (at: number) => {
+    while (at < code.length && /\s/.test(code[at]!)) at += 1;
+    return at;
+  };
+  let open = skipSpace(cursor);
+  for (const annotation of [': IKernelApplication', ': IApplication']) {
+    if (code.startsWith(annotation, open)) {
+      open = skipSpace(open + annotation.length);
+      break;
+    }
+  }
+  if (code[open] !== '{') return undefined;
+  const start = open + 1;
   depth = 1;
   for (cursor = start; cursor < code.length; cursor++) {
     if (code[cursor] === '{') depth++;

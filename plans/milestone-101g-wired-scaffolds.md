@@ -676,3 +676,17 @@ projects are unaffected. Also: package counting covers `jsr:`/`npm:` prefixes, t
 silences registration guidance, which is suppressed only by a real call (insert fails closed,
 guidance fails open); and "a backplane reference must be a call" is now enforced in exactly one
 place, with a test that fails without it.
+
+Security-audit corrections (round 5): the round-4 language was exact as a LEXER and still not
+decidable as a PROGRAM, so the guarantee is narrowed to what the CLI can actually decide from one
+file. Classified configurations must also contain only ASCII code (comments may hold anything), no
+hashbang or `#`, no HTML-like comment, no dynamic `import(`, only `@setu-ts/…` or relative module
+specifiers, and none of the reflection or global identifiers through which another module or a
+prototype could change what a call means (`Object`, `Reflect`, `Proxy`, `prototype`, `globalThis`,
+…). U+2028/U+2029 end a line comment, as the language requires. Registration guidance is suppressed
+only by a real call in classified code, never by text in a string. The full-stack template now emits
+its gRPC CSRF exclusion through `new RegExp('…')` so its own configuration stays classifiable,
+refusing a base path that would need escaping, and the factory-signature scan is linear rather than
+a backtracking regex. Every other file a project imports remains outside the check: a configuration
+that delegates composition elsewhere is classified by what this file shows, which is why every
+refusal also prints the manual registration line.

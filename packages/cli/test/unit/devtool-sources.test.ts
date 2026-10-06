@@ -274,8 +274,8 @@ describe('development source policies', () => {
   });
 
   it('masks import declarations by grammar, never across unrelated code', () => {
-    const uses = (src: string) =>
-      referencesIdentifier(maskImportDeclarations(maskSourceCode(src)!), 'CachePlugin');
+    // The scanner itself, on raw text: none of these specifiers mentions the name.
+    const uses = (src: string) => referencesIdentifier(maskImportDeclarations(src), 'CachePlugin');
     expect(uses("import { CachePlugin } from 'x';\n")).toBe(false);
     expect(uses("import {\n  CachePlugin,\n  Other,\n} from 'x';\n")).toBe(false);
     expect(uses("import type { CachePlugin } from 'x';\nimport D, * as ns from 'y';\n")).toBe(
@@ -326,6 +326,79 @@ describe('development source policies', () => {
     expect(maskImportDeclarations('import from;')).toContain('import from');
     expect(maskImportDeclarations("import('x');")).toContain('import');
     expect(maskImportDeclarations("import { a } from 'x';").trim()).toBe("'x';");
+  });
+
+  // Audit round 5: the lexer must be exact for everything it classifies, and the
+  // configuration's meaning must be decidable from its own text. Each row below is
+  // outside that language and must be refused, not parsed.
+  it('refuses every construct outside the decidable language', () => {
+    const refused: readonly string[] = [
+      "const s = 'a\u2028b';",
+      '#!/usr/bin/env deno\nconst a = 1;',
+      'class A { #x = 1; }',
+      '<!-- x\nconst a = 1;',
+      'const a = 1;\n--> x',
+      'const éa = 1;',
+      "const ns = await import('@setu-ts/' + 'cache-plugin');",
+      "import * as cp from 'cachealias';",
+      "import * as cp from /* note */ 'cachealias';",
+      "import 'side-effect';",
+      "export { a } from 'bare';",
+      ...[
+        'Object',
+        'Reflect',
+        'Proxy',
+        'constructor',
+        'prototype',
+        '__proto__',
+        'setPrototypeOf',
+        'defineProperty',
+        'defineProperties',
+        'globalThis',
+        'self',
+        'window',
+        'eval',
+        'Function',
+        'require',
+      ].map((name) => `const v = ${name};`),
+    ];
+    for (const source of refused) {
+      expect(maskSourceCode(source), source).toBeUndefined();
+      expect(maskComments(source), source).toBeUndefined();
+    }
+    const classified: readonly string[] = [
+      "import { A } from '@setu-ts/cache-plugin';",
+      "import { A } from './local.ts';",
+      "import { A } from '../up.ts';",
+      'const meta = import.meta.url;',
+      '// comment with — non-ASCII, `ticks`, \\ and #!\nconst a = 1;',
+      '/* Object.assign(globalThis) */ const a = 1;',
+    ];
+    for (const source of classified) expect(maskSourceCode(source), source).toBeDefined();
+    // U+2028/U+2029 end a line comment exactly as a newline does: what follows is code.
+    for (const separator of ['\u2028', '\u2029']) {
+      expect(maskSourceCode(`// note${separator}const c = f();`)).toContain('const c = f();');
+    }
+  });
+
+  it('scans the factory signature in linear time', () => {
+    const source = 'export function createApp()' + ' '.repeat(150_000) +
+      ': IKernelApplication & object {\n}';
+    const started = performance.now();
+    expect(factoryScope(source)).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(factoryScope('export function createApp()   :   IKernelApplication   {\n}'))
+      .toBeUndefined();
+    expect(factoryScope('export function createApp() : IKernelApplication {\n}')).toBeDefined();
+    expect(factoryScope('export function createApp()\n  : IApplication\n  {\n}')).toBeDefined();
+  });
+
+  it('never rescans text an import scan already passed', () => {
+    // Without the resume index, each of these lines rescans the next 4 KiB: ~12 s.
+    const lines = ('import {' + ' '.repeat(40) + '\n').repeat(40_000);
+    const started = performance.now();
+    maskImportDeclarations(lines);
+    expect(performance.now() - started).toBeLessThan(5000);
   });
 
   it('withholds the backplane policy for call shapes it cannot classify', async () => {
@@ -421,6 +494,20 @@ describe('development source policies', () => {
         `${imported}import { RealtimeBackplanePlugin as X } from 'jsr:@setu-ts/realtime-backplane-plugin@^0.8.0';\n` +
         "const p = [RealtimeBackplanePlugin(), X({ transport: 'custom', backplane })];",
         `${imported}const o = \`\${\`/*\`}\`;\nconst c = RealtimeBackplanePlugin({ transport: 'custom', backplane });\n// */\n` +
+        'const p = [RealtimeBackplanePlugin()];',
+      ]
+    ) expect(await custom(config), config).toBe(true);
+    // Audit round 5: prototype or global mutation, an import-map alias, and a call
+    // hidden behind a U+2028-terminated comment each withhold the policy.
+    for (
+      const config of [
+        `${imported}Object.assign(Object.prototype, { transport: 'custom', backplane: x });\n` +
+        'const p = [RealtimeBackplanePlugin({})];',
+        `${imported}({}).constructor.prototype.transport = 'custom';\n` +
+        'const p = [RealtimeBackplanePlugin({})];',
+        `${imported}import { RealtimeBackplanePlugin as X } from 'rbalias';\n` +
+        "const p = [RealtimeBackplanePlugin(), X({ transport: 'custom', backplane })];",
+        `${imported}// note\u2028const c = RealtimeBackplanePlugin({ transport: 'custom', backplane });\n` +
         'const p = [RealtimeBackplanePlugin()];',
       ]
     ) expect(await custom(config), config).toBe(true);
