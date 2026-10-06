@@ -8272,10 +8272,13 @@ Devtool enabling requires all existing `@setu-ts/*` pins to equal this CLI versi
 generated factory must accept the composition as its second argument and use both spreads:
 
 ```typescript
+import type { IPlugin } from '@setu-ts/common';
+import type { IKernelApplication, KernelDiagnosticsOptions } from '@setu-ts/kernel';
+
 export function createApp(
   _env?: Readonly<Record<string, unknown>>,
   devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
-): IApplication {
+): IKernelApplication {
   return createApplication({
     plugins: [RuntimePlugin(), ...(devtool?.plugins ?? [])],
     ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
@@ -8303,6 +8306,11 @@ deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
 pins projects to its own version — so on release day the install fails without it.
 
 ### Commands
+
+Every socket-target scaffold includes `test/app.test.ts`: it starts the application's own
+`createApp()` through `createTestApp`, injects its smoke-test endpoint, and stops it. Workers needs
+the platform environment and emits no smoke test; its `test` task permits an empty suite.
+`setu add testing` pins `@setu-ts/testing` in Deno's import map or npm's `devDependencies`.
 
 ```bash
 # Scaffold a project (creates ./my-app)
@@ -8411,11 +8419,17 @@ than "anything under `@setu-ts/`", because the range written is the CLI's OWN ve
 correct for packages released as one version with it — so a typo is refused, naming what is
 accepted, rather than pinned to a version that does not exist.
 
-When a project carries both `deno.json` and `package.json` — a Workers or Node target does, one for
-its build and one for `setu generate`'s plugin gating — **both** are updated, so the gate and the
-build cannot disagree about what is installed. `deno.json` gets a `jsr:` specifier under `imports`;
-`package.json` gets the npm-compat `npm:@jsr/setu-ts__<name>` form under `dependencies`. Re-adding a
-package already present at the same version reports that and writes nothing.
+Deno projects update only `deno.json` imports, even when a full-stack frontend has its own
+`package.json`. Node, Bun and Workers update both manifests: Deno imports hold `jsr:` pins, and npm
+dependencies use `npm:@jsr/setu-ts__<name>`. Testing uses npm `devDependencies`. Existing key order
+is retained; sorted maps receive a sorted insertion, otherwise the new framework key follows the
+existing scope block. Re-adding the same pin leaves the dependency map unchanged.
+
+The twelve safe zero-configuration providers listed in [the CLI guide](docs/cli.md) are registered
+above the emitted development-plugin anchor in either generator style. Unrecognized source is
+preserved. Starter compositions print their option arm; installing a package does not authorize a
+duplicate registration. Existing development diagnostics modules are refreshed with names-only
+approval maps and known plugin calls receive development-only options.
 
 It writes the manifest and **reports** the install command rather than running it. The command
 matches the project's toolchain, detected from its manifests the same way `setu generate` detects
@@ -8795,8 +8809,8 @@ hand-written work.
 
 The managed files are the CLI-owned **seam barrels** — one `index.ts` per generated family
 (`src/modules/`, `src/controllers/`, `src/services/`, `src/middleware/`, `src/plugins/`,
-`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). Nothing else is managed, and no flag can
-make it so.
+`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). The development-only source policy
+`src/devtool/diagnostics.ts` is also CLI-managed. No flag can make an arbitrary path managed.
 
 ### Generated code is wired
 
@@ -8830,13 +8844,16 @@ Notes on the three that are not wired, and one that is conditional:
   `app.router.get(path, { handler, middleware: [requireX()] })` or `@UseGuards(requireX())` on a
   controller or handler. `auth-plugin` publishes no guard list, and the only barrel-shaped
   alternative — the global pipeline — would answer `401` for `/health`, `/metrics` and every public
-  route, because the emitted guard rejects a request with no `ctx.request.user`. A wiring that must
-  not be applied is not a wiring.
-- **`job` is transport-agnostic on purpose.** Registering it as a queue processor would start a
-  worker loop polling for a job name nothing enqueues; scheduling it needs a cron expression the
-  artifact does not carry. `QueuePluginOptions.processors` can express a chosen queue registration,
-  but cannot infer which transport or scheduling details this artifact needs. The emitted JSDoc
-  shows both calls; pick one.
+  route. The emitted guard delegates to `requirePermission('<name>')`, enforcing the installed
+  authorization provider for anonymous and insufficient-permission requests. A wiring that must not
+  be applied is not a wiring.
+- **`job` is transport-agnostic in functional projects.** Class-based projects require queue and
+  emit a decorated processor through the ingress seam; without queue the command refuses before
+  writing and names `setu add queue`. In functional projects, registering it as a queue processor
+  would start a worker loop polling for a job name nothing enqueues; scheduling it needs a cron
+  expression the artifact does not carry. `QueuePluginOptions.processors` can express a chosen queue
+  registration, but cannot infer which transport or scheduling details this artifact needs. The
+  emitted JSDoc shows both calls; pick one.
 - **`migration` has no consumer.** No plugin registers a CLI command, so there is no
   `setu db:migrate` and nothing reads migration files. Apply them from your own script or your ORM's
   tooling.
@@ -8970,14 +8987,13 @@ commands, so the two can never disagree. The factory deliberately does NOT start
 
 ```typescript
 // setu.config.ts (--template rest)
-import { createApplication } from '@setu-ts/kernel';
-import type { IApplication } from '@setu-ts/common';
+import { createApplication, type IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 // … logging, validation, security, health, metrics, OpenAPI, decorators
 import { errorHandler } from '@setu-ts/exceptions';
 
-export function createApp(): IApplication {
+export function createApp(): IKernelApplication {
   const app = createApplication({
     plugins: [RuntimePlugin(), ConfigPlugin({ envFilePath: '.env', envFileOptional: true })],
   });
@@ -9006,11 +9022,11 @@ flag for the other three is still deferred (see "Not in this release").
 ```typescript
 // setu.config.ts (--template full-stack)
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
-import type { IApplication } from '@setu-ts/common';
+import type { IKernelApplication } from '@setu-ts/kernel';
 import { getCsrfToken, getSession } from '@setu-ts/session-plugin';
 import { csrfContext, sessionContext } from './app/lib/context-keys.ts';
 
-export async function createApp(): Promise<IApplication> {
+export async function createApp(): Promise<IKernelApplication> {
   return await createFullStackAppFromConfig((config) => ({
     reactRouter: {
       serverBuildPath: './build/server/index.js',
@@ -11739,6 +11755,10 @@ const app = await createTestApp({
 
 `TestAppOptions` — `createTestApp(options?)` — is a **union of two mutually exclusive arms**, so
 supplying both `plugins` and `app` is a compile error rather than a runtime throw.
+
+New scaffold factories return `IKernelApplication` (or `Promise<IKernelApplication>`). For an older
+project, replace the factory's `IApplication` annotation with `IKernelApplication`, imported from
+`@setu-ts/kernel`. Await an async factory before passing its result to `createTestApp`.
 
 `TestAppFromPlugins` — assemble by hand (unit scope):
 

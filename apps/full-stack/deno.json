@@ -6,7 +6,8 @@
     "check:app": "deno check app/**/*.ts app/**/*.tsx",
     "start": "deno task build && deno run --allow-net --allow-env --allow-read main.ts",
     "smoke": "deno task build && deno run -A smoke.ts",
-    "test": "deno task check:app && deno test -A test/"
+    "test": "deno task check:app && deno test -A test/",
+    "browser": "cd ../.. && deno run --allow-read=.,$HOME/.cache/ms-playwright,$HOME/Library/Caches/ms-playwright,/etc/os-release,/etc/lsb-release --allow-write=.tmp/browser --allow-env --allow-sys=hostname,cpus,osRelease,uid,gid,homedir --allow-run=deno apps/full-stack/browser/harness.ts"
   },
   "compilerOptions": {
     "strict": true,
@@ -31,6 +32,7 @@
     "@setu-ts/common": "../../packages/common/src/index.ts",
     "@setu-ts/database-plugin": "../../packages/database-plugin/src/index.ts",
     "@setu-ts/kernel": "../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "../../packages/runtime/src/index.ts",
     "@setu-ts/react-router-plugin": "../../packages/react-router-plugin/src/index.ts",
     "@setu-ts/session-plugin": "../../packages/session-plugin/src/index.ts",
     "@setu-ts/full-stack-starter": "../../packages/starters/full-stack-starter/src/index.ts",

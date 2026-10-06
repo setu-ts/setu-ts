@@ -12,7 +12,7 @@ import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { CUSTOM_SCHEMATIC_DIR } from '../../src/schematics/custom.ts';
-import { useWorkspacePackages } from '../fixtures/generated-project.ts';
+import { useWorkspacePackages, withGeneratedServer } from '../fixtures/generated-project.ts';
 
 const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -39,6 +39,102 @@ describe('setu end-to-end on a real filesystem', () => {
 
   afterEach(async () => {
     await Deno.remove(root, { recursive: true });
+  });
+
+  it('boots a functional websocket route after add and completes an RFC 6455 handshake', async () => {
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    expect(await run(['add', 'websocket', '--dir', project])).toBe(0);
+    expect(await run(['g', 'ws-route', 'board', '--dir', project])).toBe(0);
+    await useWorkspacePackages(project);
+    const configPath = `${project}/setu.config.ts`;
+    const config = await Deno.readTextFile(configPath);
+    await Deno.writeTextFile(
+      `${project}/probe.ts`,
+      "import { createApp } from './setu.config.ts';\nawait (await createApp()).start();\n",
+    );
+    try {
+      await Deno.writeTextFile(configPath, config.replace('      WebSocketPlugin(),\n', ''));
+      const broken = await new Deno.Command(Deno.execPath(), {
+        args: ['run', '-A', '--node-modules-dir=none', 'probe.ts'],
+        cwd: project,
+        stdout: 'piped',
+        stderr: 'piped',
+      }).output();
+      expect(broken.code).not.toBe(0);
+      expect(new TextDecoder().decode(broken.stderr)).toContain(
+        "depends on capability 'websocket-plugin'",
+      );
+    } finally {
+      await Deno.writeTextFile(configPath, config);
+    }
+    await withGeneratedServer(project, async (origin) => {
+      const url = new URL(origin);
+      const connection = await Deno.connect({ hostname: url.hostname, port: Number(url.port) });
+      try {
+        const request = `GET /ws/board HTTP/1.1\r\nHost: ${url.host}\r\n` +
+          'Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n' +
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n';
+        await connection.write(new TextEncoder().encode(request));
+        // One read is not guaranteed to return the whole header block, so read
+        // until the terminator, refusing EOF and an unbounded response.
+        let response = '';
+        const decoder = new TextDecoder();
+        const buffer = new Uint8Array(4096);
+        while (!response.includes('\r\n\r\n')) {
+          const read = await connection.read(buffer);
+          if (read === null) throw new Error(`Handshake ended early: ${response}`);
+          response += decoder.decode(buffer.subarray(0, read), { stream: true });
+          if (response.length > 16_384) throw new Error('Handshake headers exceed 16 KiB.');
+        }
+        expect(response).toContain('101 Switching Protocols');
+        expect(response.toLowerCase()).toContain(
+          'sec-websocket-accept: s3pplmbitxaq9kygzzhzrbk+xoo=',
+        );
+      } finally {
+        connection.close();
+      }
+    });
+  });
+
+  it('runs a generated permission guard through real auth for 401, 403 and 200', async () => {
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    expect(await run(['add', 'auth', '--dir', project])).toBe(0);
+    expect(await run(['g', 'guard', 'reports', '--dir', project])).toBe(0);
+    await useWorkspacePackages(project);
+    await Deno.writeTextFile(
+      `${project}/guard-probe.ts`,
+      `import { CAPABILITIES, type IJwtService } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+import { requireReports } from './src/guards/reports.guard.ts';
+const app = createApplication({ plugins: [RuntimePlugin(), AuthPlugin({
+  jwt: { secret: 'a-generated-guard-test-secret-at-least-32-bytes' },
+  rbac: { roles: { reader: { permissions: [] }, reporter: { permissions: ['reports'] } } },
+})] });
+app.router.get('/reports', { middleware: [requireReports()], handler: (ctx) => ctx.response.json({ ok: true }) });
+await app.start();
+try {
+  const jwt = app.services.get<IJwtService>(CAPABILITIES.JWT);
+  const statuses: number[] = [];
+  for (const role of [undefined, 'reader', 'reporter']) {
+    const headers = role === undefined ? {} : { authorization: 'Bearer ' + await jwt.sign({ sub: 'user', roles: [role] }) };
+    statuses.push((await app.fetch(new Request('http://localhost/reports', { headers }))).status);
+  }
+  console.log(JSON.stringify(statuses));
+} finally { await app.stop(); }
+`,
+    );
+    const result = await new Deno.Command(Deno.execPath(), {
+      args: ['run', '-A', '--node-modules-dir=none', 'guard-probe.ts'],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    expect(result.code, new TextDecoder().decode(result.stderr)).toBe(0);
+    expect(new TextDecoder().decode(result.stdout)).toContain('[401,403,200]');
   });
 
   it('scaffolds a project whose files exist on disk', async () => {

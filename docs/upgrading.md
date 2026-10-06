@@ -12,6 +12,36 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Set `referrerPolicy` for native full-stack forms (M101g)
+
+Existing full-stack starter compositions should configure
+`httpSecurity: { headers: { referrerPolicy: 'same-origin' } }` in `setu.config.ts`. The default
+`no-referrer` policy can make Chromium send `Origin: null` on a native form post, which React Router
+refuses. The full-stack scaffold now sets `same-origin`: cross-origin referrers remain suppressed,
+and session CSRF and React Router origin checks remain enabled.
+
+### Enable development policies with `setu devtool enable` (M101g)
+
+Run `setu devtool enable` on an eligible Deno project to generate the CLI-managed
+`src/devtool/diagnostics.ts` policy and wire recognized plugin calls. Manual configurations receive
+guidance. Source options activate only when `createApp` receives its devtool argument. The module
+contains approved names, never environment values, and is refreshed by `setu add`; keep
+application-specific policies in application-owned configuration. Empty approval maps approve no
+observations.
+
+### Return `IKernelApplication` from scaffold factories (M101g, V8-12)
+
+In `setu.config.ts`, replace `createApp`'s `IApplication` return annotation with
+`IKernelApplication`, imported as a type from `@setu-ts/kernel`. For an async starter factory, use
+`Promise<IKernelApplication>`. Remove the old common type import if nothing else reads it. The value
+already has this type; the old annotation hid `inject`, `unregister`, and `hasPlugin` from
+`createTestApp({ app: await createApp() })`. Workers' `boot` and `ensureBooted` helpers follow the
+same type change in new scaffolds.
+
+`setu add testing` now accepts `@setu-ts/testing`, putting it in Deno's import map or npm's
+`devDependencies`. New socket-target scaffolds include `test/app.test.ts`; an existing project can
+add the same composition-root smoke test using its runtime's test harness.
+
 ### Replace links inside a project before running a writing `setu` command
 
 `setu` now refuses to write through, or `adopt` to move, a path reached through a symbolic link

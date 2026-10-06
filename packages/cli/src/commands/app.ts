@@ -218,6 +218,7 @@ function planMember(
   transport: TransportSpec,
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
+  rootGitignore: string,
   devtoolPort?: number,
 ): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
   readonly ok: false;
@@ -268,9 +269,9 @@ function planMember(
     // file lands in the unparseable-root branch and the member is refused with
     // advice that would change nothing if followed.
     if (profile.manifestKind === 'deno') {
-      const plan = planRootNodeModulesDir(rootManifest, name);
+      const plan = planRootNodeModulesDir(rootManifest, name, rootGitignore);
       if (plan.kind === 'refused') return { ok: false, message: plan.message };
-      if (plan.kind === 'update') extra.push(plan.file);
+      if (plan.kind === 'update') extra.push(plan.file, ...(plan.extra ?? []));
     }
   }
 
@@ -689,6 +690,15 @@ export async function runAppCommand(
     // Left empty: `planRootNodeModulesDir` refuses an unparseable root.
   }
 
+  let rootGitignore = '';
+  try {
+    rootGitignore = new TextDecoder().decode(
+      await deps.fs.readFile(joinPath(deps.dir, '.gitignore')),
+    );
+  } catch {
+    // An absent ignore file is created along with the frontend member.
+  }
+
   // Total: the manifest reader refuses a transport it does not know, so this
   // resolves without a "cannot happen" branch.
   const profile = workspaceProfile(next.runtime);
@@ -699,6 +709,7 @@ export async function runAppCommand(
     transportSpec(next.transport),
     profile,
     rootManifest,
+    rootGitignore,
     ...(devtoolPort === undefined ? [] as const : [devtoolPort] as const),
   );
   if (!plan.ok) {

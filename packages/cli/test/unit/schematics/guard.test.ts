@@ -34,9 +34,18 @@ describe('guard schematic', () => {
     expect(file.contents).toContain('export function requireOrderItem(): MiddlewareFunction');
   });
 
-  it('short-circuits without calling next on both failure paths', () => {
-    const before = file.contents.indexOf('await next();');
-    expect(file.contents.slice(0, before)).toContain('status(401)');
-    expect(file.contents.slice(0, before)).toContain('status(403)');
+  it('delegates the real permission decision and response to auth-plugin', () => {
+    expect(file.contents).toContain("import { requirePermission } from '@setu-ts/auth-plugin';");
+    expect(file.contents).toContain("return requirePermission('order-item');");
+    expect(file.contents).not.toContain('allowed = true');
+    expect(file.contents).not.toContain('json({ error:');
+  });
+
+  it('names the rbac option it depends on and the 501 it answers without one', () => {
+    // Without an authorization service requirePermission fails closed with
+    // 501 for every authenticated caller; the guard must say how to avoid it.
+    expect(file.contents).toContain('registers only when given an `rbac` option');
+    expect(file.contents).toContain('every authenticated request answers `501`');
+    expect(file.contents).toContain("rbac: { roles: { admin: { permissions: ['order-item'] } } },");
   });
 });

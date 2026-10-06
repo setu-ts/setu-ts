@@ -147,6 +147,8 @@ describe('M101f lifecycle refusals and allocation', () => {
   });
   it('requires the signature and both usage fragments and prints their locations', () => {
     const legacy = factoryRefusal('export function createApp(): IApplication {');
+    expect(legacy).toContain('): IKernelApplication {');
+    expect(legacy).toContain("from '@setu-ts/kernel'");
     expect(legacy).toContain(signature);
     expect(legacy).toContain(plugins);
     expect(legacy).toContain(diagnostics);

@@ -55,7 +55,8 @@ function renderViteConfig(frameworkPackages: readonly string[]): string {
     .map((pkg) => `\n  '@setu-ts/${pkg}',`)
     .join('');
 
-  return `import { reactRouter } from '@react-router/dev/vite';
+  return `import { readdirSync, readFileSync } from 'node:fs';
+import { reactRouter } from '@react-router/dev/vite';
 import { defineConfig } from 'vite';
 
 /**
@@ -79,6 +80,106 @@ import { defineConfig } from 'vite';
 const frameworkPackages = [${externals}
 ];
 
+// Workspace libraries are resolved by Deno at runtime, just like framework
+// packages. Read each library's declared name: a custom scope is valid too.
+const workspaceLibraries: string[] = [];
+try {
+  const libraries = new URL('../../libs/', import.meta.url);
+  for (const entry of readdirSync(libraries, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const manifest = readLibraryManifest(new URL(entry.name + '/', libraries));
+      if (typeof manifest?.name === 'string') workspaceLibraries.push(manifest.name);
+    } catch {
+      // A directory without a readable library manifest contributes no name.
+    }
+  }
+} catch {
+  // Standalone projects and workspaces without libraries have no externals here.
+}
+
+/** Reads a member's manifest; Deno accepts deno.json first, then deno.jsonc. */
+function readLibraryManifest(directory: URL): { name?: unknown } | undefined {
+  for (const file of ['deno.json', 'deno.jsonc']) {
+    let text: string;
+    try {
+      text = readFileSync(new URL(file, directory), 'utf8');
+    } catch {
+      continue;
+    }
+    return JSON.parse(stripJsonc(text));
+  }
+  return undefined;
+}
+
+/**
+ * Drops JSONC comments, then trailing commas, leaving string contents untouched.
+ * Each pass is linear: a comma looks ahead only across the whitespace after it.
+ */
+function stripJsonc(text: string): string {
+  return dropTrailingCommas(dropComments(text));
+}
+
+/** Copies a string literal starting at \`start\`, returning the index after it. */
+function skipString(text: string, start: number): number {
+  let i = start + 1;
+  while (i < text.length && text[i] !== '"') i += text[i] === '\\\\' ? 2 : 1;
+  return i + 1;
+}
+
+/** Removes line and block comments outside string literals. */
+function dropComments(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '"') {
+      const end = skipString(text, i);
+      out += text.slice(i, end);
+      i = end;
+    } else if (text.startsWith('//', i)) {
+      const end = text.indexOf('\\n', i);
+      i = end < 0 ? text.length : end;
+    } else if (text.startsWith('/*', i)) {
+      const end = text.indexOf('*/', i + 2);
+      i = end < 0 ? text.length : end + 2;
+      out += ' ';
+    } else {
+      out += text[i];
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** Removes a comma followed only by whitespace and a closing bracket. */
+function dropTrailingCommas(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '"') {
+      const end = skipString(text, i);
+      out += text.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (text[i] === ',') {
+      let next = i + 1;
+      while (/\\s/.test(text[next] ?? '')) next += 1;
+      if (text[next] === '}' || text[next] === ']') {
+        i += 1;
+        continue;
+      }
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+}
+
+// A declared package is external together with every exported subpath of it.
+const isDeclared = (names: readonly string[], id: string): boolean =>
+  names.some((name) => id === name || id.startsWith(name + '/'));
+
 export default defineConfig({
   plugins: [reactRouter()],
   resolve: { tsconfigPaths: true },
@@ -86,7 +187,13 @@ export default defineConfig({
   // API, and neither a top-level \`ssr.external\` nor
   // \`environments.ssr.resolve.external\` is applied to that build.
   environments: {
-    ssr: { build: { rollupOptions: { external: frameworkPackages } } },
+    ssr: {
+      build: {
+        rollupOptions: {
+          external: (id) => isDeclared(frameworkPackages, id) || isDeclared(workspaceLibraries, id),
+        },
+      },
+    },
   },
 });
 `;

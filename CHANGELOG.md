@@ -8,6 +8,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Scaffold testing (M101g, V8-12, V8-39).** Generated factories return `IKernelApplication`, or
+  its promise for starter compositions, so `createTestApp({ app: await createApp() })` type-checks.
+  `setu add testing` pins `@setu-ts/testing` in Deno's import map or npm's `devDependencies`. New
+  Deno, Node, and Bun scaffolds include a smoke test of the real application composition; Workers
+  requires its platform environment and permits an empty test suite. Devtool factory-upgrade
+  instructions name the kernel type and import. **Existing projects:** replace the factory's
+  `IApplication` return annotation with `IKernelApplication` from `@setu-ts/kernel` (see
+  `docs/upgrading.md`).
+
+- **Wired scaffolds (M101g).** Workspace full-stack SSR builds externalize library package
+  identities — declared in `deno.json` or `deno.jsonc`, with their exported subpaths; projects that
+  acquire npm dependencies ignore node_modules. Adding safe zero-configuration plugins wires both
+  generator styles, starter compositions name their option arm, and dependency additions preserve
+  the manifest's existing order.
+- **Development source policies and browser gate (M101g).** Opted-in scaffolds and devtool enable
+  generate names-only diagnostics approval maps, gated off in production; adding a plugin refreshes
+  an existing policy. A dedicated pinned Chromium gate exercises both the example and a fresh
+  scaffold, including missing-client and missing-asset controls. Full-stack configurations select
+  same-origin referrer policy for native form actions; existing projects can configure
+  `httpSecurity: { headers: { referrerPolicy: 'same-origin' } }`. CSRF checks stay enabled.
+
 - **Devtool lifecycle (M101f).** Enabling verifies both composition spreads and refuses mismatched
   framework pins. Pin and edited-entry refusals escape project-controlled fields so embedded
   newlines cannot forge additional CLI output lines. The entry detects dropped composition and stops
@@ -175,6 +196,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Generated guards, class-based jobs and `setu add` on a Deno project (M101g, V8-32, V8-33,
+  V8-40).** These change what the CLI writes or refuses. `setu generate guard <name>` now emits
+  `requirePermission('<name>')` from `@setu-ts/auth-plugin` where it used to emit a stub that let
+  every authenticated caller through. The permission is evaluated by the authorization service
+  `AuthPlugin` registers only when given an `rbac` option, so without one every authenticated
+  request to a guarded route answers `501`. `setu add auth` therefore prints
+  `AuthPlugin({ jwt: { … }, rbac: { roles: {} } })`. Guards generated earlier are unchanged. In a
+  class-based project without `@setu-ts/queue-plugin`, `setu generate job` now refuses, naming
+  `setu add queue`, where it used to write an unwired function. On a Deno target `setu add` no
+  longer writes an `npm:@jsr/…` entry into `package.json`, which there holds only the frontend
+  build's own npm dependencies; a Node or Bun project is unchanged. `setu add` and
+  `setu devtool enable` now edit `setu.config.ts` only when they can read its meaning from the file
+  alone; otherwise they leave it untouched and print the registration line to add by hand. A
+  configuration that imports a starter or whose import map points a `@setu-ts/` name at another
+  package, a computed member access such as `x['k']`, an import from a package that is not a
+  framework package or a relative file, and template literals or escapes in code all get the printed
+  line instead of an edit. The managed `src/devtool/diagnostics.ts` declares every source key, so a
+  row it stops emitting still type-checks where `setu.config.ts` spreads it. Import maps are read
+  from the project's manifests, any `importMap` file and the workspace root. A backplane options
+  object that names no `transport` no longer receives the development policy, and a configuration
+  that binds its own `sources` gets the printed line rather than the CLI's declaration.
+
 - **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
   primary key is already stored now rejects
   (`Entity '<name>' already has a row with this primary
@@ -340,6 +383,12 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **Generated WebSocket and SSE routes fail the project's own `deno fmt --check` (M101g).**
+  `setu generate ws-route` emitted a `broadcast` line wider than the generated project's formatter
+  allows for every name, and `setu generate sse` emitted a one-line registrar signature that
+  overflowed for longer names. Both now emit what `deno fmt` produces, and the every-family
+  formatting sweep generates these families too.
 
 - **CLI output cannot be forged by project-controlled text (M101f security audit).** A member name,
   path, task value or parser message carrying a line feed, carriage return, U+2028/U+2029 or a bidi

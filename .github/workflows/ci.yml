@@ -20,6 +20,22 @@ permissions:
 # `release.yml`, which keeps one for exactly that reason.
 
 jobs:
+  browser:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Browser validation runs contributor code but needs no Git credential.
+          persist-credentials: false
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
+      - name: Install Chromium for the pinned browser suite
+        run: npx --yes playwright@1.63.0 install --with-deps chromium
+      - name: Browser gate (example and fresh scaffold)
+        run: deno task check:browser
   # This is deliberately the only job a fork PR can run. It does not check out contributor code,
   # start a service, or receive secrets. A failure prevents GitHub from treating the skipped,
   # resource-intensive jobs below as successful required checks. It has no checkout step, so there

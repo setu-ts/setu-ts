@@ -83,6 +83,10 @@ Once registered, the responder seam governs the kernel's own 404/500 terminals t
 application the project actually ships — the `createApp()` a scaffolded project exports from
 `setu.config.ts`, or a starter factory's return value — then subtracts from it:
 
+New scaffolds return `IKernelApplication` (or `Promise<IKernelApplication>`). In an older project,
+change the factory's `IApplication` annotation to `IKernelApplication`, imported from
+`@setu-ts/kernel`, before using the `app` arm. Await an async starter factory.
+
 ```typescript
 import { createTestApp, overrideCapability } from '@setu-ts/testing';
 import { CAPABILITIES } from '@setu-ts/common';

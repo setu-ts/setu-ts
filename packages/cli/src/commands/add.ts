@@ -33,6 +33,22 @@ import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runt
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
+import { detectPlugins } from '../utils/plugin-detector.ts';
+import {
+  callsIdentifier,
+  DEVTOOL_SOURCES_MODULE,
+  factoryScope,
+  frameworkImportsRetargeted,
+  maskComments,
+  maskImportDeclarations,
+  maskSourceCode,
+  packageSpecifierCount,
+  parseImportItem,
+  readDevtoolSourceNames,
+  referencesIdentifier,
+  renderDevtoolSources,
+  withDevtoolSourceWiring,
+} from '../devtool/sources.ts';
 
 /** What `runAddCommand` reaches the outside world through. */
 export interface AddCommandDependencies {
@@ -48,6 +64,14 @@ export interface AddCommandDependencies {
   readonly interrupt?: AbortSignal;
 }
 
+/** A package pin and the npm section that consumes it. */
+interface IAddablePackage {
+  /** Bare package name pinned at the CLI version. */
+  readonly pkg: string;
+  /** Packages used only while developing belong in npm devDependencies. */
+  readonly section?: 'dev';
+}
+
 /**
  * The framework packages this command will install.
  *
@@ -60,45 +84,46 @@ export interface AddCommandDependencies {
  * manifest carries. Both resolve, so `setu add auth` and
  * `setu add @setu-ts/auth-plugin` are the same command.
  */
-const ADDABLE: ReadonlyMap<string, string> = new Map([
-  ['audit', 'audit-plugin'],
-  ['auth', 'auth-plugin'],
-  ['cache', 'cache-plugin'],
-  ['cloudflare', 'cloudflare-plugin'],
-  ['config', 'config-plugin'],
-  ['cqrs', 'cqrs-plugin'],
-  ['database', 'database-plugin'],
-  ['decorator', 'decorator-plugin'],
-  ['di', 'di-plugin'],
-  ['events', 'events-plugin'],
-  ['feature-flags', 'feature-flags-plugin'],
-  ['graphql', 'graphql-plugin'],
-  ['grpc', 'grpc-plugin'],
-  ['health', 'health-plugin'],
-  ['http-security', 'http-security-plugin'],
-  ['logger', 'logger-plugin'],
-  ['mail', 'mail-plugin'],
-  ['messaging', 'messaging-plugin'],
-  ['metrics', 'metrics-plugin'],
-  ['multi-tenancy', 'multi-tenancy-plugin'],
-  ['notification', 'notification-plugin'],
-  ['openapi', 'openapi-plugin'],
-  ['queue', 'queue-plugin'],
-  ['react-router', 'react-router-plugin'],
-  ['realtime-backplane', 'realtime-backplane-plugin'],
-  ['resilience', 'resilience-plugin'],
-  ['scheduler', 'scheduler-plugin'],
-  ['secrets', 'secrets-plugin'],
-  ['sdk', 'sdk'],
-  ['service-discovery', 'service-discovery-plugin'],
-  ['session', 'session-plugin'],
-  ['sse', 'sse-plugin'],
-  ['static', 'static-plugin'],
-  ['storage', 'storage-plugin'],
-  ['telemetry', 'telemetry-plugin'],
-  ['validation', 'validation-plugin'],
-  ['websocket', 'websocket-plugin'],
-  ['worker-pool', 'worker-pool-plugin'],
+const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
+  ['audit', { pkg: 'audit-plugin' }],
+  ['auth', { pkg: 'auth-plugin' }],
+  ['cache', { pkg: 'cache-plugin' }],
+  ['cloudflare', { pkg: 'cloudflare-plugin' }],
+  ['config', { pkg: 'config-plugin' }],
+  ['cqrs', { pkg: 'cqrs-plugin' }],
+  ['database', { pkg: 'database-plugin' }],
+  ['decorator', { pkg: 'decorator-plugin' }],
+  ['di', { pkg: 'di-plugin' }],
+  ['events', { pkg: 'events-plugin' }],
+  ['feature-flags', { pkg: 'feature-flags-plugin' }],
+  ['graphql', { pkg: 'graphql-plugin' }],
+  ['grpc', { pkg: 'grpc-plugin' }],
+  ['health', { pkg: 'health-plugin' }],
+  ['http-security', { pkg: 'http-security-plugin' }],
+  ['logger', { pkg: 'logger-plugin' }],
+  ['mail', { pkg: 'mail-plugin' }],
+  ['messaging', { pkg: 'messaging-plugin' }],
+  ['metrics', { pkg: 'metrics-plugin' }],
+  ['multi-tenancy', { pkg: 'multi-tenancy-plugin' }],
+  ['notification', { pkg: 'notification-plugin' }],
+  ['openapi', { pkg: 'openapi-plugin' }],
+  ['queue', { pkg: 'queue-plugin' }],
+  ['react-router', { pkg: 'react-router-plugin' }],
+  ['realtime-backplane', { pkg: 'realtime-backplane-plugin' }],
+  ['resilience', { pkg: 'resilience-plugin' }],
+  ['scheduler', { pkg: 'scheduler-plugin' }],
+  ['secrets', { pkg: 'secrets-plugin' }],
+  ['sdk', { pkg: 'sdk' }],
+  ['service-discovery', { pkg: 'service-discovery-plugin' }],
+  ['session', { pkg: 'session-plugin' }],
+  ['sse', { pkg: 'sse-plugin' }],
+  ['static', { pkg: 'static-plugin' }],
+  ['storage', { pkg: 'storage-plugin' }],
+  ['testing', { pkg: 'testing', section: 'dev' }],
+  ['telemetry', { pkg: 'telemetry-plugin' }],
+  ['validation', { pkg: 'validation-plugin' }],
+  ['websocket', { pkg: 'websocket-plugin' }],
+  ['worker-pool', { pkg: 'worker-pool-plugin' }],
 ]);
 
 const RUNTIME_RESTRICTIONS: ReadonlyMap<
@@ -122,27 +147,175 @@ const RUNTIME_RESTRICTIONS: ReadonlyMap<
 ]);
 
 /** One provider a decorated ingress class can resolve from the application. */
-interface IngressProviderWiring {
+interface IPluginWiring {
   /** Factory exported by the provider package. */
   readonly symbol: string;
 }
 
 /**
- * Provider plugins that a class-based ingress config can activate safely.
+ * Provider plugins that an emitted application config can activate safely.
  *
  * Every factory here has an in-memory, zero-configuration default. That makes
- * adding it to the CLI-generated class-based config a coherent development
+ * adding it to the CLI-generated config a coherent development
  * composition; providers that need credentials or a user-owned choice remain
  * manifest-only like every other `setu add` package.
  */
-const INGRESS_PROVIDER_WIRINGS: ReadonlyMap<string, IngressProviderWiring> = new Map([
+const ZERO_CONFIG_WIRINGS: ReadonlyMap<string, IPluginWiring> = new Map([
   ['cqrs-plugin', { symbol: 'CqrsPlugin' }],
   ['events-plugin', { symbol: 'EventsPlugin' }],
   ['messaging-plugin', { symbol: 'MessagingPlugin' }],
   ['queue-plugin', { symbol: 'QueuePlugin' }],
   ['scheduler-plugin', { symbol: 'SchedulerPlugin' }],
   ['websocket-plugin', { symbol: 'WebSocketPlugin' }],
+  ['cache-plugin', { symbol: 'CachePlugin' }],
+  ['health-plugin', { symbol: 'HealthPlugin' }],
+  ['metrics-plugin', { symbol: 'MetricsPlugin' }],
+  ['openapi-plugin', { symbol: 'OpenApiPlugin' }],
+  ['sse-plugin', { symbol: 'SsePlugin' }],
+  ['realtime-backplane-plugin', { symbol: 'RealtimeBackplanePlugin' }],
 ]);
+
+/** Starter-owned options, including optional arms that must first be configured. */
+const REST_ARMS: ReadonlyMap<string, string> = new Map([
+  ['config-plugin', 'config'],
+  ['logger-plugin', 'logger'],
+  ['validation-plugin', 'validation'],
+  ['http-security-plugin', 'httpSecurity'],
+  ['health-plugin', 'health'],
+  ['metrics-plugin', 'metrics'],
+  ['openapi-plugin', 'openapi'],
+  ['decorator-plugin', 'decorators'],
+  ['database-plugin', 'database'],
+  ['auth-plugin', 'auth'],
+  ['websocket-plugin', 'realtime.websocket'],
+  ['sse-plugin', 'realtime.sse'],
+  ['realtime-backplane-plugin', 'realtime.backplane'],
+  ['session-plugin', 'session'],
+  ['di-plugin', 'di'],
+  ['graphql-plugin', 'graphql'],
+  ['service-discovery-plugin', 'serviceDiscovery'],
+]);
+const MICROSERVICE_ARMS: ReadonlyMap<string, string> = new Map([
+  ...REST_ARMS,
+  ['messaging-plugin', 'messaging'],
+  ['queue-plugin', 'queue'],
+  ['resilience-plugin', 'resilience'],
+  ['telemetry-plugin', 'telemetry'],
+]);
+const FULL_STACK_ARMS: ReadonlyMap<string, string> = new Map([
+  ...MICROSERVICE_ARMS,
+  ['cache-plugin', 'cache'],
+  ['events-plugin', 'events'],
+  ['cqrs-plugin', 'cqrs'],
+  ['scheduler-plugin', 'scheduler'],
+  ['audit-plugin', 'audit'],
+  ['secrets-plugin', 'secrets'],
+  ['storage-plugin', 'storage'],
+  ['mail-plugin', 'mail'],
+  ['feature-flags-plugin', 'featureFlags'],
+  ['notification-plugin', 'notifications'],
+  ['multi-tenancy-plugin', 'multiTenancy'],
+  ['react-router-plugin', 'reactRouter'],
+  ['static-plugin', 'static'],
+]);
+const STARTER_ARMS = [
+  { symbol: 'createRestApp', pkg: 'rest-starter', arms: REST_ARMS },
+  { symbol: 'createMicroserviceApp', pkg: 'microservice-starter', arms: MICROSERVICE_ARMS },
+  { symbol: 'createFullStackAppFromConfig', pkg: 'full-stack-starter', arms: FULL_STACK_ARMS },
+] as const;
+
+/** The concrete registration to show when configuration belongs to the application. */
+function registrationLine(bare: string): string | undefined {
+  const zero = ZERO_CONFIG_WIRINGS.get(bare);
+  if (zero !== undefined) return `${zero.symbol}()`;
+  // `rbac` is what registers the authorization service a generated guard asks;
+  // without it every permission check answers 501.
+  if (bare === 'auth-plugin') {
+    return "AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } })";
+  }
+  if (bare === 'session-plugin') return "SessionPlugin({ secret: '<your-secret>' })";
+  if (bare === 'grpc-plugin') return 'GrpcPlugin({ services: [] })';
+  if (bare === 'database-plugin') return "DatabasePlugin({ type: 'memory' })";
+  if (bare === 'feature-flags-plugin') return "FeatureFlagsPlugin({ provider: 'memory' })";
+  if (bare === 'notification-plugin') return 'NotificationPlugin({ channels: {} })';
+  if (bare === 'graphql-plugin') {
+    return "GraphqlPlugin({ typeDefs: '<your-schema>', resolvers: {} })";
+  }
+  if (bare === 'static-plugin') return "StaticPlugin({ root: '<public-directory>' })";
+  if (bare === 'react-router-plugin') {
+    return "ReactRouterPlugin({ serverBuildPath: '<server-build-module>' })";
+  }
+  if (bare === 'multi-tenancy-plugin') return "MultiTenancyPlugin({ resolver: 'header' })";
+  if (bare === 'service-discovery-plugin') {
+    return "ServiceDiscoveryPlugin({ provider: 'static', services: {} })";
+  }
+  if (bare === 'cloudflare-plugin') return 'CloudflarePlugin({ env })';
+  return undefined;
+}
+
+/** Explains the registration site without rewriting starter-owned composition. */
+function printWiringNote(
+  source: string | undefined,
+  bare: string,
+  log: (line: string) => void,
+): void {
+  const starter = source === undefined ? undefined : composingStarter(source);
+  if (starter !== undefined) {
+    const arm = starter.arms.get(bare);
+    if (arm !== undefined) {
+      log(`  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`);
+      log(
+        `  See https://github.com/setu-ts/setu-ts/blob/develop/packages/starters/${starter.pkg}/README.md`,
+      );
+      log(
+        '  Once that arm is configured, registering a second instance with app.register fails' +
+          ' with a duplicate plugin name.',
+      );
+      return;
+    }
+  }
+  const registration = registrationLine(bare);
+  const factory = registration?.slice(0, registration.indexOf('('));
+  const binding = source === undefined || factory === undefined
+    ? undefined
+    : providerBinding(source, bare, factory);
+  // Guidance is suppressed only by a real call in code. Inserting refuses on any
+  // possible use (fail closed); guidance must not ALSO go quiet then, or a mention
+  // in a string would leave the plugin unregistered with nothing said (audit 4).
+  // Only a call inside the createApp body counts: a same-named method or
+  // signature elsewhere registers nothing (audit round 6, G-R6). A plugin built at
+  // module scope therefore still gets the line — guidance fails open.
+  const scope = source === undefined ? undefined : factoryScope(source);
+  if (
+    binding !== undefined && scope !== undefined &&
+    callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
+  ) {
+    return;
+  }
+  // No raw-text check here: a string or comment containing the registration's
+  // text silenced the guidance for a plugin nothing registers (audit round 5).
+  // Only a real call in classified code, checked above, suppresses it.
+  if (registration !== undefined) {
+    log(
+      starter === undefined
+        ? `  Register ${registration} in setu.config.ts.`
+        : `  Register it after the factory returns: app.register(${registration});`,
+    );
+  }
+}
+
+/**
+ * The starter a configuration composes through, if it imports one at all. Any
+ * starter import counts — `createRestApp`, or `buildRestPlugins` spread into a
+ * synchronous factory — since either registers plugins this file never names, and
+ * a second registration is a duplicate plugin name at boot (audit round 6).
+ * Read with comments masked where the file classifies, else from raw text, which
+ * errs toward starter guidance.
+ */
+function composingStarter(source: string): (typeof STARTER_ARMS)[number] | undefined {
+  const visible = maskComments(source) ?? source;
+  return STARTER_ARMS.find(({ pkg }) => packageSpecifierCount(visible, pkg) > 0);
+}
 
 /**
  * Resolves what the user typed to a bare package name.
@@ -152,13 +325,46 @@ const INGRESS_PROVIDER_WIRINGS: ReadonlyMap<string, IngressProviderWiring> = new
  */
 export function resolveAddablePackage(input: string): string | undefined {
   const bare = input.startsWith('@setu-ts/') ? input.slice('@setu-ts/'.length) : input;
-  if ([...ADDABLE.values()].includes(bare)) return bare;
-  return ADDABLE.get(bare);
+  if ([...ADDABLE.values()].some((entry) => entry.pkg === bare)) return bare;
+  return ADDABLE.get(bare)?.pkg;
 }
 
 /** Every short name this command accepts, sorted, for a refusal to list. */
 export function addableNames(): readonly string[] {
   return [...ADDABLE.keys()].sort();
+}
+
+/**
+ * Reports a `package.json` that already pins the package, at this range, in the
+ * npm section this command would NOT write. A scaffold may list a package under
+ * `dependencies` that `setu add` places under `devDependencies` (or the reverse);
+ * adding it to the second section would pin it twice. Malformed JSON answers
+ * `false` so the caller's own parse reports it.
+ *
+ * @param source - The manifest's current contents
+ * @param file - The manifest's file name
+ * @param section - The section this command would write
+ * @param specifier - The package specifier
+ * @param range - The range this command would record
+ * @returns Whether the other npm section already holds the identical pin
+ */
+export function pinnedInOtherNpmSection(
+  source: string,
+  file: string,
+  section: string,
+  specifier: string,
+  range: string,
+): boolean {
+  if (file !== 'package.json') return false;
+  const other = section === 'devDependencies' ? 'dependencies' : 'devDependencies';
+  try {
+    const parsed = JSON.parse(source) as Record<string, unknown>;
+    const map = parsed[other];
+    return map !== null && typeof map === 'object' &&
+      (map as Record<string, unknown>)[specifier] === range;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -191,13 +397,22 @@ export function withDependency(
 
   if (map[specifier] === range) return undefined;
 
-  map[specifier] = range;
-  // Sorted, because the emitters this has to agree with sort their maps and an
-  // appended key would make a later regeneration reorder the file.
-  const sorted = Object.fromEntries(
-    Object.entries(map).sort(([left], [right]) => (left < right ? -1 : 1)),
-  );
-  return `${JSON.stringify({ ...parsed, [section]: sorted }, null, 2)}\n`;
+  const entries = Object.entries(map);
+  const keys = Object.keys(map);
+  if (specifier in map) {
+    map[specifier] = range;
+    return `${JSON.stringify({ ...parsed, [section]: map }, null, 2)}\n`;
+  }
+  // Preserve the emitter's insertion order; a hand-sorted map stays sorted.
+  const sorted = keys.every((key, index) => index === 0 || keys[index - 1]! < key);
+  const scope = specifier.startsWith('@') ? specifier.slice(0, specifier.indexOf('/') + 1) : '';
+  const afterScope = scope === '' ? -1 : keys.findLastIndex((key) => key.startsWith(scope));
+  const sortedIndex = keys.findIndex((key) => key > specifier);
+  const insertion = sorted
+    ? (sortedIndex < 0 ? entries.length : sortedIndex)
+    : (afterScope < 0 ? entries.length : afterScope + 1);
+  entries.splice(insertion, 0, [specifier, range]);
+  return `${JSON.stringify({ ...parsed, [section]: Object.fromEntries(entries) }, null, 2)}\n`;
 }
 
 /**
@@ -211,69 +426,92 @@ export function withDependency(
 function providerBinding(source: string, bare: string, symbol: string): string | undefined {
   const importStart = 'import {';
   const importEnd = `} from '@setu-ts/${bare}';`;
+  const code = maskSourceCode(source);
+  if (code === undefined) return undefined;
+  let offset = 0;
   for (const line of source.split('\n')) {
     const trimmed = line.trim();
+    const codeLine = code.slice(offset, offset + line.length).trim();
+    offset += line.length + 1;
+    if (!codeLine.startsWith('import {')) continue;
     if (!trimmed.startsWith(importStart) || !trimmed.endsWith(importEnd)) continue;
     const specifiers = trimmed.slice(importStart.length, -importEnd.length).split(',');
     for (const specifier of specifiers) {
-      const parts = specifier.trim().split(/\s+as\s+/);
-      if (parts[0] === symbol) return parts[1] ?? symbol;
+      const item = parseImportItem(specifier);
+      if (item?.symbol === symbol && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(item.local)) {
+        return item.local;
+      }
     }
   }
   return undefined;
 }
 
 /**
- * Adds a zero-config ingress provider to the CLI-generated class-based config.
+ * Adds a zero-config provider above the emitted development-plugin anchor.
  *
- * The generated config is deliberately identified by its explicit ingress
- * option, not merely by an import of `DecoratorPlugin`: a developer-owned
- * decorator composition may have a different registration site and must not
- * be rewritten by an installer. Likewise, a config that already constructs
- * the provider is left byte-identical.
+ * Both generator styles share this anchor. A configuration with another
+ * registration site receives guidance. An existing call stays byte-identical.
  *
  * @param source - Existing `setu.config.ts` contents
  * @param bare - Bare package name being added
  * @returns The updated config, or `undefined` when it is not an eligible
  * generated config or needs no change
  */
-export function withIngressProviderWiring(source: string, bare: string): string | undefined {
-  const provider = INGRESS_PROVIDER_WIRINGS.get(bare);
+export function withPluginWiring(source: string, bare: string): string | undefined {
+  const provider = ZERO_CONFIG_WIRINGS.get(bare);
   if (provider === undefined) return undefined;
 
-  const decoratorImport = "import { DecoratorPlugin } from '@setu-ts/decorator-plugin';";
-  const ingressImport = "import { INGRESS_HANDLERS } from './src/ingress/index.ts';";
-  const ingressOption = 'ingress: [...INGRESS_HANDLERS],';
-  const pluginList = 'plugins: [';
+  const anchor = '...(devtool?.plugins ?? []),';
+  const scope = factoryScope(source);
+  const code = scope?.code.slice(scope.start, scope.end);
+  const anchorMatch = code === undefined
+    ? null
+    : /^[ \t]*\.\.\.\(devtool\?\.plugins \?\? \[\]\),[ \t]*$/m.exec(code);
+  if (code === undefined || anchorMatch === null) {
+    return undefined;
+  }
   const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
   const importedBinding = providerBinding(source, bare, provider.symbol);
+  // Exactly the one recognized import, or none: any other import form (`* as ns`,
+  // double quotes, a second declaration) can use the package without the binding
+  // checked below ever appearing.
+  const visible = maskComments(source)!;
+  if (packageSpecifierCount(visible, bare) !== (importedBinding === undefined ? 0 : 1)) {
+    return undefined;
+  }
+  // A starter registers plugins this file never names (audit round 6).
+  if (composingStarter(source) !== undefined) return undefined;
   const factory = importedBinding ?? provider.symbol;
-  if (
-    !source.includes(decoratorImport) ||
-    !source.includes(ingressImport) ||
-    !source.includes('DecoratorPlugin({') ||
-    !source.includes(ingressOption) ||
-    !source.includes(pluginList) ||
-    source.includes(`${factory}(`) ||
-    source.includes(`${factory} (`)
-  ) {
+  // Any reference anywhere in the file, not only a call in the factory body: a
+  // plugin built at module scope, through an alias, an optional call or `.call`, and
+  // listed by name is already registered, and inserting a second call makes the
+  // kernel refuse a duplicate plugin name. When the factory is imported, its own
+  // import is not a use; when it is NOT imported, any binding of that name (from
+  // another module, say) also blocks the insert, since adding the import would then
+  // declare the identifier twice. A plugin constructed in a DIFFERENT module is not
+  // visible from here — that boundary is stated in plan §10.
+  //
+  // Read with only comments masked, so a use inside a string or a template
+  // substitution (`${list.push(CachePlugin())}`) is seen too (audit round 3).
+  const uses = importedBinding === undefined ? visible : maskImportDeclarations(visible);
+  if (!source.includes(anchor) || referencesIdentifier(uses, factory)) {
     return undefined;
   }
 
-  const withImport = importedBinding === undefined
-    ? source.replace(decoratorImport, `${decoratorImport}\n${providerImport}`)
-    : source;
-  const insertion = withImport.indexOf(pluginList) + pluginList.length;
+  const withImport = importedBinding === undefined ? `${providerImport}\n${source}` : source;
+  const insertion = anchorMatch.index + anchorMatch[0].indexOf(anchor) +
+    scope!.start +
+    (importedBinding === undefined ? providerImport.length + 1 : 0);
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
-  const indentation = withImport.slice(lineStart, insertion - pluginList.length);
-  return `${withImport.slice(0, insertion)}\n${indentation}  ${factory}(),${
+  const indentation = withImport.slice(lineStart, insertion);
+  return `${withImport.slice(0, insertion)}${factory}(),\n${indentation}${
     withImport.slice(insertion)
   }`;
 }
 
 /**
- * Adds a framework package to the project's manifest. For the six ingress
- * providers, it also activates the provider in an unmodified class-based
+ * Adds a framework package to the project's manifest. For zero-configuration
+ * providers, it also activates the provider in a recognized emitted
  * scaffold, whose `DecoratorPlugin` already receives the ingress barrel.
  *
  * Reports the install command rather than spawning it. That is deliberate: on
@@ -362,7 +600,9 @@ export async function runAddCommand(
     { file: 'deno.jsonc', section: 'imports', range: `jsr:${specifier}@^${VERSION}` },
     {
       file: 'package.json',
-      section: 'dependencies',
+      section: [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.section === 'dev'
+        ? 'devDependencies'
+        : 'dependencies',
       range: `npm:@jsr/setu-ts__${bare}@^${VERSION}`,
     },
   ];
@@ -372,6 +612,7 @@ export async function runAddCommand(
   let alreadyPresent = false;
 
   for (const target of targets) {
+    if (runtime === 'deno' && target.file === 'package.json') continue;
     const path = joinPath(dir, target.file);
     let source: string;
     try {
@@ -380,6 +621,11 @@ export async function runAddCommand(
       continue;
     }
     found = true;
+
+    if (pinnedInOtherNpmSection(source, target.file, target.section, specifier, target.range)) {
+      alreadyPresent = true;
+      continue;
+    }
 
     let updated: string | undefined;
     try {
@@ -413,10 +659,16 @@ export async function runAddCommand(
   // registered. Activate only the known generated shape; an application-owned
   // config can have arbitrary composition and is not ours to rewrite.
   const configPath = joinPath(dir, 'setu.config.ts');
+  let configSource: string | undefined;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
-    const wired = withIngressProviderWiring(config, bare);
+    // An import map that points a framework name elsewhere makes the configuration's
+    // imports mean something its text does not say: no automatic wiring then.
+    const wired = await frameworkImportsRetargeted(deps.fs, dir)
+      ? undefined
+      : withPluginWiring(config, bare);
     if (wired !== undefined) edits.push({ path: configPath, contents: wired });
+    configSource = wired ?? config;
   } catch {
     // `setu add` remains useful for non-scaffolded projects. A missing config
     // simply has no generated ingress composition to activate.
@@ -427,6 +679,42 @@ export async function runAddCommand(
       `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
     );
     return EXIT_ERROR;
+  }
+
+  let existingSources: string | undefined;
+  try {
+    existingSources = new TextDecoder().decode(
+      await deps.fs.readFile(joinPath(dir, DEVTOOL_SOURCES_MODULE)),
+    );
+  } catch {
+    // A project without this managed module has not opted into source wiring.
+  }
+  if (existingSources !== undefined) {
+    const installed = new Set(await detectPlugins(deps.fs, dir));
+    installed.add(bare);
+    const names = await readDevtoolSourceNames(deps.fs, dir, installed, configSource ?? '');
+    const sources = renderDevtoolSources(installed, names);
+    const sourcesPath = joinPath(dir, sources.path);
+    if (existingSources !== sources.contents) {
+      edits.push({ path: sourcesPath, contents: sources.contents });
+    }
+    if (configSource !== undefined) {
+      const wiring = withDevtoolSourceWiring(
+        configSource,
+        installed,
+        names.customBackplane === true,
+      );
+      for (const line of wiring.setup) deps.log(`  In setu.config.ts: ${escapeName(line)}`);
+      for (const line of wiring.manual) {
+        deps.log(`  Configure the development source: ${escapeName(line)}`);
+      }
+      if (wiring.source !== configSource) {
+        const configEdit = edits.findIndex((edit) => edit.path === configPath);
+        if (configEdit >= 0) edits.splice(configEdit, 1);
+        edits.push({ path: configPath, contents: wiring.source });
+        configSource = wiring.source;
+      }
+    }
   }
 
   if (edits.length === 0 && alreadyPresent) {
@@ -463,6 +751,7 @@ export async function runAddCommand(
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
+  printWiringNote(configSource, bare, deps.log);
   // Deno is excluded on measurement, not assumption: a Deno full-stack project
   // carries a `package.json` (its Vite build) and no `.npmrc`, and
   // `deno install` resolves the `npm:@jsr/…` entry there without one.

@@ -5,6 +5,9 @@
  * queue consumer or schedule. Class-based projects instead emit a decorated queue
  * processor and place it in the ingress seam consumed by `DecoratorPlugin`.
  *
+ * Class-based projects require queue-plugin; the command refuses before writing
+ * when that provider is absent. Functional projects keep the standalone function.
+ *
  * @module
  */
 
