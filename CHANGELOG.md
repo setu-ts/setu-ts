@@ -445,12 +445,16 @@ All notable changes to this project are documented here. The format follows
   queues surviving empty. Every publish is now persistent (`persistentMessages`, default `true`;
   `false` restores the old wire behaviour exactly) and goes through a publisher-confirm channel, so
   `publish()`/`add()` resolve only once RabbitMQ has accepted the message and reject when it refuses
-  it. A queue retry or dead-letter now acknowledges the reserved job only after its replacement is
-  accepted — previously it acknowledged after an unconfirmed publish, so a broker failure between
-  the two lost the job. The drive-mode reconnect reopens a confirm channel too. `IAmqpConnection`
-  and `IAmqpQueueConnection` gain an optional `createConfirmChannel()`; an injected facade without
-  it keeps a plain channel and logs one warning. Proven by restarting a real broker in CI, with the
-  transient control losing its messages in the same restart.
+  it. Each publish also listens for its channel's `close` and rejects if the channel closes first:
+  amqplib 0.10.x's close-time drain can stop at a slot an out-of-order confirm already settled and
+  never call a later publish's callback, which with `publishTimeoutMs: 0` would leave the publish —
+  and a retry's ack of the reserved job — pending forever. A queue retry or dead-letter now
+  acknowledges the reserved job only after its replacement is accepted — previously it acknowledged
+  after an unconfirmed publish, so a broker failure between the two lost the job. The drive-mode
+  reconnect reopens a confirm channel too. `IAmqpConnection` and `IAmqpQueueConnection` gain an
+  optional `createConfirmChannel()`; an injected facade without it keeps a plain channel and logs
+  one warning. Proven by restarting a real broker in CI, with the transient control losing its
+  messages in the same restart.
 
 - **A paused RabbitMQ no longer hangs `publish()` or `add()` forever (#418).** Each publish made an
   unbounded broker round trip (an exchange assert in `messaging-plugin`, queue declarations in

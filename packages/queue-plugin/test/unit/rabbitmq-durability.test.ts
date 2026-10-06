@@ -220,6 +220,66 @@ describe('RabbitMqQueue durability', () => {
     expect(acks(channel)).toBe(1);
   });
 
+  it('rejects a pending enqueue when the channel closes, even with publishTimeoutMs: 0', async () => {
+    // amqplib 0.10.x can leave a publish callback uncalled on close (its drain
+    // stops at a slot an out-of-order confirm already settled); emitClose()
+    // models exactly that, so only the per-publish close listener settles it.
+    const { queue, channel, runtime } = await connected(
+      { withholdConfirms: true },
+      { publishTimeoutMs: 0 },
+    );
+    const baseline = channel.listenerCount('close');
+    const enqueueing = queue.enqueue(job(runtime, 'a'));
+    await settle();
+    expect(channel.listenerCount('close')).toBe(baseline + 1);
+    channel.emitClose();
+    await expect(enqueueing).rejects.toThrow(
+      'RabbitMQ did not confirm the job published to queue "he.queue.emails.ready": ' +
+        'channel closed before the confirm arrived',
+    );
+    expect(channel.listenerCount('close')).toBe(baseline);
+    // A confirm arriving after the close cannot settle the publish a second time.
+    channel.releaseConfirms();
+    await queue.disconnect();
+  });
+
+  it('a channel close during a retry rejects it and leaves the reserved job UNACKED', async () => {
+    const { queue, channel, runtime } = await connected(
+      { withholdConfirms: true },
+      { publishTimeoutMs: 0 },
+    );
+    const enqueueing = queue.enqueue(job(runtime, 'a'));
+    await settle();
+    channel.releaseConfirms();
+    await enqueueing;
+    const [reserved] = await queue.reserve('emails', 1, runtime.now());
+    const retrying = queue.requeue('emails', reserved!.id, runtime.now() + 10, 1);
+    await settle();
+    channel.emitClose();
+    await expect(retrying).rejects.toThrow('channel closed before the confirm arrived');
+    expect(acks(channel)).toBe(0);
+    channel.releaseConfirms();
+    await queue.disconnect();
+  });
+
+  it('removes its close listener once each publish is confirmed or throws', async () => {
+    const { queue, channel, runtime } = await connected();
+    const baseline = channel.listenerCount('close');
+    for (const id of ['a', 'b', 'c']) {
+      await queue.enqueue(job(runtime, id));
+    }
+    expect(channel.listenerCount('close')).toBe(baseline);
+    await queue.disconnect();
+
+    const failing = await connected({ rejectPublish: true });
+    const failingBaseline = failing.channel.listenerCount('close');
+    await expect(failing.queue.enqueue(job(failing.runtime, 'x'))).rejects.toThrow(
+      'Publish failed',
+    );
+    expect(failing.channel.listenerCount('close')).toBe(failingBaseline);
+    await failing.queue.disconnect();
+  });
+
   it('bounds a confirm that never arrives', async () => {
     const { queue, channel, runtime } = await connected(
       { withholdConfirms: true },

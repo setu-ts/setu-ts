@@ -167,6 +167,47 @@ describe('RabbitMqBroker durability', () => {
     await broker.disconnect();
   });
 
+  it('rejects a pending publish when the channel closes, even with publishTimeoutMs: 0', async () => {
+    // amqplib 0.10.x can leave a publish callback uncalled on close (its drain
+    // stops at a slot an out-of-order confirm already settled); emitClose()
+    // models exactly that, so only the per-publish close listener settles it.
+    const { broker, channel } = await connected(
+      { withholdConfirms: true },
+      { publishTimeoutMs: 0 },
+    );
+    const baseline = channel.listenerCount('close');
+    const publishing = broker.publish('orders.created', { id: 1 });
+    await sleep(0);
+    expect(channel.listenerCount('close')).toBe(baseline + 1);
+    channel.emitClose();
+    await expect(publishing).rejects.toThrow(
+      'RabbitMQ did not confirm the message published to exchange',
+    );
+    await expect(publishing).rejects.toThrow('channel closed before the confirm arrived');
+    expect(channel.listenerCount('close')).toBe(baseline);
+    // A confirm arriving after the close cannot settle the publish a second time.
+    channel.releaseConfirms();
+    await broker.disconnect();
+  });
+
+  it('removes its close listener once each publish is confirmed', async () => {
+    const { broker, channel } = await connected();
+    const baseline = channel.listenerCount('close');
+    for (let id = 0; id < 3; id += 1) {
+      await broker.publish('orders.created', { id });
+    }
+    expect(channel.listenerCount('close')).toBe(baseline);
+    await broker.disconnect();
+  });
+
+  it('leaves no close listener behind when publish throws synchronously', async () => {
+    const { broker, channel } = await connected({ rejectPublish: true });
+    const baseline = channel.listenerCount('close');
+    await expect(broker.publish('orders.created', { id: 1 })).rejects.toThrow('Publish failed');
+    expect(channel.listenerCount('close')).toBe(baseline);
+    await broker.disconnect();
+  });
+
   it('defaults the bound to 15 s and refuses an out-of-range value', () => {
     expect(DEFAULT_PUBLISH_TIMEOUT_MS).toBe(15_000);
     expect(resolvePublishTimeoutMs(undefined)).toBe(15_000);

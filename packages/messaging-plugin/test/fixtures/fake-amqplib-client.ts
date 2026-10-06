@@ -82,6 +82,42 @@ export class FakeAmqpChannel {
     return Promise.resolve();
   }
 
+  #listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+
+  /** Registers an event listener (amqplib channels are `EventEmitter`s). */
+  on(event: string, listener: (...args: unknown[]) => void): this {
+    let set = this.#listeners.get(event);
+    if (set === undefined) {
+      set = new Set();
+      this.#listeners.set(event, set);
+    }
+    set.add(listener);
+    return this;
+  }
+
+  /** Removes an event listener. */
+  off(event: string, listener: (...args: unknown[]) => void): this {
+    this.#listeners.get(event)?.delete(listener);
+    return this;
+  }
+
+  /** Number of listeners currently registered for `event`. */
+  listenerCount(event: string): number {
+    return this.#listeners.get(event)?.size ?? 0;
+  }
+
+  /**
+   * Emits `'close'` WITHOUT delivering any withheld confirm. This models
+   * amqplib 0.10.x, whose close-time drain of unconfirmed callbacks stops at
+   * the first slot an out-of-order confirm already settled, so a later
+   * publish callback is never called.
+   */
+  emitClose(): void {
+    for (const listener of [...(this.#listeners.get('close') ?? [])]) {
+      listener();
+    }
+  }
+
   /** Delivers every withheld confirm (as accepted). */
   releaseConfirms(): void {
     const pending = this.#withheld;

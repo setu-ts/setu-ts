@@ -89,11 +89,48 @@ interface PublishingChannel {
 }
 
 /**
+ * The close-listener members of an amqplib channel (an `EventEmitter`). Read
+ * structurally, so an injected facade without them still publishes; it then
+ * relies on `publishTimeoutMs` alone to settle a confirm that never arrives.
+ */
+interface CloseObservable {
+  on(event: 'close', listener: () => void): unknown;
+  off(event: 'close', listener: () => void): unknown;
+}
+
+/**
+ * Whether a channel exposes the `on`/`off` pair a per-publish close listener
+ * needs.
+ *
+ * @param channel - The channel to inspect
+ * @returns `true` when both members are functions
+ */
+function isCloseObservable(channel: unknown): channel is CloseObservable {
+  return typeof channel === 'object' && channel !== null &&
+    typeof (channel as { on?: unknown }).on === 'function' &&
+    typeof (channel as { off?: unknown }).off === 'function';
+}
+
+/**
  * Publishes on a confirm channel and settles on the broker's answer.
  *
  * amqplib throws SYNCHRONOUSLY when the channel is already closed (probed);
  * the executor turns that into a rejection, so the returned promise is the
  * only failure channel.
+ *
+ * The promise ALSO rejects when the channel closes before the confirm
+ * arrives. amqplib 0.10.x drains its unconfirmed callbacks on close, but the
+ * drain stops at the first slot an out-of-order confirm already settled, so
+ * a later callback can never run — and with `publishTimeoutMs: 0` nothing
+ * else would settle the publish. The listener is removed once the publish
+ * settles either way, so a long-lived channel accumulates none.
+ *
+ * @param channel - The confirm channel
+ * @param exchange - Target exchange
+ * @param routingKey - Routing key
+ * @param content - Message body
+ * @param properties - Publish properties
+ * @returns Resolves once RabbitMQ accepts the message
  */
 function publishConfirmed(
   channel: PublishingChannel,
@@ -103,7 +140,14 @@ function publishConfirmed(
   properties: Record<string, unknown>,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    channel.publish(exchange, routingKey, content, properties, (err) => {
+    const observable = isCloseObservable(channel) ? channel : null;
+    let settled = false;
+    const settle = (err: unknown): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      observable?.off('close', onClose);
       if (err === null || err === undefined) {
         resolve();
         return;
@@ -115,7 +159,16 @@ function publishConfirmed(
           { cause: err },
         ),
       );
-    });
+    };
+    const onClose = (): void => settle(new Error('channel closed before the confirm arrived'));
+    observable?.on('close', onClose);
+    try {
+      channel.publish(exchange, routingKey, content, properties, settle);
+    } catch (error) {
+      settled = true;
+      observable?.off('close', onClose);
+      reject(error);
+    }
   });
 }
 
