@@ -12,6 +12,26 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Update `IRedisStreamsClient` facades and Redis consumer handlers
+
+Injected messaging Redis facades must implement the required `xpending`, `xclaim`, and `xinfo`
+methods using ioredis 5 RESP2 reply shapes, and accept `xgroup('DELCONSUMER', ...)`. A facade
+missing a method now fails connection. Redis 6.2 or newer is required for `XPENDING IDLE`; its
+trimmed-entry `XCLAIM` reply contains a null slot, which the facade must preserve.
+
+Failed messages now redeliver, including pending entries from before an app restart. Make handlers
+idempotent. Set `consumerRetry.delaysMs[0]` above the longest handler runtime to prevent another
+replica claiming a slow handler's entry. Defaults are five total attempts, delays
+`[30000, 60000, 300000, 600000]`, and a 5000 ms reclaim interval. `consumerRetry.isRetryable` can
+return `false` for immediate dead-lettering; deserialize and integration-event rejections
+dead-letter immediately regardless. There is no `consumerRetry: false` option.
+
+Inspect failed messages in `<topic>.dead.<group>`; each carries its original fields,
+`x-setu-source-id`, and `x-setu-deliveries`. Configure `deadLetterMaxLen` (default 10000,
+approximate trimming) and suitable Redis access/retention policy for payload data.
+`consumerIdleSweepMs` defaults to one hour. Clean consumers are removed on stop; consumers with
+pending entries remain until their work is recovered.
+
 ### Set `referrerPolicy` for native full-stack forms (M101g)
 
 Existing full-stack starter compositions should configure

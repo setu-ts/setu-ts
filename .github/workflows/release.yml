@@ -38,6 +38,7 @@ jobs:
     # and the release job dies before publishing anything: it is what killed
     # the v0.1.0-alpha.5 run, which had to be published by hand.
     env:
+      # Includes guarded messaging Redis Streams restart/redelivery tests.
       REDIS_URL: redis://localhost:6379
       SQS_ENDPOINT_URL: http://localhost:9324
       SQS_REGION: us-east-1

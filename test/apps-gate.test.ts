@@ -527,6 +527,41 @@ describe('real-backend CI wiring', () => {
     }
   });
 
+  it('pins real Redis Streams redelivery, its ignore guard, CI broker, and endpoint grants', async () => {
+    const source = await Deno.readTextFile(
+      'packages/messaging-plugin/test/integration/redis-redelivery-real.test.ts',
+    );
+    expect(source).toContain('REAL Redis Streams redelivery');
+    expect(source).toContain("Deno.env.get('REDIS_URL')");
+    expect(source).toContain('ignore: redisUrl === undefined');
+    for (
+      const scenario of [
+        'm1 is redelivered after restart',
+        'two replicas reclaim',
+        'always-failing handler',
+        'clean stop leaves no dead consumer',
+      ]
+    ) {
+      expect(source).toContain(scenario);
+    }
+    const config = await readJson<{ test: { permissions: { net: readonly string[] } } }>(
+      'packages/messaging-plugin/deno.json',
+    );
+    expect(config.test.permissions.net).toContain('127.0.0.1:6379');
+    expect(config.test.permissions.net.every((host) => host.includes(':'))).toBe(true);
+    for (
+      const path of [
+        '.github/workflows/ci.yml',
+        '.github/workflows/drift.yml',
+        '.github/workflows/release.yml',
+      ]
+    ) {
+      const workflow = await Deno.readTextFile(path);
+      expect(workflow).toContain('image: redis:7');
+      expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
+    }
+  });
+
   it('pins the M101a paused-Redis bound suites, their guard, and their grants', async () => {
     // Each suite `docker pause`s the CI Redis service to prove a command is
     // bounded. They guard with `ignore:` on REDIS_URL, so a deleted file, a

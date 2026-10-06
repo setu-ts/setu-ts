@@ -62,6 +62,7 @@ jobs:
     name: Format / Lint / Check / Test (Deno)
     runs-on: ubuntu-latest
     env:
+      # Includes guarded messaging Redis Streams restart/redelivery tests.
       REDIS_URL: redis://localhost:6379
       SQS_ENDPOINT_URL: http://localhost:9324
       SQS_REGION: us-east-1
