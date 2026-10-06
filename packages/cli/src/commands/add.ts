@@ -35,6 +35,7 @@ import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import {
+  callsIdentifier,
   DEVTOOL_SOURCES_MODULE,
   factoryScope,
   maskComments,
@@ -292,10 +293,13 @@ function printWiringNote(
   const binding = source === undefined || factory === undefined
     ? undefined
     : providerBinding(source, bare, factory);
-  const code = source === undefined ? undefined : maskComments(source);
+  // Guidance is suppressed only by a real call in code. Inserting refuses on any
+  // possible use (fail closed); guidance must not ALSO go quiet then, or a mention
+  // in a string would leave the plugin unregistered with nothing said (audit 4).
+  const code = source === undefined ? undefined : maskSourceCode(source);
   if (
     binding !== undefined && code !== undefined &&
-    referencesIdentifier(maskImportDeclarations(code), binding)
+    callsIdentifier(maskImportDeclarations(code), binding)
   ) {
     return;
   }
@@ -468,7 +472,8 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   // Exactly the one recognized import, or none: any other import form (`* as ns`,
   // double quotes, a second declaration) can use the package without the binding
   // checked below ever appearing.
-  if (packageSpecifierCount(source, bare) !== (importedBinding === undefined ? 0 : 1)) {
+  const visible = maskComments(source)!;
+  if (packageSpecifierCount(visible, bare) !== (importedBinding === undefined ? 0 : 1)) {
     return undefined;
   }
   const factory = importedBinding ?? provider.symbol;
@@ -483,7 +488,6 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   //
   // Read with only comments masked, so a use inside a string or a template
   // substitution (`${list.push(CachePlugin())}`) is seen too (audit round 3).
-  const visible = maskComments(source)!;
   const uses = importedBinding === undefined ? visible : maskImportDeclarations(visible);
   if (!source.includes(anchor) || referencesIdentifier(uses, factory)) {
     return undefined;

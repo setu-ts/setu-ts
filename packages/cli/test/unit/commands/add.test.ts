@@ -291,12 +291,40 @@ describe('withPluginWiring', () => {
           '...extra,',
         ],
         [`${imported}const label = 'CachePlugin';\n`, ''],
+        // Audit round 4: an escaped identifier or specifier, a `jsr:`/npm-compat
+        // specifier, and any template literal (including one that hides a call
+        // behind a nested opener) are refused rather than parsed.
+        [imported, 'C\\u0061chePlugin(),'],
+        [
+          `${imported}import * as ns from '@setu-ts/cache\\u002dplugin';\nconst c = ns.CachePlugin();\n`,
+          'c,',
+        ],
+        [
+          `${imported}import * as ns from 'jsr:@setu-ts/cache-plugin@^0.8.0';\nconst c = ns.CachePlugin();\n`,
+          'c,',
+        ],
+        [
+          `${imported}import * as ns from 'npm:@jsr/setu-ts__cache-plugin@0.8.0';\nconst c = ns.CachePlugin();\n`,
+          'c,',
+        ],
+        [`${imported}const opener = \`\${\`/*\`}\`;\nconst c = CachePlugin();\n// */\n`, 'c,'],
       ] as const
     ) expect(withPluginWiring(listed(prefix, item), 'cache-plugin'), prefix).toBeUndefined();
     // Its own import is not a use, and a commented call is not one either.
     expect(withPluginWiring(listed(imported, ''), 'cache-plugin')).toContain('CachePlugin(),');
     expect(withPluginWiring(listed(imported, '// CachePlugin(),'), 'cache-plugin'))
       .toContain('      CachePlugin(),\n      ...(devtool?.plugins ?? []),');
+  });
+
+  // Audit round 4 (G-R4): refusing the insert on a possible use must not also
+  // silence the guidance, or the plugin is left unregistered with nothing said.
+  it('still prints registration guidance when only a string mentions the factory', async () => {
+    const config = "import { CachePlugin } from '@setu-ts/cache-plugin';\n" +
+      "export const note = 'see CachePlugin docs';\n" + CLASS_BASED_INGRESS_CONFIG;
+    const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+    expect(await h.run(['cache'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(config);
+    expect(h.out.join('\n')).toContain('Register CachePlugin() in setu.config.ts.');
   });
 
   it('is not satisfied by a call to a different factory whose name ends the same', () => {

@@ -98,17 +98,20 @@ describe('development source policies', () => {
   it('never rewrites plugin examples inside comments, literals or unfamiliar calls', () => {
     const imports = "import { CachePlugin as $Cache } from '@setu-ts/cache-plugin';\n";
     for (
-      const fake of [
-        '// $Cache(),',
-        '/*\n$Cache(),\n*/',
-        "const text = '\\n$Cache(),';",
-        'const text = `\n$Cache(),\n`;',
-      ]
+      const fake of ['// $Cache(),', '/*\n$Cache(),\n*/', "const text = '$Cache(),';"]
     ) {
       const source = imports + signature + '\n' + fake + '\n $Cache(customOptions),\n}';
       const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
       expect(result.source).toBe(source);
       expect(result.manual).toEqual(['$Cache({ ...options, ...sources.cache })']);
+    }
+    // An escape or a template literal in code is outside the language the lexer
+    // classifies exactly, so the whole configuration is refused rather than edited.
+    for (const fake of ["const text = '\\n$Cache(),';", 'const text = `\n$Cache(),\n`;']) {
+      const source = imports + signature + '\n' + fake + '\n $Cache(),\n}';
+      const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
+      expect(result.source).toBe(source);
+      expect(result.manual).toEqual(['CachePlugin({ ...options, ...sources.cache })']);
     }
     const source = imports + '// ): IKernelApplication {\n' + signature +
       '\n // ...sources.cache\n $Cache(),\n}';
@@ -125,12 +128,19 @@ describe('development source policies', () => {
         '`unterminated',
         '/* unterminated',
         "'trailing\\",
+        // Outside the exactly-classified language: escapes, templates, a backslash
+        // in code, a raw line break inside a string.
+        "const a = 'it\\'s';",
+        'const b = `template`;',
+        'const c = \\u0061;',
+        "const d = 'line\nbreak';",
       ]
     ) {
       expect(maskSourceCode(source)).toBeUndefined();
+      expect(maskComments(source)).toBeUndefined();
     }
     const source =
-      'const a = \'it\\\'s\'; /* block\r\ncomment */ const b = "double\\"quote"; // tail\r\nconst c = `template\\\nline`; // eof';
+      'const a = \'its\'; /* block\r\ncomment `x` \\ */ const b = "double"; // tail `y`\r\nconst c = 1; // eof';
     const masked = maskSourceCode(source)!;
     expect(masked.length).toBe(source.length);
     expect(masked.match(/[\r\n]/g)).toEqual(source.match(/[\r\n]/g));
@@ -280,25 +290,27 @@ describe('development source policies', () => {
   });
 
   it('keeps literals in the comment-only mask and classifies like the full mask', () => {
-    const source = "const a = 'x'; // note\nconst b = `${f(CachePlugin())}`;\n";
-    expect(maskComments(source)).toBe("const a = 'x';        \nconst b = `${f(CachePlugin())}`;\n");
+    const source = "const a = 'CachePlugin'; // note `x`\nconst b = f(1);\n";
+    expect(maskComments(source)).toBe(
+      "const a = 'CachePlugin'; " + ' '.repeat('// note `x`'.length) + '\nconst b = f(1);\n',
+    );
     expect(maskSourceCode(source)).not.toContain('CachePlugin');
     expect(maskComments("const a = 'unterminated")).toBeUndefined();
     expect(maskComments('const a = 8 / 2;')).toBeUndefined();
+    expect(maskComments('const b = `${f(CachePlugin())}`;')).toBeUndefined();
   });
 
-  it('counts a package specifier in every quote style and nothing longer', () => {
-    expect(packageSpecifierCount("import { A } from '@setu-ts/cache-plugin';", 'cache-plugin'))
-      .toBe(1);
-    expect(
-      packageSpecifierCount(
-        'import * as a from "@setu-ts/cache-plugin";\nawait import(`@setu-ts/cache-plugin`);',
-        'cache-plugin',
-      ),
-    ).toBe(2);
-    expect(packageSpecifierCount("import x from '@setu-ts/cache-plugin-x';", 'cache-plugin'))
-      .toBe(0);
-    expect(packageSpecifierCount('// @setu-ts/cache-plugin is installed', 'cache-plugin')).toBe(0);
+  it('counts a package by every specifier spelling and nothing longer', () => {
+    const count = (text: string) => packageSpecifierCount(text, 'cache-plugin');
+    expect(count("import { A } from '@setu-ts/cache-plugin';")).toBe(1);
+    expect(count('import * as a from "@setu-ts/cache-plugin";')).toBe(1);
+    expect(count("import * as a from 'jsr:@setu-ts/cache-plugin@^0.8.0';")).toBe(1);
+    expect(count("import * as a from 'npm:@jsr/setu-ts__cache-plugin@0.8.0';")).toBe(1);
+    expect(count("import * as a from '@setu-ts/cache-plugin/sub';")).toBe(1);
+    expect(count("import x from '@setu-ts/cache-plugin-x';")).toBe(0);
+    expect(count("import x from '@setu-ts/cache-plugins';")).toBe(0);
+    // Callers pass comment-masked text, so a comment never counts.
+    expect(count(maskComments('// @setu-ts/cache-plugin is installed\n')!)).toBe(0);
   });
 
   it('scans import clauses in linear time and refuses non-import text', () => {
@@ -400,6 +412,16 @@ describe('development source policies', () => {
         `${imported}const make = RealtimeBackplanePlugin;\n` +
         "const p = [RealtimeBackplanePlugin(), make({ transport: 'custom' })];",
         `${imported}type T = typeof RealtimeBackplanePlugin;\nconst p = [RealtimeBackplanePlugin()];`,
+        // A reference followed directly by a balanced `{…}` is the one shape only
+        // the call guard refuses: without it this reads as a call with no argument.
+        `${imported}class X extends RealtimeBackplanePlugin {}\nconst p = [RealtimeBackplanePlugin()];`,
+        // Audit round 4: an escaped alias, a `jsr:` second import, or a template
+        // hiding a custom call — each beside a dead plain call.
+        `${imported}const p = [RealtimeBackplanePlugin(), R\\u0065altimeBackplanePlugin({ transport: 'custom', backplane })];`,
+        `${imported}import { RealtimeBackplanePlugin as X } from 'jsr:@setu-ts/realtime-backplane-plugin@^0.8.0';\n` +
+        "const p = [RealtimeBackplanePlugin(), X({ transport: 'custom', backplane })];",
+        `${imported}const o = \`\${\`/*\`}\`;\nconst c = RealtimeBackplanePlugin({ transport: 'custom', backplane });\n// */\n` +
+        'const p = [RealtimeBackplanePlugin()];',
       ]
     ) expect(await custom(config), config).toBe(true);
     // An alias, a second import form, or no import at all confirms nothing.

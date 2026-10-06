@@ -662,3 +662,17 @@ backplane a reference visible there but blanked in the fully masked text withhol
 (4) import declarations are blanked by a linear, bounded clause scanner instead of a regex that
 backtracked cubically (10,000 spaces: 104 s). Scanning past the bound, or any non-import syntax,
 leaves the text visible to the use checks — the fail-closed direction.
+
+Security-audit corrections (round 4): four rounds found new spellings that bypassed text masking,
+because the masker was not a real lexer — template substitutions, nested backticks and escapes are
+exactly where it mis-parsed. Rather than recognize more spellings, the configuration language the
+CLI classifies is restricted to one where the hand-written lexer is EXACT: plain `'…'`/`"…"` strings
+with no escape, no template literal, no backslash in code, no regex literal. In that language a
+string cannot contain its own quote and nothing nests. Anything else is unclassified: no automatic
+edit, manual guidance instead. CLI-generated configurations use none of these constructs outside
+comments (verified across every template, runtime, devtool and workspace variant), so generated
+projects are unaffected. Also: package counting covers `jsr:`/`npm:` prefixes, the npm-compat
+`setu-ts__` name and version/subpath suffixes; refusing an insert on a possible use no longer also
+silences registration guidance, which is suppressed only by a real call (insert fails closed,
+guidance fails open); and "a backplane reference must be a call" is now enforced in exactly one
+place, with a test that fails without it.

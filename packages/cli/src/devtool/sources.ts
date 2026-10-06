@@ -93,22 +93,28 @@ const ROWS: readonly ISourceRow[] = [
 
 /**
  * Masks comments and literals, preserving positions and line breaks.
- * Incomplete comments/literals and slash expressions remain unclassified.
- * Distinguishing division from a regex requires syntax parsing; emitted factory
- * shapes use neither, so unfamiliar expressions receive manual guidance.
+ *
+ * Classifies only a restricted language in which this hand-written lexer is EXACT:
+ * plain `'…'`/`"…"` strings with no escape, no template literal, no backslash in
+ * code, and no regex literal or division. In that language a string cannot contain
+ * its own quote and nothing nests, so every comment and string is found exactly.
+ * Anything else is unclassified (`undefined`) and receives manual guidance rather
+ * than an automatic edit. Narrower recognizers were bypassed four audit rounds in
+ * a row by escapes, nested template substitutions and Unicode-escaped identifiers;
+ * refusing the constructs is what makes the checks built on this mask sound.
+ * CLI-generated configurations use none of them outside comments.
  * @param source - Developer-owned configuration text
- * @returns Code-only text, or undefined for an incomplete literal/comment
+ * @returns Code-only text, or undefined for unclassified source
  */
 export function maskSourceCode(source: string): string | undefined {
   return maskSource(source, true);
 }
 
 /**
- * Masks comments only, keeping string and template literals — including code
- * inside a `${…}` substitution — verbatim. Same classification as
- * {@linkcode maskSourceCode}: undefined exactly when that is. A use of a binding
- * hidden inside a literal is visible here and not there, which is how the checks
- * that must not miss a use (plan §10, audit round 3) detect one.
+ * Masks comments only, keeping string literals verbatim. Same classification as
+ * {@linkcode maskSourceCode}: undefined exactly when that is. A binding name inside
+ * a string is visible here and not there, which is how the checks that must not
+ * miss a use detect one.
  * @param source - Developer-owned configuration text
  * @returns Text with comments blanked, or undefined for unclassified source
  */
@@ -118,7 +124,7 @@ export function maskComments(source: string): string | undefined {
 
 /** The one masking state machine; `blankLiterals` selects which mask it emits. */
 function maskSource(source: string, blankLiterals: boolean): string | undefined {
-  let mode: 'code' | 'line' | 'block' | "'" | '"' | '`' = 'code';
+  let mode: 'code' | 'line' | 'block' | "'" | '"' = 'code';
   const result: string[] = [];
   const blank = (c: string) => c === '\n' || c === '\r' ? c : ' ';
   const literal = (c: string) => blankLiterals ? blank(c) : c;
@@ -130,9 +136,9 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
         mode = next === '/' ? 'line' : 'block';
         result.push('  ');
         i++;
-      } else if (c === '/') {
+      } else if (c === '/' || c === '`' || c === '\\') {
         return undefined;
-      } else if (c === "'" || c === '"' || c === '`') {
+      } else if (c === "'" || c === '"') {
         mode = c;
         result.push(literal(c));
       } else result.push(c);
@@ -146,11 +152,9 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
         mode = 'code';
       } else result.push(blank(c));
     } else {
+      if (c === '\\' || c === '\n' || c === '\r') return undefined;
       result.push(literal(c));
-      if (c === '\\' && next !== undefined) {
-        result.push(literal(next));
-        i++;
-      } else if (c === mode) mode = 'code';
+      if (c === mode) mode = 'code';
     }
   }
   return mode === 'code' || mode === 'line' ? result.join('') : undefined;
@@ -189,41 +193,56 @@ export function factoryScope(source: string): {
 /** Longest import clause the scanner follows before treating text as non-import. */
 const MAX_IMPORT_CLAUSE = 4096;
 
+/** Whitespace the import scanner skips; a newline outside braces ends the attempt. */
+function isBlank(c: string): boolean {
+  return c === ' ' || c === '\t';
+}
+
+/** Identifier characters, checked without a regex per character. */
+function isIdentifierChar(c: string): boolean {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+    c === '_' || c === '$';
+}
+
 /**
- * End of the import clause starting after the `import` keyword at `from`, or -1.
- * Follows the clause grammar — optional `type`, a default binding, `,`, `{ … }` or
- * `* as name` — up to the `from` keyword, refusing any other character. Linear and
- * bounded: a regex here backtracked cubically on long runs of whitespace (audit
- * round 3, N1). Refusing means "not an import", which leaves the text visible to
- * the use checks — the fail-closed direction.
+ * Scans the import clause starting after the `import` keyword: optional `type`, a
+ * default binding, `,`, `{ … }` or `* as name`, up to the `from` keyword, refusing
+ * any other character — and a newline outside braces, which deno fmt never emits
+ * inside a clause. Returns the end of the clause, or -1, and in both cases the
+ * index scanning stopped at, so the caller never rescans that text: one linear
+ * pass over the file. Refusing means "not an import", which leaves the text
+ * visible to the use checks — the fail-closed direction.
  */
-function importClauseEnd(code: string, start: number): number {
+function importClauseEnd(
+  code: string,
+  start: number,
+): { readonly end: number; readonly stop: number } {
   const limit = Math.min(code.length, start + MAX_IMPORT_CLAUSE);
   let i = start;
   let tokens = 0;
   while (i < limit) {
     const c = code[i]!;
-    if (/\s/.test(c)) {
+    if (isBlank(c)) {
       i += 1;
     } else if (c === ',' || c === '*') {
       i += 1;
       tokens += 1;
     } else if (c === '{') {
       const close = code.indexOf('}', i);
-      if (close < 0 || close >= limit) return -1;
+      if (close < 0 || close >= limit) return { end: -1, stop: limit };
       i = close + 1;
       tokens += 1;
-    } else if (/[A-Za-z_$]/.test(c)) {
+    } else if (isIdentifierChar(c) && !(c >= '0' && c <= '9')) {
       let end = i + 1;
-      while (end < limit && /[\w$]/.test(code[end]!)) end += 1;
-      if (code.slice(i, end) === 'from' && tokens > 0) return end;
+      while (end < limit && isIdentifierChar(code[end]!)) end += 1;
+      if (code.slice(i, end) === 'from' && tokens > 0) return { end, stop: end };
       i = end;
       tokens += 1;
     } else {
-      return -1;
+      return { end: -1, stop: i };
     }
   }
-  return -1;
+  return { end: -1, stop: i };
 }
 
 /**
@@ -231,39 +250,46 @@ function importClauseEnd(code: string, start: number): number {
  * reference search sees uses of a binding and never its own import. Each line
  * starting with the `import` keyword (not `import(`) is scanned by
  * {@linkcode importClauseEnd}; only a well-formed clause up to `from` is blanked.
+ * Text a scan has already passed is never scanned again.
  *
  * @param code - Masked source from {@linkcode maskSourceCode} or {@linkcode maskComments}
  * @returns The same text with import clauses replaced by spaces
  */
 export function maskImportDeclarations(code: string): string {
   const out = code.split('');
+  let resume = 0;
   for (let line = 0; line < code.length; line = code.indexOf('\n', line) + 1 || code.length) {
+    if (line < resume) continue;
     let i = line;
-    while (code[i] === ' ' || code[i] === '\t') i += 1;
-    if (!code.startsWith('import', i) || /[\w$(]/.test(code[i + 6] ?? '')) continue;
-    const end = importClauseEnd(code, i + 6);
-    if (end < 0) continue;
-    for (let k = i; k < end; k++) if (out[k] !== '\n') out[k] = ' ';
+    while (isBlank(code[i] ?? '')) i += 1;
+    const after = code[i + 6] ?? '';
+    if (!code.startsWith('import', i) || isIdentifierChar(after) || after === '(') continue;
+    const scan = importClauseEnd(code, i + 6);
+    resume = scan.stop;
+    if (scan.end < 0) continue;
+    for (let k = i; k < scan.end; k++) if (out[k] !== '\n') out[k] = ' ';
   }
   return out.join('');
 }
 
 /**
- * How many times a framework package is named as a module specifier, in any quote
- * style. A check that trusts one recognized import requires this to be exactly one:
- * a second import form (`import * as ns`, double quotes) could otherwise use the
- * package unseen (audit round 3).
+ * How many times a framework package is named, as `@setu-ts/<pkg>` (with any
+ * `jsr:`/`npm:` prefix, version or subpath) or as its npm-compatibility name
+ * `setu-ts__<pkg>`, in comment-masked text. A check that trusts one recognized
+ * import requires exactly one: a second import form could otherwise use the
+ * package unseen (audit rounds 3 and 4). A longer package name (`<pkg>-x`) is not
+ * counted.
  *
- * @param source - Raw configuration text
+ * @param text - Configuration text with comments masked
  * @param pkg - Bare package name, e.g. `cache-plugin`
  * @returns The occurrence count
  */
-export function packageSpecifierCount(source: string, pkg: string): number {
-  const specifier = `@setu-ts/${pkg}`;
+export function packageSpecifierCount(text: string, pkg: string): number {
   let count = 0;
-  for (let at = source.indexOf(specifier); at >= 0; at = source.indexOf(specifier, at + 1)) {
-    if (/['"`]/.test(source[at - 1] ?? '') && /['"`]/.test(source[at + specifier.length] ?? '')) {
-      count += 1;
+  for (const name of [`@setu-ts/${pkg}`, `setu-ts__${pkg}`]) {
+    for (let at = text.indexOf(name); at >= 0; at = text.indexOf(name, at + 1)) {
+      const next = text[at + name.length] ?? '';
+      if (!isIdentifierChar(next) && next !== '-') count += 1;
     }
   }
   return count;
@@ -282,6 +308,26 @@ export function referencesIdentifier(code: string, name: string): boolean {
   return identifierPattern(name).test(code);
 }
 
+/**
+ * Whether masked code CALLS `name` directly (`name(`) — the precise "registered"
+ * signal that suppresses registration guidance. Deliberately narrower than
+ * {@linkcode referencesIdentifier}: refusing an automatic edit on any possible use
+ * fails closed, while guidance fails open, so a refused edit is never also a
+ * silent one (audit round 4).
+ *
+ * @param code - Masked source
+ * @param name - An identifier
+ * @returns Whether a direct call exists
+ */
+export function callsIdentifier(code: string, name: string): boolean {
+  for (const reference of code.matchAll(identifierPattern(name, 'g'))) {
+    let at = reference.index + name.length;
+    while (isBlank(code[at] ?? '') || code[at] === '\n') at += 1;
+    if (code[at] === '(') return true;
+  }
+  return false;
+}
+
 /** The reference pattern shared by every use check, global for counting. */
 function identifierPattern(name: string, flags = ''): RegExp {
   const escaped = name.replace(/[$]/g, '\\$&');
@@ -289,7 +335,11 @@ function identifierPattern(name: string, flags = ''): RegExp {
 }
 
 /** Index of the bracket closing the one at `open`, counted over masked code. */
-function matchingClose(code: string, open: number): number {
+function matchingClose(code: string, open: number, opener: '(' | '{'): number {
+  // The opener is required, not inferred: this is the one place that enforces "a
+  // backplane reference must be a call" (and "an argument must be an object"), so
+  // a reference followed by anything else is refused here and nowhere else.
+  if (code[open] !== opener) return -1;
   const pairs: Readonly<Record<string, string>> = { '(': ')', '{': '}', '[': ']' };
   const stack: string[] = [];
   for (let i = open; i < code.length; i++) {
@@ -315,7 +365,9 @@ function supportedBackplaneArgument(raw: string, masked: string): boolean {
   if (raw.trim() === '') return true;
   const trimmed = masked.trim();
   const open = masked.indexOf('{');
-  if (!trimmed.startsWith('{') || matchingClose(masked, open) !== masked.trimEnd().length - 1) {
+  if (
+    !trimmed.startsWith('{') || matchingClose(masked, open, '{') !== masked.trimEnd().length - 1
+  ) {
     return false;
   }
   // `__proto__` in an object literal sets the PROTOTYPE, which can carry a custom
@@ -354,7 +406,7 @@ function backplaneConfirmedSupported(source: string, code: string): boolean {
   if (
     declaration === null ||
     code.slice(declaration.index, declaration.index + 6) !== 'import' ||
-    packageSpecifierCount(source, 'realtime-backplane-plugin') !== 1
+    packageSpecifierCount(maskComments(source)!, 'realtime-backplane-plugin') !== 1
   ) {
     return false;
   }
@@ -373,8 +425,7 @@ function backplaneConfirmedSupported(source: string, code: string): boolean {
   for (const reference of references) {
     let at = reference.index + name.length;
     while (/\s/.test(uses[at] ?? '')) at += 1;
-    if (uses[at] !== '(') return false;
-    const close = matchingClose(uses, at);
+    const close = matchingClose(uses, at, '(');
     if (close < 0) return false;
     if (!supportedBackplaneArgument(source.slice(at + 1, close), uses.slice(at + 1, close))) {
       return false;
