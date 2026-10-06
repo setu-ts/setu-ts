@@ -38,7 +38,7 @@ import {
   callsIdentifier,
   DEVTOOL_SOURCES_MODULE,
   factoryScope,
-  importMapRetargets,
+  frameworkImportsRetargeted,
   maskComments,
   maskImportDeclarations,
   maskSourceCode,
@@ -610,9 +610,6 @@ export async function runAddCommand(
   const edits: { readonly path: string; readonly contents: string }[] = [];
   let found = false;
   let alreadyPresent = false;
-  // An import map that points a framework name elsewhere makes the configuration's
-  // imports mean something its text does not say: no automatic wiring then.
-  let retargeted = false;
 
   for (const target of targets) {
     if (runtime === 'deno' && target.file === 'package.json') continue;
@@ -624,7 +621,6 @@ export async function runAddCommand(
       continue;
     }
     found = true;
-    retargeted ||= importMapRetargets(source);
 
     if (pinnedInOtherNpmSection(source, target.file, target.section, specifier, target.range)) {
       alreadyPresent = true;
@@ -666,7 +662,11 @@ export async function runAddCommand(
   let configSource: string | undefined;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
-    const wired = retargeted ? undefined : withPluginWiring(config, bare);
+    // An import map that points a framework name elsewhere makes the configuration's
+    // imports mean something its text does not say: no automatic wiring then.
+    const wired = await frameworkImportsRetargeted(deps.fs, dir)
+      ? undefined
+      : withPluginWiring(config, bare);
     if (wired !== undefined) edits.push({ path: configPath, contents: wired });
     configSource = wired ?? config;
   } catch {

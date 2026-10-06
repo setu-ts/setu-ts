@@ -703,3 +703,16 @@ quadratically, is one linear tokenizer at all three sites. The CLI's own backpla
 (`{ ...sources.backplane }`, `{ ...<original>, ...sources.backplane }`) are recognized as their
 original argument, and the managed sources module types every row key, so a dropped row spreads to
 nothing instead of failing `deno check`.
+
+Security-audit corrections (round 7): four more gaps, fixed after the round and not re-audited (the
+maintainer capped the audit at seven rounds). Import maps are now read as parsed JSONC rather than
+matched as text, so an escaped key is the same key Deno sees; `scopes`, the npm dependency maps, any
+`importMap` file and the nearest workspace root's maps are all checked; and a path target counts as
+the framework package only when its normalized path ends in that package's directory. `[` is an
+array literal or tuple only in an allowlisted position, tracked with a bracket stack, which refuses
+a non-null-asserted index (`o!['k']`) and computed keys, destructuring included. A backplane options
+literal that names no `transport` is no longer confirmed, since it reads the transport through its
+prototype. `...sources.<key>` is read as the CLI's own only while the CLI's declaration is the sole
+binding of `sources`, and the declaration is inserted only when the name is unused — otherwise the
+configuration gets manual guidance, which closes a silent production transport change. Closing
+parentheses are found in one stack pass.

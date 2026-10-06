@@ -7,6 +7,7 @@ import {
   callsIdentifier,
   factoryScope,
   FRAMEWORK_PACKAGES,
+  frameworkImportsRetargeted,
   importMapRetargets,
   maskComments,
   maskImportDeclarations,
@@ -355,6 +356,11 @@ describe('development source policies', () => {
         'const o = f()[k];',
         'const o = a?.[k];',
         'const o = list[0][k];',
+        // Audit round 7: a non-null assertion and computed keys, destructuring included.
+        "const p = o!['constructor']!['prototype']!;",
+        "const { ['constructor']: C } = {} as R;",
+        "const o = { a: 1, ['k']: v };",
+        "const o = { ['k']: v };",
       ]
     ) {
       expect(maskSourceCode(source), source).toBeUndefined();
@@ -367,30 +373,102 @@ describe('development source policies', () => {
         'function f() { return [a]; }',
         'for (const x of [a]) g(x);',
         'const t = { plugins: [...GENERATED_PLUGINS] };',
+        'const n = [a, [b]];',
+        'f(a, [b]);',
+        'const v = c ? [a] : [b];',
+        'const w = ![a];',
+        'type T = Map<[A, B], C>;',
       ]
     ) {
       expect(maskSourceCode(source), source).toBeDefined();
     }
   });
 
-  it('detects an import map that points a framework name elsewhere', () => {
-    const map = (imports: Record<string, string>) => JSON.stringify({ imports }, null, 2);
-    expect(importMapRetargets(map({ '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin@^0.8.0' })))
-      .toBe(false);
-    expect(importMapRetargets(map({ '@setu-ts/runtime/': 'jsr:@setu-ts/runtime@^0.8.0/' })))
-      .toBe(false);
-    expect(
-      importMapRetargets(map({ '@setu-ts/cache-plugin': 'npm:@jsr/setu-ts__cache-plugin@^0.8.0' })),
-    ).toBe(false);
+  it('detects an import map that points a framework name elsewhere', async () => {
+    const map = (imports: Record<string, string>) => ({ imports });
+    for (
+      const same of [
+        { '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin@^0.8.0' },
+        { '@setu-ts/runtime/': 'jsr:@setu-ts/runtime@^0.8.0/' },
+        { '@setu-ts/cache-plugin': 'npm:@jsr/setu-ts__cache-plugin@^0.8.0' },
+        { '@setu-ts/rest-starter': '../../packages/starters/rest-starter/src/index.ts' },
+        { '@setu-ts/kernel': '/repo/packages/kernel/src/index.ts' },
+      ]
+    ) expect(importMapRetargets(map(same)), JSON.stringify(same)).toBe(false);
+    for (
+      const other of [
+        { '@setu-ts/cachealias': 'jsr:@setu-ts/cache-plugin@^0.8.0' },
+        { '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' },
+        { '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin-evil@^1' },
+        // Audit round 7: a path that merely passes through `<pkg>/`.
+        { '@setu-ts/storage-plugin': '../storage-plugin/../packages/cache-plugin/src/index.ts' },
+        { '@setu-ts/storage-plugin': './vendor/storage-plugin/x.ts' },
+        { '@setu-ts/cache-plugin': 'https://example.test/cache.ts' },
+      ]
+    ) expect(importMapRetargets(map(other)), JSON.stringify(other)).toBe(true);
+    // Keys are compared AFTER JSON decoding: an escaped key is the same key.
     expect(
       importMapRetargets(
-        map({ '@setu-ts/rest-starter': '../../packages/starters/rest-starter/src/index.ts' }),
+        JSON.parse('{"imports":{"@setu-ts\\/storage-plugin":"jsr:@setu-ts/cache-plugin@^1"}}'),
+      ),
+    ).toBe(true);
+    expect(
+      importMapRetargets({
+        scopes: { './x/': { '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' } },
+      }),
+    ).toBe(true);
+    expect(importMapRetargets({ scopes: 'nope' })).toBe(true);
+    expect(importMapRetargets({ imports: { '@setu-ts/kernel': 1 } })).toBe(true);
+    expect(importMapRetargets({ dependencies: { '@setu-ts/kernel': '^1' } })).toBe(true);
+    expect(importMapRetargets('text')).toBe(false);
+
+    const retarget = JSON.stringify(
+      map({ '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' }),
+    );
+    const clean = JSON.stringify(map({ '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^1' }));
+    // A workspace root's maps are inherited; an unrelated ancestor's are not.
+    expect(
+      await frameworkImportsRetargeted(
+        createFakeFs({
+          '/ws/deno.json': JSON.stringify({
+            workspace: ['./apps/*'],
+            ...map({ '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' }),
+          }),
+          '/ws/apps/a/deno.json': clean,
+        }),
+        '/ws/apps/a',
+      ),
+    ).toBe(true);
+    expect(
+      await frameworkImportsRetargeted(
+        createFakeFs({ '/up/deno.json': retarget, '/up/a/deno.json': clean }),
+        '/up/a',
       ),
     ).toBe(false);
-    expect(importMapRetargets(map({ '@setu-ts/cachealias': 'jsr:@setu-ts/cache-plugin@^0.8.0' })))
-      .toBe(true);
-    expect(importMapRetargets(map({ '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' })))
-      .toBe(true);
+    expect(
+      await frameworkImportsRetargeted(
+        createFakeFs({
+          '/a/deno.json': JSON.stringify({ importMap: './map.json' }),
+          '/a/map.json': retarget,
+        }),
+        '/a',
+      ),
+    ).toBe(true);
+    expect(
+      await frameworkImportsRetargeted(
+        createFakeFs({ '/a/deno.json': JSON.stringify({ importMap: 'https://x.test/m.json' }) }),
+        '/a',
+      ),
+    ).toBe(true);
+    expect(
+      await frameworkImportsRetargeted(
+        createFakeFs({ '/a/deno.jsonc': '{ // c\n "imports": {}, }', '/a/package.json': '{' }),
+        '/a',
+      ),
+    ).toBe(true);
+    expect(await frameworkImportsRetargeted(createFakeFs({ '/a/deno.json': clean }), '/a')).toBe(
+      false,
+    );
   });
 
   it('parses import items without backtracking', () => {
@@ -430,6 +508,61 @@ describe('development source policies', () => {
   });
 
   // Audit round 6 (T-R6): the shapes withSourceArgs emits keep their meaning.
+  // Audit round 7 (S-R7): only the CLI's own declaration of `sources` is trusted;
+  // any other binding of that name is not the managed module and may carry anything.
+  it('trusts `sources` only as the CLI declares it', async () => {
+    const imported =
+      "import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n";
+    const declaration =
+      '\n  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;';
+    const call = '\n  const p = [RealtimeBackplanePlugin({ ...sources.backplane })];\n}';
+    const custom = async (config: string) =>
+      (await readDevtoolSourceNames(
+        createFakeFs({}),
+        '/app',
+        new Set(['realtime-backplane-plugin']),
+        config,
+      )).customBackplane;
+    expect(await custom(imported + signature + declaration + call)).toBe(false);
+    for (
+      const config of [
+        "export const sources = { backplane: { transport: 'custom' } };\n" + imported + signature +
+        call,
+        imported + signature + declaration + '\n  { const sources = other; }' + call,
+        imported + signature + declaration + '\n  const f = (sources: R) => sources;' + call,
+        imported + signature + '\n  const x = 1;' + declaration + call,
+        imported + 'const y = sources.backplane;\n' + signature + declaration + call,
+      ]
+    ) expect(await custom(config), config).toBe(true);
+
+    const cache = "import { CachePlugin } from '@setu-ts/cache-plugin';\n";
+    const shadowed = 'export const sources = { cache: {} };\n' + cache + signature +
+      '\n  return createApplication({ plugins: [\n  CachePlugin(),\n] });\n}';
+    const result = withDevtoolSourceWiring(shadowed, new Set(['cache-plugin']));
+    expect(result.source).toBe(shadowed);
+    expect(result.manual).toEqual(['CachePlugin({ ...options, ...sources.cache })']);
+  });
+
+  // Observation O5 (round 7): the caller's override withholds the backplane wiring
+  // even when the configuration alone would confirm it.
+  it('honours the custom-backplane override', () => {
+    const source =
+      "import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n" +
+      signature +
+      '\n return createApplication({ plugins: [\n  RealtimeBackplanePlugin(),\n] });\n}';
+    const installed = new Set(['realtime-backplane-plugin']);
+    expect(withDevtoolSourceWiring(source, installed).source).toContain('...sources.backplane');
+    expect(withDevtoolSourceWiring(source, installed, true).source).toBe(source);
+  });
+
+  // Audit round 7 (R-R7): closing parentheses are found in one pass, not per reference.
+  it('tests many unclosed references in linear time', () => {
+    const body = 'CachePlugin(\n'.repeat(20_000);
+    const started = performance.now();
+    expect(callsIdentifier(body, 'CachePlugin')).toBe(false);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
   it('keeps the committed absent-row fixture in step with the renderer', async () => {
     const fixture = await Deno.readTextFile(
       new URL('../fixtures/devtool-sources-absent.ts', import.meta.url),
@@ -448,7 +581,9 @@ describe('development source policies', () => {
         createFakeFs({}),
         '/app',
         new Set(['realtime-backplane-plugin']),
-        imported + signature + `\n  const p = [${call}];\n}`,
+        imported + signature +
+          '\n  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;' +
+          `\n  const p = [${call}];\n}`,
       );
     for (
       const call of [
@@ -601,12 +736,14 @@ describe('development source policies', () => {
       'RealtimeBackplanePlugin()',
       "RealtimeBackplanePlugin({ transport: 'redis', url: 'redis://127.0.0.1:6379' })",
       'RealtimeBackplanePlugin({ transport: "memory" })',
-      'RealtimeBackplanePlugin({})',
     ];
     for (const call of confirmed) {
       expect(await custom(`${imported}const p = [${call}];`), call).toBe(false);
     }
     const withheld: readonly string[] = [
+      // Audit round 7: a literal naming no transport reads it from the prototype.
+      'RealtimeBackplanePlugin({})',
+      "RealtimeBackplanePlugin({ url: 'redis://127.0.0.1:6379' })",
       "RealtimeBackplanePlugin({ transport: 'custom', backplane })",
       "RealtimeBackplanePlugin({ 'transport': 'custom' })",
       'RealtimeBackplanePlugin({ "transport": "custom" })',

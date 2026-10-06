@@ -212,7 +212,10 @@ All notable changes to this project are documented here. The format follows
   package, a computed member access such as `x['k']`, an import from a package that is not a
   framework package or a relative file, and template literals or escapes in code all get the printed
   line instead of an edit. The managed `src/devtool/diagnostics.ts` declares every source key, so a
-  row it stops emitting still type-checks where `setu.config.ts` spreads it.
+  row it stops emitting still type-checks where `setu.config.ts` spreads it. Import maps are read
+  from the project's manifests, any `importMap` file and the workspace root. A backplane options
+  object that names no `transport` no longer receives the development policy, and a configuration
+  that binds its own `sources` gets the printed line rather than the CLI's declaration.
 
 - **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
   primary key is already stored now rejects

@@ -1,7 +1,8 @@
 /** Development-only source policies, shared by scaffold, enable and add. @module */
 import type { IFileSystem } from '@setu-ts/common';
 import type { GeneratedFile } from '../utils/file-writer.ts';
-import { joinPath } from '../utils/file-writer.ts';
+import { dirName, joinPath } from '../utils/file-writer.ts';
+import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { PLUGIN_HEALTH_INDICATORS } from '../utils/plugin-claims.ts';
 import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
@@ -228,31 +229,129 @@ function isRecognizedSpecifier(specifier: string): boolean {
   return FRAMEWORK_PACKAGES.has(slash < 0 ? rest : rest.slice(0, slash));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A path's segments with `.` dropped and `..` applied, so `a/b/../c` is `a/c`. */
+function normalizedSegments(path: string): readonly string[] {
+  const out: string[] = [];
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..' && out.length > 0 && out.at(-1) !== '..') out.pop();
+    else out.push(segment);
+  }
+  return out;
+}
+
 /**
- * Whether a manifest maps a `@setu-ts/` import key to something other than that
- * same framework package — an unknown name, or a known name pointed at a different
- * package. Either makes the configuration's imports mean something its text does
- * not say, so automatic edits are withheld (audit round 6). A value naming the
- * package as `jsr:@setu-ts/<pkg>`, its npm-compatibility name `setu-ts__<pkg>`, or
- * a path through a `<pkg>/` directory (a workspace checkout) is the same package.
+ * Whether an import target is the framework package `pkg` itself: the published
+ * `jsr:` or npm-compatibility specifier (optionally versioned or with a subpath),
+ * or a filesystem path whose last `packages/` segment is that package's
+ * directory (a workspace checkout). Anything else — another package, a path that
+ * only passes through `<pkg>/`, a URL — is a retarget (audit rounds 6 and 7).
+ */
+function namesFrameworkPackage(pkg: string, value: string): boolean {
+  for (
+    const prefix of [`jsr:@setu-ts/${pkg}`, `jsr:/@setu-ts/${pkg}`, `npm:@jsr/setu-ts__${pkg}`]
+  ) {
+    if (value.startsWith(prefix)) {
+      const rest = value.slice(prefix.length);
+      return rest === '' || rest[0] === '@' || rest[0] === '/';
+    }
+  }
+  const path = value.startsWith('file://') ? value.slice('file://'.length) : value;
+  if (!path.startsWith('/') && !path.startsWith('./') && !path.startsWith('../')) return false;
+  const segments = normalizedSegments(path);
+  const last = segments.lastIndexOf('packages');
+  if (last < 0) return false;
+  const rest = segments.slice(last + 1);
+  return rest[0] === pkg || (rest[0] === 'starters' && rest[1] === pkg);
+}
+
+/**
+ * Whether one parsed manifest or import map maps a `@setu-ts/` key to something
+ * other than that same framework package. Reads `imports`, every `scopes` map and
+ * the npm dependency maps, AFTER JSON decoding — an escaped key such as
+ * `"@setu-ts\\/x"` is the same key to Deno and must be the same key here (audit
+ * round 7). A malformed map is treated as a retarget: fail closed.
  *
- * @param manifest - Raw `deno.json` or `package.json` text
+ * @param manifest - A parsed `deno.json`, `package.json` or import map
  * @returns Whether any framework import is retargeted
  */
-export function importMapRetargets(manifest: string): boolean {
-  for (const entry of manifest.matchAll(/"@setu-ts\/([^"]*)"[ \t\r\n]*:[ \t\r\n]*"([^"]*)"/g)) {
-    const key = entry[1]!.replace(/\/$/, '');
-    const value = entry[2]!;
-    if (!FRAMEWORK_PACKAGES.has(key)) return true;
-    const same = value === `jsr:@setu-ts/${key}` || value.includes(`@setu-ts/${key}@`) ||
-      value.includes(`@setu-ts/${key}/`) || value.includes(`setu-ts__${key}@`) ||
-      value.includes(`/${key}/`);
-    if (!same) return true;
+export function importMapRetargets(manifest: unknown): boolean {
+  if (!isRecord(manifest)) return false;
+  const maps: unknown[] = [
+    manifest['imports'],
+    manifest['dependencies'],
+    manifest['devDependencies'],
+    manifest['peerDependencies'],
+    manifest['optionalDependencies'],
+  ];
+  const scopes = manifest['scopes'];
+  if (scopes !== undefined) {
+    if (!isRecord(scopes)) return true;
+    maps.push(...Object.values(scopes));
+  }
+  for (const map of maps) {
+    if (map === undefined) continue;
+    if (!isRecord(map)) return true;
+    for (const [key, value] of Object.entries(map)) {
+      if (!key.startsWith('@setu-ts/')) continue;
+      const name = key.slice('@setu-ts/'.length);
+      const pkg = name.split('/')[0]!;
+      if (!FRAMEWORK_PACKAGES.has(pkg) || typeof value !== 'string') return true;
+      if (!namesFrameworkPackage(pkg, value)) return true;
+    }
   }
   return false;
 }
 
-/** Words before which `[` opens an array literal rather than indexing a value. */
+/**
+ * Whether the import maps that resolve this project's imports retarget a framework
+ * name: the project's own `deno.json`/`deno.jsonc`/`package.json`, any `importMap`
+ * file they name, and the nearest ancestor that declares a workspace — whose maps a
+ * member inherits (audit round 7). An unreadable manifest or a remote import map
+ * counts as a retarget, since its mapping cannot be read.
+ *
+ * @param fs - The CLI filesystem port
+ * @param dir - The project directory
+ * @returns Whether automatic edits must be withheld
+ */
+export async function frameworkImportsRetargeted(fs: IFileSystem, dir: string): Promise<boolean> {
+  let current = dir;
+  for (let depth = 0; depth < 64; depth++) {
+    let workspace = false;
+    for (const file of ['deno.json', 'deno.jsonc', 'package.json']) {
+      const read = await readJsonManifest(fs, joinPath(current, file));
+      if (read.kind === 'missing') continue;
+      if (read.kind !== 'ok') return true;
+      const declaresWorkspace = isRecord(read.value) &&
+        ('workspace' in read.value || 'workspaces' in read.value);
+      // Above the project only a workspace root contributes maps.
+      if (current !== dir && !declaresWorkspace) continue;
+      workspace ||= declaresWorkspace;
+      if (importMapRetargets(read.value)) return true;
+      const importMap = isRecord(read.value) ? read.value['importMap'] : undefined;
+      if (importMap === undefined) continue;
+      if (typeof importMap !== 'string' || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(importMap)) {
+        return true;
+      }
+      const mapRead = await readJsonManifest(
+        fs,
+        importMap.startsWith('/') ? importMap : joinPath(current, importMap),
+      );
+      if (mapRead.kind !== 'ok' || importMapRetargets(mapRead.value)) return true;
+    }
+    if (workspace) break;
+    const parent = dirName(current);
+    if (parent === '' || parent === current) break;
+    current = parent;
+  }
+  return false;
+}
+
+/** Words after which `[` opens an array literal or a tuple type. */
 const LITERAL_BRACKET_KEYWORDS: ReadonlySet<string> = new Set([
   'return',
   'of',
@@ -264,38 +363,64 @@ const LITERAL_BRACKET_KEYWORDS: ReadonlySet<string> = new Set([
   'else',
   'do',
   'void',
-  'delete',
   'throw',
   'readonly',
   'satisfies',
   'as',
+  'keyof',
 ]);
 
+/** Characters after which `[` opens an array literal or a tuple type. */
+const LITERAL_BRACKET_PRECEDERS = '(=:[?|&<>!';
+
 /**
- * Whether masked code indexes a value with `[…]`. A computed member access reaches
- * a property no identifier names — `x['constructor']['prototype']` — so it is as
- * undecidable as the identifiers it spells (audit round 6). An array literal, and
- * a `T[]` type (an empty bracket pair), are not member access.
+ * Whether masked code contains a `[` that is not provably an array literal, a
+ * tuple type or an empty `T[]` type. Computed member access (`x['k']`, `x!['k']`,
+ * `x?.[k]`) and computed keys (`{ ['k']: v }`, destructuring included) reach a
+ * property no identifier names — `constructor`, `prototype` — so they are as
+ * undecidable as the identifiers they spell (audit rounds 6 and 7). The rule is
+ * an allowlist of positions, tracked with a bracket stack: a `[` after `,` counts
+ * as a literal only inside `[…]` or `(…)`, never inside `{…}`.
+ *
+ * @param code - The code mask
+ * @param kept - The comment-only mask, whose strings show what a bracket holds
  */
 function indexesValue(code: string, kept: string): boolean {
+  const stack: string[] = [];
   let previous = -1;
   for (let i = 0; i < code.length; i++) {
     const c = code[i]!;
-    if (c === '[' && previous >= 0) {
-      // The bracket's contents are read with string literals KEPT: in the code
-      // mask `['constructor']` is blank and would pass for a `T[]` type.
+    if (c === '[') {
+      // Contents read with strings KEPT: in the code mask `['constructor']` is blank.
       let next = i + 1;
       while (next < kept.length && /\s/.test(kept[next]!)) next += 1;
-      const empty = kept[next] === ']';
-      const before = code[previous]!;
-      if (!empty && (before === ')' || before === ']' || before === '.')) return true;
-      if (!empty && isIdentifierChar(before)) {
-        let start = previous;
-        while (start > 0 && isIdentifierChar(code[start - 1]!)) start -= 1;
-        if (!LITERAL_BRACKET_KEYWORDS.has(code.slice(start, previous + 1))) return true;
-      }
+      if (kept[next] !== ']' && !literalBracket(code, previous, stack.at(-1))) return true;
     }
+    if (c === '(' || c === '[' || c === '{') stack.push(c);
+    else if (c === ')' || c === ']' || c === '}') stack.pop();
     if (!/\s/.test(c)) previous = i;
+  }
+  return false;
+}
+
+/** Whether a `[` preceded by `code[previous]`, inside `enclosing`, opens a literal. */
+function literalBracket(code: string, previous: number, enclosing: string | undefined): boolean {
+  if (previous < 0) return true;
+  const before = code[previous]!;
+  // `!` is a literal position only as logical not (`![a]`), never a non-null
+  // assertion (`o!['k']`), which follows a value.
+  if (before === '!') {
+    let start = previous - 1;
+    while (start >= 0 && /\s/.test(code[start]!)) start -= 1;
+    const prior = start < 0 ? '' : code[start]!;
+    return !(isIdentifierChar(prior) || prior === ')' || prior === ']');
+  }
+  if (LITERAL_BRACKET_PRECEDERS.includes(before)) return true;
+  if (before === ',') return enclosing === '[' || enclosing === '(';
+  if (isIdentifierChar(before)) {
+    let start = previous;
+    while (start > 0 && isIdentifierChar(code[start - 1]!)) start -= 1;
+    return LITERAL_BRACKET_KEYWORDS.has(code.slice(start, previous + 1));
   }
   return false;
 }
@@ -569,10 +694,13 @@ export function referencesIdentifier(code: string, name: string): boolean {
  * @returns Whether a direct call exists
  */
 export function callsIdentifier(code: string, name: string): boolean {
+  let closes: Int32Array | undefined;
   for (const reference of code.matchAll(identifierPattern(name, 'g'))) {
     let at = reference.index + name.length;
     while (isBlank(code[at] ?? '') || code[at] === '\n') at += 1;
-    const close = matchingClose(code, at, '(');
+    if (code[at] !== '(') continue;
+    closes ??= closingParens(code);
+    const close = closes[at]!;
     if (close < 0) continue;
     // A method, function or signature DECLARATION shares the shape `name(…)`;
     // what follows its parentheses — a body, a return type or an arrow — is what
@@ -592,6 +720,31 @@ export function callsIdentifier(code: string, name: string): boolean {
 function identifierPattern(name: string, flags = ''): RegExp {
   const escaped = name.replace(/[$]/g, '\\$&');
   return new RegExp(`(?<![\\w$])(?<!(?:^|[^.])\\.)${escaped}(?![\\w$])`, flags);
+}
+
+/**
+ * Every `(`'s matching `)` in one stack pass, or -1 where brackets do not nest.
+ * Callers that test many references read this once instead of rescanning the body
+ * per reference, which was quadratic on unclosed calls (audit round 7, R-R7).
+ */
+function closingParens(code: string): Int32Array {
+  const closes = new Int32Array(code.length).fill(-1);
+  const stack: number[] = [];
+  const pairs: Readonly<Record<string, string>> = { ')': '(', '}': '{', ']': '[' };
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i]!;
+    if (c === '(' || c === '{' || c === '[') stack.push(i);
+    else if (c in pairs) {
+      const open = stack.pop();
+      if (open === undefined) continue;
+      if (code[open] !== pairs[c]) {
+        stack.length = 0;
+        continue;
+      }
+      if (c === ')') closes[open] = i;
+    }
+  }
+  return closes;
 }
 
 /** Index of the bracket closing the one at `open`, counted over masked code. */
@@ -619,15 +772,18 @@ function matchingClose(code: string, open: number, opener: '(' | '{'): number {
  * escape or template literal, naming `transport` at most once — as a bare key whose
  * value is exactly one plain quoted literal other than `custom`.
  */
-function supportedBackplaneArgument(raw: string, masked: string): boolean {
+function supportedBackplaneArgument(raw: string, masked: string, trustSources: boolean): boolean {
   // Emptiness is judged on the RAW text: masking blanks a string argument to
   // spaces, so `('memory')` would otherwise read as no argument at all.
   if (raw.trim() === '') return true;
-  const own = withoutSourceSpread(raw);
+  // The CLI's own spread is recognized only while `sources` is provably the CLI's
+  // declaration; any other binding of that name could carry anything (S-R7).
+  const own = trustSources ? withoutSourceSpread(raw) : undefined;
   if (own !== undefined) {
     return supportedBackplaneArgument(
       raw.slice(own.start, own.end),
       masked.slice(own.start, own.end),
+      false,
     );
   }
   const trimmed = masked.trim();
@@ -641,8 +797,10 @@ function supportedBackplaneArgument(raw: string, masked: string): boolean {
   // transport without the literal naming one (audit round 3).
   if (/\\|\.\.\.|\[|`|__proto__/.test(raw)) return false;
   const mentions = raw.match(/transport/g)?.length ?? 0;
-  if (mentions === 0) return true;
-  if (mentions > 1) return false;
+  // A literal that names no transport reads it from the options object's
+  // prototype chain, which the file's text cannot settle; only an own key does
+  // (audit round 7, L2-R7). The empty call `()` is handled above.
+  if (mentions !== 1) return false;
   const key = /(?:^|[{,])\s*transport\s*:/.exec(masked);
   if (key === null) return false;
   let at = key.index + key[0].length;
@@ -654,6 +812,43 @@ function supportedBackplaneArgument(raw: string, masked: string): boolean {
   let after = close + 1;
   while (/\s/.test(raw[after] ?? '')) after += 1;
   return raw[after] === ',' || raw[after] === '}';
+}
+
+/** The declaration {@linkcode withDevtoolSourceWiring} inserts into `createApp`. */
+const SOURCES_DECLARATION =
+  'const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;';
+
+/**
+ * How the name `sources` is bound in the configuration (audit round 7, S-R7):
+ * `'declared'` when the CLI's own declaration is its only binding and every other
+ * occurrence reads a member of it, `'absent'` when the name appears nowhere, and
+ * `'foreign'` otherwise — a module-level object, a parameter, a destructured or
+ * shadowing binding. Only `'declared'` lets the CLI read `...sources.<key>` as its
+ * own; only `'absent'` lets it insert the declaration.
+ *
+ * @param code - The code mask of the whole configuration
+ */
+function sourcesBindingTrusted(code: string): 'declared' | 'absent' | 'foreign' {
+  // The mask is already classified text, so masking it again is the identity.
+  const scope = factoryScope(code);
+  const body = scope === undefined ? -1 : scope.start;
+  const declaration = body < 0 ? -1 : code.indexOf(SOURCES_DECLARATION, body);
+  const declared = declaration >= 0 && declaration < scope!.end &&
+    code.indexOf(SOURCES_DECLARATION, declaration + 1) < 0 &&
+    code.slice(body, declaration).trim() === '';
+  let seen = 0;
+  for (const reference of code.matchAll(identifierPattern('sources', 'g'))) {
+    seen += 1;
+    if (declared && reference.index === declaration + 'const '.length) continue;
+    let at = reference.index + 'sources'.length;
+    while (/\s/.test(code[at] ?? '')) at += 1;
+    const member = code[at] === '.' || code.startsWith('?.', at);
+    if (!declared || !member || reference.index < scope!.start || reference.index > scope!.end) {
+      return 'foreign';
+    }
+  }
+  if (seen === 0) return 'absent';
+  return declared ? 'declared' : 'foreign';
 }
 
 /**
@@ -722,12 +917,21 @@ function backplaneConfirmedSupported(source: string, code: string): boolean {
   const visible = maskImportDeclarations(maskComments(source)!);
   if ([...visible.matchAll(pattern)].length !== references.length) return false;
   let calls = 0;
+  const closes = closingParens(uses);
+  const trusted = sourcesBindingTrusted(code);
   for (const reference of references) {
     let at = reference.index + name.length;
     while (/\s/.test(uses[at] ?? '')) at += 1;
-    const close = matchingClose(uses, at, '(');
+    if (uses[at] !== '(') return false;
+    const close = closes[at]!;
     if (close < 0) return false;
-    if (!supportedBackplaneArgument(source.slice(at + 1, close), uses.slice(at + 1, close))) {
+    if (
+      !supportedBackplaneArgument(
+        source.slice(at + 1, close),
+        uses.slice(at + 1, close),
+        trusted === 'declared',
+      )
+    ) {
       return false;
     }
     calls += 1;
@@ -866,7 +1070,8 @@ export function withDevtoolSourceWiring(
     scope === undefined ||
     !scope.code.slice(scope.header, scope.start).includes(
       'devtool?: { plugins?: readonly IPlugin[];',
-    )
+    ) ||
+    sourcesBindingTrusted(scope.code) === 'foreign'
   ) {
     return {
       source,
@@ -925,13 +1130,11 @@ export function withDevtoolSourceWiring(
   const finalScope = factoryScope(updated)!;
   if (
     !finalScope.code.slice(finalScope.start, finalScope.end).includes(
-      'const sources: Partial<typeof DEVTOOL_SOURCES>',
+      SOURCES_DECLARATION,
     )
   ) {
     const offset = finalScope.start;
-    updated = updated.slice(0, offset) +
-      '\n  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;' +
-      updated.slice(offset);
+    updated = updated.slice(0, offset) + `\n  ${SOURCES_DECLARATION}` + updated.slice(offset);
   }
   return { source: updated, manual };
 }
@@ -966,16 +1169,7 @@ export async function readDevtoolSourceNames(
     // A project without an env example approves no configuration keys.
   }
   const flags = policyFlags(config);
-  let retargeted = false;
-  for (const manifest of ['deno.json', 'deno.jsonc', 'package.json']) {
-    try {
-      retargeted ||= importMapRetargets(
-        new TextDecoder().decode(await fs.readFile(joinPath(dir, manifest))),
-      );
-    } catch {
-      // An absent manifest maps nothing.
-    }
-  }
+  const retargeted = await frameworkImportsRetargeted(fs, dir);
   return {
     project: dir.split('/').at(-1) ?? 'app',
     artifacts,
