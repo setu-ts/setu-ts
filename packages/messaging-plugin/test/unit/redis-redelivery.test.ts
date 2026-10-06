@@ -231,6 +231,32 @@ describe('Redis Streams redelivery', () => {
     await broker.disconnect();
   });
 
+  it('leases one entry at a time so queued entries never age behind a slow handler', async () => {
+    const { clock, client, broker } = setup();
+    await broker.connect();
+    const delivered: unknown[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await broker.subscribe('t', async (m) => {
+      delivered.push(m);
+      if (m === 0) await gate;
+    });
+    for (let i = 0; i < 3; i++) await broker.publish('t', i);
+    // Hold the first handler past delaysMs[0]: a batched read would have
+    // leased all three entries, making the queued two reclaimable elsewhere.
+    await clock.advance(30);
+    expect(delivered).toEqual([0]);
+    const leased = await client.xpending('t', 'messaging-consumers', '-', '+', '10');
+    expect(leased.map(([id]) => id)).toEqual(['0-0']);
+    release();
+    await clock.advance(10);
+    expect(delivered).toEqual([0, 1, 2]);
+    expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toEqual([]);
+    await broker.disconnect();
+  });
+
   it('preserves hostile header keys as own data and logs cleanup failures', async () => {
     const { clock, client, broker, logs } = setup();
     await broker.connect();
@@ -256,10 +282,15 @@ describe('Redis Streams redelivery', () => {
       seen.push({ body, meta });
       if (seen.length < 3) throw Error('retry');
     });
-    await broker.publishWithHeaders('t', { m: 'm1' }, {
-      traceparent: 'canary',
-      ['__proto__']: 'safe',
-    });
+    await broker.publishWithHeaders(
+      't',
+      { m: 'm1' },
+      Object.fromEntries([
+        ['traceparent', 'canary'],
+        // An own `__proto__` key, never the prototype setter a literal key would be.
+        ['__proto__', 'safe'],
+      ]),
+    );
     await clock.advance(5);
     expect(seen).toHaveLength(1);
     expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toEqual([[

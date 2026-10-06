@@ -4990,7 +4990,7 @@ app.register(MessagingPlugin({
 the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
 semantics are unchanged; the indicator still reports the outage.
 
-**Redis Streams recovery (0.8.0).** Requires Redis ≥6.2 (`XPENDING IDLE`). Failed messages
+**Redis Streams recovery (0.9.0).** Requires Redis ≥6.2 (`XPENDING IDLE`). Failed messages
 redeliver, including after restart, so handlers must be idempotent. The first retry delay must
 exceed the longest handler runtime: it also guards against another replica stealing in-flight work.
 Reclaim atomically claims up to ten idle pending entries per pass; delivery metadata and

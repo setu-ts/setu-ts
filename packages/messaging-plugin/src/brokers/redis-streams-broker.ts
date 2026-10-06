@@ -417,30 +417,30 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       }
     };
     const poll = async (): Promise<void> => {
-      const result = await client.xreadgroup(
-        'GROUP',
-        groupId,
-        consumerId,
-        'COUNT',
-        '10',
-        'BLOCK',
-        String(this.#blockSizeMs),
-        'STREAMS',
-        topic,
-        '>',
-      );
-      if (result) {
+      // Read ONE entry at a time and keep reading while entries arrive. A
+      // batched read leases every entry at read time, so an entry queued behind
+      // earlier handlers ages toward delaysMs[0] and another replica's reclaim
+      // could take it before this replica starts it. One-at-a-time keeps the
+      // lease equal to a single handler run, which is what the docs promise.
+      while (!stopped) {
+        const result = await client.xreadgroup(
+          'GROUP',
+          groupId,
+          consumerId,
+          'COUNT',
+          '1',
+          'BLOCK',
+          String(this.#blockSizeMs),
+          'STREAMS',
+          topic,
+          '>',
+        );
+        if (!result) return;
         const entries = result[0][1] as Array<[string, string[]]>;
-        // Redis leases the entire batch at read time, including entries whose
-        // handlers have not started. Do not reclaim our own queued batch.
-        for (const [id] of entries) delivering.add(id);
-        try {
-          for (const entry of entries) {
-            if (stopped) break;
-            await deliver(entry, 1);
-          }
-        } finally {
-          for (const [id] of entries) delivering.delete(id);
+        if (entries.length === 0) return;
+        for (const entry of entries) {
+          if (stopped) return;
+          await deliver(entry, 1);
         }
       }
     };
