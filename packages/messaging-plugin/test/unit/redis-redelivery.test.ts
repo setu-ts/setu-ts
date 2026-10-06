@@ -27,6 +27,54 @@ function setup(options: RedisStreamsOptions = {}) {
 }
 
 describe('Redis Streams redelivery', () => {
+  it('keeps hostile thrown values within retry classification and continues the batch', async () => {
+    for (const retryable of [true, false]) {
+      for (const revoked of [true, false]) {
+        const hostile = Proxy.revocable({}, {
+          getPrototypeOf() {
+            throw Error('hostile prototype trap');
+          },
+        });
+        if (revoked) hostile.revoke();
+        const { clock, client, broker, logs } = setup({
+          consumerRetry: {
+            maxAttempts: retryable ? 2 : 1,
+            delaysMs: [20],
+            isRetryable: () => retryable,
+          },
+        });
+        let failedCalls = 0;
+        const delivered: unknown[] = [];
+        await broker.connect();
+        await broker.subscribe('t', (message) => {
+          if (message === 'failed') {
+            failedCalls++;
+            throw hostile.proxy;
+          }
+          delivered.push(message);
+        });
+        await broker.publish('t', 'failed');
+        await broker.publish('t', 'healthy');
+        await clock.advance(5);
+        expect(delivered).toEqual(['healthy']);
+        expect(failedCalls).toBe(1);
+        expect(logs.some((m) => m.startsWith('Poll error:'))).toBe(false);
+        expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10'))
+          .toHaveLength(retryable ? 1 : 0);
+        if (retryable) await clock.advance(30);
+        expect(failedCalls).toBe(retryable ? 2 : 1);
+        expect(
+          client.calls.filter((c) =>
+            c.method === 'xadd' && c.args[0] === 't.dead.messaging-consumers'
+          ),
+        )
+          .toHaveLength(1);
+        expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toEqual([]);
+        await broker.disconnect();
+      }
+    }
+  });
+
   it('bounds shutdown drain and fences late handler completion, preserving pending data', async () => {
     for (const rejects of [false, true]) {
       const { clock, client, broker, logs } = setup();

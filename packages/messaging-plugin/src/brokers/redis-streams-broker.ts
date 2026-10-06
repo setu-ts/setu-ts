@@ -591,10 +591,14 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
           this.#logger?.error(`Retry classifier failed: ${describeError(classifierError)}`);
         }
       }
-      if (
-        error instanceof IntegrationEventRejectedError || !retryable ||
-        deliveries >= this.#maxAttempts
-      ) {
+      let integrationRejected = false;
+      try {
+        integrationRejected = error instanceof IntegrationEventRejectedError;
+      } catch {
+        // A hostile thrown value may reject prototype inspection. Keep the
+        // classifier result and the rest of this delivery batch intact.
+      }
+      if (integrationRejected || !retryable || deliveries >= this.#maxAttempts) {
         await this.#deadLetter(client, topic, group, entry, deliveries, active);
       }
       return;
