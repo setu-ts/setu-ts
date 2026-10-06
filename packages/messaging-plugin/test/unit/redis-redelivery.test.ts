@@ -75,6 +75,28 @@ describe('Redis Streams redelivery', () => {
     }
   });
 
+  it('drains every subscription in parallel, so disconnect is bounded by ONE drain', async () => {
+    const { clock, broker } = setup();
+    await broker.connect();
+    for (const topic of ['a', 'b', 'c']) {
+      await broker.subscribe(topic, () => new Promise<void>(() => {}));
+      await broker.publish(topic, 'm');
+    }
+    await clock.advance(5);
+    let closed = false;
+    const closing = broker.disconnect().then(() => {
+      closed = true;
+    });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    // Sequential drains would need 3 × 5000 ms; parallel ones finish at 5000.
+    await clock.advance(4999);
+    expect(closed).toBe(false);
+    await clock.advance(1);
+    await closing;
+    expect(closed).toBe(true);
+    expect(clock.timerCount()).toBe(0);
+  });
+
   it('bounds shutdown drain and fences late handler completion, preserving pending data', async () => {
     for (const rejects of [false, true]) {
       const { clock, client, broker, logs } = setup();

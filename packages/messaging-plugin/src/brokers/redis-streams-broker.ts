@@ -268,9 +268,11 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    */
   async disconnect(): Promise<void> {
     await this.#rr.close();
-    for (const subscription of [...this.#activeSubscriptions.values()]) {
-      await subscription.unsubscribe();
-    }
+    // In parallel: each drain is bounded by SHUTDOWN_DRAIN_MS, and draining in
+    // sequence would multiply that bound by the subscription count.
+    await Promise.all(
+      [...this.#activeSubscriptions.values()].map((subscription) => subscription.unsubscribe()),
+    );
 
     if (this.#client) {
       await this.#client.quit();

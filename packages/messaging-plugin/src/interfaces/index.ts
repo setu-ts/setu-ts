@@ -268,8 +268,8 @@ export interface MessagingCommonOptions {
    * the topic as `name`, the delivered message as `payload`, and the
    * transport `headers` from `MessageMetadata` (absent when the transport
    * carried no channel — there is deliberately NO `attempt`: brokers
-   * redeliver, but their delivery counts are not exposed by MessageMetadata), and runs in declared order
-   * ahead of the handler. A behaviour that returns without calling `next()`
+   * redeliver, but `MessageMetadata` exposes no delivery count), and runs in
+   * declared order ahead of the handler. A behaviour that returns without calling `next()`
    * short-circuits: the handler never sees the message. A behaviour that
    * throws follows the messaging handler's existing rejection path. The chain
    * wraps SUBSCRIBE handlers only — `respond` (RPC) is deliberately not
@@ -396,7 +396,7 @@ export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
    * nondecreasing list of positive integer milliseconds ≤2147483647.
    * The first delay must exceed the longest handler run to avoid concurrent
    * processing by another replica. No false arm: failed messages are retried.
-   * @since 0.8.0
+   * @since 0.9.0
    */
   consumerRetry?: {
     /** Positive safe integer delivery budget, including the initial attempt. */
@@ -406,11 +406,11 @@ export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
     /** False dead-letters immediately; a throwing classifier is logged and retries. */
     readonly isRetryable?: (error: unknown) => boolean;
   };
-  /** Reclaim timer in positive integer ms ≤2147483647. Default 5000. @since 0.8.0 */
+  /** Reclaim timer in positive integer ms ≤2147483647. Default 5000. @since 0.9.0 */
   reclaimIntervalMs?: number;
-  /** Approximate DLQ MAXLEN, a positive safe integer. Default 10000. @since 0.8.0 */
+  /** Approximate DLQ MAXLEN, a positive safe integer. Default 10000. @since 0.9.0 */
   deadLetterMaxLen?: number;
-  /** Foreign-consumer inactivity in positive integer ms ≤2147483647. Default 3600000. @since 0.8.0 */
+  /** Foreign-consumer inactivity in positive integer ms ≤2147483647. Default 3600000. @since 0.9.0 */
   consumerIdleSweepMs?: number;
 
   broker: 'redis-streams';
@@ -725,7 +725,7 @@ export interface RedisStreamsOptions {
    * the console. Never attached to an injected `client`, which belongs to the
    * caller. `MessagingPlugin` supplies one backed by its logger.
    *
-   * @since 0.8.0
+   * @since 0.9.0
    */
   connectionErrorReporter?: ConnectionErrorReporter;
 }
