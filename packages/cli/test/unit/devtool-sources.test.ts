@@ -254,4 +254,28 @@ describe('development source policies', () => {
     expect(examples.authorization).toBe(false);
     expect(examples.customBackplane).toBe(false);
   });
+
+  // Audit L2: only a plain quoted literal other than `custom` confirms a supported
+  // transport. A template literal or a binding cannot be classified without running
+  // the configuration, so it withholds the policy rather than wiring a source the
+  // custom arm does not support.
+  it('withholds the backplane policy unless every transport is a known literal', async () => {
+    const fs = createFakeFs({});
+    const classify = async (config: string) =>
+      (await readDevtoolSourceNames(fs, '/shop', packages, config)).customBackplane === true;
+    for (const config of ['transport: `custom`', 'transport: kind', "transport: pick('x')"]) {
+      expect(await classify(config), config).toBe(true);
+      const policy = renderDevtoolSources(packages, {
+        project: 'shop',
+        customBackplane: await classify(config),
+      }).contents;
+      expect(policy, config).not.toContain('  backplane:');
+    }
+    for (const config of ["transport: 'custom'", 'transport:"custom"']) {
+      expect(await classify(config), config).toBe(true);
+    }
+    for (const config of ["transport: 'redis'", 'transport: "memory"', '', "x: 'custom'"]) {
+      expect(await classify(config), config).toBe(false);
+    }
+  });
 });

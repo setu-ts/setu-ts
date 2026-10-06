@@ -465,9 +465,12 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   const importedBinding = providerBinding(source, bare, provider.symbol);
   if (importedBinding === undefined && source.includes(`'@setu-ts/${bare}'`)) return undefined;
   const factory = importedBinding ?? provider.symbol;
+  // The whole file, not just the factory body: a plugin built once at module scope
+  // (`const cache = CachePlugin();`) and listed by name is already registered, and
+  // inserting a second call makes the kernel refuse a duplicate plugin name.
   if (
     !source.includes(anchor) ||
-    callsFactory(code, factory)
+    callsFactory(scope!.code, factory)
   ) {
     return undefined;
   }

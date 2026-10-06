@@ -246,6 +246,19 @@ describe('withPluginWiring', () => {
     expect(result).toContain('// ...(devtool?.plugins ?? []),\n');
     expect(result).toContain('      CachePlugin(),\n      ...(devtool?.plugins ?? []),');
   });
+  // Audit L1: a plugin built once at module scope and listed by name is already
+  // registered. Checking only the factory body inserted a second call, and the kernel
+  // then refused the duplicate plugin name at boot.
+  it('does not wire a provider the file already constructs outside the factory', () => {
+    const source = "import { CachePlugin } from '@setu-ts/cache-plugin';\n" +
+      'const cachePlugin = CachePlugin();\n' +
+      CLASS_BASED_INGRESS_CONFIG.replace(
+        '...(devtool?.plugins ?? []),',
+        'cachePlugin,\n      ...(devtool?.plugins ?? []),',
+      );
+    expect(withPluginWiring(source, 'cache-plugin')).toBeUndefined();
+  });
+
   it('is not satisfied by a call to a different factory whose name ends the same', () => {
     // `RedisCachePlugin()` is not a `CachePlugin()` registration; a substring
     // match left the provider unwired AND suppressed the guidance line.

@@ -167,6 +167,28 @@ export function factoryScope(source: string): {
   return undefined;
 }
 
+/**
+ * Whether any `transport:` option at a code position might name the custom
+ * backplane transport. Only a plain `'…'`/`"…"` literal other than `custom` is
+ * confirmed otherwise; a template literal, a binding or any expression cannot be
+ * classified without evaluating the configuration, so it counts as custom and the
+ * policy is withheld — the direction that never wires an unsupported source.
+ */
+function mayUseCustomTransport(source: string, code: string): boolean {
+  // Matched in the masked code (so a commented example is ignored), then read from
+  // the raw source: masking blanks a literal to spaces, so a trailing `\s*` in the
+  // masked match would run on through the literal itself.
+  for (const match of code.matchAll(/\btransport\s*:/g)) {
+    let start = match.index + match[0].length;
+    while (/\s/.test(source[start] ?? '')) start += 1;
+    const quote = source[start];
+    if (quote !== "'" && quote !== '"') return true;
+    const end = source.indexOf(quote, start + 1);
+    if (end < 0 || source.slice(start + 1, end) === 'custom') return true;
+  }
+  return false;
+}
+
 /** Reads literal policy discriminants only at code positions, never within examples. */
 function policyFlags(
   source: string,
@@ -174,10 +196,7 @@ function policyFlags(
   const code = maskSourceCode(source);
   return {
     authorization: code !== undefined && /\brbac\s*:/.test(code),
-    customBackplane: code === undefined ||
-      [...source.matchAll(/\btransport\s*:\s*(['"])custom\1/g)].some((match) =>
-        code.slice(match.index, match.index + 'transport'.length) === 'transport'
-      ),
+    customBackplane: code === undefined || mayUseCustomTransport(source, code),
   };
 }
 

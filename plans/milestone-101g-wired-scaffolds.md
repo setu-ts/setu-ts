@@ -630,3 +630,12 @@ the emitted guard's JSDoc names the dependency; a committed type fixture
 that each printed line appears in it verbatim. (3) The `ws-route` and `sse` schematics emitted lines
 past the generated project's formatter width; both now emit `deno fmt` output, and the every-family
 formatting sweep in `workspace-e2e.test.ts` installs the plugins that unlock those gated families.
+
+Security-audit corrections (round 1, 2026-10-06): (L1) the "factory already called" check in
+`withPluginWiring` reads the whole masked file, not only the `createApp` body, so a plugin built at
+module scope and listed by name is not registered a second time — the round-1 audit reproduced the
+resulting `Duplicate plugin name` boot failure, a regression against `develop`'s whole-file check.
+(L2) a backplane `transport:` value is confirmed supported only when it is a plain quoted literal
+other than `custom`; a template literal, a binding or any expression withholds the policy, which is
+the §10 rule ("unsupported custom backplanes receive no automatic source policy") applied to values
+the CLI cannot classify without evaluating the configuration.
