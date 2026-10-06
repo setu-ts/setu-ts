@@ -87,6 +87,7 @@ export type { IntegrationEventHandler } from './integration/subscribe.ts';
 
 // Option types
 export type {
+  ConsumerRetryOptions,
   CustomMessagingOptions,
   EventsMessagingBridgeOptions,
   INatsHeaders,

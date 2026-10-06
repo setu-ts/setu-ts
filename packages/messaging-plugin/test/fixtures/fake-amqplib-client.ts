@@ -191,6 +191,24 @@ export class FakeAmqpChannel {
     return Promise.resolve({ consumerTag });
   }
 
+  prefetch(count: number): Promise<void> {
+    this.#record('prefetch', [count]);
+    return Promise.resolve();
+  }
+
+  /** Drives one delivery and waits for its async disposition. */
+  async deliver(
+    content: string,
+    properties: Record<string, unknown> = {},
+    queue?: string,
+  ): Promise<void> {
+    for (const consumer of this.#consumers) {
+      if (queue === undefined || queue === consumer.queue) {
+        await consumer.callback(createFakeMessage(content, properties));
+      }
+    }
+  }
+
   ack(msg: unknown): void {
     this.#record('ack', [msg]);
   }

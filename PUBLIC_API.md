@@ -5005,6 +5005,20 @@ app.register(MessagingPlugin({
 the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
 semantics are unchanged; the indicator still reports the outage.
 
+**RabbitMQ consumer recovery (0.9.0).** Durable consumer groups retry transient handler failures
+through durable `Q.retry.<delay>ms` queues (queue-level TTL, default-exchange DLX back to `Q`).
+Delays must be nonempty, nondecreasing positive integer milliseconds ≤2147483647. Total attempts and
+dead-letter cap must be positive safe integers. Invalid options throw `RangeError` at construction.
+Deserialize failures and `IntegrationEventRejectedError` dead-letter immediately; then `isRetryable`
+runs (false dead-letters, throwing logs and retries), then the attempt budget applies. The original
+is acked after the persistent retry/dead-letter publish is accepted on the same captured channel.
+Disposition failure leaves it unacked until channel closure; a late confirm or a crash between
+publish and ack can duplicate it. Handlers must be idempotent. `Q.dead` carries preserved
+properties/headers plus `x-setu-attempts`, `x-setu-topic`, and a 1 KiB UTF-8 `x-setu-error`
+description. Changing the cap requires draining and deleting `Q.dead`. Private exclusive queues and
+RPC reply inboxes retain nack-and-discard. `consumerRetry: false` retains the operator-DLX path.
+Prefetch is re-applied on reconnect, which re-declares retry and dead queues before consuming.
+
 **Redis Streams recovery (0.9.0).** Requires Redis ≥6.2 (`XPENDING IDLE`). Failed messages
 redeliver, including after restart, so handlers must be idempotent. The first retry delay must
 exceed the longest handler runtime: it also guards against another replica stealing in-flight work.
@@ -5062,6 +5076,13 @@ interface MemoryMessagingOptions extends MessagingCommonOptions {
   broker?: 'memory';
 }
 
+/** Shared retry shape; defaults and lease semantics depend on the broker. @since 0.9.0 */
+interface ConsumerRetryOptions {
+  readonly maxAttempts?: number;
+  readonly delaysMs?: readonly number[];
+  readonly isRetryable?: (error: unknown) => boolean;
+}
+
 // ── Redis Streams ────────────────────────────────────────────────────────────────────
 interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
   broker: 'redis-streams';
@@ -5076,13 +5097,7 @@ interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
   /** XREADGROUP block timeout in ms. */
   blockSizeMs?: number;
   /** Total delivery budget, including initial delivery. Default 5. */
-  consumerRetry?: {
-    maxAttempts?: number;
-    /** Nonempty, nondecreasing. Default [30000, 60000, 300000, 600000]. */
-    delaysMs?: readonly number[];
-    /** False dead-letters immediately; throwing logs and retries. */
-    isRetryable?: (error: unknown) => boolean;
-  };
+  consumerRetry?: ConsumerRetryOptions;
   /** Pending reclaim interval, default 5000 ms. */
   reclaimIntervalMs?: number;
   /** Approximate per-group dead-letter MAXLEN, default 10000. */
@@ -5093,6 +5108,12 @@ interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
 
 // ── RabbitMQ ─────────────────────────────────────────────────────────────────────────
 interface RabbitMqMessagingOptions extends MessagingCommonOptions {
+  /** Group retry policy, default 5 attempts and [5000, 30000, 120000, 600000] ms. @since 0.9.0 */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /** Q.dead retention cap, default 10000; changing requires draining/deleting Q.dead. @since 0.9.0 */
+  deadLetterMaxLength?: number;
+  /** Unacked delivery limit per consumer, integer 1–65535, default 32. @since 0.9.0 */
+  prefetch?: number;
   broker: 'rabbitmq';
   /** AMQP connection URL. */
   url?: string;
@@ -5587,6 +5608,7 @@ export {
 
 // Option types
 export type {
+  ConsumerRetryOptions,
   CustomMessagingOptions,
   EventsMessagingBridgeOptions,
   InMemoryBrokerOptions,

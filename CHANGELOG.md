@@ -202,6 +202,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **RabbitMQ consumer retry defaults.** Durable messaging consumer groups now retry failures with
+  five total attempts and tiered delays, create durable retry/dead queues, and bound unacked
+  deliveries to prefetch 32 per consumer. Handlers must be idempotent. Configure
+  `consumerRetry: false` for the existing operator-DLX behavior; private queues and RPC reply
+  inboxes retain discard behavior. `ConsumerRetryOptions` names the shared RabbitMQ/Redis shape.
+
 - **BREAKING: Redis Streams messaging recovery (#419).** Failed messages now retry across restarts;
   handlers must be idempotent. Redis ≥6.2 is required. Injected `IRedisStreamsClient` facades must
   implement `xpending`, `xclaim`, `xinfo`, and `xgroup('DELCONSUMER', ...)`. Configure
@@ -411,6 +417,12 @@ All notable changes to this project are documented here. The format follows
   duplicate refused at `commit()` is mapped too, including a DynamoDB transaction cancelled by a
   create's guard; any other commit rejection is still rethrown unchanged. The served `detail` is
   fixed and never quotes the duplicated value.
+
+- **RabbitMQ discarded handler failures (messaging).** Durable groups now confirm persistent
+  retry/dead-letter copies before acknowledging the original, preserve message properties and
+  prototype-safe transport headers, classify deterministic failures immediately, and replay
+  retry/dead declarations plus prefetch on reconnect. Retry delays, attempt budget, classifier,
+  dead-letter cap and prefetch are configurable and validated at construction.
 
 - **Redis Streams stranded messages (`@setu-ts/messaging-plugin`, #419).** Failed entries are
   reclaimed with tiered idle backoff through one delivery path, instead of staying in the pending

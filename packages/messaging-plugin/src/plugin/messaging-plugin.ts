@@ -17,7 +17,11 @@ import {
 } from '@setu-ts/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
-import { RabbitMqBroker, resolvePublishTimeoutMs } from '../brokers/rabbitmq-broker.ts';
+import {
+  RabbitMqBroker,
+  resolveConsumerOptions,
+  resolvePublishTimeoutMs,
+} from '../brokers/rabbitmq-broker.ts';
 import { NatsBroker } from '../brokers/nats-broker.ts';
 import { KafkaBroker } from '../brokers/kafka-broker.ts';
 import { GcpPubSubBroker } from '../brokers/pubsub-broker.ts';
@@ -142,6 +146,7 @@ export function MessagingPlugin(
   if (brokerType === 'rabbitmq') {
     const rabbit = options as RabbitMqMessagingOptions;
     resolvePublishTimeoutMs(rabbit.publishTimeoutMs);
+    resolveConsumerOptions(rabbit);
     if (
       rabbit.persistentMessages !== undefined && typeof rabbit.persistentMessages !== 'boolean'
     ) {
@@ -310,6 +315,11 @@ export function MessagingPlugin(
         if (opts.publishTimeoutMs !== undefined) {
           rabbitOptions.publishTimeoutMs = opts.publishTimeoutMs;
         }
+        if (opts.consumerRetry !== undefined) rabbitOptions.consumerRetry = opts.consumerRetry;
+        if (opts.deadLetterMaxLength !== undefined) {
+          rabbitOptions.deadLetterMaxLength = opts.deadLetterMaxLength;
+        }
+        if (opts.prefetch !== undefined) rabbitOptions.prefetch = opts.prefetch;
         if (logger !== undefined) rabbitOptions.logger = logger;
         broker = new RabbitMqBroker(ctx.runtime, serializer, rabbitOptions);
       } else if (brokerType === 'nats') {

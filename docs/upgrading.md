@@ -21,6 +21,26 @@ for a duplicate stops matching. `instanceof DuplicateKeyError` replaces matching
 message text. Do not retry it: unlike `SerializationConflictError`, the same write fails the same
 way.
 
+### Make RabbitMQ handlers idempotent and configure `consumerRetry`
+
+Durable consumer groups now retry handler failures with five total attempts and delays
+`[5000, 30000, 120000, 600000]` ms. Make handlers idempotent: retries and a crash between confirmed
+copy and original ack can repeat side effects. Deserialize and integration-event rejections
+dead-letter immediately; `consumerRetry.isRetryable` can return false for other deterministic
+failures. Set `consumerRetry: false` to retain the existing operator DLX policy.
+
+Allow the application to declare durable `Q.retry.<delay>ms` queues and `Q.dead`. Changing delays is
+safe; changing `deadLetterMaxLength` (default 10000) requires draining and deleting `Q.dead` before
+restart, because RabbitMQ rejects changed queue arguments. Inspect `x-setu-attempts`, `x-setu-topic`
+and the bounded `x-setu-error` in dead letters, and apply access/retention policy for their data.
+Default prefetch is now 32 per consumer; configure `prefetch` for handler concurrency and latency.
+Injected channels should implement `prefetch`. Private exclusive queues and RPC reply inboxes retain
+discard behavior. A failed copy stays unacked until channel closure; reconnect to recover deliveries
+left by a publish timeout on an otherwise live channel.
+
+`ConsumerRetryOptions` now names the shared RabbitMQ/Redis retry object type; Redis behavior and its
+existing option shape are unchanged.
+
 ### Update `IRedisStreamsClient` facades and Redis consumer handlers
 
 Injected messaging Redis facades must implement the required `xpending`, `xclaim`, and `xinfo`
