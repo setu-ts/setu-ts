@@ -40,4 +40,12 @@ describe('guard schematic', () => {
     expect(file.contents).not.toContain('allowed = true');
     expect(file.contents).not.toContain('json({ error:');
   });
+
+  it('names the rbac option it depends on and the 501 it answers without one', () => {
+    // Without an authorization service requirePermission fails closed with
+    // 501 for every authenticated caller; the guard must say how to avoid it.
+    expect(file.contents).toContain('registers only when given an `rbac` option');
+    expect(file.contents).toContain('every authenticated request answers `501`');
+    expect(file.contents).toContain("rbac: { roles: { admin: { permissions: ['order-item'] } } },");
+  });
 });

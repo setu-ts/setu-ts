@@ -279,6 +279,20 @@ describe('workspace scaffolding — end to end', () => {
       }
     }
 
+    // The gated families too. `ws-route` and `sse` emitted lines past the width
+    // on every name and survived because this sweep never installed the plugins
+    // that unlock them. Each name is prefixed with its family: `ws-route` and
+    // `plugin` share `src/plugins/`, and `sse` and `route` share a registrar name.
+    for (const pkg of ['websocket', 'sse', 'auth', 'database']) {
+      expect(await run(['add', pkg, '--dir', project]), pkg).toBe(0);
+    }
+    for (const name of ['payment-gateway', 'user-directory', 'order-archive']) {
+      for (const family of ['ws-route', 'sse', 'guard', 'job', 'migration']) {
+        const artifact = `${family}-${name}`;
+        expect(await run(['g', family, artifact, '--dir', project]), artifact).toBe(0);
+      }
+    }
+
     const formatted = await new Deno.Command(Deno.execPath(), {
       args: ['fmt', '--check'],
       cwd: project,

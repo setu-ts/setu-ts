@@ -221,7 +221,11 @@ const STARTER_ARMS = [
 function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
   if (zero !== undefined) return `${zero.symbol}()`;
-  if (bare === 'auth-plugin') return "AuthPlugin({ jwt: { secret: '<your-secret>' } })";
+  // `rbac` is what registers the authorization service a generated guard asks;
+  // without it every permission check answers 501.
+  if (bare === 'auth-plugin') {
+    return "AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } })";
+  }
   if (bare === 'session-plugin') return "SessionPlugin({ secret: '<your-secret>' })";
   if (bare === 'grpc-plugin') return 'GrpcPlugin({ services: [] })';
   if (bare === 'database-plugin') return "DatabasePlugin({ type: 'memory' })";

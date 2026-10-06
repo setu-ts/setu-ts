@@ -27,7 +27,20 @@ import { requirePermission } from '@setu-ts/auth-plugin';
  * Guards a route behind the ${names.kebab} check.
  *
  * The guard short-circuits by responding WITHOUT calling \`next()\`, so the
- * handler never runs when the check fails.
+ * handler never runs when the check fails: \`401\` without a principal, \`403\`
+ * when no role grants \`${names.kebab}\`.
+ *
+ * The permission is evaluated by the authorization service \`AuthPlugin\`
+ * registers only when given an \`rbac\` option — grant \`${names.kebab}\` to a role
+ * there. Without one, every authenticated request answers \`501\` (the guard
+ * fails closed and the handler never runs):
+ *
+ * \`\`\`typescript
+ * AuthPlugin({
+ *   jwt: { secret: '<your-secret>' },
+ *   rbac: { roles: { admin: { permissions: ['${names.kebab}'] } } },
+ * })
+ * \`\`\`
  *
  * Apply it PER ROUTE — the CLI does not wire guards, because a guard applied globally
  * would reject unauthenticated requests to \`/health\`, \`/metrics\` and every public

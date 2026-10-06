@@ -376,6 +376,48 @@ describe('runAddCommand', () => {
     expect(worker.out.join('\n')).toContain('Register CloudflarePlugin({ env })');
   });
 
+  it('prints only registrations that type-check against their plugin option types', async () => {
+    // The fixture is reached by `deno check packages`, so each line it carries
+    // compiles against the real option type; this test pins that every printed
+    // line IS one of them, verbatim.
+    const fixture = await Deno.readTextFile(
+      new URL('../../fixtures/registration-lines.ts', import.meta.url),
+    );
+    const printed: string[] = [];
+    for (
+      const pkg of [
+        'auth',
+        'session',
+        'grpc',
+        'database',
+        'feature-flags',
+        'notification',
+        'graphql',
+        'static',
+        'react-router',
+        'multi-tenancy',
+        'service-discovery',
+        'cloudflare',
+      ]
+    ) {
+      const h = harness({
+        '/app/deno.json': DENO_MANIFEST,
+        ...(pkg === 'cloudflare' ? { '/app/wrangler.jsonc': '{}' } : {}),
+      });
+      expect(await h.run([pkg]), h.err.join('\n')).toBe(0);
+      const line = /Register (.+) in setu\.config\.ts\./.exec(h.out.join('\n'))?.[1];
+      expect(line, `no registration printed for ${pkg}`).toBeDefined();
+      printed.push(line!);
+    }
+    for (const line of printed) expect(fixture).toContain(`  ${line},`);
+    // The guard schematic composes requirePermission, which answers 501 unless
+    // AuthPlugin registers an authorization service — so the auth line must
+    // carry the rbac arm, not just jwt.
+    expect(printed[0]).toBe(
+      "AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } })",
+    );
+  });
+
   it('refreshes an opted-in source module and gates the newly wired plugin', async () => {
     const source = CLASS_BASED_INGRESS_CONFIG.replace(
       'export function createApp() {',

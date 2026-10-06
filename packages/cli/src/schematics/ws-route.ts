@@ -46,6 +46,9 @@ export class ${names.pascal}Ingress {
   const contents = `import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IPluginContext, IWebSocketService } from '@setu-ts/common';
 
+/** Room a connection joins when its URL names none. */
+const DEFAULT_ROOM = '${names.kebab}';
+
 /** Registers the ${names.kebab} WebSocket route. */
 export function ${names.pascal}Plugin(): IPlugin {
   return {
@@ -56,13 +59,15 @@ export function ${names.pascal}Plugin(): IPlugin {
       const websocket = ctx.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
       websocket.route('/ws/${names.kebab}', {
         onOpen: (connection, context) => {
-          const room = context.query['room'] ?? '${names.kebab}';
+          const room = context.query['room'] ?? DEFAULT_ROOM;
           connection.data.set('room', room);
           websocket.room(room).add(connection);
         },
         onMessage: (connection, data) => {
           const room = connection.data.get('room');
-          if (typeof room === 'string') websocket.room(room).broadcast(data, { except: connection });
+          if (typeof room === 'string') {
+            websocket.room(room).broadcast(data, { except: connection });
+          }
         },
       });
     },
