@@ -34,6 +34,8 @@ import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { PrismaRepository } from '../../src/adapters/prisma/prisma-repository.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
+import { DatabaseService } from '../../src/services/database-service.ts';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type { PrismaAdapterOptions } from '../../src/interfaces/index.ts';
 
 const postgresUrl = Deno.env.get('POSTGRES_URL');
@@ -500,4 +502,35 @@ describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)'
       }
     },
   );
+});
+
+describe('PrismaAdapter against live PostgreSQL — duplicate key', () => {
+  it('a duplicate primary key reaches the caller as DuplicateKeyError (P2002)', {
+    ignore: skipReal,
+  }, async () => {
+    const client = await connectPrisma();
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'prisma');
+    try {
+      const repo = service.getRepository('AuditEvent');
+      const row = {
+        id: `dup-${suffix}`,
+        run: `dup-${suffix}`,
+        userId: 'u1',
+        createdAt: new Date('2026-01-15T10:00:00Z'),
+        profile: {},
+      };
+      await repo.create(row);
+
+      const refusal = await repo.create(row).catch((e: unknown) => e);
+      expect(refusal).toBeInstanceOf(DuplicateKeyError);
+      expect((refusal as DuplicateKeyError).entity).toBe('AuditEvent');
+      // Prisma maps SQLSTATE 23505 onto its own P2002 before the app sees it.
+      expect(((refusal as Error).cause as { code?: unknown }).code).toBe('P2002');
+    } finally {
+      await adapter.disconnect();
+      await client.$disconnect();
+    }
+  });
 });

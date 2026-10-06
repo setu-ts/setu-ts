@@ -34,6 +34,7 @@ import {
   type IDatabaseService,
 } from '../../src/index.ts';
 import { DatabaseUnavailableError } from '../../src/errors.ts';
+import { DuplicateKeyError } from '@setu-ts/common';
 
 const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
 const skipReal = dynamoEndpoint === undefined;
@@ -508,6 +509,39 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
         .toBeNull();
     } finally {
       await adapter.disconnect();
+    }
+  });
+
+  it('a duplicate key reaches the caller as DuplicateKeyError, directly and at commit', {
+    ignore: skipReal,
+  }, async () => {
+    const entityMapping = mapping(tables.transaction, 'id');
+    const adapter = adapterFor('Transaction', entityMapping);
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'dynamodb');
+    try {
+      const repo = service.getRepository('Transaction');
+      await repo.create({ id: 'dup', value: 1 });
+
+      const direct = await repo.create({ id: 'dup', value: 2 }).catch((e: unknown) => e);
+      expect(direct).toBeInstanceOf(DuplicateKeyError);
+      expect((direct as DuplicateKeyError).entity).toBe('Transaction');
+      expect(((direct as Error).cause as Error).name).toBe('ConditionalCheckFailedException');
+
+      // In a transaction the guard fails at TransactWriteItems, which DynamoDB
+      // reports as a cancellation with one reason per write.
+      const atCommit = await service.transaction(async (uow) => {
+        const scoped = uow.getRepository('Transaction');
+        await scoped.create({ id: 'dup-tx-fresh', value: 3 });
+        await scoped.create({ id: 'dup', value: 4 });
+      }).catch((e: unknown) => e);
+      expect(atCommit).toBeInstanceOf(DuplicateKeyError);
+      expect(((atCommit as Error).cause as Error).name).toBe('TransactionCanceledException');
+      // The transaction is atomic: the fresh write did not land either.
+      await expect(repo.findById('dup-tx-fresh')).resolves.toBeNull();
+      await expect(repo.findById('dup')).resolves.toMatchObject({ value: 1 });
+    } finally {
+      await service.close();
     }
   });
 

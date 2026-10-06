@@ -24,6 +24,7 @@ import type {
   PageResult,
   TransactionOptions,
 } from '@setu-ts/common';
+import { DuplicateKeyError } from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
@@ -79,8 +80,13 @@ function accessPathOf(dataSource: DataSource): string | undefined {
  * SQLSTATE, the statement — stays reachable for the log while the served
  * `detail` stays the class's fixed sentence.
  */
-function classifiedOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
+function classifiedOrOriginal(
+  error: unknown,
+  adapterType: DatabaseAdapterType,
+  entity?: string,
+): unknown {
   const kind = classifyDriverError(error, adapterType);
+  if (kind === 'duplicate') return duplicateKeyError(error, entity);
   if (kind === 'conflict') {
     return new SerializationConflictError(
       'The database rejected the write because a concurrent transaction changed the same data.',
@@ -94,6 +100,37 @@ function classifiedOrOriginal(error: unknown, adapterType: DatabaseAdapterType):
     );
   }
   return error;
+}
+
+/**
+ * Builds the {@linkcode DuplicateKeyError} for a classified driver error,
+ * naming the entity when the interception site knows it.
+ */
+function duplicateKeyError(cause: unknown, entity: string | undefined): DuplicateKeyError {
+  return new DuplicateKeyError(
+    entity === undefined
+      ? 'The database rejected the write because it would duplicate a unique key.'
+      : `The database rejected the write to '${entity}' because it would duplicate a unique key.`,
+    entity === undefined ? { cause } : { entity, cause },
+  );
+}
+
+/**
+ * Classifies a rejection raised by `commit()`, where only a duplicate key is
+ * mapped.
+ *
+ * A commit rejection is otherwise rethrown unchanged because its outcome can
+ * be unknown: a lost acknowledgement may follow a write the server applied,
+ * so the retry-safe `409`/`503` contracts are not advertised there. A
+ * duplicate key is different. It is the server's own refusal of the write,
+ * and the backends that detect it at commit (D1's atomic `batch()`, a Cosmos
+ * transactional batch, the memory and Bigtable deferred writes) apply nothing
+ * when they refuse.
+ */
+function duplicateAtCommitOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
+  return classifyDriverError(error, adapterType) === 'duplicate'
+    ? duplicateKeyError(error, undefined)
+    : error;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +250,7 @@ export class DatabaseService implements IDatabaseService {
       // A commit rejection can mean the server applied the write before its
       // acknowledgement was lost. Its outcome is unknown, so never advertise
       // the retry-safe contract reserved for definitely rejected operations.
-      if (committing) throw error;
+      if (committing) throw duplicateAtCommitOrOriginal(error, this._adapterType);
       // X38-1 (M90f): a conflict surfaced inside a repository call was
       // already classified by the `wrapDataSource` wrapper, and
       // `classifyDriverError` returns `null` for a package-owned error — so
@@ -417,7 +454,7 @@ export class DatabaseService implements IDatabaseService {
             }
             return result;
           } catch (error) {
-            throw classifiedOrOriginal(error, adapterType);
+            throw classifiedOrOriginal(error, adapterType, entity);
           }
         },
       }),
@@ -435,7 +472,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       async findById(id) {
@@ -450,7 +487,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       async create(data) {
@@ -465,7 +502,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       async update(id, data) {
@@ -480,7 +517,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       async delete(id) {
@@ -495,7 +532,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       // BOTH parameters are forwarded. Taking only `where` dropped the
@@ -515,7 +552,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
     };

@@ -1,6 +1,6 @@
 /** DynamoDB implementation of the per-entity IDataSource port. @module */
 import type { EntityKey, IDataSource, NormalizedQuery, PageResult } from '@setu-ts/common';
-import { decodeCursor, encodeCursor, sortFingerprint } from '@setu-ts/common';
+import { decodeCursor, DuplicateKeyError, encodeCursor, sortFingerprint } from '@setu-ts/common';
 import type {
   DynamoAttributeMap,
   DynamoAttributeValue,
@@ -162,11 +162,13 @@ export function createDynamoDataSource(
   };
   const conditional = (error: unknown, operation: 'create' | 'update'): never => {
     if (error instanceof Error && error.name === 'ConditionalCheckFailedException') {
-      throw new Error(
-        `DynamoDB entity '${entity}' ${operation} failed: the key already ${
-          operation === 'create' ? 'exists' : 'does not exist'
-        }.`,
-      );
+      if (operation === 'create') {
+        throw new DuplicateKeyError(
+          `DynamoDB entity '${entity}' create failed: the key already exists.`,
+          { entity, cause: error },
+        );
+      }
+      throw new Error(`DynamoDB entity '${entity}' update failed: the key does not exist.`);
     }
     throw error;
   };

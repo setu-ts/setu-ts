@@ -15,7 +15,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { DynamoAdapter } from '../../src/adapters/dynamo/dynamo-adapter.ts';
+import { DynamoAdapter, failedCreateGuard } from '../../src/adapters/dynamo/dynamo-adapter.ts';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type {
   DynamoTransactWriteItemsCommandInput,
   IDynamoClient,
@@ -126,6 +127,66 @@ describe('DynamoDB adapter — deferred TransactWriteItems transactions', () => 
     await expect(tx.commit()).rejects.toThrow('transaction cancelled');
     await tx.commit();
     expect(attempts).toBe(1);
+  });
+
+  /**
+   * A cancellation shaped exactly as DynamoDB Local returns it: one reason per
+   * write, in write order, `None` for the writes that did not fail.
+   */
+  function cancelled(...codes: string[]): Error {
+    return Object.assign(new Error('Transaction cancelled'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: codes.map((Code) => ({ Code })),
+    });
+  }
+
+  it('a create whose key exists cancels the commit as a DuplicateKeyError', async () => {
+    const failure = cancelled('None', 'ConditionalCheckFailed');
+    const client = fakeClient({
+      getItem: async () => ({ Item: { pk: { S: 'k' } } }),
+      transactWriteItems: () => Promise.reject(failure),
+    });
+    const adapter = await connectedAdapter(client);
+    const tx = await adapter.beginTransaction();
+    await tx.createDataSource('Shipment').update('k', { status: 'shipped' });
+    await tx.createDataSource('Order').create({ pk: 'taken' });
+
+    const refusal = await tx.commit().catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(DuplicateKeyError);
+    expect((refusal as Error).cause).toBe(failure);
+  });
+
+  it('a failed UPDATE guard is not a duplicate — the row is missing', async () => {
+    const failure = cancelled('ConditionalCheckFailed', 'None');
+    const client = fakeClient({
+      getItem: async () => ({ Item: { pk: { S: 'k' } } }),
+      transactWriteItems: () => Promise.reject(failure),
+    });
+    const adapter = await connectedAdapter(client);
+    const tx = await adapter.beginTransaction();
+    await tx.createDataSource('Shipment').update('k', { status: 'shipped' });
+    await tx.createDataSource('Order').create({ pk: 'fresh' });
+
+    await expect(tx.commit()).rejects.toBe(failure);
+  });
+
+  it('failedCreateGuard reads only a cancellation with index-aligned reasons', () => {
+    const create = { Put: { TableName: 't', Item: {} } };
+    const update = { Update: { TableName: 't', Key: {}, UpdateExpression: 'SET a = b' } };
+    expect(failedCreateGuard(cancelled('ConditionalCheckFailed'), [create])).toBe(true);
+    expect(failedCreateGuard(cancelled('ConditionalCheckFailed'), [update])).toBe(false);
+    expect(failedCreateGuard(cancelled('TransactionConflict'), [create])).toBe(false);
+    // A reason past the end of the writes names no write.
+    expect(failedCreateGuard(cancelled('None', 'ConditionalCheckFailed'), [create])).toBe(false);
+    expect(failedCreateGuard(new Error('Transaction cancelled'), [create])).toBe(false);
+    expect(failedCreateGuard('a string', [create])).toBe(false);
+    const noReasons = Object.assign(new Error('x'), { name: 'TransactionCanceledException' });
+    expect(failedCreateGuard(noReasons, [create])).toBe(false);
+    const nullReason = Object.assign(new Error('x'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [null],
+    });
+    expect(failedCreateGuard(nullReason, [create])).toBe(false);
   });
 
   it('refuses a duplicate item key by name before any SDK call', async () => {

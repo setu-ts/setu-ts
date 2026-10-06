@@ -7,8 +7,9 @@
  * discarded it: the condition reached the client as a masked `500`, which by
  * convention means the opposite, so a well-behaved client did not retry and
  * the write was silently dropped. This module reads the classifier the
- * backend supplied and maps it onto the two statuses the framework answers
- * caller-actionable database conditions with.
+ * backend supplied and maps it onto the statuses the framework answers
+ * caller-actionable database conditions with. A duplicate key, the third
+ * class, was masked the same way and is read from the same table.
  *
  * The signal table is per backend (§3.2 of the M90f plan). A **code** is
  * read first — SQLSTATE for the SQL backends, a gRPC status for Bigtable,
@@ -19,20 +20,24 @@
  *
  * @module
  */
+import { DuplicateKeyError } from '@setu-ts/common';
 import { DatabaseUnavailableError, SerializationConflictError } from '../errors.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 
 /**
- * The two caller-actionable classes a driver error can be mapped onto.
+ * The caller-actionable classes a driver error can be mapped onto.
  *
  * - `'conflict'` — the write was rejected because of concurrent work; the
  *   operation did not happen and **may be retried** (`409`).
  * - `'unavailable'` — the database, its pool, or its network is temporarily
  *   unreachable; the operation did not happen and **may be retried** (`503`).
+ * - `'duplicate'` — the write would duplicate a primary key or a unique
+ *   index; the operation did not happen and repeating it fails the same way
+ *   (`409`).
  *
  * @since 0.5.0
  */
-export type DriverErrorClass = 'conflict' | 'unavailable';
+export type DriverErrorClass = 'conflict' | 'unavailable' | 'duplicate';
 
 /**
  * The maximum number of `cause` hops the walk performs.
@@ -57,6 +62,32 @@ const COSMOS_TOO_MANY_REQUESTS = 429;
 
 /** Cosmos DB server-side unavailability. */
 const COSMOS_UNAVAILABLE = 503;
+
+/** MongoDB's duplicate-key code (`E11000`), measured on a real server. */
+const MONGO_DUPLICATE_KEY = 11000;
+
+/** Cosmos DB `409` — an existing `id` in the partition, or a unique-key violation. */
+const COSMOS_CONFLICT = 409;
+
+/**
+ * The string codes that mean "duplicate key": PostgreSQL SQLSTATE `23505`
+ * (`unique_violation`), Prisma's `P2002` (its own mapping of that SQLSTATE,
+ * measured through the Prisma 7 pg driver adapter), and mysql2's
+ * `ER_DUP_ENTRY`. PostgreSQL and Prisma are pinned by the guarded live
+ * suites; `ER_DUP_ENTRY` was measured against MySQL 8 by probe, since CI runs
+ * no MySQL.
+ */
+const DUPLICATE_KEY_CODES: ReadonlySet<string> = new Set(['23505', 'P2002', 'ER_DUP_ENTRY']);
+
+/**
+ * The message anchor for SQLite's unique violation, which is the only signal
+ * Cloudflare D1 carries: measured on workerd's local D1, the error has no
+ * code and reads `D1_ERROR: UNIQUE constraint failed: a.id: SQLITE_CONSTRAINT
+ * (extended: SQLITE_CONSTRAINT_PRIMARYKEY)`. The same words open
+ * `node:sqlite`'s message and the SQLite drivers Drizzle supports, for a
+ * primary key and a unique index alike.
+ */
+const SQLITE_UNIQUE_ANCHOR = 'UNIQUE constraint failed';
 
 /** SQLSTATE `57P03` — `cannot_connect_now`, refused by the server itself. */
 const PG_CANNOT_CONNECT_NOW = '57P03';
@@ -130,7 +161,11 @@ export function classifyDriverError(
   // value is checked: walking INTO a classified error's cause could
   // re-classify from the driver error it wraps, which is exactly the
   // double-wrap the pass-through exists to prevent.
-  if (error instanceof SerializationConflictError || error instanceof DatabaseUnavailableError) {
+  if (
+    error instanceof SerializationConflictError ||
+    error instanceof DatabaseUnavailableError ||
+    error instanceof DuplicateKeyError
+  ) {
     return null;
   }
 
@@ -217,12 +252,14 @@ function classifyStructured(
   //    them when the active adapter identifies the namespace. An unmatched
   //    numeric code still does not veto the Mongo label below.
   if (typeof code === 'number') {
+    if (adapterType === 'mongodb' && code === MONGO_DUPLICATE_KEY) return 'duplicate';
     if (adapterType === 'bigtable') {
       if (code === GRPC_ABORTED) return 'conflict';
       if (code === GRPC_UNAVAILABLE) return 'unavailable';
     }
     if (adapterType === 'cosmos') {
       if (code === COSMOS_RETRY_WITH) return 'conflict';
+      if (code === COSMOS_CONFLICT) return 'duplicate';
       if (code === COSMOS_TOO_MANY_REQUESTS || code === COSMOS_UNAVAILABLE) return 'unavailable';
     }
   }
@@ -235,6 +272,7 @@ function classifyStructured(
   //    refusing connections. A matched string code is FINAL: SQLSTATE
   //    classes are the backend's own classifier and outrank any text.
   if (typeof code === 'string') {
+    if (DUPLICATE_KEY_CODES.has(code)) return 'duplicate';
     if (code === PG_CANNOT_CONNECT_NOW) return 'unavailable';
     if (code === PRISMA_WRITE_CONFLICT) return 'conflict';
     if (code === '40001' || code === '40P01') return 'conflict';
@@ -268,11 +306,13 @@ function classifyFallback({ name, message }: DriverErrorMembers): DriverErrorCla
     if (name === 'TimeoutError' || name === 'NetworkingError') return 'unavailable';
   }
 
-  // The one message anchor — node-postgres pool exhaustion, which carries
-  //    no code at all. Reached last, only after every structured signal
-  //    missed; pinned by a live-backend test.
-  if (typeof message === 'string' && message.includes(PG_POOL_TIMEOUT_ANCHOR)) {
-    return 'unavailable';
+  // The two message anchors — node-postgres pool exhaustion and SQLite's
+  //    unique violation, neither of which carries a code. Reached last, only
+  //    after every structured signal missed; each is pinned by a test against
+  //    the real engine.
+  if (typeof message === 'string') {
+    if (message.includes(PG_POOL_TIMEOUT_ANCHOR)) return 'unavailable';
+    if (message.includes(SQLITE_UNIQUE_ANCHOR)) return 'duplicate';
   }
 
   return null;

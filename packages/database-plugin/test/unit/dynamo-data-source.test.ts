@@ -1,6 +1,7 @@
 // deno-lint-ignore-file require-await -- async facade fakes model IDynamoClient promises.
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type { IDynamoClient } from '../../src/adapters/dynamo/dynamo-client-types.ts';
 import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';
 import { createDynamoTransactionBuffer } from '../../src/adapters/dynamo/dynamo-transaction-buffer.ts';
@@ -190,8 +191,15 @@ describe('DynamoDB data source writes', () => {
       destroy() {},
     };
     const ds = createDynamoDataSource(client, 'Item', { Item: { partitionKey: 'pk' } });
-    await expect(ds.create({ pk: 'p' })).rejects.toThrow('already exists');
-    await expect(ds.update('p', { x: 1 })).rejects.toThrow('does not exist');
+    const duplicate = await ds.create({ pk: 'p' }).catch((error: unknown) => error);
+    expect(duplicate).toBeInstanceOf(DuplicateKeyError);
+    expect((duplicate as DuplicateKeyError).entity).toBe('Item');
+    expect((duplicate as Error).message).toContain('already exists');
+    expect((duplicate as Error).cause).toBe(failure);
+    // A failed update guard means the row is MISSING, not duplicated.
+    const missing = await ds.update('p', { x: 1 }).catch((error: unknown) => error);
+    expect(missing).not.toBeInstanceOf(DuplicateKeyError);
+    expect((missing as Error).message).toContain('does not exist');
   });
   it('preserves non-conditional errors and refuses empty updates', async () => {
     const failure = new Error('network');

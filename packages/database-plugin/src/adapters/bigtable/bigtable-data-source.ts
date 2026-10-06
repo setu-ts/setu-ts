@@ -22,7 +22,7 @@ import type {
   NormalizedQuery,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, mintNextCursor, sortFingerprint } from '@setu-ts/common';
+import { decodeCursor, DuplicateKeyError, mintNextCursor, sortFingerprint } from '@setu-ts/common';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import { matchesFilter, matchesWhere, projectFields } from '../../query/query-builder.ts';
 import type {
@@ -309,9 +309,10 @@ export function createBigtableDataSource(
         onNoMatch: [{ method: 'insert', data: cells }],
       });
       if (existed) {
-        throw new Error(
+        throw new DuplicateKeyError(
           `Bigtable entity '${target.entity}' already has a row keyed '${rowKey}'; ` +
             `create() does not overwrite. Use update() to merge into it.`,
+          { entity: target.entity },
         );
       }
       return persisted;

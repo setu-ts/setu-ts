@@ -21,6 +21,7 @@ import type { IMongoDatabase } from '../../src/adapters/mongo/mongo-client-types
 import { DatabaseService } from '../../src/index.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
 import { SerializationConflictError } from '../../src/errors.ts';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 
 /** `MONGO_URL` is the §7 gate variable; `MONGODB_URI` is the CI's name. */
@@ -660,6 +661,33 @@ describe('MongoAdapter — classified statuses (X38-1/X35-2)', () => {
       for (const rejection of rejected) {
         expect(rejection.reason).toBeInstanceOf(SerializationConflictError);
       }
+    } finally {
+      await service.close();
+    }
+  });
+});
+
+describe('MongoAdapter against a real server — duplicate key', () => {
+  it('a duplicate _id reaches the caller as DuplicateKeyError (code 11000)', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `dupkey_${crypto.randomUUID().replaceAll('-', '')}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_dupkey',
+      collections: { Widget: { collection } },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'mongodb');
+    try {
+      const repo = service.getRepository('Widget');
+      await repo.create({ id: 'w1', n: 1 });
+
+      const refusal = await repo.create({ id: 'w1', n: 2 }).catch((e: unknown) => e);
+      expect(refusal).toBeInstanceOf(DuplicateKeyError);
+      expect((refusal as DuplicateKeyError).entity).toBe('Widget');
+      expect(((refusal as Error).cause as { code?: unknown }).code).toBe(11000);
+      expect(await repo.findById('w1')).toMatchObject({ n: 1 });
     } finally {
       await service.close();
     }

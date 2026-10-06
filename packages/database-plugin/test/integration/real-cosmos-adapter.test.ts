@@ -25,6 +25,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
+import { DuplicateKeyError } from '@setu-ts/common';
+import { DatabaseService } from '../../src/services/database-service.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import type {
@@ -520,3 +522,31 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
 
 /** The shape of the database `read()` the recording wrapper delegates. */
 type ICosmosDatabaseRead = () => Promise<{ statusCode: number }>;
+
+describe('CosmosAdapter against a real emulator — duplicate key', () => {
+  it('an existing id in the partition is a DuplicateKeyError (409)', {
+    ignore: skipReal,
+  }, async () => {
+    const container = await provision(`dupkey_${suffix}`, '/tenantId');
+    const adapter = new CosmosAdapter({
+      endpoint: endpoint as string,
+      key,
+      database: databaseId,
+      containers: { Order: { container, partitionKey: 'tenantId' } },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'cosmos');
+    try {
+      const repo = service.getRepository('Order');
+      await repo.create({ id: 'o1', tenantId: 't1', total: 10 });
+
+      const refusal = await repo.create({ id: 'o1', tenantId: 't1', total: 20 })
+        .catch((e: unknown) => e);
+      expect(refusal).toBeInstanceOf(DuplicateKeyError);
+      expect((refusal as DuplicateKeyError).entity).toBe('Order');
+      expect(((refusal as Error).cause as { code?: unknown }).code).toBe(409);
+    } finally {
+      await service.close();
+    }
+  });
+});

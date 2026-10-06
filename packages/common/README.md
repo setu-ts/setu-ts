@@ -182,6 +182,7 @@ package fits the plugin architecture.
 | `withResponseMetadata`               | function  |
 | `withSecurityMetadata`               | function  |
 | `withValidationMetadata`             | function  |
+| `DuplicateKeyError`                  | class     |
 | `MalformedRequestBodyError`          | class     |
 | `UnsupportedFormEncodingError`       | class     |
 | `CAPABILITIES`                       | const     |

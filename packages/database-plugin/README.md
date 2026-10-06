@@ -740,20 +740,29 @@ test.
 
 ## What a driver condition returns to the client
 
-Two driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
-answered as the package's own errors, so a caller can `instanceof` them instead of matching message
-text:
+Three driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
+answered as typed errors, so a caller can `instanceof` them instead of matching message text:
 
 | Condition                                                                                                                                                                                                                                           | Thrown as                    | Served status |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
 | The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                          | `SerializationConflictError` | `409`         |
 | The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, the pg pool timeout, `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
+| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                         | `DuplicateKeyError`          | `409`         |
 
-Both carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
-reachable for the log (M90j) — and neither serves driver text: the body's `detail` is a fixed
-sentence. **No classified answer carries `Retry-After`**: the hint channel has no header, and the
-framework holds no honest horizon for a pool's saturation. Catch-then-throw sites and the typed
-Drizzle builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's row.
+`DuplicateKeyError` is exported from `@setu-ts/common`, not from this package, because more than one
+package raises or recognises it (the D1 adapter in `@setu-ts/cloudflare-plugin`, and any store that
+records "already processed" with a unique insert). Unlike a serialization conflict it is **not**
+retryable: the same write fails the same way. The memory, DynamoDB and Bigtable adapters raise it
+themselves, and it carries the targeted `entity` when the failing call names one. A duplicate found
+at `commit()` (D1's batch, a Cosmos transactional batch, a DynamoDB `TransactWriteItems` cancelled
+by a create's guard, a buffered memory or Bigtable create) is mapped too; every other commit
+rejection is still rethrown unchanged, because its outcome can be unknown.
+
+All three carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
+reachable for the log (M90j) — and none serves driver text: the body's `detail` is a fixed sentence.
+**No classified answer carries `Retry-After`**: the hint channel has no header, and the framework
+holds no honest horizon for a pool's saturation. Catch-then-throw sites and the typed Drizzle
+builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's row.
 
 ## What a refused query returns to the client
 

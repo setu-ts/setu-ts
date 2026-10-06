@@ -32,11 +32,12 @@ import type {
   TransactionIsolationLevel,
   TransactionOptions,
 } from '@setu-ts/common';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type { DynamoAdapterOptions } from '../../interfaces/index.ts';
 import { UnsupportedIsolationLevelError, UnsupportedRawQueryError } from '../../errors.ts';
 import { createInjectedDynamoLoader, createLazyDynamoLoader } from './dynamo-client.ts';
 import type { DynamoClientConfiguration } from './dynamo-client.ts';
-import type { IDynamoClient } from './dynamo-client-types.ts';
+import type { DynamoTransactWriteItem, IDynamoClient } from './dynamo-client-types.ts';
 import type { DynamoEntityMapping } from './dynamo-mapping.ts';
 import { createDynamoDataSource } from './dynamo-data-source.ts';
 import {
@@ -376,7 +377,16 @@ class DynamoTransaction implements IAdapterTransaction {
     // API requires one to one hundred items — and a transaction with no
     // buffered write has nothing to commit, so zero writes send nothing.
     if (writes.length > 0) {
-      await this.#client.transactWriteItems({ TransactItems: writes });
+      try {
+        await this.#client.transactWriteItems({ TransactItems: writes });
+      } catch (error) {
+        throw failedCreateGuard(error, writes)
+          ? new DuplicateKeyError(
+            'DynamoDB transaction was cancelled: a create in it would duplicate an existing key.',
+            { cause: error },
+          )
+          : error;
+      }
     }
   }
 
@@ -404,4 +414,31 @@ class DynamoTransaction implements IAdapterTransaction {
       this.#buffer,
     );
   }
+}
+
+/**
+ * Whether a rejected `TransactWriteItems` was cancelled because a create's
+ * `attribute_not_exists` guard failed — a duplicate key.
+ *
+ * DynamoDB reports one cancellation reason per write, in write order
+ * (measured on DynamoDB Local: `[{Code:"None"},{Code:"ConditionalCheckFailed"}]`).
+ * A failed guard on an update reads identically, which is why the WRITE at
+ * that index decides: only a `Put` is a create, and only a create's guard
+ * means the key already exists.
+ *
+ * @param error - The rejection
+ * @param writes - The writes sent, in order
+ * @returns `true` when a create's guard failed
+ */
+export function failedCreateGuard(
+  error: unknown,
+  writes: readonly DynamoTransactWriteItem[],
+): boolean {
+  if (!(error instanceof Error) || error.name !== 'TransactionCanceledException') return false;
+  const reasons = (error as Error & { CancellationReasons?: unknown }).CancellationReasons;
+  if (!Array.isArray(reasons)) return false;
+  return reasons.some((reason, index) =>
+    (reason as { Code?: unknown } | null)?.Code === 'ConditionalCheckFailed' &&
+    writes[index]?.Put !== undefined
+  );
 }
