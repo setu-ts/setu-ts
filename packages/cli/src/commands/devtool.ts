@@ -323,7 +323,7 @@ async function planSourceWrites(
   if (existing !== module.contents) {
     planned.push({ path: modulePath, contents: module.contents, creating: existing === undefined });
   }
-  const wiring = withDevtoolSourceWiring(config, installed);
+  const wiring = withDevtoolSourceWiring(config, installed, names.customBackplane === true);
   if (wiring.source !== config) {
     planned.push({ path: configPath, contents: wiring.source, creating: false });
   }

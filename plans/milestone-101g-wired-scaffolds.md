@@ -690,3 +690,16 @@ refusing a base path that would need escaping, and the factory-signature scan is
 a backtracking regex. Every other file a project imports remains outside the check: a configuration
 that delegates composition elsewhere is classified by what this file shows, which is why every
 refusal also prints the manual registration line.
+
+Security-audit corrections (round 6): the classifier still trusted three things its own text did not
+settle. A `@setu-ts/` specifier is recognized only when it names a published framework package (a
+drift test pins the list to the workspace), and an import map pointing a framework key anywhere else
+withholds every automatic edit. Any starter import marks the configuration starter-composed, since a
+starter registers plugins the file never names. Computed member access is outside the classified
+language, which closes `x['constructor']['prototype']`. Registration guidance is suppressed only by
+a call inside the `createApp` body that is not a declaration (no body, return type or arrow after
+it, no `function` before it). The `split(/\s+as\s+/)` import-item parse, which backtracked
+quadratically, is one linear tokenizer at all three sites. The CLI's own backplane rewrites
+(`{ ...sources.backplane }`, `{ ...<original>, ...sources.backplane }`) are recognized as their
+original argument, and the managed sources module types every row key, so a dropped row spreads to
+nothing instead of failing `deno check`.

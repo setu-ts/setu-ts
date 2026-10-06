@@ -156,13 +156,166 @@ const UNDECIDABLE_IDENTIFIERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Every package the framework publishes. A `@setu-ts/` name outside this list is
+ * an import-map alias that can point anywhere (audit round 6), so it is no more
+ * recognizable than any other bare specifier. A drift test pins it to the
+ * workspace members.
+ */
+export const FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set([
+  'audit-plugin',
+  'auth-plugin',
+  'cache-plugin',
+  'cli',
+  'cloudflare-plugin',
+  'common',
+  'config-plugin',
+  'cqrs-plugin',
+  'database-plugin',
+  'decorator-plugin',
+  'di-plugin',
+  'diagnostics-plugin',
+  'events-plugin',
+  'exceptions',
+  'feature-flags-plugin',
+  'full-stack-starter',
+  'graphql-plugin',
+  'grpc-plugin',
+  'health-plugin',
+  'http-security-plugin',
+  'kernel',
+  'localization-plugin',
+  'logger-plugin',
+  'mail-plugin',
+  'messaging-plugin',
+  'metrics-plugin',
+  'microservice-starter',
+  'multi-tenancy-plugin',
+  'notification-plugin',
+  'openapi-plugin',
+  'queue-plugin',
+  'react-router-plugin',
+  'realtime-backplane-plugin',
+  'resilience-plugin',
+  'rest-starter',
+  'runtime',
+  'scheduler-plugin',
+  'sdk',
+  'secrets-plugin',
+  'service-discovery-plugin',
+  'session-plugin',
+  'sse-plugin',
+  'static-plugin',
+  'storage-plugin',
+  'telemetry-plugin',
+  'testing',
+  'validation-plugin',
+  'view-plugin',
+  'websocket-plugin',
+  'worker-pool-plugin',
+]);
+
+/**
  * Whether a static module specifier names something whose contents the CLI can
- * reason about: a framework package or a relative file. A bare specifier can be
- * remapped by an import map to anything (audit round 5).
+ * reason about: a known framework package (optionally with a subpath) or a
+ * relative file. A bare specifier — including an unknown `@setu-ts/` name — can be
+ * remapped by an import map to anything (audit rounds 5 and 6).
  */
 function isRecognizedSpecifier(specifier: string): boolean {
-  return specifier.startsWith('@setu-ts/') || specifier.startsWith('./') ||
-    specifier.startsWith('../');
+  if (specifier.startsWith('./') || specifier.startsWith('../')) return true;
+  if (!specifier.startsWith('@setu-ts/')) return false;
+  const rest = specifier.slice('@setu-ts/'.length);
+  const slash = rest.indexOf('/');
+  return FRAMEWORK_PACKAGES.has(slash < 0 ? rest : rest.slice(0, slash));
+}
+
+/**
+ * Whether a manifest maps a `@setu-ts/` import key to something other than that
+ * same framework package — an unknown name, or a known name pointed at a different
+ * package. Either makes the configuration's imports mean something its text does
+ * not say, so automatic edits are withheld (audit round 6). A value naming the
+ * package as `jsr:@setu-ts/<pkg>`, its npm-compatibility name `setu-ts__<pkg>`, or
+ * a path through a `<pkg>/` directory (a workspace checkout) is the same package.
+ *
+ * @param manifest - Raw `deno.json` or `package.json` text
+ * @returns Whether any framework import is retargeted
+ */
+export function importMapRetargets(manifest: string): boolean {
+  for (const entry of manifest.matchAll(/"@setu-ts\/([^"]*)"[ \t\r\n]*:[ \t\r\n]*"([^"]*)"/g)) {
+    const key = entry[1]!.replace(/\/$/, '');
+    const value = entry[2]!;
+    if (!FRAMEWORK_PACKAGES.has(key)) return true;
+    const same = value === `jsr:@setu-ts/${key}` || value.includes(`@setu-ts/${key}@`) ||
+      value.includes(`@setu-ts/${key}/`) || value.includes(`setu-ts__${key}@`) ||
+      value.includes(`/${key}/`);
+    if (!same) return true;
+  }
+  return false;
+}
+
+/** Words before which `[` opens an array literal rather than indexing a value. */
+const LITERAL_BRACKET_KEYWORDS: ReadonlySet<string> = new Set([
+  'return',
+  'of',
+  'in',
+  'typeof',
+  'case',
+  'await',
+  'yield',
+  'else',
+  'do',
+  'void',
+  'delete',
+  'throw',
+  'readonly',
+  'satisfies',
+  'as',
+]);
+
+/**
+ * Whether masked code indexes a value with `[…]`. A computed member access reaches
+ * a property no identifier names — `x['constructor']['prototype']` — so it is as
+ * undecidable as the identifiers it spells (audit round 6). An array literal, and
+ * a `T[]` type (an empty bracket pair), are not member access.
+ */
+function indexesValue(code: string, kept: string): boolean {
+  let previous = -1;
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i]!;
+    if (c === '[' && previous >= 0) {
+      // The bracket's contents are read with string literals KEPT: in the code
+      // mask `['constructor']` is blank and would pass for a `T[]` type.
+      let next = i + 1;
+      while (next < kept.length && /\s/.test(kept[next]!)) next += 1;
+      const empty = kept[next] === ']';
+      const before = code[previous]!;
+      if (!empty && (before === ')' || before === ']' || before === '.')) return true;
+      if (!empty && isIdentifierChar(before)) {
+        let start = previous;
+        while (start > 0 && isIdentifierChar(code[start - 1]!)) start -= 1;
+        if (!LITERAL_BRACKET_KEYWORDS.has(code.slice(start, previous + 1))) return true;
+      }
+    }
+    if (!/\s/.test(c)) previous = i;
+  }
+  return false;
+}
+
+/**
+ * Parses one named-import item — `Name` or `Name as alias` — in a single linear
+ * pass. `type Name` items and anything else return undefined. Replaces a
+ * `split(/\s+as\s+/)` that backtracked quadratically on a long run of spaces
+ * (audit round 6, R-R6).
+ *
+ * @param item - One comma-separated entry from an import's braces
+ * @returns The imported symbol and its local binding, or undefined
+ */
+export function parseImportItem(
+  item: string,
+): { readonly symbol: string; readonly local: string } | undefined {
+  const tokens = item.split(/\s+/).filter((token) => token !== '');
+  if (tokens.length === 1) return { symbol: tokens[0]!, local: tokens[0]! };
+  if (tokens.length === 3 && tokens[1] === 'as') return { symbol: tokens[0]!, local: tokens[2]! };
+  return undefined;
 }
 
 /**
@@ -230,6 +383,7 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
   // `from /* c */ 'x'` is seen) while string quotes survive — in the code mask the
   // literal itself is blank and a whitespace skip would run straight through it.
   const kept = comments.join('');
+  if (indexesValue(masked, kept)) return undefined;
   for (const keyword of masked.matchAll(/\b(?:import|from)\b/g)) {
     let at = keyword.index + keyword[0].length;
     while (kept[at] === ' ' || kept[at] === '\t' || kept[at] === '\n' || kept[at] === '\r') at += 1;
@@ -418,7 +572,18 @@ export function callsIdentifier(code: string, name: string): boolean {
   for (const reference of code.matchAll(identifierPattern(name, 'g'))) {
     let at = reference.index + name.length;
     while (isBlank(code[at] ?? '') || code[at] === '\n') at += 1;
-    if (code[at] === '(') return true;
+    const close = matchingClose(code, at, '(');
+    if (close < 0) continue;
+    // A method, function or signature DECLARATION shares the shape `name(…)`;
+    // what follows its parentheses — a body, a return type or an arrow — is what
+    // tells it from a call (audit round 6, G-R6).
+    let after = close + 1;
+    while (isBlank(code[after] ?? '') || code[after] === '\n') after += 1;
+    if (code[after] === '{' || code[after] === ':' || code.startsWith('=>', after)) continue;
+    let before = reference.index;
+    while (before > 0 && (isBlank(code[before - 1]!) || code[before - 1] === '\n')) before -= 1;
+    if (code.slice(Math.max(0, before - 8), before).endsWith('function')) continue;
+    return true;
   }
   return false;
 }
@@ -458,6 +623,13 @@ function supportedBackplaneArgument(raw: string, masked: string): boolean {
   // Emptiness is judged on the RAW text: masking blanks a string argument to
   // spaces, so `('memory')` would otherwise read as no argument at all.
   if (raw.trim() === '') return true;
+  const own = withoutSourceSpread(raw);
+  if (own !== undefined) {
+    return supportedBackplaneArgument(
+      raw.slice(own.start, own.end),
+      masked.slice(own.start, own.end),
+    );
+  }
   const trimmed = masked.trim();
   const open = masked.indexOf('{');
   if (
@@ -485,6 +657,40 @@ function supportedBackplaneArgument(raw: string, masked: string): boolean {
 }
 
 /**
+ * Recognizes the argument shapes {@linkcode withSourceArgs} itself emits for the
+ * backplane — `{ ...sources.backplane }` and `{ ...<original>, ...sources.backplane }` —
+ * and returns the span of the original argument (empty for the first). Without
+ * this, the CLI refused its own rewrite on the next run and dropped the row the
+ * configuration still reads (audit round 6, T-R6). Hand-scanned, no regex.
+ */
+function withoutSourceSpread(
+  raw: string,
+): { readonly start: number; readonly end: number } | undefined {
+  const isSpace = (c: string | undefined) => c !== undefined && /\s/.test(c);
+  let start = 0;
+  let end = raw.length;
+  while (isSpace(raw[start])) start += 1;
+  while (end > start && isSpace(raw[end - 1])) end -= 1;
+  if (raw[start] !== '{' || raw[end - 1] !== '}') return undefined;
+  start += 1;
+  end -= 1;
+  while (isSpace(raw[start])) start += 1;
+  while (end > start && isSpace(raw[end - 1])) end -= 1;
+  const tail = '...sources.backplane';
+  if (!raw.slice(start, end).endsWith(tail)) return undefined;
+  end -= tail.length;
+  while (end > start && isSpace(raw[end - 1])) end -= 1;
+  if (end === start) return { start, end };
+  if (raw[end - 1] !== ',') return undefined;
+  end -= 1;
+  while (end > start && isSpace(raw[end - 1])) end -= 1;
+  if (!raw.startsWith('...', start)) return undefined;
+  start += 3;
+  while (isSpace(raw[start])) start += 1;
+  return { start, end };
+}
+
+/**
  * Whether the configuration is CONFIRMED to give the realtime backplane a
  * supported transport. Fails closed: the policy is emitted only when the plugin is
  * imported through the one recognized named import, referenced at least once, and
@@ -505,9 +711,8 @@ function backplaneConfirmedSupported(source: string, code: string): boolean {
   ) {
     return false;
   }
-  const binding = declaration[1]!.split(',').map((item) => item.trim().split(/\s+as\s+/))
-    .find(([symbol]) => symbol === 'RealtimeBackplanePlugin');
-  const name = binding?.[1] ?? binding?.[0];
+  const name = declaration[1]!.split(',').map(parseImportItem)
+    .find((item) => item?.symbol === 'RealtimeBackplanePlugin')?.local;
   if (name === undefined || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) return false;
   const uses = maskImportDeclarations(code);
   const pattern = identifierPattern(name, 'g');
@@ -614,8 +819,17 @@ export function renderDevtoolSources(
  * Sources are enabled only when createApp receives its devtool argument.
  */${imports.length === 0 ? '' : `\n${imports.join('\n')}`}
 
+const ROWS_SOURCES = ${entries.length === 0 ? '{}' : `{\n${entries.join('\n')}\n}`};
+
+/** Every source key, so a row this file no longer emits still spreads to nothing. */
+interface AbsentSources {
+${ROWS.map((row) => `  readonly ${row.key}?: Readonly<Record<never, never>>;`).join('\n')}
+}
+
+type Sources = Omit<AbsentSources, keyof typeof ROWS_SOURCES> & typeof ROWS_SOURCES;
+
 /** Installed plugin options consumed by the development factory. */
-export const DEVTOOL_SOURCES = ${entries.length === 0 ? '{}' : `{\n${entries.join('\n')}\n}`};\n`,
+export const DEVTOOL_SOURCES: Sources = ROWS_SOURCES;\n`,
   };
 }
 
@@ -631,14 +845,20 @@ export function withSourceArgs(
 }
 
 /** Adds policies only to recognizable emitted factory calls, preserving unfamiliar composition. */
-export function withDevtoolSourceWiring(source: string, installed: ReadonlySet<string>): {
+export function withDevtoolSourceWiring(
+  source: string,
+  installed: ReadonlySet<string>,
+  customBackplane = false,
+): {
   readonly source: string;
   readonly manual: readonly string[];
 } {
   const scope = factoryScope(source);
+  const flags = policyFlags(source);
   const names = {
     project: 'app',
-    ...policyFlags(source),
+    ...flags,
+    customBackplane: flags.customBackplane || customBackplane,
   };
   const rows = sourceRows(installed, names);
   if (rows.length === 0) return { source, manual: [] };
@@ -666,9 +886,8 @@ export function withDevtoolSourceWiring(source: string, installed: ReadonlySet<s
       manual.push(`${row.symbol}({ ...options, ...sources.${row.key} })`);
       continue;
     }
-    const binding = imported?.[1]?.split(',').map((item) => item.trim().split(/\s+as\s+/))
-      .find(([symbol]) => symbol === row.symbol);
-    const symbol = binding?.[1] ?? binding?.[0];
+    const symbol = imported?.[1]?.split(',').map(parseImportItem)
+      .find((item) => item?.symbol === row.symbol)?.local;
     if (symbol === undefined || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(symbol)) {
       manual.push(`${row.symbol}({ ...options, ...sources.${row.key} })`);
       continue;
@@ -746,10 +965,22 @@ export async function readDevtoolSourceNames(
   } catch {
     // A project without an env example approves no configuration keys.
   }
+  const flags = policyFlags(config);
+  let retargeted = false;
+  for (const manifest of ['deno.json', 'deno.jsonc', 'package.json']) {
+    try {
+      retargeted ||= importMapRetargets(
+        new TextDecoder().decode(await fs.readFile(joinPath(dir, manifest))),
+      );
+    } catch {
+      // An absent manifest maps nothing.
+    }
+  }
   return {
     project: dir.split('/').at(-1) ?? 'app',
     artifacts,
     envKeys,
-    ...policyFlags(config),
+    ...flags,
+    customBackplane: flags.customBackplane || retargeted,
   };
 }

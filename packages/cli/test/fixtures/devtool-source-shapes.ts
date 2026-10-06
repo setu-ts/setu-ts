@@ -16,25 +16,43 @@ import type { ConfigDiagnosticsOptions } from '@setu-ts/config-plugin';
 import type { TraceDiagnosticsOptions } from '@setu-ts/telemetry-plugin';
 import type { AuthorizationDiagnosticsOptions } from '@setu-ts/auth-plugin';
 
-/** Installed plugin options consumed by the development factory. */
-export const DEVTOOL_SOURCES = {
+const ROWS_SOURCES = {
   cache: {
-    diagnostics: { enabled: true, alias: 'cache' } satisfies CacheDiagnosticsOptions,
+    diagnostics: {
+      enabled: true,
+      alias: 'cache',
+    } satisfies CacheDiagnosticsOptions,
   },
   storage: {
-    diagnostics: { enabled: true, alias: 'storage' } satisfies StorageDiagnosticsOptions,
+    diagnostics: {
+      enabled: true,
+      alias: 'storage',
+    } satisfies StorageDiagnosticsOptions,
   },
   websocket: {
-    diagnostics: { enabled: true, alias: 'websocket' } satisfies RealtimeDiagnosticsOptions,
+    diagnostics: {
+      enabled: true,
+      alias: 'websocket',
+    } satisfies RealtimeDiagnosticsOptions,
   },
   sse: {
-    diagnostics: { enabled: true, alias: 'sse' } satisfies RealtimeDiagnosticsOptions,
+    diagnostics: {
+      enabled: true,
+      alias: 'sse',
+    } satisfies RealtimeDiagnosticsOptions,
   },
   backplane: {
-    diagnostics: { enabled: true, alias: 'backplane' } satisfies RealtimeDiagnosticsOptions,
+    diagnostics: {
+      enabled: true,
+      alias: 'backplane',
+    } satisfies RealtimeDiagnosticsOptions,
   },
   events: {
-    diagnostics: { enabled: true, alias: 'events', events: {} } satisfies EventsDiagnosticsOptions,
+    diagnostics: {
+      enabled: true,
+      alias: 'events',
+      events: {},
+    } satisfies EventsDiagnosticsOptions,
   },
   scheduler: {
     diagnostics: {
@@ -67,7 +85,10 @@ export const DEVTOOL_SOURCES = {
     } satisfies HealthDiagnosticsOptions,
   },
   config: {
-    diagnostics: { enabled: true, keys: {} } satisfies ConfigDiagnosticsOptions,
+    diagnostics: {
+      enabled: true,
+      keys: {},
+    } satisfies ConfigDiagnosticsOptions,
   },
   telemetry: {
     diagnostics: {
@@ -84,3 +105,24 @@ export const DEVTOOL_SOURCES = {
     } satisfies AuthorizationDiagnosticsOptions,
   },
 };
+
+/** Every source key, so a row this file no longer emits still spreads to nothing. */
+interface AbsentSources {
+  readonly cache?: Readonly<Record<never, never>>;
+  readonly storage?: Readonly<Record<never, never>>;
+  readonly websocket?: Readonly<Record<never, never>>;
+  readonly sse?: Readonly<Record<never, never>>;
+  readonly backplane?: Readonly<Record<never, never>>;
+  readonly events?: Readonly<Record<never, never>>;
+  readonly scheduler?: Readonly<Record<never, never>>;
+  readonly queue?: Readonly<Record<never, never>>;
+  readonly health?: Readonly<Record<never, never>>;
+  readonly config?: Readonly<Record<never, never>>;
+  readonly telemetry?: Readonly<Record<never, never>>;
+  readonly auth?: Readonly<Record<never, never>>;
+}
+
+type Sources = Omit<AbsentSources, keyof typeof ROWS_SOURCES> & typeof ROWS_SOURCES;
+
+/** Installed plugin options consumed by the development factory. */
+export const DEVTOOL_SOURCES: Sources = ROWS_SOURCES;

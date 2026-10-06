@@ -205,7 +205,14 @@ All notable changes to this project are documented here. The format follows
   class-based project without `@setu-ts/queue-plugin`, `setu generate job` now refuses, naming
   `setu add queue`, where it used to write an unwired function. On a Deno target `setu add` no
   longer writes an `npm:@jsr/…` entry into `package.json`, which there holds only the frontend
-  build's own npm dependencies; a Node or Bun project is unchanged.
+  build's own npm dependencies; a Node or Bun project is unchanged. `setu add` and
+  `setu devtool enable` now edit `setu.config.ts` only when they can read its meaning from the file
+  alone; otherwise they leave it untouched and print the registration line to add by hand. A
+  configuration that imports a starter or whose import map points a `@setu-ts/` name at another
+  package, a computed member access such as `x['k']`, an import from a package that is not a
+  framework package or a relative file, and template literals or escapes in code all get the printed
+  line instead of an edit. The managed `src/devtool/diagnostics.ts` declares every source key, so a
+  row it stops emitting still type-checks where `setu.config.ts` spreads it.
 
 - **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
   primary key is already stored now rejects

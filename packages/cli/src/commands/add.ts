@@ -38,10 +38,12 @@ import {
   callsIdentifier,
   DEVTOOL_SOURCES_MODULE,
   factoryScope,
+  importMapRetargets,
   maskComments,
   maskImportDeclarations,
   maskSourceCode,
   packageSpecifierCount,
+  parseImportItem,
   readDevtoolSourceNames,
   referencesIdentifier,
   renderDevtoolSources,
@@ -257,9 +259,7 @@ function printWiringNote(
   bare: string,
   log: (line: string) => void,
 ): void {
-  const starter = source?.includes('export async function createApp(')
-    ? STARTER_ARMS.find(({ pkg, symbol }) => providerBinding(source, pkg, symbol) !== undefined)
-    : undefined;
+  const starter = source === undefined ? undefined : composingStarter(source);
   if (starter !== undefined) {
     const arm = starter.arms.get(bare);
     if (arm !== undefined) {
@@ -282,10 +282,13 @@ function printWiringNote(
   // Guidance is suppressed only by a real call in code. Inserting refuses on any
   // possible use (fail closed); guidance must not ALSO go quiet then, or a mention
   // in a string would leave the plugin unregistered with nothing said (audit 4).
-  const code = source === undefined ? undefined : maskSourceCode(source);
+  // Only a call inside the createApp body counts: a same-named method or
+  // signature elsewhere registers nothing (audit round 6, G-R6). A plugin built at
+  // module scope therefore still gets the line — guidance fails open.
+  const scope = source === undefined ? undefined : factoryScope(source);
   if (
-    binding !== undefined && code !== undefined &&
-    callsIdentifier(maskImportDeclarations(code), binding)
+    binding !== undefined && scope !== undefined &&
+    callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
   ) {
     return;
   }
@@ -299,6 +302,19 @@ function printWiringNote(
         : `  Register it after the factory returns: app.register(${registration});`,
     );
   }
+}
+
+/**
+ * The starter a configuration composes through, if it imports one at all. Any
+ * starter import counts — `createRestApp`, or `buildRestPlugins` spread into a
+ * synchronous factory — since either registers plugins this file never names, and
+ * a second registration is a duplicate plugin name at boot (audit round 6).
+ * Read with comments masked where the file classifies, else from raw text, which
+ * errs toward starter guidance.
+ */
+function composingStarter(source: string): (typeof STARTER_ARMS)[number] | undefined {
+  const visible = maskComments(source) ?? source;
+  return STARTER_ARMS.find(({ pkg }) => packageSpecifierCount(visible, pkg) > 0);
 }
 
 /**
@@ -421,9 +437,10 @@ function providerBinding(source: string, bare: string, symbol: string): string |
     if (!trimmed.startsWith(importStart) || !trimmed.endsWith(importEnd)) continue;
     const specifiers = trimmed.slice(importStart.length, -importEnd.length).split(',');
     for (const specifier of specifiers) {
-      const parts = specifier.trim().split(/\s+as\s+/);
-      const binding = parts[1] ?? symbol;
-      if (parts[0] === symbol && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(binding)) return binding;
+      const item = parseImportItem(specifier);
+      if (item?.symbol === symbol && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(item.local)) {
+        return item.local;
+      }
     }
   }
   return undefined;
@@ -462,6 +479,8 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   if (packageSpecifierCount(visible, bare) !== (importedBinding === undefined ? 0 : 1)) {
     return undefined;
   }
+  // A starter registers plugins this file never names (audit round 6).
+  if (composingStarter(source) !== undefined) return undefined;
   const factory = importedBinding ?? provider.symbol;
   // Any reference anywhere in the file, not only a call in the factory body: a
   // plugin built at module scope, through an alias, an optional call or `.call`, and
@@ -591,6 +610,9 @@ export async function runAddCommand(
   const edits: { readonly path: string; readonly contents: string }[] = [];
   let found = false;
   let alreadyPresent = false;
+  // An import map that points a framework name elsewhere makes the configuration's
+  // imports mean something its text does not say: no automatic wiring then.
+  let retargeted = false;
 
   for (const target of targets) {
     if (runtime === 'deno' && target.file === 'package.json') continue;
@@ -602,6 +624,7 @@ export async function runAddCommand(
       continue;
     }
     found = true;
+    retargeted ||= importMapRetargets(source);
 
     if (pinnedInOtherNpmSection(source, target.file, target.section, specifier, target.range)) {
       alreadyPresent = true;
@@ -643,7 +666,7 @@ export async function runAddCommand(
   let configSource: string | undefined;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
-    const wired = withPluginWiring(config, bare);
+    const wired = retargeted ? undefined : withPluginWiring(config, bare);
     if (wired !== undefined) edits.push({ path: configPath, contents: wired });
     configSource = wired ?? config;
   } catch {
@@ -676,7 +699,11 @@ export async function runAddCommand(
       edits.push({ path: sourcesPath, contents: sources.contents });
     }
     if (configSource !== undefined) {
-      const wiring = withDevtoolSourceWiring(configSource, installed);
+      const wiring = withDevtoolSourceWiring(
+        configSource,
+        installed,
+        names.customBackplane === true,
+      );
       for (const line of wiring.manual) {
         deps.log(`  Configure the development source: ${escapeName(line)}`);
       }

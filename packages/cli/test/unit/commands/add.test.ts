@@ -588,6 +588,88 @@ describe('runAddCommand', () => {
     );
   });
 
+  // Audit round 6 (T-R6): the CLI's own rewrite `RealtimeBackplanePlugin({ ...sources.backplane })`
+  // was refused on the next run, so the backplane row vanished from the managed module while
+  // the configuration still read it — a TS2339 produced entirely by CLI commands.
+  it('keeps the backplane row across a later add', async () => {
+    const source = CLASS_BASED_INGRESS_CONFIG.replace(
+      'export function createApp() {',
+      `export function createApp(\n  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n): IKernelApplication {`,
+    );
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/setu.config.ts': source,
+      '/app/src/devtool/diagnostics.ts': 'old managed module',
+    });
+    expect(await h.run(['realtime-backplane'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toContain(
+      'RealtimeBackplanePlugin({ ...sources.backplane })',
+    );
+    expect(h.read('/app/src/devtool/diagnostics.ts')).toContain('  backplane: {');
+    expect(await h.run(['cache'])).toBe(0);
+    expect(h.read('/app/src/devtool/diagnostics.ts')).toContain('  backplane: {');
+    expect(h.read('/app/src/devtool/diagnostics.ts')).toContain('  cache: {');
+  });
+
+  // Audit round 6 (L1-R5): a starter, or an import map pointing a framework name
+  // elsewhere, registers plugins the configuration never names; inserting another
+  // is a duplicate plugin name at boot.
+  it('never inserts beside a starter import or a retargeted import map', async () => {
+    const starter = "import { buildRestPlugins } from '@setu-ts/rest-starter';\n" +
+      CLASS_BASED_INGRESS_CONFIG.replace(
+        'DecoratorPlugin({',
+        '...buildRestPlugins(),\n      DecoratorPlugin({',
+      );
+    const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': starter });
+    expect(await h.run(['health'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(starter);
+    expect(h.out.join('\n')).toContain('createRestApp owns this plugin');
+
+    const manifest = JSON.stringify({
+      imports: {
+        '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^1',
+        '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1',
+      },
+    });
+    const remapped = harness({
+      '/app/deno.json': manifest,
+      '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+    });
+    expect(await remapped.run(['cache'])).toBe(0);
+    expect(remapped.read('/app/setu.config.ts')).toBe(CLASS_BASED_INGRESS_CONFIG);
+    expect(remapped.out.join('\n')).toContain('Register CachePlugin() in setu.config.ts.');
+  });
+
+  // Audit round 6 (G-R6): a declaration sharing the factory's name is not a call,
+  // and a call outside createApp does not register anything createApp builds.
+  it('prints guidance when the only match is a declaration', async () => {
+    const imported = "import { CachePlugin } from '@setu-ts/cache-plugin';\n";
+    for (
+      const extra of [
+        'const docs = { CachePlugin() { return 1; } };\n',
+        'class Docs { CachePlugin() { return 1; } }\n',
+        'interface Docs { CachePlugin(): string }\n',
+        'function helper() { return CachePlugin(); }\n',
+      ]
+    ) {
+      const config = imported + extra + CLASS_BASED_INGRESS_CONFIG;
+      const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+      expect(await h.run(['cache']), extra).toBe(0);
+      expect(h.out.join('\n'), extra).toContain('Register CachePlugin() in setu.config.ts.');
+    }
+  });
+
+  // Audit round 6 (R-R6): the import-item split was quadratic in a run of spaces.
+  it('parses a hostile import item in linear time', async () => {
+    const config =
+      `import { CachePlugin as${' '.repeat(150_000)}AppCache } from '@setu-ts/cache-plugin';\n` +
+      CLASS_BASED_INGRESS_CONFIG;
+    const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+    const started = performance.now();
+    expect(await h.run(['cache'])).toBe(0);
+    expect(performance.now() - started).toBeLessThan(5000);
+  });
+
   it('refreshes an opted-in source module and gates the newly wired plugin', async () => {
     const source = CLASS_BASED_INGRESS_CONFIG.replace(
       'export function createApp() {',

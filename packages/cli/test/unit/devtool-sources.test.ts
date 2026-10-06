@@ -4,11 +4,15 @@ import { expect } from '@std/expect';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { DEVTOOL_SOURCES } from '../fixtures/devtool-source-shapes.ts';
 import {
+  callsIdentifier,
   factoryScope,
+  FRAMEWORK_PACKAGES,
+  importMapRetargets,
   maskComments,
   maskImportDeclarations,
   maskSourceCode,
   packageSpecifierCount,
+  parseImportItem,
   readDevtoolSourceNames,
   referencesIdentifier,
   renderDevtoolSources,
@@ -77,7 +81,7 @@ describe('development source policies', () => {
     expect(emitted.contents).not.toContain('authorizationDiagnostics');
     expect(emitted.contents).not.toContain('  backplane:');
     expect(renderDevtoolSources(new Set(), { project: 'app' }).contents).toContain(
-      'DEVTOOL_SOURCES = {};',
+      'ROWS_SOURCES = {};',
     );
     expect(withSourceArgs('runtime', '', packages, { project: 'app' })).toBe('');
   });
@@ -331,6 +335,154 @@ describe('development source policies', () => {
   // Audit round 5: the lexer must be exact for everything it classifies, and the
   // configuration's meaning must be decidable from its own text. Each row below is
   // outside that language and must be refused, not parsed.
+  it('lists exactly the workspace packages as framework packages', async () => {
+    const root = JSON.parse(
+      await Deno.readTextFile(new URL('../../../../deno.json', import.meta.url)),
+    ) as { workspace: string[] };
+    const members = root.workspace.map((path) => path.split('/').at(-1)!).sort();
+    expect([...FRAMEWORK_PACKAGES].sort()).toEqual(members);
+  });
+
+  // Audit round 6 (L1-R5/L2-R5): an unknown `@setu-ts/` name is an import-map
+  // alias, and computed member access reaches a property no identifier names.
+  it('refuses aliases and computed member access, keeps array literals', () => {
+    for (
+      const source of [
+        "import * as ns from '@setu-ts/cachealias';",
+        "import { RealtimeBackplanePlugin } from '@setu-ts/bpalias';",
+        "const o = ({} as never)['constructor'];",
+        "const o = x['proto' + 'type'];",
+        'const o = f()[k];',
+        'const o = a?.[k];',
+        'const o = list[0][k];',
+      ]
+    ) {
+      expect(maskSourceCode(source), source).toBeUndefined();
+    }
+    for (
+      const source of [
+        "import { CachePlugin } from '@setu-ts/cache-plugin';",
+        "import { defineWorkerTask } from '@setu-ts/runtime/worker';",
+        'const plugins: readonly IPlugin[] = [a, b];',
+        'function f() { return [a]; }',
+        'for (const x of [a]) g(x);',
+        'const t = { plugins: [...GENERATED_PLUGINS] };',
+      ]
+    ) {
+      expect(maskSourceCode(source), source).toBeDefined();
+    }
+  });
+
+  it('detects an import map that points a framework name elsewhere', () => {
+    const map = (imports: Record<string, string>) => JSON.stringify({ imports }, null, 2);
+    expect(importMapRetargets(map({ '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin@^0.8.0' })))
+      .toBe(false);
+    expect(importMapRetargets(map({ '@setu-ts/runtime/': 'jsr:@setu-ts/runtime@^0.8.0/' })))
+      .toBe(false);
+    expect(
+      importMapRetargets(map({ '@setu-ts/cache-plugin': 'npm:@jsr/setu-ts__cache-plugin@^0.8.0' })),
+    ).toBe(false);
+    expect(
+      importMapRetargets(
+        map({ '@setu-ts/rest-starter': '../../packages/starters/rest-starter/src/index.ts' }),
+      ),
+    ).toBe(false);
+    expect(importMapRetargets(map({ '@setu-ts/cachealias': 'jsr:@setu-ts/cache-plugin@^0.8.0' })))
+      .toBe(true);
+    expect(importMapRetargets(map({ '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' })))
+      .toBe(true);
+  });
+
+  it('parses import items without backtracking', () => {
+    expect(parseImportItem(' CachePlugin ')).toEqual({
+      symbol: 'CachePlugin',
+      local: 'CachePlugin',
+    });
+    expect(parseImportItem('CachePlugin  as\tAppCache')).toEqual({
+      symbol: 'CachePlugin',
+      local: 'AppCache',
+    });
+    expect(parseImportItem('type CachePluginOptions')).toBeUndefined();
+    expect(parseImportItem('a as')).toBeUndefined();
+    const started = performance.now();
+    expect(parseImportItem(`type${' '.repeat(150_000)}X`)).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  // Audit round 6 (G-R6): the shape `name(…)` is a call only when no body, return
+  // type or arrow follows it and no `function` keyword precedes it.
+  it('tells a call from a declaration', () => {
+    expect(callsIdentifier('x = [CachePlugin()];', 'CachePlugin')).toBe(true);
+    expect(callsIdentifier('CachePlugin(\n  opts,\n),', 'CachePlugin')).toBe(true);
+    for (
+      const declaration of [
+        '{ CachePlugin() { } }',
+        'CachePlugin(): string',
+        'CachePlugin() => 1',
+        'function CachePlugin() {}',
+        'function\n  CachePlugin(a) {}',
+        'function CachePlugin(a: string);',
+        'CachePlugin',
+      ]
+    ) {
+      expect(callsIdentifier(declaration, 'CachePlugin'), declaration).toBe(false);
+    }
+  });
+
+  // Audit round 6 (T-R6): the shapes withSourceArgs emits keep their meaning.
+  it('keeps the committed absent-row fixture in step with the renderer', async () => {
+    const fixture = await Deno.readTextFile(
+      new URL('../fixtures/devtool-sources-absent.ts', import.meta.url),
+    );
+    expect(fixture).toBe(
+      renderDevtoolSources(new Set(['cache-plugin']), { project: 'shop' }).contents,
+    );
+    expect(fixture).not.toContain('  backplane: {');
+  });
+
+  it('reads the backplane shapes the CLI itself writes', async () => {
+    const imported =
+      "import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n";
+    const names = (call: string) =>
+      readDevtoolSourceNames(
+        createFakeFs({}),
+        '/app',
+        new Set(['realtime-backplane-plugin']),
+        imported + signature + `\n  const p = [${call}];\n}`,
+      );
+    for (
+      const call of [
+        'RealtimeBackplanePlugin({ ...sources.backplane })',
+        "RealtimeBackplanePlugin({ ...{ transport: 'redis' }, ...sources.backplane })",
+        withSourceArgs('realtime-backplane-plugin', '', packages, { project: 'app' })
+          .replace(/^/, 'RealtimeBackplanePlugin(') + ')',
+      ]
+    ) {
+      expect((await names(call)).customBackplane, call).toBe(false);
+    }
+    for (
+      const call of [
+        "RealtimeBackplanePlugin({ ...{ transport: 'custom' }, ...sources.backplane })",
+        'RealtimeBackplanePlugin({ ...other, ...sources.backplane })',
+        'RealtimeBackplanePlugin({ ...sources.backplane, ...other })',
+        'RealtimeBackplanePlugin({ ...sources.backplanex })',
+      ]
+    ) {
+      expect((await names(call)).customBackplane, call).toBe(true);
+    }
+    const retargeted = await readDevtoolSourceNames(
+      createFakeFs({
+        '/app/deno.json': JSON.stringify({
+          imports: { '@setu-ts/realtime-backplane-plugin': 'jsr:@setu-ts/cache-plugin@^1' },
+        }),
+      }),
+      '/app',
+      new Set(['realtime-backplane-plugin']),
+      imported + signature + '\n  const p = [RealtimeBackplanePlugin()];\n}',
+    );
+    expect(retargeted.customBackplane).toBe(true);
+  });
+
   it('refuses every construct outside the decidable language', () => {
     const refused: readonly string[] = [
       "const s = 'a\u2028b';",
