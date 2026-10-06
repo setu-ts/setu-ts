@@ -5052,6 +5052,17 @@ interface RabbitMqMessagingOptions extends MessagingCommonOptions {
   exchangeName?: string;
   /** Default consumer group / queue name. */
   defaultQueue?: string;
+  /**
+   * Publish every message persistent (`delivery_mode` 2), so it survives a broker restart.
+   * `false` restores the pre-0.9.0 transient publishes. @defaultValue true @since 0.9.0
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one `publish()` in ms — every broker round trip, including the publisher confirm.
+   * `0` disables it; outside `0`–`2147483647` throws `RangeError` at `MessagingPlugin(...)`.
+   * @defaultValue 15000 @since 0.9.0
+   */
+  publishTimeoutMs?: number;
 }
 
 // ── NATS (JetStream) ─────────────────────────────────────────────────────────────────
@@ -5826,7 +5837,8 @@ Provides background job queue with Memory and Redis adapters.
 - **`RedisQueueOptions`** — Redis adapter configuration
 - **`RabbitMqQueue`** — RabbitMQ queue adapter via amqplib (polling via basicGet, TTL+DLX for
   delays)
-- **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`)
+- **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`,
+  `persistentMessages?`, `publishTimeoutMs?`, `reportWarning?`)
 - **`SqsQueue`** — AWS SQS queue adapter via `@aws-sdk/client-sqs` (receipt-handle bookkeeping,
   `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, dead-letter ordering)
 - **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`, `region?`,
@@ -5930,6 +5942,17 @@ depth row in the observations describes the latest cycle only: a name that cycle
 row, and the source's `failure` plus `depthCoverage: 'partial'` say why — an unreadable depth is
 never a retained zero.
 
+**RabbitMQ durability.** Since 0.9.0 the `'rabbitmq'` adapter publishes every job persistent
+(`persistentMessages`, default `true`) through a publisher-confirm channel. Its ready/delay/dead
+queues are durable, and a durable queue keeps only persistent messages across a broker restart —
+before 0.9.0 a restart discarded every job not yet processed. `add()` resolves once RabbitMQ has
+accepted the job; a retry or dead-letter acknowledges the reserved job only after its replacement is
+accepted, so a broker failure in between can run a job twice but never loses it. `publishTimeoutMs`
+(default `15000`, `0` disables) bounds each publish, queue declarations included; a value outside
+`0`–`2147483647` throws `RangeError` when `QueuePlugin(...)` is called. A rejection is not proof the
+job was dropped. An injected connection without `createConfirmChannel()` keeps a plain channel and
+the adapter reports one warning through the logger.
+
 ### Declarative processors and behaviours
 
 | Option       | Type                                                                 | Behavior                                                                                                                                                                                                                                                                                                                                                |
@@ -5985,12 +6008,12 @@ attempt number was not a positive safe integer, or because its runner failed bef
 settlement (which releases the slot). No payload, header, raw id, claim token, credential, attempt
 limit or thrown value is captured: the observer signatures cannot accept them.
 
-| Adapter    | Settlement evidence                                                          | Depths                                     |
-| ---------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
-| `memory`   | confirmed (in-process)                                                       | `process-local`                            |
-| `redis`    | confirmed (awaited server commands)                                          | `shared-backend` when the client can count |
-| `rabbitmq` | `unknown` — channel `ack`/`publish` are unconfirmed                          | `unavailable`                              |
-| `sqs`      | `unknown` — a lapsed claim or failed dead-letter send is absorbed and logged | `unavailable`                              |
+| Adapter    | Settlement evidence                                                            | Depths                                     |
+| ---------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| `memory`   | confirmed (in-process)                                                         | `process-local`                            |
+| `redis`    | confirmed (awaited server commands)                                            | `shared-backend` when the client can count |
+| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed) | `unavailable`                              |
+| `sqs`      | `unknown` — a lapsed claim or failed dead-letter send is absorbed and logged   | `unavailable`                              |
 
 `depths` is its own opt-in because counting costs backend work: one cycle at bootstrap and one per
 `intervalMs` (1,000–300,000), never overlapping, at most `concurrency` (1–4) count calls in flight,

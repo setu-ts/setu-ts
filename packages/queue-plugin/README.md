@@ -48,6 +48,17 @@ app.register(QueuePlugin({
 }));
 ```
 
+Every job is published **persistent** through a **confirm channel**. The ready, delay and dead
+queues are durable, and a durable queue keeps only persistent messages across a broker restart —
+before 0.9.0 jobs were published transient, so a RabbitMQ restart silently discarded every job not
+yet processed. `add()` resolves only once RabbitMQ has accepted the job, and a retry or dead-letter
+acknowledges the reserved job only after its replacement is accepted, so a broker failure between
+the two can run a job twice but cannot lose it. `publishTimeoutMs` (default `15000`) bounds each
+publish, queue declarations included, so a paused broker rejects `add()` rather than leaving it
+pending; a rejection is not proof the job was dropped. `persistentMessages: false` restores the
+transient publishes. An injected `client` without `createConfirmChannel()` keeps a plain channel and
+the adapter logs one warning saying its publishes are unconfirmed.
+
 ### SQS Adapter
 
 ```typescript
@@ -145,6 +156,8 @@ await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midn
 | `pollIntervalMs`     | `number`                                                             | `1000`                     | Worker poll interval                                                                                                                                                                                                                                                                                                                  |
 | `deadLetterTtlMs`    | `number`                                                             | — (retained forever)       | Retention for a dead-lettered payload (Redis only)                                                                                                                                                                                                                                                                                    |
 | `commandTimeoutMs`   | `number`                                                             | `15000`                    | Bound on one Redis command (Redis only; `0` disables). A paused server makes `add()` reject and a poll record the failure instead of waiting forever. The server may still apply a timed-out command, so a rejected `add()` can still have enqueued the job — retrying it can run the job twice. Not applied to an injected `client`. |
+| `persistentMessages` | `boolean`                                                            | `true`                     | Publish every job persistent so it survives a RabbitMQ restart (adapter `rabbitmq` only); `false` restores the pre-0.9.0 transient publishes                                                                                                                                                                                          |
+| `publishTimeoutMs`   | `number`                                                             | `15000`                    | Bound on one job publish, including its broker confirm (adapter `rabbitmq` only); `0` disables it                                                                                                                                                                                                                                     |
 | `processors`         | `readonly QueueProcessorEntry[]`                                     | —                          | Declarative `process()` registrations. A `QueueProcessorDefinition` is `{ name, processor, options? }`; factories resolve at `onInit`.                                                                                                                                                                                                |
 | `behaviors`          | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                          | Chain around every processor. It sees `kind: 'queue'`, job name, the delivered job, and its attempt count.                                                                                                                                                                                                                            |
 | `diagnostics`        | `QueueDiagnosticsOptions`                                            | — (disabled)               | Opt-in minimized attempt and depth observations for the diagnostics connector (M98f) — see below.                                                                                                                                                                                                                                     |
@@ -194,7 +207,7 @@ id, claim token, credential or error text is captured.
 | ---------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
 | `memory`   | confirmed (in-process)                                                         | `process-local`                            |
 | `redis`    | confirmed (awaited server commands)                                            | `shared-backend` when the client can count |
-| `rabbitmq` | `unknown` — channel `ack`/`publish` are unconfirmed                            | `unavailable` (never zero)                 |
+| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed) | `unavailable` (never zero)                 |
 | `sqs`      | `unknown` — a lapsed claim or a failed dead-letter send is absorbed and logged | `unavailable` (never zero)                 |
 
 Depth counting runs one non-overlapping cycle at bootstrap and one per `intervalMs`, over approved
@@ -282,9 +295,10 @@ hand.
 
 ### RabbitMqQueue
 
-RabbitMQ-backed queue using native channels, exchanges, and queues. Supports delayed retries through
-a per-queue delay exchange with TTL-based message routing. Requires the `amqplib` package at runtime
-(or an injected `RabbitMqClient`).
+RabbitMQ-backed queue polling per-name durable queues through the default exchange. Delayed jobs and
+retries wait in a per-name delay queue whose message TTL dead-letters them into the ready queue.
+Jobs are published persistent through a confirm channel (see [RabbitMQ Adapter](#rabbitmq-adapter)).
+Requires the `amqplib` package at runtime (or an injected `IAmqpQueueConnection`).
 
 ### SqsQueue
 

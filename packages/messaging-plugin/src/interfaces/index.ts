@@ -65,6 +65,19 @@ export interface IRedisStreamsClient {
 export interface IAmqpConnection {
   /** Create a channel. */
   createChannel(): Promise<unknown>;
+  /**
+   * Create a channel in publisher-confirm mode (optional).
+   *
+   * Real amqplib connections always have it. When present the broker
+   * publishes on a confirm channel, so `publish()` resolves only once the
+   * broker has accepted the message and rejects when it refuses it. A facade
+   * without it keeps a plain channel — `publish()` then resolves before the
+   * broker has stored anything — and the broker logs one warning saying so.
+   *
+   * @returns A channel whose `publish` takes a confirmation callback
+   * @since 0.9.0
+   */
+  createConfirmChannel?(): Promise<unknown>;
   /** Close the connection. */
   close(): Promise<void>;
   /**
@@ -384,6 +397,36 @@ export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
   client?: IAmqpConnection;
   exchangeName?: string;
   defaultQueue?: string;
+  /**
+   * Publish every message persistent (`delivery_mode` 2). Default `true`.
+   *
+   * Consumer-group queues are declared durable, and a durable queue keeps
+   * only PERSISTENT messages across a broker restart: before 0.9.0 every
+   * message was published transient, so a RabbitMQ restart emptied every
+   * queue of messages not yet consumed. `false` restores that behaviour, for
+   * deliberately ephemeral traffic where losing in-flight messages on a
+   * restart is acceptable in exchange for skipping the broker's disk write.
+   *
+   * @since 0.9.0
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one `publish()`, in milliseconds. Default `15000`; `0` waits
+   * without a bound.
+   *
+   * It covers every broker round trip a publish makes — the exchange assert,
+   * and, on a confirm channel (a real amqplib connection always opens one),
+   * the wait for RabbitMQ to accept the message. `publish()` resolves once
+   * RabbitMQ has accepted it, rejects when it refuses it or the channel closes
+   * first, and rejects when the bound expires: a paused broker keeps its
+   * socket open, so without a bound the call would stay pending forever. A
+   * rejection is not proof the message was dropped — the broker may still
+   * accept it after the bound. A value outside `0`–`2147483647` (including
+   * `NaN`) throws `RangeError` when `MessagingPlugin(...)` is called.
+   *
+   * @since 0.9.0
+   */
+  publishTimeoutMs?: number;
 }
 
 /**
@@ -658,8 +701,18 @@ export interface RabbitMqOptions {
   exchangeName?: string;
   /** Default consumer group/queue name. */
   defaultQueue?: string;
-  /** Optional logger for error reporting. */
-  logger?: { error: (msg: string) => void };
+  /**
+   * Mark every published message persistent (default `true`). See
+   * {@linkcode RabbitMqMessagingOptions.persistentMessages}.
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one publish, including its confirm, in ms (default `15000`, `0`
+   * unbounded). See {@linkcode RabbitMqMessagingOptions.publishTimeoutMs}.
+   */
+  publishTimeoutMs?: number;
+  /** Optional logger for error reporting; `warn` is used when present. */
+  logger?: { error: (msg: string) => void; warn?: (msg: string) => void };
 }
 
 /**

@@ -17,7 +17,7 @@ import {
 } from '@setu-ts/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
-import { RabbitMqBroker } from '../brokers/rabbitmq-broker.ts';
+import { RabbitMqBroker, resolvePublishTimeoutMs } from '../brokers/rabbitmq-broker.ts';
 import { NatsBroker } from '../brokers/nats-broker.ts';
 import { KafkaBroker } from '../brokers/kafka-broker.ts';
 import { GcpPubSubBroker } from '../brokers/pubsub-broker.ts';
@@ -28,13 +28,13 @@ import { TracedBroker } from '../tracing/traced-broker.ts';
 import { PipelinedBroker } from '../pipeline/pipelined-broker.ts';
 import { JsonSerializer } from '../serializers/json-serializer.ts';
 import type {
-  IAmqpConnection,
   IKafkaFactory,
   INatsConnection,
   IRedisStreamsClient,
   KafkaOptions,
   MessagingPluginOptions,
   NatsOptions,
+  RabbitMqMessagingOptions,
   RabbitMqOptions,
   RedisStreamsOptions,
   SubscriptionDefinition,
@@ -136,6 +136,18 @@ export function MessagingPlugin(
   options: MessagingPluginOptions = {},
 ): IPlugin {
   const brokerType: string = (options as { broker?: string }).broker ?? 'memory';
+  // Refused HERE, before any application exists, like every other bound
+  // (the M90a/M101a rule) — not at `start()`, where a typo would surface as a
+  // boot failure far from the line that caused it.
+  if (brokerType === 'rabbitmq') {
+    const rabbit = options as RabbitMqMessagingOptions;
+    resolvePublishTimeoutMs(rabbit.publishTimeoutMs);
+    if (
+      rabbit.persistentMessages !== undefined && typeof rabbit.persistentMessages !== 'boolean'
+    ) {
+      throw new TypeError('messaging-plugin: persistentMessages must be a boolean');
+    }
+  }
   const instanceName = (options as { name?: string }).name;
   const serializer =
     (options as { serializer?: import('../serializers/serializer.ts').ISerializer })
@@ -221,7 +233,7 @@ export function MessagingPlugin(
         : undefined;
 
       // Resolve optional logger
-      let logger: { error: (msg: string) => void } | undefined;
+      let logger: { error: (msg: string) => void; warn?: (msg: string) => void } | undefined;
       if (ctx.services.has('logger')) {
         logger = ctx.services.get('logger');
       }
@@ -272,17 +284,18 @@ export function MessagingPlugin(
         });
         broker = new RedisStreamsBroker(ctx.runtime, serializer, redisOptions);
       } else if (brokerType === 'rabbitmq') {
-        const opts = options as {
-          url?: string;
-          client?: IAmqpConnection;
-          exchangeName?: string;
-          defaultQueue?: string;
-        };
+        const opts = options as RabbitMqMessagingOptions;
         const rabbitOptions: RabbitMqOptions = {};
         if (opts.url !== undefined) rabbitOptions.url = opts.url;
         if (opts.client !== undefined) rabbitOptions.client = opts.client;
         if (opts.exchangeName !== undefined) rabbitOptions.exchangeName = opts.exchangeName;
         if (opts.defaultQueue !== undefined) rabbitOptions.defaultQueue = opts.defaultQueue;
+        if (opts.persistentMessages !== undefined) {
+          rabbitOptions.persistentMessages = opts.persistentMessages;
+        }
+        if (opts.publishTimeoutMs !== undefined) {
+          rabbitOptions.publishTimeoutMs = opts.publishTimeoutMs;
+        }
         if (logger !== undefined) rabbitOptions.logger = logger;
         broker = new RabbitMqBroker(ctx.runtime, serializer, rabbitOptions);
       } else if (brokerType === 'nats') {

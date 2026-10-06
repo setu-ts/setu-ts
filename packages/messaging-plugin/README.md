@@ -152,6 +152,37 @@ application logger — the first error of an outage at `warn`, identical repeats
 recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
 injected client gets no listener: it belongs to the caller.
 
+### RabbitMQ durability
+
+Consumer-group queues are declared durable, and every message is published **persistent** — a
+durable queue keeps only persistent messages across a broker restart. Before 0.9.0 messages were
+published transient, so a RabbitMQ restart emptied every group queue of the messages waiting in it.
+Publishes also go through a **confirm channel**: `publish()` resolves only once RabbitMQ has
+accepted the message, and rejects when it refuses it (or the channel closes first).
+
+Each `publish()` is bounded by `publishTimeoutMs` (default `15000`, `0` unbounded). The bound covers
+every broker round trip the publish makes, so a paused broker — which keeps its socket open and
+answers nothing — rejects the call instead of leaving it pending forever. A rejection is not proof
+the message was dropped: RabbitMQ may still accept it after the bound.
+
+```typescript
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+MessagingPlugin({
+  broker: 'rabbitmq',
+  url: 'amqp://localhost:5672',
+  // Both values are the defaults, shown for reference.
+  persistentMessages: true,
+  publishTimeoutMs: 15_000,
+});
+```
+
+`persistentMessages: false` restores the transient behaviour, for deliberately ephemeral traffic
+where losing in-flight messages on a restart is acceptable. An injected `client` without
+`createConfirmChannel()` keeps a plain channel — `publish()` then resolves before RabbitMQ has
+stored anything — and the broker logs one warning saying so; a real amqplib connection always has
+it.
+
 ### NATS prerequisites
 
 The nats broker **requires a JetStream-enabled server** — start it with the `-js` flag (or set

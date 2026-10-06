@@ -68,11 +68,14 @@ interface FakeAmqp {
   channelOpens: () => number;
   /** Number of channel close() calls (the probe must close every channel it opens). */
   channelCloses: () => number;
+  /** Number of createConfirmChannel() calls on the connection. */
+  confirmChannelOpens: () => number;
 }
 
-function makeAmqp(): FakeAmqp {
+function makeAmqp(opts: { confirm?: boolean } = {}): FakeAmqp {
   let consumeCalls = 0;
   let openCalls = 0;
+  let confirmOpenCalls = 0;
   let closeCalls = 0;
   const listeners = new Map<string, Array<(err?: unknown) => void>>();
 
@@ -100,6 +103,14 @@ function makeAmqp(): FakeAmqp {
       openCalls++;
       return Promise.resolve(makeChannel());
     },
+    ...(opts.confirm
+      ? {
+        createConfirmChannel: () => {
+          confirmOpenCalls++;
+          return Promise.resolve(makeChannel());
+        },
+      }
+      : {}),
     close: () => Promise.resolve(),
     on: (event: string, listener: (err?: unknown) => void) => {
       const arr = listeners.get(event) ?? [];
@@ -124,6 +135,7 @@ function makeAmqp(): FakeAmqp {
     },
     consumeCount: () => consumeCalls,
     channelOpens: () => openCalls,
+    confirmChannelOpens: () => confirmOpenCalls,
     channelCloses: () => closeCalls,
   };
 }
@@ -223,6 +235,29 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
     // a duplicated replay, which is precisely the defect the sibling
     // error+close test exists to catch.
     expect(consumeCount()).toBe(before + 1);
+  });
+
+  it('the drive-mode reconnect reopens a CONFIRM channel, never a plain one', async () => {
+    // One channel factory serves connect() and the reconnect: a reconnect that
+    // fell back to createChannel() would silently stop confirming publishes
+    // after the first broker restart.
+    const clock = makeClock();
+    const runtime = makeRuntime(clock);
+    const { client, fire, confirmChannelOpens, channelOpens } = makeAmqp({ confirm: true });
+    const broker = new RabbitMqBroker(runtime, new JsonSerializer(), { client });
+    await broker.connect();
+    expect(confirmChannelOpens()).toBe(1);
+    const plainBefore = channelOpens();
+
+    fire('close');
+    clock.advance(10_000);
+    await flush();
+
+    expect(confirmChannelOpens()).toBe(2);
+    // The reconnect opened no plain channel. (Plain channels are opened only
+    // by the reachability probe's throwaway channel, which nothing here calls.)
+    expect(channelOpens()).toBe(plainBefore);
+    await broker.disconnect();
   });
 
   it('a failing reconnect retries rather than terminating', async () => {
