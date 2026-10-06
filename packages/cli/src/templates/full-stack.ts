@@ -113,6 +113,8 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
       csrf: ${csrf},
     },${discovery}
+    // Preserve Origin on native form posts; send no cross-origin referrer.
+    httpSecurity: { headers: { referrerPolicy: 'same-origin' } },
   }), { env${config} }`;
 }
 

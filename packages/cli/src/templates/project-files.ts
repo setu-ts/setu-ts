@@ -19,6 +19,7 @@ import {
   VERSION,
 } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import { renderDevtoolSources, withSourceArgs } from '../devtool/sources.ts';
 import type {
   AppFactoryRenderContext,
   AppFactoryWiring,
@@ -313,6 +314,21 @@ function configModule(
       : host.manifest?.envFilePath === undefined
       ? wiring.args ?? ''
       : renderConfigOptions(host.manifest.envFilePath);
+  const sourceInstalled = new Set(plugins.map((plugin) => plugin.pkg));
+  const sourceNames = {
+    project: 'app',
+    authorization: plugins.some((plugin) =>
+      plugin.pkg === 'auth-plugin' && /\brbac\s*:/.test(plugin.args ?? '')
+    ),
+    customBackplane: plugins.some((plugin) =>
+      plugin.pkg === 'realtime-backplane-plugin' && /transport:\s*'custom'/.test(plugin.args ?? '')
+    ),
+  };
+  const hasSources = host.devtoolPort !== undefined &&
+    plugins.some((plugin) =>
+      withSourceArgs(plugin.pkg, pluginArgs(plugin), sourceInstalled, sourceNames) !==
+        pluginArgs(plugin)
+    );
   // `common` is always imported for IPlugin, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
   // second import of the same module.
@@ -328,6 +344,9 @@ function configModule(
     );
 
   const imports = [
+    ...(!hasSources ? [] : [
+      "import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';",
+    ]),
     // A starter factory returns the application, so `createApplication` is not
     // imported on that path — but the factory's devtool parameter names
     // `KernelDiagnosticsOptions` on EVERY target, so every config module still
@@ -424,7 +443,13 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
   const pluginList = [
     ...plugins
       .map((p) =>
-        `      ${p.symbol}(${onWorkers ? p.workersArgs ?? pluginArgs(p) : pluginArgs(p)}),`
+        `      ${p.symbol}(${
+          onWorkers
+            ? p.workersArgs ?? pluginArgs(p)
+            : host.devtoolPort === undefined
+            ? pluginArgs(p)
+            : withSourceArgs(p.pkg, pluginArgs(p), sourceInstalled, sourceNames)
+        }),`
       ),
     ...pluginSpreads.map((spread) => `      ${spread},`),
     // The devtool composition lands LAST: the kernel resolves plugins by
@@ -493,6 +518,11 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
  * @returns The configured, unstarted application
  */
 export function ${CONFIG_EXPORT}(${factoryParam}): IKernelApplication {
+${
+    !hasSources
+      ? ''
+      : '  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;\n'
+  }\
   const app = createApplication({
     plugins: [
 ${pluginList}
@@ -1371,12 +1401,10 @@ ${PROGRAM_NAME} generate --help
 \`\`\`
 ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
 
-  // Deno projects get neither `node_modules/` nor `.wrangler/`: this file is
-  // read by a human, and an ignore rule for a directory the target can never
-  // produce is noise that invites copying it into projects that would need it.
-  const gitignore = `${runtime === 'deno' ? '' : 'node_modules/\n'}coverage/\n${
-    runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''
-  }${
+  // A Deno frontend build creates node_modules too; other Deno projects do not.
+  const gitignore = `${
+    runtime !== 'deno' || host.manifest?.npmBuild !== undefined ? 'node_modules/\n' : ''
+  }coverage/\n${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
     // A frontend build's output is generated, so it is ignored like any other
     // build artifact — the generated file used to list only `coverage/` and the
     // env file, which left a minified bundle tracked (D2).
@@ -1509,6 +1537,19 @@ describe('application composition', () => {
     path: CONFIG_MODULE,
     contents: configModule(runtime, host),
   });
+  if (host.devtoolPort !== undefined) {
+    files.push(renderDevtoolSources(new Set(frameworkPackages(host, runtime)), {
+      project: projectName,
+      envKeys: manifest?.envVariables?.map((variable) => variable.name) ?? [],
+      authorization: host.plugins.some((plugin) =>
+        plugin.pkg === 'auth-plugin' && /\brbac\s*:/.test(plugin.args ?? '')
+      ),
+      customBackplane: host.plugins.some((plugin) =>
+        plugin.pkg === 'realtime-backplane-plugin' &&
+        /transport:\s*'custom'/.test(plugin.args ?? '')
+      ),
+    }));
+  }
 
   if (manifest?.envFilePath !== undefined) {
     files.push({

@@ -95,7 +95,8 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log(`Usage: ${PROGRAM_NAME} generate <schematic> <name> [options]`);
   log('');
   log('Schematics:');
-  for (const { name, requiresPlugin } of listSchematics()) {
+  for (const { name, requiresPlugin: fixed, requiresPluginWhen } of listSchematics()) {
+    const requiresPlugin = fixed ?? requiresPluginWhen?.(installed);
     if (requiresPlugin === undefined) {
       log(`  ${name}`);
     } else if (installed.has(requiresPlugin)) {
@@ -272,6 +273,7 @@ export async function runGenerateCommand(
   }
 
   const installed = await detectPlugins(deps.fs, dir);
+  requiredPlugin ??= getSchematic(schematicName)?.requiresPluginWhen?.(installed);
 
   // Resolve project-owned code and plugin gates only after the target has been
   // established as a readable project. Otherwise a missing plugin or custom

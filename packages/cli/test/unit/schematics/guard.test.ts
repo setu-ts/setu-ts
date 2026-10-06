@@ -34,9 +34,10 @@ describe('guard schematic', () => {
     expect(file.contents).toContain('export function requireOrderItem(): MiddlewareFunction');
   });
 
-  it('short-circuits without calling next on both failure paths', () => {
-    const before = file.contents.indexOf('await next();');
-    expect(file.contents.slice(0, before)).toContain('status(401)');
-    expect(file.contents.slice(0, before)).toContain('status(403)');
+  it('delegates the real permission decision and response to auth-plugin', () => {
+    expect(file.contents).toContain("import { requirePermission } from '@setu-ts/auth-plugin';");
+    expect(file.contents).toContain("return requirePermission('order-item');");
+    expect(file.contents).not.toContain('allowed = true');
+    expect(file.contents).not.toContain('json({ error:');
   });
 });

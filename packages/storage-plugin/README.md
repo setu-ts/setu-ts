@@ -14,6 +14,11 @@ import { StoragePlugin } from '@setu-ts/storage-plugin';
 
 ## Usage
 
+In a full-stack starter composition, configure its `storage` arm in `setu.config.ts`. The starter
+owns that registration; adding another `app.register(StoragePlugin(...))` can duplicate it. See the
+[starter options](../starters/full-stack-starter/README.md). The registration below applies when
+your application owns its plugin list.
+
 ```typescript
 import { createUploadMiddleware, getUploadedFile, StoragePlugin } from '@setu-ts/storage-plugin';
 import { CAPABILITIES, type IStorage } from '@setu-ts/common';

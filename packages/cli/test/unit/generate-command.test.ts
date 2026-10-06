@@ -63,6 +63,20 @@ function bareHarness(seed: Readonly<Record<string, string>> = {}): Harness {
 }
 
 describe('runGenerateCommand', () => {
+  it('refuses a class-based job without queue before writing and marks help unavailable', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
+    expect(await h.run(['job', 'nightly'])).toBe(1);
+    expect(h.err.text()).toContain('setu add queue');
+    expect(h.fs.writes).toEqual([]);
+    expect(await h.run(['--help'])).toBe(0);
+    expect(h.out.text()).toContain('job  (unavailable — run `setu add queue`)');
+  });
+
+  it('emits decorated ingress once the class-based project has queue', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin', 'queue-plugin') });
+    expect(await h.run(['job', 'nightly'])).toBe(0);
+    expect(h.fs.writes.some((path) => path.includes('/ingress/'))).toBe(true);
+  });
   it('writes nothing when a JSONC comment splits a manifest token', async () => {
     const h = bareHarness({ '/app/deno.jsonc': '{"compilerOptions":{"strict":tru/*note*/e}}' });
     expect(await h.run(['service', 'billing'])).toBe(1);

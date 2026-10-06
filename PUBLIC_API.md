@@ -8419,11 +8419,17 @@ than "anything under `@setu-ts/`", because the range written is the CLI's OWN ve
 correct for packages released as one version with it — so a typo is refused, naming what is
 accepted, rather than pinned to a version that does not exist.
 
-When a project carries both `deno.json` and `package.json` — a Workers or Node target does, one for
-its build and one for `setu generate`'s plugin gating — **both** are updated, so the gate and the
-build cannot disagree about what is installed. `deno.json` gets a `jsr:` specifier under `imports`;
-`package.json` gets the npm-compat `npm:@jsr/setu-ts__<name>` form under `dependencies`. Re-adding a
-package already present at the same version reports that and writes nothing.
+Deno projects update only `deno.json` imports, even when a full-stack frontend has its own
+`package.json`. Node, Bun and Workers update both manifests: Deno imports hold `jsr:` pins, and npm
+dependencies use `npm:@jsr/setu-ts__<name>`. Testing uses npm `devDependencies`. Existing key order
+is retained; sorted maps receive a sorted insertion, otherwise the new framework key follows the
+existing scope block. Re-adding the same pin leaves the dependency map unchanged.
+
+The twelve safe zero-configuration providers listed in [the CLI guide](docs/cli.md) are registered
+above the emitted development-plugin anchor in either generator style. Unrecognized source is
+preserved. Starter compositions print their option arm; installing a package does not authorize a
+duplicate registration. Existing development diagnostics modules are refreshed with names-only
+approval maps and known plugin calls receive development-only options.
 
 It writes the manifest and **reports** the install command rather than running it. The command
 matches the project's toolchain, detected from its manifests the same way `setu generate` detects
@@ -8803,8 +8809,8 @@ hand-written work.
 
 The managed files are the CLI-owned **seam barrels** — one `index.ts` per generated family
 (`src/modules/`, `src/controllers/`, `src/services/`, `src/middleware/`, `src/plugins/`,
-`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). Nothing else is managed, and no flag can
-make it so.
+`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). The development-only source policy
+`src/devtool/diagnostics.ts` is also CLI-managed. No flag can make an arbitrary path managed.
 
 ### Generated code is wired
 

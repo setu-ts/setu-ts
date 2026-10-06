@@ -55,7 +55,8 @@ function renderViteConfig(frameworkPackages: readonly string[]): string {
     .map((pkg) => `\n  '@setu-ts/${pkg}',`)
     .join('');
 
-  return `import { reactRouter } from '@react-router/dev/vite';
+  return `import { readdirSync, readFileSync } from 'node:fs';
+import { reactRouter } from '@react-router/dev/vite';
 import { defineConfig } from 'vite';
 
 /**
@@ -79,6 +80,26 @@ import { defineConfig } from 'vite';
 const frameworkPackages = [${externals}
 ];
 
+// Workspace libraries are resolved by Deno at runtime, just like framework
+// packages. Read each library's declared name: a custom scope is valid too.
+const workspaceLibraries: string[] = [];
+try {
+  const libraries = new URL('../../libs/', import.meta.url);
+  for (const entry of readdirSync(libraries, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const manifest = JSON.parse(
+        readFileSync(new URL(entry.name + '/deno.json', libraries), 'utf8'),
+      );
+      if (typeof manifest.name === 'string') workspaceLibraries.push(manifest.name);
+    } catch {
+      // A directory without a readable library manifest contributes no name.
+    }
+  }
+} catch {
+  // Standalone projects and workspaces without libraries have no externals here.
+}
+
 export default defineConfig({
   plugins: [reactRouter()],
   resolve: { tsconfigPaths: true },
@@ -86,7 +107,13 @@ export default defineConfig({
   // API, and neither a top-level \`ssr.external\` nor
   // \`environments.ssr.resolve.external\` is applied to that build.
   environments: {
-    ssr: { build: { rollupOptions: { external: frameworkPackages } } },
+    ssr: {
+      build: {
+        rollupOptions: {
+          external: (id) => frameworkPackages.includes(id) || workspaceLibraries.includes(id),
+        },
+      },
+    },
   },
 });
 `;

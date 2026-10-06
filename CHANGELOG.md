@@ -17,6 +17,18 @@ All notable changes to this project are documented here. The format follows
   `IApplication` return annotation with `IKernelApplication` from `@setu-ts/kernel` (see
   `docs/upgrading.md`).
 
+- **Wired scaffolds (M101g).** Workspace full-stack SSR builds externalize library package
+  identities; projects that acquire npm dependencies ignore node_modules. Adding safe
+  zero-configuration plugins wires both generator styles, starter compositions name their option
+  arm, generated guards enforce permissions, and class-based jobs require queue. Dependency
+  additions preserve order and Deno frontend manifests avoid unused framework copies.
+- **Development source policies and browser gate (M101g).** Opted-in scaffolds and devtool enable
+  generate names-only diagnostics approval maps, gated off in production; adding a plugin refreshes
+  an existing policy. A dedicated pinned Chromium gate exercises both the example and a fresh
+  scaffold, including missing-client and missing-asset controls. Full-stack configurations select
+  same-origin referrer policy for native form actions; existing projects can configure
+  `httpSecurity: { headers: { referrerPolicy: 'same-origin' } }`. CSRF checks stay enabled.
+
 - **Devtool lifecycle (M101f).** Enabling verifies both composition spreads and refuses mismatched
   framework pins. Pin and edited-entry refusals escape project-controlled fields so embedded
   newlines cannot forge additional CLI output lines. The entry detects dropped composition and stops

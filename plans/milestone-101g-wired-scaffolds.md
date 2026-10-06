@@ -6,8 +6,9 @@
 
 Implementation progress: §3.1 (V8-12 and V8-39) is implemented: kernel factory annotations,
 `setu add testing`, generated socket-target smoke tests, the Workers empty-suite exception, and
-updated devtool upgrade instructions. Sections §3.2–§3.10 remain to be implemented; this milestone
-is not complete and the plan stays at `plans/` root.
+updated devtool upgrade instructions. Sections §3.2–§3.10 are implemented and undergoing
+verification; the security design review is recorded in §10. This milestone is not complete and the
+plan stays at `plans/` root.
 
 ## 0. Objective & scope
 
@@ -73,7 +74,7 @@ referenced here and never restated.
 | Full-stack build on Deno                           | `packages/cli/src/templates/full-stack.ts:204-209`                                                                                                                                                                                                                                    | `denoCommand: 'deno run -A npm:@react-router/dev build'` — the Vite config is evaluated under Deno on that target, Node on `--runtime node`; `node:fs` is available in both                                                                                      |
 | `.gitignore` emitters                              | `packages/cli/src/templates/project-files.ts:1355-1366`; `workspace/root-files.ts:206-211`                                                                                                                                                                                            | project: `node_modules/` only when `runtime !== 'deno'`, so a Deno full-stack project (which sets `nodeModulesDir: 'auto'`, `:1393-1399`) omits it; root: `coverage/` alone on a Deno workspace                                                                  |
 | `planRootNodeModulesDir`                           | `packages/cli/src/workspace/root-manifest.ts:68-119`                                                                                                                                                                                                                                  | plans the root `deno.json` `nodeModulesDir: 'auto'` edit as a managed file; touches no `.gitignore`                                                                                                                                                              |
-| Starter arms                                       | `packages/starters/rest-starter/src/options.ts:50-175`; `microservice-starter/src/options.ts:23-38`; `full-stack-starter/src/options.ts:29-65`                                                                                                                                        | the 28 `<arm>?: <Plugin>Options` keys the §3.4 table is built from; full-stack extends microservice extends rest                                                                                                                                                 |
+| Starter arms                                       | `packages/starters/rest-starter/src/options.ts:50-175`; `microservice-starter/src/options.ts:23-38`; `full-stack-starter/src/options.ts:29-65`                                                                                                                                        | the 34 `<arm>?: <Plugin>Options` keys the §3.4 table is built from; full-stack extends microservice extends rest                                                                                                                                                 |
 | Starter detection in a config                      | `packages/cli/src/devtool/planner.ts:159`                                                                                                                                                                                                                                             | `STARTER_FACTORY_MARK = 'export async function createApp('` — the one async shape the CLI emits; the starter SYMBOL is importable by name from the config's import line                                                                                          |
 | Dev runner on a failed child                       | `packages/cli/src/workspace/dev-runner.ts:153-157`                                                                                                                                                                                                                                    | `if (!status.success) { shutdown(); Deno.exit(status.code); }` — fail-fast by design                                                                                                                                                                             |
 | Generated `test` tasks                             | `packages/cli/src/templates/project-files.ts:924,1139`                                                                                                                                                                                                                                | `deno test -A` (Deno, Workers) / `bun test` / `node --test`; no template emits a test file, so a fresh Deno scaffold's `deno task test` exits 1 "No test modules found" (V8-39)                                                                                  |
@@ -206,19 +207,19 @@ templates.
 
 - **Decision:** `add` reads the target's `setu.config.ts`; when it contains `STARTER_FACTORY_MARK`
   and imports one of the three starter symbols, it consults a static table
-  `STARTER_ARMS: Map<starterSymbol, Map<bare, arm>>` built from the 28 arms verified in §1 (REST's
-  18, microservice's 4 and full-stack's 10, inherited down the chain). The pin is still written
+  `STARTER_ARMS: Map<starterSymbol, Map<bare, arm>>` built from the 34 arms verified in §1 (REST's
+  17, microservice's 4 and full-stack's 13, inherited down the chain). The pin is still written
   (harmless and makes `generate` gating see it); the "Next:" block then prints one of two sentences
-  — bundled: "`<Starter>` already registers this plugin; configure its `<arm>` arm in
-  `setu.config.ts` (see the starter README); `app.register(<Plugin>())` would fail with a duplicate
-  plugin name" — or not bundled: "register it after the factory returns:
-  `app.register(<Plugin>())`". §3.5's wiring never edits a starter-composed config (it has no
-  `plugins: [` list to insert into), so the message is the whole deliverable there.
+  — bundled: "`<Starter>` owns this plugin; configure its `<arm>` arm in `setu.config.ts` (see the
+  starter README); `app.register(<Plugin>())` would fail with a duplicate plugin name" — or not
+  bundled: "register it after the factory returns: `app.register(<Plugin>())`". §3.5's wiring never
+  edits a starter-composed config (it has no `plugins: [` list to insert into), so the message is
+  the whole deliverable there.
 - **Why:** the starter bundles the full tier (verified from its options), `setu add` only edits
   manifests, and the plugin README's `app.register` form is right for every other composition.
   Naming the arm at the moment the developer asks for the package is the cheapest point; the
   kernel's duplicate-name error naming `override: true` is a kernel message and stays (§9).
-- **Test home:** `packages/cli/test/unit/commands/add.test.ts` (iterates the 28-row table as data; a
+- **Test home:** `packages/cli/test/unit/commands/add.test.ts` (iterates the 34-row table as data; a
   full-stack member adding `storage` prints the `storage` arm; adding `grpc` prints the register
   form; a plugin-list config prints neither). **Negative control:** drop the table lookup — the
   `storage` case prints nothing about the arm.
@@ -438,7 +439,7 @@ No new CLI flag.
 | `packages/cli/test/unit/templates.test.ts`                                                      | `templates/project-files.ts` (files)                             | `test/app.test.ts` per harness (`testHarnessFor(runtime)`); Workers task carries `--permit-no-files`; `.gitignore` rule per runtime × npmBuild                                                                                                                                                     |
 | `packages/cli/test/unit/full-stack-template.test.ts`                                            | `templates/full-stack-build-files.ts`, `full-stack-app-files.ts` | function externals; README boundary                                                                                                                                                                                                                                                                |
 | `packages/cli/test/unit/workspace/root-files.test.ts`, `root-manifest.test.ts`                  | `workspace/root-files.ts`, `root-manifest.ts`                    | root ignore; `planRootNodeModulesDir(contents, member)` plans the ignore append / no-op                                                                                                                                                                                                            |
-| `packages/cli/test/unit/commands/add.test.ts`                                                   | `commands/add.ts`                                                | `testing` sections; 28-row starter table as data; `withPluginWiring(config, bare)` both styles / anchor-less; one-line insertion; Deno `package.json` untouched; sources refresh                                                                                                                   |
+| `packages/cli/test/unit/commands/add.test.ts`                                                   | `commands/add.ts`                                                | `testing` sections; 34-row starter table as data; `withPluginWiring(config, bare)` both styles / anchor-less; one-line insertion; Deno `package.json` untouched; sources refresh                                                                                                                   |
 | `packages/cli/test/unit/schematics/guard.test.ts`, `job.test.ts`, `registry.test.ts`            | `schematics/guard.ts`, `job.ts`, `registry.ts`                   | composed guard; `requiresPluginWhen` for `job`                                                                                                                                                                                                                                                     |
 | `packages/cli/test/unit/generate-command.test.ts`                                               | `commands/generate.ts`                                           | mode gate refusal with the `setu add queue` remedy; listing marks `job` unavailable in a class-based project without queue                                                                                                                                                                         |
 | `packages/cli/test/unit/devtool-sources.test.ts`                                                | `devtool/sources.ts`                                             | `renderDevtoolSources(installed, names)` per §3.9 row; the committed fixture type-checks each entry against its plugin's option type                                                                                                                                                               |
@@ -451,7 +452,7 @@ No new CLI flag.
 | `packages/cli/test/e2e/devtool-e2e.test.ts`                                                     | end to end (BOOTED)                                              | signed `/v1/health` and `/v1/cache` populated under `deno task dev`; `disabled` under `deno task start`                                                                                                                                                                                            |
 | `packages/cli/test/unit/barrel-exports.test.ts`                                                 | `src/index.ts`                                                   | the one optional field; nothing else                                                                                                                                                                                                                                                               |
 | `apps/full-stack/browser/full-stack.browser.test.ts` (REAL Chromium)                            | end to end (BOOTED, browser)                                     | the eleven M37c checks on the example AND a fresh `--template full-stack` scaffold; both §3.10 negative controls                                                                                                                                                                                   |
-| `apps/full-stack/browser/harness.test.ts`                                                       | `apps/full-stack/browser/harness.ts`                             | browser present → runs; absent → exit 77 naming the install command; `ALLOW_SKIP` membership refused by `test/apps-gate.test.ts`                                                                                                                                                                   |
+| `test/browser-gate.test.ts`                                                                     | `apps/full-stack/browser/harness.ts`                             | browser present → runs; absent → exit 77 naming the install command; `ALLOW_SKIP` membership refused by `test/apps-gate.test.ts`                                                                                                                                                                   |
 
 ## 7. Verification gates
 
@@ -508,3 +509,103 @@ emitted config cannot see a Vite resolution, a kernel dependency check, or which
 - Keeping healthy siblings up in the dev runner — decided against in §3.6.
 - Filling `telemetry.operations`, `auth.roles`/`permissions` or `scheduler.jobs` automatically — not
   knowable at scaffold time; emitted as empty maps with the key named.
+
+## 10. Design security review
+
+**Review completed 2026-10-06 in the implementing session, at the maintainer's explicit request.**
+No prior design security review was recorded. This review was added during implementation, rather
+than before it; it records the required security behavior of the approved deliverables. It is not an
+independent audit, and does not claim that the implementation already satisfies these obligations.
+The final audit must run in a fresh context over the committed tree and challenge this threat model
+as well as the code.
+
+### Reviewed flow and trust boundaries
+
+1. `new`/`app` consume validated CLI choices and render project files. `add`/`devtool enable`
+   additionally read project manifests, configuration text, generated artifact names and env-example
+   keys through `IFileSystem`. Reading policy names must not import or execute application code.
+2. The CLI plans writes within the detected project (or its recognized workspace root), performs
+   existing runtime, pin, ownership and factory refusal checks, and applies writes through the
+   existing transactional writer. Configuration edits recognize emitted syntax; unfamiliar source
+   remains developer-owned and receives manual guidance. `--dry-run` performs no writes.
+3. The managed diagnostics module contains approval names and option objects, never env values or
+   secrets. Its policy is passed into plugin factories only when the development factory argument is
+   supplied. An ordinary production invocation keeps the existing disabled defaults.
+4. Development sources feed the existing diagnostics connector and its existing credential, pairing,
+   signature, replay and projection controls. This milestone grants no new listener, credential,
+   authorization bypass or remote export path. Installing a plugin alone must not enable diagnostic
+   collection in production.
+5. Generated guards delegate permission checks to the installed authorization provider. Generated
+   WebSocket routes retain the kernel's real upgrade pipeline. A class-based job is refused until
+   the queue capability is installed, rather than emitting an unusable functional artifact.
+6. The Vite build reads workspace library identities as build configuration and externalizes exact
+   package identities in SSR. Server code stays server-side; this does not authorize exporting
+   environment variables, backend credentials or arbitrary libraries into browser bundles.
+7. The dedicated browser gate builds and serves only local example/scaffold targets, uses disposable
+   test identities and cookie jars, and exercises real Chromium. CI runs it on repository branches
+   under the existing fork policy, with checkout credential persistence disabled. Browser absence is
+   explicit failure in CI and explicit exit 77 locally; it cannot silently skip a required gate.
+
+### Assets and attackers
+
+| Asset                                 | Attacker or failure source                                                                              | Required boundary                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Developer files and manifest order    | Hostile project names, aliases, malformed manifests, unfamiliar configuration; accidental broad rewrite | Existing project detection/refusals, literal bounded edits, transactional writes, safe printed names    |
+| Session/JWT secrets and env values    | Accidental copying from env examples or configuration into managed files, logs or diagnostics           | Names-only discovery; no values in emitted policy or CLI guidance                                       |
+| Production data and backend resources | Accidental dev policy activation, permissive option merge, install-time activation                      | Production source collectors remain disabled when the devtool argument is absent                        |
+| Diagnostics approval scope            | Hostile artifact/env names, excessive distinct names, unrecognized custom transport                     | Explicit bounded allowlists; empty unknown-name maps; custom transport remains manually configured      |
+| Restricted route results              | Anonymous or authenticated caller without the required permission, absent provider                      | Existing authorization guard refuses before protected work; authorized positive control still succeeds  |
+| SSR backend code and credentials      | Browser consumer, mistaken bundling of server imports                                                   | Workspace library externalization is SSR-only; served assets contain no planted backend-secret canaries |
+| Browser gate integrity and CI host    | Missing browser, broken hydration/assets, untrusted fork contribution                                   | Pinned browser tooling, required CI result, existing branch policy, no new CI secrets                   |
+
+Local application code and build configuration are executable developer inputs, not a sandboxed
+language: this milestone does not promise to safely execute a malicious project's Vite
+configuration. The CLI's text-only discovery and refusal paths still must not execute those inputs
+as a side effect. Application plugin policies and the diagnostics connector's cryptography remain
+existing contracts; the audit must inspect their integration seams without treating a passing
+downstream suite as proof.
+
+### Approved limits and defaults
+
+- Emitted approval names: printable ASCII matching `[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`; maximum 64
+  characters, deduplicated and sorted. Invalid project aliases use `app`.
+- Event-handler, queue and health-indicator approval maps contain at most 64 entries each; config
+  key maps contain at most 128. Limits constrain emitted policy, not project file byte size. Reading
+  local source files retains the CLI's existing filesystem model; no remote-input budget is added.
+- Scheduler job, telemetry operation and authorization role/permission maps default to empty. Auth
+  diagnostics require a recognized RBAC configuration; unsupported custom backplanes receive no
+  automatic source policy. Unknown source call shapes retain their bytes.
+- No new network protocol or cryptographic limit is introduced. Connector limits, loopback binding,
+  credentials and expiry are inherited from the existing diagnostics design.
+- Browser checks use separate contexts, local ephemeral ports, a 10-second page action timeout and a
+  15-minute CI job timeout. Ordinary unit/application gates remain browser-free.
+
+### Findings and required resolutions
+
+| ID      | Threat                                                                   | Required resolution and audit obligation                                                                                                                                                                                                                                                         |
+| ------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D101G-1 | Diagnostics options become production defaults                           | Probe real health/cache sources without the devtool argument: disabled; development sources: ready with approved observations. Remove the gate, restart from fresh code, and observe failure.                                                                                                    |
+| D101G-2 | Broad automatic discovery leaks secrets or creates source-code injection | Plant value, quote, CR/LF, NUL, bidi, reserved-key and excessive-name canaries in project inputs. Inspect generated source, raw signed output and captured CLI output. Valid approved names must still arrive. Remove name filtering/capping and prove relevant probes fail.                     |
+| D101G-3 | Source rewrites or manual instructions interpret hostile syntax          | Probe aliases, repeated enable/add, unfamiliar calls, custom transports and anchorless factories. Unknown text stays unchanged; diagnostic guidance escapes each project-controlled interpolation; known calls wire once. Remove the recognition/escaping control and demonstrate failure.       |
+| D101G-4 | Refusal/dry-run partially mutates project files                          | Snapshot manifests/config/source module before wrong runtime, mismatched pin, ownership refusal and dry-run. Assert zero writes; a supported operation must commit the intended files. Exercise interruption through the existing writer contract if the new paths alter it.                     |
+| D101G-5 | Generated guard grants access or fails open without a provider           | Boot the generated guard with real auth: anonymous 401, insufficient permission 403, approved permission succeeds; absent provider never serves protected work. Replace the guard with pass-through and observe failure.                                                                         |
+| D101G-6 | Wiring bypasses upgrade middleware or permits unusable jobs              | Drive a real raw WebSocket handshake through generated wiring; review its auth/upgrade seam. Class-based job without queue refuses with zero writes; installed queue/functional mode succeeds. Remove each added control and prove the targeted probe fails.                                     |
+| D101G-7 | SSR externalization accidentally exports backend code                    | Build and serve a fresh full-stack workspace member importing a real library. Inspect client assets for a planted server-only canary. Removing SSR externalization must fail the library resolution probe.                                                                                       |
+| D101G-8 | Browser gate passes on SSR alone or accepts missing tooling              | Real hydrated link/Form transitions preserve the document and native no-JS POST redirects. Abort the client entry: transition probes fail while SSR succeeds. Remove a served asset: the asset probe fails. Simulate missing browser locally/CI: 77/1 with installation guidance, no ALLOW_SKIP. |
+
+### Independent committed-tree audit handoff
+
+Apply `.roo/skills/security-audit/SKILL.md` in a fresh context. Hand over only milestone, branch,
+commit, this plan and existing verification report paths. Audit every row above with raw evidence,
+positive controls and fresh-process negative controls; also perform the skill's recurring-defect
+sweep. Use disposable local credentials and scoped permissions with an emptied environment. Record
+the implementing and auditing contexts, exact HEAD, probe source/output, findings and verdict in the
+audit report. Any fix changes the audit target and requires a fresh re-audit before completion.
+
+Implementation clarifications: source locals use `Partial<typeof DEVTOOL_SOURCES>` so production's
+empty policy type-checks; factories without applicable source calls emit no unused local. The
+browser gate exposed native form posts carrying `Origin: null` under the default `no-referrer`
+policy. Only the full-stack example and scaffold now configure
+`httpSecurity.headers.referrerPolicy: 'same-origin'`: native actions preserve same-origin identity,
+while cross-origin referrers remain suppressed. Session CSRF and React Router's origin verification
+remain enabled. The audit must probe valid native actions and invalid cross-origin actions.

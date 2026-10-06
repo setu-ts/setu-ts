@@ -6,6 +6,7 @@ import { parseArgs } from '../../src/args.ts';
 import { runDevtoolCommand } from '../../src/commands/devtool.ts';
 import { renderDevEntry } from '../../src/devtool/dev-entry.ts';
 import { DEFAULT_DEVTOOL_PORT } from '../../src/devtool/planner.ts';
+import { renderDevtoolSources } from '../../src/devtool/sources.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { runAppCommand } from '../../src/commands/app.ts';
 import {
@@ -885,6 +886,10 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
       '/ws/setu.config.ts': CURRENT_CONFIG,
       // Byte-identical to what the command would write.
       '/ws/main.dev.ts': renderDevEntry({ devtoolPort: DEFAULT_DEVTOOL_PORT }),
+      '/ws/src/devtool/diagnostics.ts': renderDevtoolSources(
+        new Set(['diagnostics-plugin']),
+        { project: 'ws' },
+      ).contents,
     });
     expect(await h.run(['enable'])).toBe(0);
     expect(h.log.text()).toContain('already enabled');

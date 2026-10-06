@@ -785,4 +785,10 @@ Use kernel middleware for cross-cutting concerns such as headers, auditing and r
 route middleware for page-level rules: \`app/middleware/require-user.server.ts\` redirects a visitor
 who is not signed in to \`/login\`, and puts the signed-in user on the context for the loader.
 \`/products\` attaches it; export it from a layout module to guard every route in that group.
+
+## Workspace libraries
+
+Import workspace libraries from \`.server.ts\` modules and \`setu.config.ts\`. The SSR build leaves
+their declared package names external so the server runtime resolves them through the workspace.
+Client modules cannot import a Deno workspace library: the browser bundle has no Deno workspace.
 `;

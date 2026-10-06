@@ -60,6 +60,7 @@
     "npm:nodemailer@10": "10.0.12",
     "npm:pg@8": "8.23.0",
     "npm:pino@10": "10.3.1",
+    "npm:playwright@1.63.0": "1.63.0",
     "npm:react-router@8": "8.4.0_react@19.3.0",
     "npm:ws@^8.18.0": "8.22.0",
     "npm:xml-crypto@6": "6.3.2",
@@ -2684,6 +2685,17 @@
         "safe-stable-stringify",
         "sonic-boom",
         "thread-stream"
+      ],
+      "bin": true
+    },
+    "playwright-core@1.63.0": {
+      "integrity": "sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==",
+      "bin": true
+    },
+    "playwright@1.63.0": {
+      "integrity": "sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==",
+      "dependencies": [
+        "playwright-core"
       ],
       "bin": true
     },

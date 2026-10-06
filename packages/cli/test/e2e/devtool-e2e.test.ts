@@ -16,7 +16,11 @@
 import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createDenoRuntimeServices } from '@setu-ts/runtime';
-import type { IFileSystem } from '@setu-ts/common';
+import type {
+  CacheDiagnosticsResponse,
+  HealthDiagnosticsSnapshot,
+  IFileSystem,
+} from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
   unusedPort,
@@ -189,6 +193,107 @@ async function bootDev(
 }
 
 describe('a scaffolded devtool project, driven end to end', () => {
+  it('generates ready health/cache sources for dev while production keeps both disabled', async () => {
+    const devtoolPort = unusedPort();
+    const appPort = unusedPort();
+    expect(
+      await run([
+        'new',
+        'sources',
+        '--template',
+        'rest',
+        '--devtool',
+        '--devtool-port',
+        String(devtoolPort),
+      ]),
+    ).toBe(0);
+    const project = `${root}/sources`;
+    expect(await run(['add', 'cache'], project)).toBe(0);
+    await useWorkspacePackages(project);
+    const formatted = await denoRun(project, ['fmt', '--check']);
+    expect(formatted.code, formatted.output).toBe(0);
+    const configPath = `${project}/setu.config.ts`;
+    const config = "import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';\n" +
+      (await Deno.readTextFile(configPath)).replace(
+        '  return app;',
+        `  app.router.get('/cache-probe', async (ctx) => {
+    const cache = app.services.get<ICacheStore>(CAPABILITIES.CACHE);
+    await cache.set('probe', 'value');
+    await cache.get('probe');
+    return ctx.response.json({ ok: true });
+  });
+  return app;`,
+      );
+    await Deno.writeTextFile(configPath, config);
+    const probe =
+      `import { CAPABILITIES, type ICacheDiagnosticsSource, type IHealthDiagnosticsSource } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+const app = createApp();
+await app.start();
+try {
+  const health = app.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS).snapshot('production-probe');
+  const cache = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS).map((source) => source.snapshot());
+  console.log(JSON.stringify({ health: health.state, cache: cache.map((source) => source.state) }));
+} finally { await app.stop(); }
+`;
+    await Deno.writeTextFile(`${project}/production-probe.ts`, probe);
+    const production = await denoRun(project, ['run', '-A', 'production-probe.ts']);
+    expect(production.code, production.output).toBe(0);
+    expect(production.stdout).toContain('"health":"disabled"');
+    expect(production.stdout).toContain('"cache":["disabled"]');
+    try {
+      await Deno.writeTextFile(
+        configPath,
+        config.replace('devtool === undefined ? {} : DEVTOOL_SOURCES', 'DEVTOOL_SOURCES'),
+      );
+      const broken = await denoRun(project, ['run', '-A', 'production-probe.ts']);
+      expect(broken.code, broken.output).toBe(0);
+      expect(broken.stdout).not.toContain('"health":"disabled"');
+      expect(broken.stdout).not.toContain('"cache":["disabled"]');
+    } finally {
+      await Deno.writeTextFile(configPath, config);
+    }
+    const checked = await denoRun(project, ['task', 'check']);
+    expect(checked.code, checked.output).toBe(0);
+    const credentials_ = credentials();
+    const booted = await bootDev(project, appPort, credentials_.env);
+    try {
+      await Deno.writeTextFile(
+        `${project}/source-driver.ts`,
+        DRIVER.replace(
+          'const snapshot = await client.snapshot();',
+          `await fetch(\`http://127.0.0.1:\${appPort}/health\`);
+await fetch(\`http://127.0.0.1:\${appPort}/cache-probe\`);
+const health = await client.health();
+const cache = await client.cache();
+console.log('__SOURCES__' + JSON.stringify({ health, cache }));
+const snapshot = await client.snapshot();`,
+        ),
+      );
+      const driven = await denoRun(project, [
+        'run',
+        '--allow-net',
+        'source-driver.ts',
+        String(devtoolPort),
+        String(appPort),
+        credentials_.sessionId,
+        credentials_.sessionKey,
+      ]);
+      expect(driven.code, driven.output).toBe(0);
+      const reportLine = driven.stdout.split('\n').find((line) => line.startsWith('__SOURCES__'))!;
+      const report = JSON.parse(reportLine.slice('__SOURCES__'.length)) as {
+        health: HealthDiagnosticsSnapshot;
+        cache: CacheDiagnosticsResponse;
+      };
+      expect(report.health.state).toBe('ready');
+      expect(report.health.observations.length).toBeGreaterThan(0);
+      expect(report.cache.sources.length).toBe(1);
+      expect(report.cache.state).toBe('ready');
+      expect(report.cache.sources[0]?.snapshot.records.length).toBeGreaterThan(0);
+    } finally {
+      await booted.stop();
+    }
+  });
   it('formats both standalone and workspace development entries without a repair', async () => {
     expect(await run(['new', 'formatted', '--devtool'])).toBe(0);
     const standalone = await denoRun(`${root}/formatted`, ['fmt', '--check']);

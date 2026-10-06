@@ -22,6 +22,7 @@ import {
   denoCheck,
   unusedPort,
   useWorkspacePackages,
+  withGeneratedServer,
 } from '../fixtures/generated-project.ts';
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
@@ -112,6 +113,78 @@ describe('workspace scaffolding — end to end', () => {
     expect(await run(['g', 'app', 'billing', '--template', 'microservice', '--dir', ws])).toBe(0);
     return ws;
   }
+
+  it('builds and serves a custom-scoped workspace library through SSR, and ignores node_modules', async () => {
+    expect(await run(['new', 'shop', '--workspace', '--port', String(base)])).toBe(0);
+    const ws = `${root}/shop`;
+    // Exercise the upgrade of a root created before node_modules was ignored.
+    await Deno.writeTextFile(`${ws}/.gitignore`, 'coverage/\n');
+    expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
+    expect(await run(['g', 'library', 'shared', '--scope', 'custom', '--dir', ws])).toBe(0);
+    const project = `${ws}/apps/web`;
+    await useWorkspacePackages(project);
+    await Deno.writeTextFile(
+      `${project}/app/lib/workspace.server.ts`,
+      "export { shared } from '@custom/shared';\n",
+    );
+    const routePath = `${project}/app/routes/_app/_index.tsx`;
+    const route = await Deno.readTextFile(routePath);
+    await Deno.writeTextFile(
+      routePath,
+      "import { shared } from '~/lib/workspace.server.ts';\n" + route.replace(
+        "session.get<string>('userEmail') ?? null",
+        "shared('served-from-library')",
+      ),
+    );
+
+    const build = async () => {
+      const result = await new Deno.Command(Deno.execPath(), {
+        args: ['task', 'build'],
+        cwd: project,
+        stdout: 'piped',
+        stderr: 'piped',
+      }).output();
+      return {
+        code: result.code,
+        output: new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr),
+      };
+    };
+    const vitePath = `${project}/vite.config.ts`;
+    const vite = await Deno.readTextFile(vitePath);
+    try {
+      await Deno.writeTextFile(
+        vitePath,
+        vite.replace(
+          '(id) => frameworkPackages.includes(id) || workspaceLibraries.includes(id)',
+          'frameworkPackages',
+        ),
+      );
+      const broken = await build();
+      expect(broken.code, broken.output).not.toBe(0);
+      expect(broken.output).toContain('@custom/shared');
+      expect(broken.output).toMatch(/failed to resolve import/i);
+    } finally {
+      await Deno.writeTextFile(vitePath, vite);
+    }
+    const built = await build();
+    expect(built.code, built.output).toBe(0);
+    await withGeneratedServer(project, async (origin) => {
+      const response = await fetch(origin);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('shared: served-from-library');
+    }, base);
+    const git = async (args: string[]) =>
+      await new Deno.Command('git', {
+        args,
+        cwd: ws,
+        stdout: 'piped',
+        stderr: 'piped',
+      }).output();
+    expect((await git(['init'])).code).toBe(0);
+    const status = await git(['status', '--porcelain', '--untracked-files=all']);
+    expect(status.code).toBe(0);
+    expect(new TextDecoder().decode(status.stdout)).not.toContain('node_modules/');
+  });
 
   it('is formatted and lints clean, like a scaffolded project', async () => {
     // M63 established this bar for `setu new <name>` and `scaffold-runs-e2e`

@@ -247,11 +247,24 @@ Install it, then run this command again.
 Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
 ```
 
-For a generated class-based project, `setu add cqrs`, `events`, `messaging`, `queue`, `scheduler`,
-or `websocket` also activates that provider's safe in-memory default in `setu.config.ts`. This keeps
-the ingress barrel runnable after the matching decorated artifact is generated. Other `setu add`
-packages remain manifest-only, and a config that does not retain this generated ingress shape is
-never rewritten.
+For generated projects in either style, `setu add` registers the safe zero-configuration defaults
+for cqrs, events, messaging, queue, scheduler, websocket, cache, health, metrics, openapi, sse and
+realtime-backplane above the emitted development-plugin anchor. Other shapes receive registration
+guidance. Starter compositions receive their named option arm and a link to the starter README;
+configure that arm rather than registering the same plugin twice.
+
+Class-based `generate job` requires queue; functional projects keep the standalone job recipe.
+Generated guards use `requirePermission` from auth-plugin, which enforces the installed provider.
+
+`new --devtool`, `app --devtool` and `devtool enable` write the CLI-managed
+`src/devtool/diagnostics.ts` policy. `add` refreshes it only when it already exists. Recognized
+plugin calls receive source options only when the factory receives its devtool argument; production
+defaults remain disabled. Discovery copies artifact names and env-example key names, never values.
+Empty job/operation/role/permission maps approve no observations. This module is regenerated:
+application-specific policies belong in application-owned configuration.
+
+Dependency additions preserve existing key order. Deno projects update imports only, including
+full-stack projects with a frontend package.json; Node, Bun and Workers update both manifests.
 
 ### Managed barrels
 

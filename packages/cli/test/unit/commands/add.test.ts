@@ -13,11 +13,12 @@ import {
   resolveAddablePackage,
   runAddCommand,
   withDependency,
-  withIngressProviderWiring,
+  withPluginWiring,
 } from '../../../src/commands/add.ts';
 import { VERSION } from '../../../src/constants.ts';
 import { parseArgs } from '../../../src/args.ts';
 import { listSchematics } from '../../../src/schematics/registry.ts';
+import { deriveNames } from '../../../src/utils/names.ts';
 
 /** Builds a command harness over a fake filesystem. */
 function harness(files: Readonly<Record<string, string>> = {}) {
@@ -60,6 +61,7 @@ export function createApp() {
       DecoratorPlugin({
         ingress: [...INGRESS_HANDLERS],
       }),
+      ...(devtool?.plugins ?? []),
     ],
   });
 }
@@ -141,12 +143,44 @@ describe('withDependency', () => {
     expect(parsed.tasks['start']).toBe('deno run main.ts');
   });
 
-  it('sorts the map, so a later regeneration does not reorder the file', () => {
+  it('keeps a sorted map sorted', () => {
     const updated = withDependency(DENO_MANIFEST, 'imports', '@setu-ts/audit-plugin', 'jsr:x@^1');
     const keys = Object.keys(
       (JSON.parse(updated ?? '') as { imports: Record<string, string> }).imports,
     );
     expect(keys).toEqual([...keys].sort());
+  });
+
+  it('inserts one line after the framework group without moving existing keys', () => {
+    const source = `${
+      JSON.stringify(
+        {
+          imports: {
+            '@setu-ts/common': 'common',
+            '@setu-ts/kernel': 'kernel',
+            '@setu-ts/runtime': 'runtime',
+            '@std/expect': 'expect',
+          },
+        },
+        null,
+        2,
+      )
+    }\n`;
+    const updated = withDependency(source, 'imports', '@setu-ts/cache-plugin', 'cache')!;
+    const added = '    "@setu-ts/cache-plugin": "cache",\n';
+    expect(updated.replace(added, '')).toBe(source);
+  });
+
+  it('updates an existing value in place', () => {
+    const source = JSON.stringify({ imports: { z: 'old', a: 'a' } });
+    expect(Object.keys(JSON.parse(withDependency(source, 'imports', 'z', 'new')!).imports))
+      .toEqual(['z', 'a']);
+  });
+
+  it('appends an unscoped entry to an unsorted map', () => {
+    const source = JSON.stringify({ imports: { z: 'z', a: 'a' } });
+    expect(Object.keys(JSON.parse(withDependency(source, 'imports', 'b', 'b')!).imports))
+      .toEqual(['z', 'a', 'b']);
   });
 
   it('reports no change when the entry is already present with that value', () => {
@@ -161,7 +195,7 @@ describe('withDependency', () => {
   });
 });
 
-describe('withIngressProviderWiring', () => {
+describe('withPluginWiring', () => {
   for (
     const [bare, symbol] of [
       ['cqrs-plugin', 'CqrsPlugin'],
@@ -170,10 +204,16 @@ describe('withIngressProviderWiring', () => {
       ['queue-plugin', 'QueuePlugin'],
       ['scheduler-plugin', 'SchedulerPlugin'],
       ['websocket-plugin', 'WebSocketPlugin'],
+      ['cache-plugin', 'CachePlugin'],
+      ['health-plugin', 'HealthPlugin'],
+      ['metrics-plugin', 'MetricsPlugin'],
+      ['openapi-plugin', 'OpenApiPlugin'],
+      ['sse-plugin', 'SsePlugin'],
+      ['realtime-backplane-plugin', 'RealtimeBackplanePlugin'],
     ] as const
   ) {
     it(`activates ${bare} in the generated class-based ingress config`, () => {
-      const updated = withIngressProviderWiring(CLASS_BASED_INGRESS_CONFIG, bare);
+      const updated = withPluginWiring(CLASS_BASED_INGRESS_CONFIG, bare);
 
       expect(updated).toContain(`import { ${symbol} } from '@setu-ts/${bare}';`);
       expect(updated).toContain(`      ${symbol}(),`);
@@ -182,14 +222,26 @@ describe('withIngressProviderWiring', () => {
 
   it('does not rewrite a custom decorator config or a provider it already constructs', () => {
     const custom = CLASS_BASED_INGRESS_CONFIG.replace(
-      'ingress: [...INGRESS_HANDLERS],',
-      'controllers: [],',
+      '...(devtool?.plugins ?? []),',
+      '',
     );
-    expect(withIngressProviderWiring(custom, 'events-plugin')).toBeUndefined();
+    expect(withPluginWiring(custom, 'events-plugin')).toBeUndefined();
 
-    const once = withIngressProviderWiring(CLASS_BASED_INGRESS_CONFIG, 'events-plugin') ?? '';
-    expect(withIngressProviderWiring(once, 'events-plugin')).toBeUndefined();
-    expect(withIngressProviderWiring(CLASS_BASED_INGRESS_CONFIG, 'auth-plugin')).toBeUndefined();
+    const once = withPluginWiring(CLASS_BASED_INGRESS_CONFIG, 'events-plugin') ?? '';
+    expect(withPluginWiring(once, 'events-plugin')).toBeUndefined();
+    expect(withPluginWiring(CLASS_BASED_INGRESS_CONFIG, 'auth-plugin')).toBeUndefined();
+  });
+
+  it('uses the same anchor in a functional config', () => {
+    const functional = CLASS_BASED_INGRESS_CONFIG.replace('DecoratorPlugin({', 'OtherPlugin({');
+    const updated = withPluginWiring(functional, 'websocket-plugin')!;
+    expect(updated).toContain('WebSocketPlugin(),\n      ...(devtool?.plugins ?? []),');
+  });
+
+  it('preserves an unfamiliar import shape', () => {
+    const source =
+      `import * as events from '@setu-ts/events-plugin';\n${CLASS_BASED_INGRESS_CONFIG}`;
+    expect(withPluginWiring(source, 'events-plugin')).toBeUndefined();
   });
 
   it('reuses a provider import that exists before its plugin construction is added', () => {
@@ -198,7 +250,7 @@ describe('withIngressProviderWiring', () => {
       "import { EventsPlugin } from '@setu-ts/events-plugin';\n" +
         "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
     );
-    const updated = withIngressProviderWiring(source, 'events-plugin') ?? '';
+    const updated = withPluginWiring(source, 'events-plugin') ?? '';
 
     expect(updated.match(/import \{ EventsPlugin \} from '@setu-ts\/events-plugin';/g))
       .toHaveLength(1);
@@ -211,7 +263,7 @@ describe('withIngressProviderWiring', () => {
       "import { EventsPlugin as AppEvents } from '@setu-ts/events-plugin';\n" +
         "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
     );
-    const updated = withIngressProviderWiring(source, 'events-plugin') ?? '';
+    const updated = withPluginWiring(source, 'events-plugin') ?? '';
 
     expect(updated).toContain(
       "import { EventsPlugin as AppEvents } from '@setu-ts/events-plugin';",
@@ -222,6 +274,105 @@ describe('withIngressProviderWiring', () => {
 });
 
 describe('runAddCommand', () => {
+  it('names every starter arm from the committed option interfaces without editing the config', async () => {
+    const config =
+      "import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';\nexport async function createApp() {}\n";
+    let count = 0;
+    for (const tier of ['rest', 'microservice', 'full-stack']) {
+      const options = await Deno.readTextFile(
+        new URL(`../../../../starters/${tier}-starter/src/options.ts`, import.meta.url),
+      );
+      for (const match of options.matchAll(/^\s+(\w+)\?: (\w+)PluginOptions;/gm)) {
+        const stem = match[2]!;
+        const bare = `${
+          stem === 'OpenApi'
+            ? 'openapi'
+            : stem === 'WebSocket'
+            ? 'websocket'
+            : deriveNames(stem).kebab
+        }-plugin`;
+        const key = match[1]!;
+        const arm = ['websocket', 'sse', 'backplane'].includes(key) ? `realtime.${key}` : key;
+        const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+        expect(await h.run([bare]), bare).toBe(0);
+        expect(h.out.join('\n'), bare).toContain(`configure its ${arm} arm`);
+        expect(h.out.join('\n'), bare).toContain('duplicate plugin name');
+        expect(h.read('/app/setu.config.ts')).toBe(config);
+        count += 1;
+      }
+    }
+    expect(count).toBe(34);
+  });
+
+  it('names the inherited arms on REST and microservice starters and registers unbundled plugins afterwards', async () => {
+    for (
+      const [pkg, symbol] of [['rest-starter', 'createRestApp'], [
+        'microservice-starter',
+        'createMicroserviceApp',
+      ], ['full-stack-starter', 'createFullStackAppFromConfig']]
+    ) {
+      const config =
+        `import { ${symbol} } from '@setu-ts/${pkg}';\nexport async function createApp() {}\n`;
+      const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+      expect(await h.run(['auth'])).toBe(0);
+      expect(h.out.join('\n')).toContain('configure its auth arm');
+      const grpc = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+      expect(await grpc.run(['grpc'])).toBe(0);
+      expect(grpc.out.join('\n')).toContain(
+        'Register it after the factory returns: app.register(GrpcPlugin(',
+      );
+    }
+  });
+
+  it('preserves a Deno frontend package.json byte for byte and prints a manual line without an anchor', async () => {
+    const npm = '{ "scripts": { "build": "vite build" }, "devDependencies": { "vite": "^8" } }';
+    const config = 'export function createApp() { return customComposition(); }\n';
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/package.json': npm,
+      '/app/setu.config.ts': config,
+    });
+    expect(await h.run(['cache'])).toBe(0);
+    expect(h.read('/app/package.json')).toBe(npm);
+    expect(h.read('/app/setu.config.ts')).toBe(config);
+    expect(h.out.join('\n')).toContain('Register CachePlugin() in setu.config.ts.');
+    expect(h.out.join('\n')).not.toContain('starter');
+  });
+
+  it('prints concrete configuration guidance for providers requiring application choices', async () => {
+    for (
+      const [pkg, factory] of [
+        ['database', 'DatabasePlugin'],
+        ['feature-flags', 'FeatureFlagsPlugin'],
+        ['notification', 'NotificationPlugin'],
+        ['graphql', 'GraphqlPlugin'],
+        ['static', 'StaticPlugin'],
+        ['react-router', 'ReactRouterPlugin'],
+      ]
+    ) {
+      const h = harness({ '/app/deno.json': DENO_MANIFEST });
+      expect(await h.run([pkg!]), h.err.join('\n')).toBe(0);
+      expect(h.out.join('\n')).toContain(`Register ${factory}({`);
+    }
+  });
+
+  it('refreshes an opted-in source module and gates the newly wired plugin', async () => {
+    const source = CLASS_BASED_INGRESS_CONFIG.replace(
+      'export function createApp() {',
+      `export function createApp(\n  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n): IKernelApplication {`,
+    );
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/setu.config.ts': source,
+      '/app/src/devtool/diagnostics.ts': 'old managed module',
+    });
+    expect(await h.run(['cache'])).toBe(0);
+    expect(h.read('/app/src/devtool/diagnostics.ts')).toContain('CacheDiagnosticsOptions');
+    expect(h.read('/app/setu.config.ts')).toContain('...sources.cache');
+    const noDevtool = harness({ '/app/deno.json': DENO_MANIFEST });
+    expect(await noDevtool.run(['cache'])).toBe(0);
+    expect(noDevtool.fs.has('/app/src/devtool/diagnostics.ts')).toBe(false);
+  });
   it('refuses with exit 1 and writes nothing when a runtime marker is unreadable', async () => {
     const fs = createFakeFs({ '/app/deno.json': DENO_MANIFEST, '/app/wrangler.jsonc': '{}' });
     const err: string[] = [];
@@ -294,7 +445,11 @@ describe('runAddCommand', () => {
     // would leave the gate and the build disagreeing.
     const h = harness({
       '/app/deno.json': DENO_MANIFEST,
-      '/app/package.json': JSON.stringify({ name: 'edge', dependencies: {} }, null, 2),
+      '/app/package.json': JSON.stringify(
+        { name: 'edge', scripts: { start: 'tsx main.ts' }, dependencies: {} },
+        null,
+        2,
+      ),
     });
     expect(await h.run(['auth'])).toBe(0);
 

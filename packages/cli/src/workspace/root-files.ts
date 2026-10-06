@@ -205,7 +205,7 @@ members can only meet on a bus they share. Every service added later inherits it
     {
       path: '.gitignore',
       contents: profile.manifestKind === 'deno'
-        ? 'coverage/\n'
+        ? 'node_modules/\ncoverage/\n'
         // Both locations: Bun installs into each MEMBER's node_modules as well as
         // the root, measured — an ignore listing only the root would commit them.
         : 'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n',

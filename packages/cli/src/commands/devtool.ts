@@ -39,6 +39,12 @@ import {
 } from '../constants.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
+import { detectPlugins } from '../utils/plugin-detector.ts';
+import {
+  readDevtoolSourceNames,
+  renderDevtoolSources,
+  withDevtoolSourceWiring,
+} from '../devtool/sources.ts';
 import { devEntryPort, devEntryVariants, renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
@@ -295,6 +301,34 @@ function planManifestWrites(planned: PlannedWrite[], handles: readonly DenoJsonH
     const importsChanged = JSON.stringify(handle.imports) !== handle.originalImports;
     if (!tasksChanged && !importsChanged) continue;
     planned.push({ path: handle.path, contents: handle.serialize(), creating: false });
+  }
+}
+
+/** Shares source generation with scaffolding; all reads precede the write transaction. */
+async function planSourceWrites(
+  deps: DevtoolCommandDependencies,
+  dir: string,
+  configPath: string,
+  config: string,
+  planned: PlannedWrite[],
+): Promise<void> {
+  const installed = await detectPlugins(deps.fs, dir);
+  const names = await readDevtoolSourceNames(deps.fs, dir, installed, config);
+  const module = renderDevtoolSources(installed, names);
+  const modulePath = joinPath(dir, module.path);
+  let existing: string | undefined;
+  try {
+    existing = new TextDecoder().decode(await deps.fs.readFile(modulePath));
+  } catch { /* Created below. */ }
+  if (existing !== module.contents) {
+    planned.push({ path: modulePath, contents: module.contents, creating: existing === undefined });
+  }
+  const wiring = withDevtoolSourceWiring(config, installed);
+  if (wiring.source !== config) {
+    planned.push({ path: configPath, contents: wiring.source, creating: false });
+  }
+  for (const line of wiring.manual) {
+    deps.log(`  Configure the development source in setu.config.ts: ${escapeName(line)}`);
   }
 }
 
@@ -619,6 +653,7 @@ async function enableInWorkspace(
     });
   }
   planManifestWrites(planned, handles);
+  await planSourceWrites(deps, joinPath(dir, memberRoot), configPath, configSource, planned);
   if (existingRunner === undefined) {
     planned.push({ path: runnerPath, contents: runner.contents, creating: true });
   }
@@ -812,6 +847,7 @@ async function enableStandalone(
   }
 
   planManifestWrites(planned, [handle]);
+  await planSourceWrites(deps, dir, configPath, configSource, planned);
   // An accepted older rendering (the 0.8.0 entry) is rewritten to the current one.
   if (existingEntry !== entry) {
     planned.push({ path: entryPath, contents: entry, creating: existingEntry === undefined });

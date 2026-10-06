@@ -398,7 +398,17 @@ describe('full-stack template | manifest contributions', () => {
 
     expect(vite).toContain('environments');
     expect(vite).toContain('rollupOptions');
-    expect(vite).toContain('external: frameworkPackages');
+    expect(vite).toContain(
+      'external: (id) => frameworkPackages.includes(id) || workspaceLibraries.includes(id)',
+    );
+  });
+
+  it('reads declared library identities and documents the server-only boundary', () => {
+    const vite = contentsOf('vite.config.ts');
+    expect(vite).toContain("new URL('../../libs/', import.meta.url)");
+    expect(vite).toContain("entry.name + '/deno.json'");
+    expect(vite).toContain('workspaceLibraries.push(manifest.name)');
+    expect(FULL_STACK_TEMPLATE.manifest?.readmeSection).toContain('Client modules cannot import');
   });
 });
 
