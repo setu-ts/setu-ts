@@ -704,6 +704,7 @@ export async function runAddCommand(
         installed,
         names.customBackplane === true,
       );
+      for (const line of wiring.setup) deps.log(`  In setu.config.ts: ${escapeName(line)}`);
       for (const line of wiring.manual) {
         deps.log(`  Configure the development source: ${escapeName(line)}`);
       }

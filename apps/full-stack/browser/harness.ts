@@ -21,10 +21,43 @@ export async function browserGateCode(
   return browserAvailabilityCode(await exists(path), ci);
 }
 
+/**
+ * Environment variables Playwright reads to locate its browser cache. Clearing any of them would
+ * make the harness resolve a different cache than the one the browser was installed into.
+ */
+export const CACHE_LOCATION_VARIABLES = [
+  'PLAYWRIGHT_BROWSERS_PATH',
+  'XDG_CACHE_HOME',
+  'LOCALAPPDATA',
+] as const;
+
+/**
+ * Derives the browser cache from the executable path Playwright itself resolved, so the gate never
+ * restates Playwright's per-platform cache rules. The cache is the directory holding the
+ * `chromium-<revision>` (or `chromium_headless_shell-<revision>`) install.
+ */
+export function browserCacheDir(executable: string): string {
+  const separator = executable.includes('\\') && !executable.includes('/') ? '\\' : '/';
+  const segments = executable.split(separator);
+  const install = segments.findIndex((segment) => /^chromium[-_]/.test(segment));
+  if (install <= 0) {
+    throw new Error(`Cannot locate the Playwright browser cache in '${executable}'.`);
+  }
+  return segments.slice(0, install).join(separator);
+}
+
+/** The diagnostic for an installed-or-not browser the gate is not permitted to inspect. */
+export function unreadableCacheMessage(cache: string): string {
+  return `The Playwright browser cache '${cache}' is outside this gate's read permission, so ` +
+    `Chromium's presence cannot be decided. Run the harness with --allow-read=.,${cache},` +
+    `/etc/os-release,/etc/lsb-release (the deno.json task grants only the Linux and macOS ` +
+    `default caches).`;
+}
+
 if (import.meta.main) {
   // Dependency code and child builds receive only the local harness environment.
   const retained: Record<string, string> = {};
-  for (const name of ['PATH', 'HOME', 'CI', 'PLAYWRIGHT_BROWSERS_PATH']) {
+  for (const name of ['PATH', 'HOME', 'CI', ...CACHE_LOCATION_VARIABLES]) {
     const value = Deno.env.get(name);
     if (value !== undefined) retained[name] = value;
   }
@@ -33,8 +66,15 @@ if (import.meta.main) {
   // Playwright's pinned WSL detector otherwise asks for all of /proc.
   Deno.env.set('__IS_WSL_TEST__', '1');
   const { chromium } = await import('npm:playwright@1.63.0');
+  const executable = chromium.executablePath();
+  const cache = browserCacheDir(executable);
+  // A failed stat on an unreadable path would otherwise report an installed browser as missing.
+  if ((await Deno.permissions.query({ name: 'read', path: cache })).state !== 'granted') {
+    console.error(unreadableCacheMessage(cache));
+    Deno.exit(1);
+  }
   const code = await browserGateCode(
-    chromium.executablePath(),
+    executable,
     Deno.env.get('CI') === 'true',
     async (path) => {
       try {
@@ -50,8 +90,6 @@ if (import.meta.main) {
   }
   const root = new URL('../../../', import.meta.url).pathname;
   const scratch = `${root}.tmp/browser`;
-  const executable = chromium.executablePath();
-  const cache = retained['PLAYWRIGHT_BROWSERS_PATH'] ?? `${retained['HOME']}/.cache/ms-playwright`;
   await Deno.mkdir(scratch, { recursive: true });
   const result = await new Deno.Command(Deno.execPath(), {
     args: [

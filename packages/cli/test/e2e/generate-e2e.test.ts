@@ -76,9 +76,17 @@ describe('setu end-to-end on a real filesystem', () => {
           'Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n' +
           'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n';
         await connection.write(new TextEncoder().encode(request));
+        // One read is not guaranteed to return the whole header block, so read
+        // until the terminator, refusing EOF and an unbounded response.
+        let response = '';
+        const decoder = new TextDecoder();
         const buffer = new Uint8Array(4096);
-        const read = await connection.read(buffer);
-        const response = new TextDecoder().decode(buffer.subarray(0, read ?? 0));
+        while (!response.includes('\r\n\r\n')) {
+          const read = await connection.read(buffer);
+          if (read === null) throw new Error(`Handshake ended early: ${response}`);
+          response += decoder.decode(buffer.subarray(0, read), { stream: true });
+          if (response.length > 16_384) throw new Error('Handshake headers exceed 16 KiB.');
+        }
         expect(response).toContain('101 Switching Protocols');
         expect(response.toLowerCase()).toContain(
           'sec-websocket-accept: s3pplmbitxaq9kygzzhzrbk+xoo=',

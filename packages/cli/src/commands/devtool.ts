@@ -327,6 +327,7 @@ async function planSourceWrites(
   if (wiring.source !== config) {
     planned.push({ path: configPath, contents: wiring.source, creating: false });
   }
+  for (const line of wiring.setup) deps.log(`  In setu.config.ts: ${escapeName(line)}`);
   for (const line of wiring.manual) {
     deps.log(`  Configure the development source in setu.config.ts: ${escapeName(line)}`);
   }

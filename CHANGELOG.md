@@ -18,9 +18,10 @@ All notable changes to this project are documented here. The format follows
   `docs/upgrading.md`).
 
 - **Wired scaffolds (M101g).** Workspace full-stack SSR builds externalize library package
-  identities; projects that acquire npm dependencies ignore node_modules. Adding safe
-  zero-configuration plugins wires both generator styles, starter compositions name their option
-  arm, and dependency additions preserve the manifest's existing order.
+  identities — declared in `deno.json` or `deno.jsonc`, with their exported subpaths; projects that
+  acquire npm dependencies ignore node_modules. Adding safe zero-configuration plugins wires both
+  generator styles, starter compositions name their option arm, and dependency additions preserve
+  the manifest's existing order.
 - **Development source policies and browser gate (M101g).** Opted-in scaffolds and devtool enable
   generate names-only diagnostics approval maps, gated off in production; adding a plugin refreshes
   an existing policy. A dedicated pinned Chromium gate exercises both the example and a fresh

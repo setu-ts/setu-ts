@@ -162,4 +162,27 @@ describe('the one devtool planner', () => {
     expect(commandTasks.tasks['dev']).toBe(flagTasks.tasks['dev']);
     expect(commandTasks.tasks['check']).toBe(flagTasks.tasks['check']);
   });
+
+  // PR #415 review: a configuration the CLI declines to edit gets the binding its
+  // manual lines read, before those lines.
+  it('prints the sources import and declaration beside a manual line on `enable`', async () => {
+    const h = harnessOver(createFakeFs({
+      '/ws/shop/deno.json': `${
+        JSON.stringify({
+          tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' },
+          imports: { '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin@^0.8.0' },
+        })
+      }\n`,
+      '/ws/shop/setu.config.ts': CONFIG + 'const banner = `unclassified`;\n',
+    }));
+    expect(await h.runDevtool(['enable', '--devtool-port', '4919'], '/ws/shop'), h.err.text())
+      .toBe(0);
+    const out = h.out.text();
+    expect(out).toContain(
+      "In setu.config.ts: Add the import: import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';",
+    );
+    expect(out.indexOf('devtool === undefined ? {} : DEVTOOL_SOURCES;')).toBeLessThan(
+      out.indexOf('Configure the development source in setu.config.ts: CachePlugin('),
+    );
+  });
 });

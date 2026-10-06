@@ -181,6 +181,35 @@ describe('development source policies', () => {
       .toContain('return { literal:');
   });
 
+  it('prints the import and declaration a pasted manual line needs, and only then', () => {
+    const declaration =
+      'const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;';
+    const importLine = "import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';";
+    const unclassified = withDevtoolSourceWiring('handwritten()', new Set(['cache-plugin']));
+    expect(unclassified.setup).toEqual([
+      `Add the import: ${importLine}`,
+      'Add as the first statement of createApp, whose second parameter must be the devtool ' +
+      `composition: ${declaration}`,
+    ]);
+    const imported = withDevtoolSourceWiring(
+      `${importLine}\nhandwritten()`,
+      new Set(['cache-plugin']),
+    );
+    expect(imported.setup).toHaveLength(1);
+    expect(imported.setup[0]).toContain(declaration);
+    // One call wired automatically leaves the declaration in place for the other's manual line.
+    const mixed = "import { CachePlugin } from '@setu-ts/cache-plugin';\n" +
+      "import { HealthPlugin } from '@setu-ts/health-plugin';\n" + signature +
+      '\n return createApplication({ plugins: [\n  CachePlugin(),\n  HealthPlugin(options),\n] });\n}';
+    const partial = withDevtoolSourceWiring(mixed, new Set(['cache-plugin', 'health-plugin']));
+    expect(partial.manual).toHaveLength(1);
+    expect(partial.source).toContain(declaration);
+    expect(partial.setup).toEqual([]);
+    const wired = withDevtoolSourceWiring(partial.source, new Set(['cache-plugin']));
+    expect(wired.manual).toEqual([]);
+    expect(wired.setup).toEqual([]);
+  });
+
   it('leaves unclassified factories and calls untouched and names the manual option', () => {
     const unclassified = withDevtoolSourceWiring('handwritten()', packages);
     expect(unclassified.source).toBe('handwritten()');

@@ -427,8 +427,9 @@ Every export and option is documented in
 Opted-in Deno scaffolds and `setu devtool enable` write the CLI-managed `src/devtool/diagnostics.ts`
 approval module. `setu add` refreshes an existing module, using artifact names and env-example keys
 rather than values. Source options activate only when the factory receives its devtool argument;
-production keeps disabled defaults. Unknown source shapes receive manual guidance. The module is
-regenerated, so preserve application-specific policy outside that file.
+production keeps disabled defaults. Unknown source shapes receive manual guidance, including the
+`DEVTOOL_SOURCES` import and the `sources` declaration those lines read. The module is regenerated,
+so preserve application-specific policy outside that file.
 
 Adding one of the twelve safe zero-configuration providers wires its emitted plugin-list anchor in
 either style. Starter compositions instead name their option arm; configure that arm to avoid a

@@ -89,8 +89,12 @@ proves transition checks fail while SSR still renders; removing a referenced ass
 check names the missing bundle.
 
 Install the pinned browser with `deno run -A npm:playwright@1.63.0 install chromium`. A missing
-browser exits 77 locally and fails in CI, which installs Chromium in its dedicated job. Ordinary
-tests do not launch a browser. Set `PORT` to choose the application's listening port (default 3000).
+browser exits 77 locally and fails in CI, which installs Chromium in its dedicated job. The gate
+locates the browser through Playwright's own resolution, so `PLAYWRIGHT_BROWSERS_PATH`,
+`XDG_CACHE_HOME` and `LOCALAPPDATA` are honored; the task grants read access to the Linux and macOS
+default caches only, and a cache elsewhere fails with the exact `--allow-read` to rerun with rather
+than being reported as missing. Ordinary tests do not launch a browser. Set `PORT` to choose the
+application's listening port (default 3000).
 
 The full-stack configuration selects `Referrer-Policy: same-origin` so native form posts retain
 their origin for React Router's action check. Cross-origin referrers remain suppressed; both session

@@ -814,6 +814,9 @@ function supportedBackplaneArgument(raw: string, masked: string, trustSources: b
   return raw[after] === ',' || raw[after] === '}';
 }
 
+/** The import {@linkcode withDevtoolSourceWiring} adds to the configuration. */
+const SOURCES_IMPORT = "import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';";
+
 /** The declaration {@linkcode withDevtoolSourceWiring} inserts into `createApp`. */
 const SOURCES_DECLARATION =
   'const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;';
@@ -1056,6 +1059,41 @@ export function withDevtoolSourceWiring(
 ): {
   readonly source: string;
   readonly manual: readonly string[];
+  readonly setup: readonly string[];
+} {
+  const result = wireSources(source, installed, customBackplane);
+  return { ...result, setup: manualSetup(result.source, result.manual) };
+}
+
+/**
+ * The binding a pasted manual line (`...sources.<key>`) reads, printed once before those lines
+ * whenever the CLI did not leave its own declaration in the factory — in exactly the text the
+ * automatic edit inserts, so guidance and edit cannot disagree.
+ *
+ * @param source - The configuration after any automatic edit
+ * @param manual - The manual lines that will be printed
+ */
+function manualSetup(source: string, manual: readonly string[]): readonly string[] {
+  if (manual.length === 0) return [];
+  const scope = factoryScope(source);
+  if (scope !== undefined && sourcesBindingTrusted(scope.code) === 'declared') return [];
+  const setup: string[] = [];
+  if (!source.includes(SOURCES_IMPORT)) setup.push(`Add the import: ${SOURCES_IMPORT}`);
+  setup.push(
+    'Add as the first statement of createApp, whose second parameter must be the devtool ' +
+      `composition: ${SOURCES_DECLARATION}`,
+  );
+  return setup;
+}
+
+/** The automatic edit behind {@linkcode withDevtoolSourceWiring}. */
+function wireSources(
+  source: string,
+  installed: ReadonlySet<string>,
+  customBackplane: boolean,
+): {
+  readonly source: string;
+  readonly manual: readonly string[];
 } {
   const scope = factoryScope(source);
   const flags = policyFlags(source);
@@ -1125,7 +1163,7 @@ export function withDevtoolSourceWiring(
     sourceImport === null ||
     maskSourceCode(updated)?.slice(sourceImport.index, sourceImport.index + 6) !== 'import'
   ) {
-    updated = "import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';\n" + updated;
+    updated = `${SOURCES_IMPORT}\n` + updated;
   }
   const finalScope = factoryScope(updated)!;
   if (

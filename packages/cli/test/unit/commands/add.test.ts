@@ -688,6 +688,27 @@ describe('runAddCommand', () => {
     expect(await noDevtool.run(['cache'])).toBe(0);
     expect(noDevtool.fs.has('/app/src/devtool/diagnostics.ts')).toBe(false);
   });
+  // PR #415 review: a manual line reads `sources.<key>`, so guidance for a
+  // configuration the CLI declined to edit must name the binding it reads.
+  it('prints the sources import and declaration beside a manual line', async () => {
+    const config = CLASS_BASED_INGRESS_CONFIG + 'const banner = `unclassified`;\n';
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/setu.config.ts': config,
+      '/app/src/devtool/diagnostics.ts': 'old managed module',
+    });
+    expect(await h.run(['cache'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(config);
+    const out = h.out.join('\n');
+    expect(out).toContain(
+      "In setu.config.ts: Add the import: import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';",
+    );
+    expect(out).toContain('devtool === undefined ? {} : DEVTOOL_SOURCES;');
+    expect(out.indexOf('Add the import')).toBeLessThan(
+      out.indexOf('Configure the development source'),
+    );
+  });
+
   it('refuses with exit 1 and writes nothing when a runtime marker is unreadable', async () => {
     const fs = createFakeFs({ '/app/deno.json': DENO_MANIFEST, '/app/wrangler.jsonc': '{}' });
     const err: string[] = [];

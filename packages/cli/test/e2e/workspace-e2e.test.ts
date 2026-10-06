@@ -155,7 +155,7 @@ describe('workspace scaffolding — end to end', () => {
       await Deno.writeTextFile(
         vitePath,
         vite.replace(
-          '(id) => frameworkPackages.includes(id) || workspaceLibraries.includes(id)',
+          '(id) => isDeclared(frameworkPackages, id) || isDeclared(workspaceLibraries, id)',
           'frameworkPackages',
         ),
       );
