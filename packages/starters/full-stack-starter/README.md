@@ -137,12 +137,17 @@ existed. A root-level `urlPrefix` claims the bare wildcard and would collide wit
 
 ### Workers Portability
 
-This starter bundles **MessagingPlugin** and **QueuePlugin**, which require raw network sockets and
-are therefore **not compatible with Cloudflare Workers**. Additionally, **StoragePlugin** (local
-filesystem), **MailPlugin** (SMTP), and **SchedulerPlugin** (timers) have Node/Deno/Bun-specific
-dependencies that degrade or fail on Workers. The REST base plugins and CachePlugin/EventsPlugin are
-edge-safe. Use this starter on Node.js, Deno, or Bun only — matching the CLI's refusal of
-`--template microservice --runtime cloudflare-workers` (microservice inherits these constraints).
+With default options the starter boots on Cloudflare Workers. Every always-on plugin defaults to an
+arm that needs no socket or filesystem: memory messaging, queue and storage, log mail, and
+environment secrets. One plugin is different: **SchedulerPlugin** refuses Workers at startup,
+because its timers do not survive isolate eviction, so the starter leaves it out there. Schedule on
+Workers with Cron Triggers (`cloudflare-plugin`'s `WorkersCron`). Passing a `scheduler` arm
+registers the plugin anyway, and it then fails with an error that names that remedy.
+
+The memory arms are process-local, and a Workers isolate is short-lived, so they carry nothing
+between isolates. For queues and messaging that must reach another isolate or service, use
+`cloudflare-plugin`'s Queues-backed `WorkersQueue` and `WorkersBroker`. Arms that need sockets or a
+filesystem (SMTP mail, local storage, the Redis and broker drivers) do not run on Workers.
 
 ### Multi-instance Restriction + Escape Hatch
 

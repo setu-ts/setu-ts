@@ -452,6 +452,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A full-stack application could not start on Cloudflare Workers (`@setu-ts/full-stack-starter`,
+  PR pending).** The starter always registered `SchedulerPlugin`, which refuses Workers at
+  `register()`, so `createFullStackApp()`, and every project from
+  `setu new --template full-stack --runtime cloudflare-workers`, threw `SchedulerUnavailableError`
+  before serving a request. The starter now leaves the scheduler out on Workers unless a `scheduler`
+  arm is passed; schedule there with `cloudflare-plugin`'s `WorkersCron`. Verified by booting the
+  composed set with the runtime forced to `cloudflare-workers` on Deno, not on workerd. The starter
+  README's Workers section, which said the starter does not run there, is corrected.
+
 - **`export default { fetch: app.fetch }` answered every Workers request with 500
   (`@setu-ts/kernel`, PR pending).** It is the Workers entry the `cloudflare-plugin` README,
   `PUBLIC_API.md`, the `rest-starter` README and the Workers adapter's own `listen()` error all
