@@ -154,8 +154,8 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * promise is RETAINED and its rejection routed to the failure path below —
    * never dropped, never unhandled. @internal
    */
-  // Resolves-on-hand-off is the documented contract, not a forgotten await.
-  // deno-lint-ignore require-await
+  // Resolves-on-hand-off is still the documented contract; the await below is
+  // real (options validation), so this is no longer a lint exception.
   async publishWithHeaders<T>(
     topic: string,
     message: T,

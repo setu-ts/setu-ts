@@ -169,6 +169,10 @@ function validateHeaderValue(name: string, value: unknown): string {
  * @throws {RangeError} As a rejected promise, naming the field and the rule
  * @internal
  */
+// `async` here is load-bearing, not a forgotten await: it is what turns every
+// `throw` below into a REJECTED promise, which §3.4 requires of a
+// Promise-returning publish entry (the M52b class).
+// deno-lint-ignore require-await
 export async function validatePublishOptions(
   options: unknown,
 ): Promise<ValidatedPublishOptions> {
