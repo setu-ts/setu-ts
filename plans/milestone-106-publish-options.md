@@ -206,7 +206,9 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
     partition until it succeeds) and Pub/Sub on an ordering subscription.
   - **Order lost on retry:** RabbitMQ (retry queues since #421), Redis Streams (reclaim since #419),
     NATS and Service Bus redelivery — later messages for the key are handled while the failed one
-    waits.
+    waits. The NATS and Service Bus cells are reasoned from each broker's redelivery model and are
+    measured during implementation before the README states them; the RabbitMQ and Kafka cells are
+    pinned by the tests below.
 
   Consumers that need order compare the envelope's `aggregateVersion` and drop or defer a stale
   event.
@@ -217,7 +219,9 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
   out of order").
 - **Test home:** `packages/messaging-plugin/test/integration/consumer-retry-real.test.ts` (real
   RabbitMQ: two messages with one key, the first failing once — the second is handled before the
-  first's retry, pinning the documented limit so a later change to it is deliberate).
+  first's retry, pinning the documented limit so a later change to it is deliberate);
+  `packages/messaging-plugin/test/integration/kafka-real.test.ts` (real Kafka: same key, the first
+  failing once — the second is not handled until the first succeeds).
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -262,19 +266,19 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                       | src covered                 | Key assertions                                                                                               |
-| ------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `packages/common/test/unit/publish-options.test.ts`                             | `messaging.ts`              | a two-parameter implementor assigns; barrel exports both constants                                           |
-| `packages/messaging-plugin/test/unit/publish-options-validation.test.ts`        | `publish-options.ts`        | each §3.4 refusal is a rejected promise naming the field; 128-byte boundary both sides                       |
-| `packages/messaging-plugin/test/integration/header-conformance.test.ts`         | all seven brokers           | one row per broker × option, asserting the wire shape from §3.3                                              |
-| `packages/messaging-plugin/test/integration/kafka-real.test.ts`                 | `kafka-broker.ts`           | same key → one partition, in order; no key → unchanged                                                       |
-| `packages/messaging-plugin/test/integration/nats-real.test.ts`                  | `nats-broker.ts`            | repeated `deduplicationId` stored once                                                                       |
-| `packages/messaging-plugin/test/unit/pubsub-adapter.test.ts`                    | `pubsub-broker.ts`          | topic cached, `messageOrdering: true`, `resumePublishing` after a failure, subscription flag                 |
-| `packages/messaging-plugin/test/integration/messaging-telemetry.test.ts`        | both decorators             | options survive tracing + behaviours; `traceparent` still the framework's                                    |
-| `packages/messaging-plugin/test/unit/integration/definition.test.ts`            | `integration/definition.ts` | selector stored; non-function refused with a named `TypeError`                                               |
-| `packages/messaging-plugin/test/unit/integration/publish.test.ts`               | `integration/publish.ts`    | default `deduplicationId`; caller > selector > none; `undefined` = no key; throwing/invalid selector rejects |
-| `packages/messaging-plugin/test/integration/consumer-retry-real.test.ts`        | (documented limit, §3.8)    | one key, first message fails once: the second is handled before the first's retry                            |
-| `packages/cloudflare-plugin/test/unit/messaging/workers-broker-publish.test.ts` | Workers broker + envelope   | fields round-trip; an envelope without them still decodes                                                    |
+| Test file                                                                       | src covered                 | Key assertions                                                                                                      |
+| ------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/publish-options.test.ts`                             | `messaging.ts`              | a two-parameter implementor assigns; barrel exports both constants                                                  |
+| `packages/messaging-plugin/test/unit/publish-options-validation.test.ts`        | `publish-options.ts`        | each §3.4 refusal is a rejected promise naming the field; 128-byte boundary both sides                              |
+| `packages/messaging-plugin/test/integration/header-conformance.test.ts`         | all seven brokers           | one row per broker × option, asserting the wire shape from §3.3                                                     |
+| `packages/messaging-plugin/test/integration/kafka-real.test.ts`                 | `kafka-broker.ts`           | same key → one partition, in order; no key → unchanged; a failing first message blocks the second until it succeeds |
+| `packages/messaging-plugin/test/integration/nats-real.test.ts`                  | `nats-broker.ts`            | repeated `deduplicationId` stored once                                                                              |
+| `packages/messaging-plugin/test/unit/pubsub-adapter.test.ts`                    | `pubsub-broker.ts`          | topic cached, `messageOrdering: true`, `resumePublishing` after a failure, subscription flag                        |
+| `packages/messaging-plugin/test/integration/messaging-telemetry.test.ts`        | both decorators             | options survive tracing + behaviours; `traceparent` still the framework's                                           |
+| `packages/messaging-plugin/test/unit/integration/definition.test.ts`            | `integration/definition.ts` | selector stored; non-function refused with a named `TypeError`                                                      |
+| `packages/messaging-plugin/test/unit/integration/publish.test.ts`               | `integration/publish.ts`    | default `deduplicationId`; caller > selector > none; `undefined` = no key; throwing/invalid selector rejects        |
+| `packages/messaging-plugin/test/integration/consumer-retry-real.test.ts`        | (documented limit, §3.8)    | one key, first message fails once: the second is handled before the first's retry                                   |
+| `packages/cloudflare-plugin/test/unit/messaging/workers-broker-publish.test.ts` | Workers broker + envelope   | fields round-trip; an envelope without them still decodes                                                           |
 
 ## 7. Verification gates
 
