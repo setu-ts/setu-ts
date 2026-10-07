@@ -405,3 +405,38 @@ describe('the routes a generated README lists', () => {
     expect(readme).toContain('On the port `./src/discovery/services.ts` exports:');
   });
 });
+
+describe('the emitted smoke test', () => {
+  const smokeTest = (name: string, runtime: TargetRuntime = 'deno') =>
+    contentsOf(
+      [...projectFiles('proj', runtime, resolveHost(getTemplate(name)!, runtime))],
+      'test/app.test.ts',
+    );
+
+  // I2 (X66-3): `/health` stays 200 when `populateLoadContext` throws, so the
+  // full-stack smoke test also requests the SSR home page — through `fetch`,
+  // since an SSR body streams and `inject()` refuses one, with the body
+  // consumed so the test's resource sanitizer does not report a leak.
+  it('requests the SSR home page through fetch for full-stack, beside /health', () => {
+    const test = smokeTest('full-stack');
+    expect(test).toContain("url: '/health'");
+    expect(test).toContain("app.fetch(new Request('http://localhost/'))");
+    expect(test).toContain('await page.text();');
+  });
+
+  it('keeps the /health-only smoke test for a host without a factory', () => {
+    const test = smokeTest('rest');
+    expect(test).toContain("url: '/health'");
+    expect(test).not.toContain('app.fetch');
+  });
+
+  // The emitted test runs on all three runtimes through testHarnessFor, so the
+  // fetch assertion must render in each target's own idiom.
+  it('renders the fetch assertion in each runtime idiom', () => {
+    expect(smokeTest('full-stack', 'node')).toContain(
+      'assert.deepStrictEqual(page.status, 200);',
+    );
+    expect(smokeTest('full-stack', 'bun')).toContain('expect(page.status).toEqual(200);');
+    expect(smokeTest('full-stack', 'deno')).toContain('expect(page.status).toEqual(200);');
+  });
+});

@@ -1649,11 +1649,24 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
         `${readme}\n## Testing\n\nThe application needs the platform environment to boot. No smoke test is emitted here;\n\`deno task test\` permits an empty suite until you add platform-aware tests.\n`,
     };
   } else {
-    const path = host.appFactory !== undefined || host.plugins.some((p) =>
-        p.pkg === 'health-plugin'
-      )
+    const hasAppFactory = host.appFactory !== undefined;
+    const path = hasAppFactory || host.plugins.some((p) => p.pkg === 'health-plugin')
       ? '/health'
       : '/';
+    // A factory host composes a starter that serves SSR pages (full-stack
+    // today). `/health` stays 200 when `populateLoadContext` throws, so the
+    // smoke test also requests `/` — through `fetch`, because an SSR body
+    // streams and `inject()` refuses one, with the body consumed so the
+    // test's resource sanitizer does not report a leak.
+    const ssrProbe = hasAppFactory
+      ? `
+      // The SSR home page streams, which inject() refuses — request it
+      // through fetch, and consume the body so the resource sanitizer
+      // does not report a leak.
+      const page = await app.fetch(new Request('http://localhost/'));
+      ${renderEquals(runtime, 'page.status', '200')}
+      await page.text();`
+      : '';
     files.push({
       path: 'test/app.test.ts',
       contents: `${testHarnessFor(runtime).imports}
@@ -1665,7 +1678,7 @@ describe('application composition', () => {
     const app = await createTestApp({ app: await createApp() });
     try {
       const response = await app.inject({ method: 'GET', url: '${path}' });
-      ${renderEquals(runtime, 'response.statusCode', '200')}
+      ${renderEquals(runtime, 'response.statusCode', '200')}${ssrProbe}
     } finally {
       await app.stop();
     }

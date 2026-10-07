@@ -422,6 +422,12 @@ All notable changes to this project are documented here. The format follows
   framework capabilities through the registry; `di: { autoRegister: false }` restores the old
   behaviour.
 
+- **A newly scaffolded full-stack project's smoke test now also requests `/` (`@setu-ts/cli`, PR
+  pending).** `populateLoadContext` runs only on an SSR request, so any DI misconfiguration left
+  `/health` at 200 while every page answered 500 and the generated `deno task test` passed over it.
+  The emitted `test/app.test.ts` now fetches `/` through `app.fetch` — an SSR body streams, which
+  `inject()` refuses — and asserts 200; other templates are unchanged.
+
 - **`export default { fetch: app.fetch }` answered every Workers request with 500
   (`@setu-ts/kernel`, PR pending).** It is the Workers entry the `cloudflare-plugin` README,
   `PUBLIC_API.md`, the `rest-starter` README and the Workers adapter's own `listen()` error all
