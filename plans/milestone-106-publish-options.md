@@ -76,6 +76,16 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
 | Pub/Sub attribute limits (docs, 2026-10-08)    | `docs.cloud.google.com/pubsub/quotas`                                                           | at most 100 attributes; key ≤ 256 bytes; value ≤ 1024 bytes. A reserved `goog` key prefix is stated only by third-party docs — measured against the emulator during implementation (§10)                                                                                     |
 | Service Bus property limits (docs, 2026-10-08) | `learn.microsoft.com/…/service-bus-quotas`                                                      | message ID ≤ 128; each property ≤ 32 KB; ALL properties (user and system) ≤ 64 KB together                                                                                                                                                                                   |
 
+**Measurements taken during implementation (2026-10-07, M106).** Two of these correct claims the
+plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to match.
+
+| Reference                                                   | Source                                                                                                      | Verified fact                                                                                                                                                                                              |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NATS retry ordering (measured 2026-10-07, M106)             | real `nats:2-alpine -js`, nats.js 2.29.3, explicit-ack durable consumer                                     | a message whose handler `nak()`s is redelivered only after later messages were handled: order `first-attempt-1 → second → first-attempt-2` (order LOST on retry)                                           |
+| Service Bus retry ordering (measured 2026-10-07, M106)      | `servicebus-emulator`, `@azure/service-bus@^7`, `autoCompleteMessages: false`, default `maxConcurrentCalls` | an abandoned message is redelivered before the next is handled: order `first-attempt-1 → first-attempt-2 → second` (order KEPT by blocking — corrects §3.8)                                                |
+| RabbitMQ 4 server-owned headers (measured 2026-10-07, M106) | real `rabbitmq:4-management-alpine`, amqplib 0.10.9                                                         | dead-lettering writes `x-death` + `x-first-death-*` + `x-last-death-*`; a quorum-queue redelivery writes `x-acquired-count` (1, 2, …) and NOT `x-delivery-count` — so §3.4 reserves `x-acquired-count` too |
+| Pub/Sub `goog` prefix (measured 2026-10-07, M106)           | `google-cloud-cli:emulators`, `@google-cloud/pubsub@^6`                                                     | attributes `googFoo`, `goog`, `googclient_x` were ACCEPTED by the emulator (recorded as not refused); the prefix stays reserved because the live service refuses it                                        |
+
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
 | #  | Conflict                                                                                              | Resolution (picked side)                                                       | Doc deliverable (same PR)                               |
@@ -162,10 +172,11 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
   - **Header values:** well-formed strings of at most 1024 UTF-8 bytes, refused by the same
     predicate, with no leading or trailing whitespace.
   - **Reserved names, compared ASCII-case-insensitively:** `traceparent`, `tracestate`, `cc`, `bcc`,
-    `payload`; the RabbitMQ server's own `x-death`, `x-delivery-count`, `x-delay`, and any name
-    beginning `x-first-death-` or `x-last-death-`; and any name beginning `x-setu-`, `nats-` or
-    `goog`. The list is ONE internal table (`RESERVED_HEADER_NAMES`, `RESERVED_HEADER_PREFIXES`, not
-    barrel-exported) that the test iterates, not prose.
+    `payload`; the RabbitMQ server's own `x-death`, `x-delivery-count`, `x-acquired-count` (measured
+    2026-10-07: a quorum-queue redelivery writes `x-acquired-count`, not `x-delivery-count`), and
+    `x-delay`, and any name beginning `x-first-death-` or `x-last-death-`; and any name beginning
+    `x-setu-`, `nats-` or `goog`. The list is ONE internal table (`RESERVED_HEADER_NAMES`,
+    `RESERVED_HEADER_PREFIXES`, not barrel-exported) that the test iterates, not prose.
   - **Refusal text** names the field and the rule. It never quotes a value, and it quotes a header
     name only after that name has passed the character check (a reserved-name refusal), escaped with
     `JSON.stringify`; a name refused for its characters is identified by its position in the record
@@ -253,12 +264,15 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
   handler failure does to order differs per broker, and the README table carries a column for it:
   - **Order kept by blocking:** Kafka (a throwing handler leaves the offset uncommitted and kafkajs
     redelivers from that record, `kafka-broker.ts:723`, so one failing message stalls its whole
-    partition until it succeeds) and Pub/Sub on an ordering subscription.
-  - **Order lost on retry:** RabbitMQ (retry queues since #421), Redis Streams (reclaim since #419),
-    NATS and Service Bus redelivery — later messages for the key are handled while the failed one
-    waits. The NATS and Service Bus cells are reasoned from each broker's redelivery model and are
-    measured during implementation before the README states them; the RabbitMQ and Kafka cells are
-    pinned by the tests below.
+    partition until it succeeds), Pub/Sub on an ordering subscription, and — measured 2026-10-07,
+    correcting this plan's first draft — Service Bus, whose abandoned message is redelivered before
+    the next is handled (`first-attempt-1 → first-attempt-2 → second`).
+  - **Order lost on retry:** RabbitMQ (retry queues since #421), Redis Streams (reclaim since #419)
+    and NATS redelivery — later messages for the key are handled while the failed one waits.
+    Measured 2026-10-07 for NATS: the handler order was
+    `first-attempt-1 → second →
+    first-attempt-2`. The RabbitMQ and Kafka cells are pinned by the
+    tests below.
 
   Consumers that need order compare the envelope's `aggregateVersion` and drop or defer a stale
   event.
