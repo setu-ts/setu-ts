@@ -85,7 +85,8 @@ function boot(plugin: ReturnType<typeof DatabasePlugin>, format: ErrorFormat = '
   return app;
 }
 
-const DETAIL = 'A record with the same unique key already exists. The request was not applied.';
+const DETAIL =
+  'A record with the same unique key already exists. The conflicting write was rejected.';
 
 describe('a duplicate key answers 409 Conflict', () => {
   it('maps PostgreSQL 23505 to a Problem Details 409, field by field', async () => {

@@ -396,7 +396,8 @@ describe('@setu-ts/common barrel — duplicate key', () => {
     expect(common.httpStatusHintOf(error)).toEqual({
       status: 409,
       title: 'Conflict',
-      detail: 'A record with the same unique key already exists. The request was not applied.',
+      detail:
+        'A record with the same unique key already exists. The conflicting write was rejected.',
     });
     // The served detail never quotes the driver's text, which carries the value.
     expect(common.httpStatusHintOf(error)?.detail).not.toContain('ada@example.com');

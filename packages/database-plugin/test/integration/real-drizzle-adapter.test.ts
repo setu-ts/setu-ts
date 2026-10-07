@@ -823,8 +823,13 @@ const pgAccounts = pgTable('x90f_classified_accounts', {
   balance: integer('balance').notNull(),
 });
 
-/** A primary key AND a secondary unique column, for the duplicate-key cases. */
-const pgMembers = pgTable('dupkey_members', {
+/**
+ * A primary key AND a secondary unique column, for the duplicate-key cases.
+ * The table name is unique per run, so the case never adopts, empties or drops
+ * a pre-existing table in whatever database `POSTGRES_URL` names.
+ */
+const pgMembersTable = `dupkey_members_${crypto.randomUUID().replaceAll('-', '')}`;
+const pgMembers = pgTable(pgMembersTable, {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
 });
@@ -843,10 +848,11 @@ describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
     });
     await adapter.connect();
     const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'drizzle');
+    // No IF NOT EXISTS and no DELETE: the name is fresh, so creating it fails
+    // loudly rather than adopting someone else's table.
     await pool.query(
-      'CREATE TABLE IF NOT EXISTS dupkey_members (id text primary key, email text not null unique)',
+      `CREATE TABLE "${pgMembersTable}" (id text primary key, email text not null unique)`,
     );
-    await pool.query('DELETE FROM dupkey_members');
     try {
       const repo = service.getRepository('Member');
       await repo.create({ id: 'm1', email: 'ada@example.com' });
@@ -871,7 +877,7 @@ describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
       }
       expect(await repo.count()).toBe(1);
     } finally {
-      await pool.query('DROP TABLE IF EXISTS dupkey_members');
+      await pool.query(`DROP TABLE IF EXISTS "${pgMembersTable}"`);
       await pool.end();
       await adapter.disconnect();
     }

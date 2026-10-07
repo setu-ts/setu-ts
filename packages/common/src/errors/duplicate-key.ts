@@ -70,7 +70,8 @@ export class DuplicateKeyError extends Error {
     withHttpStatusHint(this, {
       status: 409,
       title: 'Conflict',
-      detail: 'A record with the same unique key already exists. The request was not applied.',
+      detail:
+        'A record with the same unique key already exists. The conflicting write was rejected.',
     });
   }
 }
