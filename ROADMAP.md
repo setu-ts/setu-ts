@@ -9532,10 +9532,9 @@ finishing successfully; the messaging README's current dispatch timing remains t
 write business state and an integration-event envelope atomically, relay persisted rows with
 at-least-once delivery, and de-duplicate per consumer by stable event ID. It must decide ordering,
 retention, replay, and failure observability across the database and messaging contracts; none of
-those choices belongs in a local recorder or a typed publishing convenience API. The publish-side
-primitive those rows are relayed WITH ships in M106 — a per-aggregate ordering key, a stable
-de-duplication ID and transport headers — while THIS milestone owns relay ordering and the
-per-consumer de-duplication the inbox performs.
+those choices belongs in a local recorder or a typed publishing convenience API. That design is now
+M107 (outbox) and M108 (inbox), relayed with the publish-side primitive M106 shipped — a
+per-aggregate ordering key, a stable de-duplication ID and transport headers.
 
 ---
 
@@ -13036,6 +13035,224 @@ depends on reading the acknowledgement.
 
 ---
 
+## Milestone 107: Transactional Outbox
+
+**Package(s):** `packages/messaging-plugin`, with `packages/common` only for what §2.2 forces there
+(a type another plugin must implement), and `packages/cloudflare-plugin` for the Workers relay.
+
+**Objective:** a service that changes its own data and announces the change does both or neither.
+The integration event is written as a row in the SAME database transaction as the business change,
+and a relay publishes persisted rows afterwards — at least once, per aggregate in order.
+
+**Why.** Publishing after commit loses the event when the process dies between the two; publishing
+before commit announces a change that may roll back. Every service that emits integration events
+(M93b) has this window today, and closing it by hand is the most commonly mis-built piece of an
+event-driven system. The prerequisites shipped first, each confirmed against a real broker: RabbitMQ
+publishes are persistent and confirmed (#418), Redis Streams and RabbitMQ redeliver a failed message
+(#419, #421), a unique violation is a portable `DuplicateKeyError` (#420), NATS reports a refused
+publish (#425), and M106 gives a publish an ordering key and a deduplication id.
+
+**Scope.**
+
+- **Atomic write.** An API that writes an envelope into an outbox entity through the caller's
+  `IUnitOfWork`, built at WRITE time (the envelope id is the end-to-end deduplication key and must
+  not change across re-sends), capturing the active `traceparent`, tenant and `aggregateId`, and
+  refusing an envelope too large to ever publish inside the business transaction rather than writing
+  an unsendable row. Per backend: SQL, MongoDB (replica set), DynamoDB and D1 support it; Cosmos
+  only when the row shares the business partition key; Bigtable cannot (single-row atomicity) and is
+  refused by name, pointing at the CDC follow-up.
+- **The relay queries the pending set, never a watermark.** "Everything after the last id or
+  timestamp" skips a row whose transaction took an earlier id and committed later; every sweep reads
+  all rows still pending. Rows are published per aggregate in `createdAt` order with M106's
+  `orderingKey` (the aggregate) and `deduplicationId` (the envelope id), then marked sent.
+- **One relay at a time.** The portable repository has no `SKIP LOCKED` and no conditional update
+  (M105 adds the latter), so the only portable mode is a single relay per database. The relay is a
+  job on `CAPABILITIES.SCHEDULER`, whose slot lock and handler mutex (M70l) keep a job to one
+  replica — but only with a SHARED `distributedLock` (Redis or a Durable Object); the default
+  `MemoryLock` is per process, so the plugin refuses a relay without one in a multi-replica setup,
+  or the plan states why it cannot tell. `IDistributedLock` itself lives in `scheduler-plugin`,
+  which this package may not import, so this is the route to it. The lease must outlast a batch; a
+  lease that expires mid-batch re-publishes, which the inbox (M108) absorbs. Native `SKIP LOCKED`
+  multi-relay is a later Postgres-only option.
+- **Latency.** Optionally publish right after commit, best effort, with the relay sweeping whatever
+  that missed. On Cloudflare Workers, where `SchedulerPlugin` refuses to register (M70l) and Cron
+  Triggers fire at most once a minute, the immediate publish runs in `waitUntil` and the cron sweep
+  is the relay.
+- **Trace continuity.** `TracedBroker` injects the trace active AT PUBLISH, which is the relay's
+  tick, not the request that wrote the row. The relay re-parents each publish to the stored
+  `traceparent` through `withSpan({ parentContext })`, so a request → row → publish → consume is one
+  trace again. No contract change.
+- **Poison rows.** `attempts`, `lastError` and an `availableAt` backoff; a row that fails N times
+  becomes `failed`, stops blocking its aggregate's later rows only if the plan decides it may, and
+  turns health `degraded`.
+- **Observability.** Health reports the age of the oldest pending row (degraded above a threshold —
+  the M90b backlog pattern); metrics for published, failed, poisoned, and relay lag. A stuck relay
+  is otherwise silent.
+- **Tenancy.** Column isolation is one table with the tenant in the row and in the headers.
+  Database-per-tenant needs the relay to iterate tenants, and no tenant catalog exists (M89c cut
+  `tenantById`), so the application supplies the list.
+- **Provisioning.** There is no portable `migrate()`, so the plugin checks at startup that the
+  outbox entity exists and refuses by name if not (the M52c binding-guard pattern); a migration
+  template ships for the SQL adapters.
+
+**Decided in the plan, not here.** Placement — inside `messaging-plugin` (it owns the envelope, the
+internal `createEnvelope`, `onIntegrationEvent` and the broker capability, and reaches the database
+structurally the way `multi-tenancy-plugin` does) versus a new `outbox-plugin` with the envelope
+codec promoted to `common` (the M47 precedent). The analysis leans to the first. Also: whether a
+poisoned row blocks its aggregate, and the outbox row's exact column set.
+
+**The promise, stated once and nowhere stronger:** at-least-once delivery from a committed write;
+per-aggregate publish order; delivery order as the broker gives it, corrected by the consumer
+comparing `aggregateVersion`. Never "exactly once".
+
+**Out of scope.** Change-data-capture relays (PostgreSQL logical decoding, MongoDB change streams,
+DynamoDB Streams, Cosmos change feed) — a later milestone, and the natural relay for the backends
+where "all pending rows in order" is expensive or impossible. The consumer side is M108.
+
+**Deliverables**
+
+- [ ] The atomic-write API, implemented per backend or refused by name
+- [ ] A pending-set relay as a scheduled job, with the watermark trap as a committed negative
+      control (two transactions committing out of id order — both rows are published)
+- [ ] Crash-injection tests at each point of the crash table: before commit (nothing published),
+      after commit (published by the relay), after publish before mark-sent (published twice, by
+      design)
+- [ ] Trace re-parenting proven with the real OTel SDK (one trace, request to consumer)
+- [ ] Poison handling, health and metrics; real-broker runs on RabbitMQ and Redis (the fakes hid
+      both redelivery defects)
+- [ ] The Workers hybrid driven on real workerd
+- [ ] README, PUBLIC_API.md, a design security review in the plan, and a committed-tree audit
+
+---
+
+## Milestone 108: Consumer Inbox
+
+**Package(s):** `packages/messaging-plugin`.
+
+**Objective:** a consumer applies an integration event's database effects once, even though the
+outbox (M107) and every broker deliver at least once.
+
+**Why.** At-least-once delivery means duplicates by design: a relay that crashes after publishing
+re-publishes, and a broker redelivers after a lost acknowledgement. Without an inbox, every consumer
+hand-rolls the same check, usually against the wrong key.
+
+**Scope.**
+
+- **The key is `(consumer group, envelope id)`.** Not the envelope id alone — two consumer groups
+  must each process the same `hired` event — and not `MessageMetadata.messageId`, which the broker
+  assigns and which changes on a re-send. `IntegrationEventEnvelope.id` is producer-assigned (M93b)
+  and stable through the outbox, which is why it is the key.
+- **Handler-level, in the consumer's transaction.** `IngressContext` is readonly with no state bag,
+  and handlers take `(message, metadata)`, so an ingress behaviour cannot hand a transaction to the
+  handler. The API is on `onIntegrationEvent`, for example
+  `onIntegrationEvent(definition, { inbox: { consumer: 'payroll' } }, async (event, uow) => …)`: the
+  inbox record is inserted through the same `IUnitOfWork` as the handler's writes, a
+  `DuplicateKeyError` (#420) means "already handled" and the delivery is acknowledged without
+  running the handler, and a handler failure rolls back both.
+- **Effects outside the database are a stated choice, not a guarantee.** Sending an email or calling
+  a provider cannot join the transaction; the README names the three options — record before (at
+  most once), record after (at least once), or forward a derived key the provider de-duplicates
+  (once where the provider supports it).
+- **Poison messages.** A failing handler keeps being redelivered (and blocks a Kafka partition).
+  Failures are counted OUTSIDE the rolled-back transaction, or the broker's own delivery limit is
+  used; `IngressContext.attempt` is absent for messaging by contract.
+- **Retention.** Inbox rows are kept at least as long as broker redelivery plus the outbox's replay
+  window; replaying anything older than that produces duplicates, documented.
+- **Backends.** The same per-backend table as M107: SQL, MongoDB, DynamoDB and D1 support it; Cosmos
+  needs the inbox row in the business partition; Bigtable is refused by name.
+
+**Depends on** broker redelivery being real, which #419 and #421 fixed — an inbox on a broker that
+discards failed messages has nothing to de-duplicate.
+
+**Deliverables**
+
+- [ ] The handler-level inbox on `onIntegrationEvent`, per backend or refused by name
+- [ ] A duplicate delivery skipped and acknowledged; a handler failure rolling back both the effect
+      and the inbox row, then succeeding on redelivery — on real RabbitMQ and Redis
+- [ ] Two consumer groups each processing the same event once
+- [ ] An end-to-end run with M107: a forced double publish handled once
+- [ ] Retention, README (the three non-database effect choices), PUBLIC_API.md, a design security
+      review, and a committed-tree audit
+
+---
+
+## Milestone 109: Idempotency
+
+**Package(s):** a new `packages/idempotency-plugin`; `packages/common` (the store port and a
+capability token, because `cloudflare-plugin` would implement Durable Object and D1 stores and §2.2
+forbids it importing this plugin); `packages/sdk`; `packages/cloudflare-plugin`.
+
+**Objective:** one configurable mechanism that makes a repeated request, message, job or outbound
+call do its work once, reachable from HTTP routes, ingress, plain code and the SDK.
+
+**Why.** A client that retries a payment after a lost response, a provider redelivering a webhook, a
+queue redelivering a job after a crash: each needs "do this once per key", and each application
+builds it differently. The design must state which of three guarantees it gives — no duplicate
+processing; the work and its idempotency record committed together; external side effects once — and
+the framework can only deliver the first two. The third it can only support by forwarding a derived
+key to a provider that de-duplicates.
+
+**Scope.**
+
+- **One core state machine.** `claim(key, fingerprint, lease)` → `claimed` with a fencing token,
+  then `complete(token, record)` or `release(token)`. A claim answers claimed, completed (with the
+  stored record), in progress, fingerprint mismatch, or lease expired. The lease must exceed the
+  longest the work can take, or a retry claims mid-work.
+- **Four entry points.**
+  - HTTP: a route-level `idempotent(options)` middleware and an `@Idempotent()` decorator, appended
+    after authentication, authorization and route validation (the M89a precedent) so that a refused
+    or invalid request consumes no key. **No global switch.**
+  - Ingress: an ingress behaviour for queue jobs and messages.
+  - Code: `within(uow, key, fn)`, for the transactional tier.
+  - SDK: an `idempotencyKey` request option, generated once per logical call and reused on every
+    attempt, which is also what makes a POST or PATCH retryable (the SDK retries only
+    GET/HEAD/OPTIONS/PUT/DELETE today).
+- **Configurable, with safe defaults:** key source (header, body field, message id, job id) with a
+  bounded length and character set; scope of tenant + principal + route or topic — principal scope
+  is a SECURITY requirement, since without it one user replays another's stored response; the
+  fingerprint (method, path and raw body by default) with a mismatch answering `422`; a concurrent
+  duplicate answering `409`; failure classification (a recorded caller error replays, a server error
+  releases the key, a failed message or job always releases); replay rules (non-streaming responses
+  only, `Set-Cookie`, request ids and `RateLimit-*` stripped, `Idempotent-Replayed: true` added, a
+  body size cap); and a TTL.
+- **Three store tiers.** A: memory, single process. B: Redis `SET NX PX` or a Cloudflare Durable
+  Object — across replicas, but not atomic with the business write. C: a record written inside the
+  business transaction — the work happens once — which cannot be plain middleware, so it is
+  `within()` only, built on the same transaction seam as M108's inbox. Tier C per backend: SQL,
+  MongoDB and DynamoDB yes; D1 for database-only effects; Cosmos only within one partition; Bigtable
+  no.
+- **Not this mechanism:** business uniqueness ("one payroll run per company and period") is a unique
+  constraint, and a scheduled tick is already de-duplicated by M70l's slot locks. The README says
+  so.
+
+**Known contract gap.** `ICacheStore` has no atomic set-if-absent, so tier B cannot be built on the
+cache capability without a race; the plan decides whether the store port owns its own Redis client
+or the cache contract gains an optional atomic member.
+
+**Suggested split.** 109a: the core, tiers A and B, and the HTTP and ingress entry points — needs
+nothing from M107/M108 and can start in parallel. 109b: tier C `within()` (after M108, sharing its
+seam) and the SDK option.
+
+**Security and privacy, for the plan's design review:** cross-user replay (principal scope); store
+growth as a denial-of-service (rate limiting runs earlier, TTL, key and body caps); stored responses
+carrying personal data (a status-only mode, M96 redaction, and retention counting toward erasure);
+and `409` versus `422` revealing that a key exists, acceptable once keys are principal-scoped.
+
+**Prior art, to verify live before the plan relies on it:** Stripe's idempotency keys, the IETF
+`Idempotency-Key` header draft, AWS Lambda Powertools idempotency (the closest configurable design),
+and Brandur Leach's Postgres idempotency article.
+
+**Deliverables**
+
+- [ ] The store port and token in `common`; tiers A and B; memory, Redis and Durable Object stores
+- [ ] Route middleware and decorator, refusing a streaming route at registration
+- [ ] The ingress behaviour, releasing on a failed job or message
+- [ ] `within()` tier C per backend, or refused by name
+- [ ] The SDK `idempotencyKey` option, with a test that every retry carries the same key
+- [ ] A design security review in each plan, and a committed-tree audit
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -13269,3 +13486,6 @@ patch by construction and gains nothing new here.
 | 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
 | 105       | ⬜     | database-plugin + cloudflare-plugin — conditional writes on `IRepository` (closes the M101c tenant-bridge check-then-write race)                                                                                                              |
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
+| 107       | ⬜     | messaging-plugin (+ common, cloudflare-plugin as needed) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                                                                  |
+| 108       | ⬜     | messaging-plugin — consumer inbox keyed by (consumer group, envelope id), in the handler's transaction                                                                                                                                        |
+| 109       | ⬜     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
