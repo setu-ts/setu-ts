@@ -136,6 +136,26 @@ export interface AppFactoryWiring {
    * its wirings already name every package.
    */
   readonly composes?: readonly string[];
+  /**
+   * A third factory parameter, after `env` and the devtool composition.
+   * Omitted → the factory takes the two shared parameters only.
+   *
+   * Rendered on every target with one signature; where the target reads none
+   * of it, the name is underscore-prefixed, as the devtool parameter is.
+   */
+  readonly parameter?: AppFactoryParameter;
+}
+
+/** A starter-composed template's own factory parameter. */
+export interface AppFactoryParameter {
+  /** Parameter name, as `args` reads it. */
+  readonly name: string;
+  /** The parameter's type annotation. */
+  readonly type: string;
+  /** One-sentence JSDoc `@param` text. */
+  readonly doc: string;
+  /** Targets on which `args` reads the parameter. */
+  readonly readOn: readonly TargetRuntime[];
 }
 
 /** One configuration variable a template's generated source reads. */
@@ -252,6 +272,11 @@ export interface TemplateManifest {
      * listed only `coverage/` and the env file.
      */
     readonly outputDir: string;
+    /**
+     * A development entry emitted on the Deno target only, with a `dev` task
+     * that runs it. Omitted → no development entry and no `dev` task.
+     */
+    readonly devEntry?: { readonly path: string; readonly contents: string };
   };
   /**
    * `compilerOptions` merged into `tsconfig.json`, which the npm toolchain reads.

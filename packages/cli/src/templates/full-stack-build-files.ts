@@ -77,12 +77,12 @@ import { defineConfig } from 'vite';
 //    in app/lib/context-keys.server.ts are matched by identity: the copy
 //    setu.config.ts holds would stop matching the copy a loader reads, so
 //    every context value would silently fall back to its default.
-const frameworkPackages = [${externals}
+export const frameworkPackages = [${externals}
 ];
 
 // Workspace libraries are resolved by Deno at runtime, just like framework
 // packages. Read each library's declared name: a custom scope is valid too.
-const workspaceLibraries: string[] = [];
+export const workspaceLibraries: string[] = [];
 try {
   const libraries = new URL('../../libs/', import.meta.url);
   for (const entry of readdirSync(libraries, { withFileTypes: true })) {
@@ -316,4 +316,96 @@ export const FULL_STACK_DENO_COMPILER_OPTIONS: Readonly<Record<string, unknown>>
  */
 export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
   'check:app': 'deno check app/**/*.ts app/**/*.tsx src/**/*.ts',
+};
+
+/**
+ * The development entry a Deno full-stack project carries, run by `deno task dev`.
+ *
+ * Runs Vite in-process, hands its server build to the SSR plugin through
+ * `createApp`'s `ssr` parameter, and proxies Vite's client URLs (all under
+ * `/__vite/`) through the application's port, so a route edit is served on the
+ * next request with no restart. `viteDevExternals` keeps every `@setu-ts`
+ * package and workspace library external, resolved through `deno.json`: Vite
+ * cannot resolve a JSR import, and loading one itself would make a second copy
+ * whose context keys match nothing.
+ */
+export const FULL_STACK_DEV_ENTRY: { readonly path: string; readonly contents: string } = {
+  path: 'dev.ts',
+  contents: `import * as vite from 'vite';
+import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
+import { viteDevExternals } from '@setu-ts/react-router-plugin';
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { createApp } from './setu.config.ts';
+import { frameworkPackages, workspaceLibraries } from './vite.config.ts';
+
+/**
+ * Development server: React Router with hot module replacement.
+ *
+ * Vite serves the route modules and the client graph; the application still
+ * owns the port, the plugins and every non-page route. Client URLs are
+ * namespaced under \`/__vite/\` so one proxy route reaches Vite without
+ * colliding with application routes. Production does not use this file:
+ * \`deno task start\` builds and runs \`main.ts\`.
+ */
+const BASE = '/__vite/';
+const runtime = createRuntimeServices();
+const port = Number(runtime.env.PORT ?? '3000');
+const vitePort = Number(runtime.env.VITE_PORT ?? '5173');
+
+// A file module always has a directory; the fallback only satisfies the type.
+const root = import.meta.dirname ?? '.';
+
+const viteServer = await vite.createServer({
+  root,
+  configFile: \`\${root}/vite.config.ts\`,
+  base: BASE,
+  server: { port: vitePort, strictPort: true },
+  plugins: [viteDevExternals({
+    packages: [...frameworkPackages, ...workspaceLibraries],
+    // Deno's resolver, so a route shares the module instances this entry holds.
+    resolve: (specifier) => import.meta.resolve(specifier),
+  })],
+});
+await viteServer.listen();
+
+// Re-read on every request, so an edited route is served without a restart.
+const loadServerBuild = async (): Promise<ServerBuild> =>
+  (await viteServer.ssrLoadModule('virtual:react-router/server-build')) as ServerBuild;
+
+const app = await createApp(undefined, undefined, {
+  mode: 'development',
+  loadRequestHandler: (_path, mode) => {
+    const handler = createRequestHandler(loadServerBuild, mode);
+    return Promise.resolve({
+      handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
+      // From the same react-router module as the handler: React Router checks
+      // the context with instanceof.
+      createLoadContext: () => new RouterContextProvider(),
+    });
+  },
+});
+
+app.router.get(\`\${BASE}*\`, async (ctx) => {
+  const url = new URL(ctx.request.url);
+  const upstream = await fetch(\`http://localhost:\${vitePort}\${url.pathname}\${url.search}\`, {
+    headers: ctx.request.headers,
+  });
+  ctx.response.status(upstream.status);
+  for (const [key, value] of upstream.headers.entries()) {
+    const lower = key.toLowerCase();
+    if (lower !== 'content-encoding' && lower !== 'content-length') {
+      ctx.response.appendHeader(key, value);
+    }
+  }
+  return upstream.body === null ? ctx.response.text('') : ctx.response.stream(upstream.body);
+});
+
+await app.start({ port });
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
+    void Promise.allSettled([app.stop(), viteServer.close()]).then(() => runtime.exit(0));
+  });
+}
+`,
 };

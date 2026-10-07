@@ -10,6 +10,7 @@ import {
   MockResponse,
   MockServiceRegistry,
   overrideCapability,
+  overrideProvider,
 } from '../../src/index.ts';
 
 // Type imports for assignability checks
@@ -33,6 +34,7 @@ import type {
 describe('barrel exports', () => {
   it('every named export is defined', () => {
     expect(typeof createTestApp).toBe('function');
+    expect(typeof overrideProvider).toBe('function');
     expect(typeof createMockPlugin).toBe('function');
     expect(typeof inject).toBe('function');
     expect(typeof createTestContext).toBe('function');

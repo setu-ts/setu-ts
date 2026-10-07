@@ -342,9 +342,9 @@ describe('class-based template', () => {
   });
 
   it('leaves every wiring without a seam argument-free, except di-plugin', () => {
-    // Three plugins take a seam, and — since M70d (E3) — `di-plugin` emits
-    // `autoRegister: true`, because the default disables the container's only
-    // route to the framework. Everything else must stay a bare call, or a
+    // Three plugins take a seam, and — since M70d (E3) — `di-plugin` states
+    // `autoRegister: true` explicitly, the container's only route to the
+    // framework. Everything else must stay a bare call, or a
     // template has grown configuration nothing asked for.
     //
     // `config-plugin` is deliberately NOT in this set: its dotenv argument is
@@ -370,9 +370,8 @@ describe('class-based template', () => {
   });
 
   it('emits DiPlugin({ autoRegister: true }), not a bare call (E3)', () => {
-    // A bare `DiPlugin()` leaves `autoRegister` at its `false` default, so every
-    // `@Inject(CAPABILITIES.X)` throws at startup. The one file the developer
-    // does not hand-edit must set it.
+    // Without `autoRegister` every `@Inject(CAPABILITIES.X)` throws at startup.
+    // It is the default since 0.9.0; the composition still states it.
     const di = CLASS_BASED_TEMPLATE.plugins.find((w) => w.pkg === 'di-plugin');
     expect(di?.args).toBe('{ autoRegister: true }');
   });

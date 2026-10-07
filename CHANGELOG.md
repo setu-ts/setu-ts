@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`deno task dev` in a full-stack project serves route edits without a restart (`@setu-ts/cli`,
+  `@setu-ts/react-router-plugin`, PR pending).** On Deno, Vite's development SSR runner could not
+  load a route that imports a `@setu-ts` package: it resolves imports through `node_modules`, so
+  every page answered `500` with `Cannot find module '@setu-ts/react-router-plugin'`. And a package
+  it loaded itself would be a second copy whose `contextKeyFor()` keys match nothing. The new
+  `viteDevExternals()` resolves those packages with the runtime's own resolver and keeps them
+  external, so the dev server shares the instance the application holds.
+  `setu new --template
+  full-stack` on Deno now emits a `dev.ts` entry and a `dev` task using it.
+  The plugin is typed structurally (`ViteDevExternalsOptions`, `ViteDevExternalsPlugin`,
+  `ViteDevExternalId`, `ViteResolvedEnvironments`), so the package still imports no Vite. Verified
+  against the published JSR packages and the workspace sources: `/login` renders with its CSRF
+  token, client modules load through the app port, and an edited route is served on the next
+  request.
+
+- **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR
+  pending).** With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the
+  container, where `overrideCapability()` cannot reach it, and the container refuses a second
+  registration. `overrideProvider('pricing-service', { useValue: fake })` registers the double
+  before the real class, so a decorated controller is constructed with it. A mistyped token, an
+  application without a container, or a provider registered too early fails `start()` instead of
+  testing the real class.
+
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
   error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s
@@ -201,6 +224,21 @@ All notable changes to this project are documented here. The format follows
   field is validated at construction, `factor` (kafkajs's jitter) included, held to [0, 1].
 
 ### Changed
+
+- **A generated full-stack `setu.config.ts` takes an `ssr` parameter, and its `vite.config.ts`
+  exports `frameworkPackages` and `workspaceLibraries` (`@setu-ts/cli`, PR pending).** `dev.ts`
+  passes the development SSR runtime as `createApp`'s third argument, which replaces `assetsDir`;
+  omitted, production behaviour is unchanged. Workers projects declare the parameter as `_ssr` and
+  read none of it. Existing projects are unaffected; to adopt the dev loop, copy those changes and
+  `dev.ts` from a fresh scaffold.
+
+- **BREAKING: `DiPlugin()` now defaults `autoRegister` to `true` (`@setu-ts/di-plugin`, PR
+  pending).** With the old `false` default, a bare `DiPlugin()` could not resolve any framework
+  capability, so `@Inject(CAPABILITIES.LOGGER)` or `CAPABILITIES.CACHE` failed at startup with "No
+  provider registered for DI token". The container now falls back to the kernel `ServiceRegistry`
+  for a token it does not hold; explicit container registrations still win. **Migration:** pass
+  `DiPlugin({ autoRegister: false })` to keep resolution confined to the container.
+  `createContainer()` outside the plugin is unchanged.
 
 - **BREAKING: RabbitMQ consumer retry defaults (#421).** Durable messaging consumer groups now retry
   failures with five total attempts and tiered delays, create durable retry/dead queues (retry

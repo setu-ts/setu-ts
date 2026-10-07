@@ -245,6 +245,56 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(contentsOf([...projectFiles('shop', 'deno', host)], '.gitignore')).toContain('build/\n');
   });
 
+  it('emits a development entry and a dev task that skips the production build', () => {
+    const files = [...projectFiles('shop', 'deno', host)];
+    const tasks = (manifestOf('deno') as unknown as { tasks: Record<string, string> }).tasks;
+    expect(tasks['dev']).toBe('deno task install && deno run -A dev.ts');
+    const dev = contentsOf(files, 'dev.ts');
+    expect(dev).toContain('viteDevExternals({');
+    expect(dev).toContain('packages: [...frameworkPackages, ...workspaceLibraries]');
+    expect(dev).toContain('resolve: (specifier) => import.meta.resolve(specifier)');
+    expect(dev).toContain("mode: 'development'");
+    // The externals list dev.ts imports is the one the server build uses.
+    const vite = contentsOf(files, 'vite.config.ts');
+    expect(vite).toContain('export const frameworkPackages = [');
+    expect(vite).toContain('export const workspaceLibraries: string[] = [];');
+  });
+
+  it('hands the development SSR runtime to the plugin in place of assetsDir', () => {
+    const config = contentsOf([...projectFiles('shop', 'deno', host)], 'setu.config.ts');
+    expect(config).toContain(
+      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+    );
+    expect(config).toContain(
+      "...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),",
+    );
+    expect(config).toContain(
+      "import type { ReactRouterPluginOptions } from '@setu-ts/react-router-plugin';",
+    );
+  });
+
+  it('emits no development entry off Deno', () => {
+    for (const runtime of ['node', 'bun', 'cloudflare-workers'] as const) {
+      const files = [
+        ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
+      ];
+      expect(files.some((file) => file.path === 'dev.ts')).toBe(false);
+    }
+    const workers = contentsOf(
+      [...projectFiles(
+        'shop',
+        'cloudflare-workers',
+        resolveHost(getTemplate('full-stack')!, 'cloudflare-workers'),
+      )],
+      'setu.config.ts',
+    );
+    // One signature on every target; Workers reads none of it.
+    expect(workers).toContain(
+      "  _ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+    );
+    expect(workers).not.toContain('ssr === undefined');
+  });
+
   it('leaves a template WITHOUT a frontend build untouched', () => {
     // The three settings above ride one signal, so a REST project must gain
     // none of them — a `package.json` in a Deno project is the trap M58 hit.

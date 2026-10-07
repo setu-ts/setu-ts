@@ -408,6 +408,18 @@ function configModule(
     const factoryPluginLines = plugins.length === 0
       ? ''
       : `\n${plugins.map((p) => `  app.register(${p.symbol}(${pluginArgs(p)}));`).join('\n')}\n`;
+    const parameter = appFactory.parameter;
+    const parameterName = parameter === undefined
+      ? ''
+      : parameter.readOn.includes(runtime)
+      ? parameter.name
+      : `_${parameter.name}`;
+    const factoryParameterDoc = parameter === undefined
+      ? ''
+      : `\n * @param ${parameterName} - ${parameter.doc}`;
+    const factoryParameterLine = parameter === undefined
+      ? ''
+      : `\n  ${parameterName}?: ${parameter.type},`;
     return `${imports}
 
 /**
@@ -421,12 +433,12 @@ function configModule(
  * forwarded through unchanged.
  * @param _devtool - Accepted for one signature on every target. The starter
  * owns its construction, so a devtool composition cannot be honored here —
- * the CLI refuses the devtool opt-in on this template by name.
+ * the CLI refuses the devtool opt-in on this template by name.${factoryParameterDoc}
  * @returns The configured, unstarted application
  */
 export async function ${CONFIG_EXPORT}(
   env?: Readonly<Record<string, unknown>>,
-  _${DEVTOOL_PARAMETER}
+  _${DEVTOOL_PARAMETER}${factoryParameterLine}
 ): Promise<IKernelApplication> {
   const app = await ${appFactory.symbol}(${
       appFactory.args?.({
@@ -1132,6 +1144,11 @@ function denoTasks(
     // build, so a fresh project's first `deno task test` needs it as much as
     // `start` does — without it the test fails on a missing build (V8-39).
     test: `deno task build && ${test.test}`,
+    // The development entry runs Vite in-process and needs it installed, but
+    // not the production build: Vite serves the route modules itself.
+    ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
+      ? { dev: `deno task install && deno run -A ${manifest.npmBuild.devEntry.path}` }
+      : {}),
     ...host.extraTasks,
   };
 }
@@ -1675,6 +1692,10 @@ ${
 \`\`\`
 ${servedRoutesSection(host, runtime, port)}
 ${
+    runtime === 'deno' && manifest?.npmBuild?.devEntry !== undefined
+      ? `## Develop\n\n\`\`\`bash\ndeno task dev\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart. Vite\nlistens on \`VITE_PORT\` (default 5173); open the app's own port.\n\n`
+      : ''
+  }${
     host.devtoolPort === undefined
       ? ''
       : `## Devtool\n\nRun \`deno task dev\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
@@ -1928,6 +1949,11 @@ ${host.wranglerToml}`,
     });
   } else {
     files.push({ path: 'main.ts', contents: serveEntry(runtime, port) });
+  }
+
+  const devEntry = host.manifest?.npmBuild?.devEntry;
+  if (runtime === 'deno' && devEntry !== undefined) {
+    files.push({ path: devEntry.path, contents: devEntry.contents });
   }
 
   // Template source files last. Any path colliding with the fixed set above is
