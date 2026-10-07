@@ -769,27 +769,42 @@ function workersEntry(
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
-  // The memoisation seam every entry shares. `??= boot(env)` cached the raw
-  // promise, so ONE failed boot — a mistyped binding, a broker briefly down at
-  // cold start — was permanent for the isolate's life; the catch clears the
-  // slot before rethrowing so the next request re-attempts. Synchronous on
-  // purpose: an `async` wrapper with no await fails the generated project's
-  // own `deno lint` (require-await).
+  // The memoisation seam every entry shares. Two cases rebuild rather than
+  // reuse:
+  // - A FAILED boot. `??= boot(env)` cached the raw promise, so ONE failed
+  //   boot — a mistyped binding, a broker briefly down at cold start — was
+  //   permanent for the isolate's life (M70l X9-8). The catch clears the slot,
+  //   but only while it still holds THIS attempt: a rebuild that superseded it
+  //   must not be erased by the older attempt's late rejection.
+  // - A DIFFERENT `env` object. Cloudflare may keep an isolate running across a
+  //   bindings-only deploy, and an app built from the first request's `env`
+  //   would keep the old bindings. Measured on workerd: every request — `fetch`
+  //   and `queue` alike — receives the SAME `env` object while bindings are
+  //   unchanged, so the identity check never rebuilds in the steady state. The
+  //   superseded app is stopped best-effort; its failure must not reach the
+  //   new one.
+  // Synchronous on purpose: an `async` wrapper with no await fails the
+  // generated project's own `deno lint` (require-await).
   const ensureBootedFn =
     `function ensureBooted(env: Record<string, unknown>): Promise<IKernelApplication> {
-  if (booted === undefined) {
-    booted = boot(env).catch((error: unknown) => {
-      booted = undefined;
+  if (booted === undefined || bootedEnv !== env) {
+    const previous = booted;
+    const attempt = boot(env).catch((error: unknown) => {
+      if (booted === attempt) booted = undefined;
       throw error;
     });
+    booted = attempt;
+    bootedEnv = env;
+    void previous?.then((app) => app.stop()).catch(() => {});
   }
   return booted;
 }`;
 
   // One import line per contributing package, and one export per contribution.
-  // Each reuses `booted`, never a second `boot(env)`: two applications would
-  // mean two brokers with two dispatch tables, and a subscription registered on
-  // one would be invisible to the other.
+  // Each reuses `booted`, never a second `boot(env)`: two LIVE applications
+  // would mean two brokers with two dispatch tables, and a subscription
+  // registered on one would be invisible to the other. A binding change is the
+  // one case that builds a second app, and it stops the first.
   const exportImports = workerExports
     .map((entry) =>
       `import type { ${entry.payloadType} } from '@setu-ts/${entry.payloadPkg}';\n` +
@@ -813,9 +828,13 @@ ${renderRoutes(entry)}
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
 ${waitUntilImport}${exportImports === '' ? '' : `${exportImports}\n`}
 let booted: Promise<IKernelApplication> | undefined;
+// The \`env\` the current application was built from; a different one means the
+// Worker's bindings changed while this isolate kept running.
+let bootedEnv: Record<string, unknown> | undefined;
 
 /**
- * Builds and starts the application once, on the first request.
+ * Builds and starts the application on the first request, and again whenever
+ * the Worker's bindings change.
  *
  * Workers have no socket to bind, so start() takes no port: it registers the
  * plugins and the platform drives the app through fetch().

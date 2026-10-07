@@ -414,6 +414,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A scaffolded Worker kept its old bindings after a bindings-only deploy (`@setu-ts/cli`, PR
+  pending).** The `src/index.ts` that `setu new --runtime cloudflare-workers` generates memoized the
+  application built from the first request's `env` and reused it for every later request. Cloudflare
+  may keep an isolate running across a deploy that changes only bindings, so that application kept
+  serving with the previous bindings, variables and secrets. `ensureBooted` now rebuilds when a
+  request carries a different `env` object and stops the superseded application on a best-effort
+  basis. On workerd, `fetch` and `queue` handlers receive the same `env` object while bindings are
+  unchanged, so the check never rebuilds in the steady state. A superseded boot's late rejection no
+  longer clears the slot a newer boot holds. Only newly scaffolded projects change; an existing
+  project can copy the new `ensureBooted` and its `bootedEnv` variable into its own `src/index.ts`.
+
 - **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
   `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as
   a plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB

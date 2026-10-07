@@ -72,3 +72,112 @@ describe('generated Workers entry boot semantics (X9-8)', () => {
     expect((entry.match(/await ensureBooted\(env\)/g) ?? []).length).toBeGreaterThanOrEqual(1);
   });
 });
+
+/** What the fake `setu.config.ts` records about every application it builds. */
+interface BootLog {
+  readonly built: string[];
+  readonly stopped: string[];
+}
+
+/** The emitted entry's default export, as the platform invokes it. */
+interface WorkerModule {
+  readonly default: {
+    fetch(request: Request, env: Record<string, unknown>): Promise<Response>;
+  };
+}
+
+/**
+ * Writes the emitted entry beside a fake `setu.config.ts` and imports it.
+ *
+ * The fake factory names each application after `env.NAME`, answers its name
+ * from `fetch`, and fails to start when `env.FAIL` is set (or 20 ms later when
+ * `env.FAIL_LATER` is) — enough to observe
+ * which application served a request and which ones were stopped. Each call
+ * uses a fresh directory, so the entry's module-level state starts empty.
+ */
+async function loadEntry(): Promise<{ worker: WorkerModule['default']; log: BootLog }> {
+  const dir = await Deno.makeTempDir({ prefix: 'workers-entry-' });
+  await Deno.mkdir(`${dir}/src`);
+  await Deno.writeTextFile(`${dir}/src/index.ts`, workersEntry());
+  await Deno.writeTextFile(
+    `${dir}/setu.config.ts`,
+    `export const log = { built: [] as string[], stopped: [] as string[] };
+export function createApp(env: Record<string, unknown>) {
+  const name = String(env.NAME);
+  log.built.push(name);
+  return Promise.resolve({
+    start: () =>
+      env.FAIL_LATER
+        ? new Promise<void>((_, reject) => setTimeout(() => reject(new Error('late')), 20))
+        : env.FAIL
+        ? Promise.reject(new Error('boot failed'))
+        : Promise.resolve(),
+    stop: () => { log.stopped.push(name); return Promise.resolve(); },
+    fetch: () => Promise.resolve(new Response(name)),
+  });
+}
+`,
+  );
+  const entry = (await import(`file://${dir}/src/index.ts`)) as WorkerModule;
+  const config = (await import(`file://${dir}/setu.config.ts`)) as { log: BootLog };
+  return { worker: entry.default, log: config.log };
+}
+
+/** Lets the best-effort `stop()` of a superseded application settle. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+describe('generated Workers entry rebuilds when bindings change', () => {
+  const request = () => new Request('http://worker.test/');
+
+  it('reuses one application while every request carries the same env', async () => {
+    const { worker, log } = await loadEntry();
+    const env = { NAME: 'a' };
+    const bodies = await Promise.all([
+      worker.fetch(request(), env).then((r) => r.text()),
+      worker.fetch(request(), env).then((r) => r.text()),
+    ]);
+    expect(await (await worker.fetch(request(), env)).text()).toBe('a');
+    expect(bodies).toEqual(['a', 'a']);
+    expect(log.built).toEqual(['a']);
+    expect(log.stopped).toEqual([]);
+  });
+
+  it('builds a new application for a new env and stops the old one', async () => {
+    const { worker, log } = await loadEntry();
+    expect(await (await worker.fetch(request(), { NAME: 'old' })).text()).toBe('old');
+    // A bindings-only deploy that reuses the isolate hands later requests a
+    // different env object; serving from the old application would use the
+    // old bindings.
+    expect(await (await worker.fetch(request(), { NAME: 'new' })).text()).toBe('new');
+    await settle();
+    expect(log.built).toEqual(['old', 'new']);
+    expect(log.stopped).toEqual(['old']);
+  });
+
+  it('retries a failed boot instead of caching the failure', async () => {
+    const { worker, log } = await loadEntry();
+    const failing = { NAME: 'bad', FAIL: true };
+    expect((await worker.fetch(request(), failing)).status).toBe(503);
+    // Same env again: the failure was not cached, so the boot is attempted anew.
+    expect((await worker.fetch(request(), failing)).status).toBe(503);
+    const good = { NAME: 'good' };
+    expect(await (await worker.fetch(request(), good)).text()).toBe('good');
+    expect(await (await worker.fetch(request(), good)).text()).toBe('good');
+    expect(log.built).toEqual(['bad', 'bad', 'good']);
+  });
+
+  it('keeps a newer application when a superseded boot fails late', async () => {
+    const { worker, log } = await loadEntry();
+    // The old env's boot is still in flight when the bindings change.
+    const stale = worker.fetch(request(), { NAME: 'stale', FAIL_LATER: true });
+    const fresh = { NAME: 'fresh' };
+    expect(await (await worker.fetch(request(), fresh)).text()).toBe('fresh');
+    expect((await stale).status).toBe(503);
+    // The stale attempt's rejection must not clear the slot the fresh boot now
+    // holds: the next request reuses 'fresh' rather than booting it again.
+    expect(await (await worker.fetch(request(), fresh)).text()).toBe('fresh');
+    expect(log.built).toEqual(['stale', 'fresh']);
+  });
+});
