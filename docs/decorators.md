@@ -506,10 +506,9 @@ import { Controller, Get, Header, Params } from '@setu-ts/decorator-plugin';
 export class UserController {
   @Get()
   @Params(Header('Authorization'))
-  async list(auth: string | null | undefined) {
-    // "Bearer <token>" or "Basic <credentials>". An absent header arrives as null
-    // although the source is typed `string | undefined`, so test with `!= null`.
-    return { hasAuth: auth != null };
+  async list(auth: string | undefined) {
+    // "Bearer <token>" or "Basic <credentials>"; undefined when the header is absent.
+    return { hasAuth: auth !== undefined };
   }
 }
 ```
@@ -688,13 +687,11 @@ export class UserController {
 
   @Get()
   @ValidateQuery(listQuerySchema)
-  @Params(Query())
-  async list(query: Readonly<Record<string, unknown>>) {
-    // GET /users?page=3 → { page: 3, limit: 10 }. At run time this is the
-    // PARSED query, numbers included, but `Query()` is typed as the raw string
-    // record, so narrow it rather than declare the schema's type here.
-    const { page, limit } = query as z.infer<typeof listQuerySchema>;
-    return { page, limit };
+  @Params(Query<z.infer<typeof listQuerySchema>>())
+  async list(query: z.infer<typeof listQuerySchema>) {
+    // GET /users?page=3 → { page: 3, limit: 10 }: the parsed query, defaults
+    // and coerced numbers included.
+    return query;
   }
 }
 ```

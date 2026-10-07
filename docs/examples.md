@@ -19,8 +19,8 @@ packages to this repository's `packages/` sources, so an example always runs aga
 code rather than a published release.
 
 Most apps listen on port `3000` unless you pass a port, but three do not: `graphql-demo` defaults to
-`4000`, `grpc` to `5000`, and `static-site` always binds `8000`. Two apps are demonstrations that
-print a result and exit rather than servers: `cqrs` and `microservices`.
+`4000`, `grpc` to `5000`, and `static-site` to `8000`. Two apps are demonstrations that print a
+result and exit rather than servers: `cqrs` and `microservices`.
 
 ## How every example is laid out
 
@@ -77,7 +77,7 @@ try {
 | [cloudflare](../apps/cloudflare)                 | KV, a cron trigger, and queue-backed messaging work on real workerd                             | Wrangler                  |
 | [compiled-binary](../apps/compiled-binary)       | `deno compile` produces a binary that serves `/health`                                          | —                         |
 | [full-stack](../apps/full-stack)                 | A server-rendered React Router page shows rows read through the database capability             | — (builds with Deno)      |
-| [static-site](../apps/static-site)               | Static files are served with cache headers, ETags, conditional requests, and byte ranges        | Port 8000 free            |
+| [static-site](../apps/static-site)               | Static files are served with cache headers, ETags, conditional requests, and byte ranges        | —                         |
 
 ## Example deep dives
 
@@ -354,12 +354,11 @@ its `immutable` policy when the brotli copy is served, conditional requests, and
 through `Range` and `If-Range`.
 
 ```bash
-cd apps/static-site && deno task start           # always port 8000
-curl -I localhost:8000/index.html
+cd apps/static-site && deno task start 3400      # the port; defaults to 8000
+curl -I localhost:3400/index.html
 ```
 
-Port `8000` is hard-coded, so stop anything else bound there first. DynamoDB Local's default port is
-also `8000`.
+The default port `8000` is also DynamoDB Local's default, so pass another port when that is running.
 
 Read: [`main.ts`](../apps/static-site/main.ts), [`smoke.ts`](../apps/static-site/smoke.ts).
 
