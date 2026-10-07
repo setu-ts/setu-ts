@@ -193,9 +193,12 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 272 in M95d: docs/mvc.md's URL-scheme demonstration and its Error pages
   // worked example (+2, both compiling). 274 in M99e: migration-nestjs.md's
   // Scaffolding and Microservices sections add two bash fences (+2, skipped).
-  total: 274,
-  ts: 226,
-  compile: 193,
+  // 272 after the getting-started cold read: three identical per-runtime
+  // blocks collapse to one and a "Stopping Cleanly" block is added (-2, all
+  // compiling).
+  total: 272,
+  ts: 224,
+  compile: 191,
   external: 33,
   pseudocode: 0,
   skipped: 48,
