@@ -36,7 +36,9 @@ export interface FullStackStarterOptions extends MicroserviceStarterOptions {
    */
   cqrs?: CqrsPluginOptions;
   /**
-   * Always-on arm: {@linkcode SchedulerPlugin}. Omitted → defaults.
+   * Always-on arm: {@linkcode SchedulerPlugin}. Omitted → defaults. On Cloudflare Workers the
+   * scheduler is left out unless this arm is given, because the plugin refuses that platform;
+   * schedule there with Cron Triggers (`cloudflare-plugin`'s `WorkersCron`).
    */
   scheduler?: SchedulerPluginOptions;
   /**
