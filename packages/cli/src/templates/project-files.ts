@@ -1152,10 +1152,39 @@ function denoPermissions(manifest?: TemplateManifest): string {
  * Workers project gets when its template needs an npm toolchain, so the two can
  * never disagree about how the emitted TypeScript is compiled.
  *
+ * Workers gets three more options, because it is the one target whose
+ * `tsconfig.json` a generated script type-checks (`npm run check` is
+ * `tsc --noEmit`). Without them that script failed on a pristine scaffold:
+ * every emitted import carries the `.ts` extension Deno requires, which `tsc`
+ * refuses (TS5097) unless `allowImportingTsExtensions` is set — and that option
+ * is itself refused unless `noEmit` is. And `@cloudflare/workers-types` is not
+ * an `@types/*` package, so `tsc` never loads it unless `types` names it: the
+ * devDependency was installed and read by nothing, leaving `cloudflare:workers`
+ * an unresolvable module (TS2307) and `KVNamespace` an undeclared name. `lib`
+ * drops the DOM, which describes a browser rather than workerd, and which the
+ * package's own documentation omits beside it. A template's own options still
+ * win, and its own `types` are KEPT beside the Workers ones rather than
+ * replacing them.
+ *
+ * @param runtime - The selected runtime target
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The merged compiler options
  */
-function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
+function tsconfigOptions(
+  runtime: TargetRuntime,
+  manifest?: TemplateManifest,
+): Record<string, unknown> {
+  const template = manifest?.tsconfigCompilerOptions;
+  const workers = runtime === 'cloudflare-workers'
+    ? {
+      allowImportingTsExtensions: true,
+      noEmit: true,
+      // A template's own `lib` wins: a frontend build needs the DOM for the code
+      // it ships to a browser.
+      lib: template?.['lib'] ?? ['ES2022'],
+      types: [WORKERS_TYPES_PACKAGE, ...templateTypes(template)],
+    }
+    : {};
   return {
     target: 'ES2022',
     module: 'ESNext',
@@ -1163,9 +1192,24 @@ function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
     strict: true,
     verbatimModuleSyntax: true,
     skipLibCheck: true,
-    ...manifest?.tsconfigCompilerOptions,
+    ...template,
+    ...workers,
   };
 }
+
+/**
+ * The `types` a template's compiler options declare, as a list.
+ *
+ * @param options - The template's `tsconfig.json` compiler options
+ * @returns Its `types` entries, or an empty list when it declares none
+ */
+function templateTypes(options?: Readonly<Record<string, unknown>>): readonly unknown[] {
+  const types = options?.['types'];
+  return Array.isArray(types) ? types : [];
+}
+
+/** The ambient type package a Workers project's `tsconfig.json` names. */
+const WORKERS_TYPES_PACKAGE = '@cloudflare/workers-types';
 
 /**
  * The `compilerOptions` a generated `deno.json` carries.
@@ -1271,11 +1315,25 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   // and the README's own Durable Object snippet fails with TS2339/TS4112 under
   // the only checker present. `tsc` reads the `tsconfig.json` the scaffold
   // already emitted and nothing consumed.
+  //
+  // The three are pinned as a SET, because they are not independent: every
+  // `wrangler` release declares a peer range on `@cloudflare/workers-types`
+  // starting at its own bundled workerd date, and npm refuses an install whose
+  // ranges do not intersect. `wrangler` moved that peer from `^4` to `^5` inside
+  // its 4.x line (4.100.0 declares `^4.20260611.1`, 4.130.0 `^5.20260908.1`),
+  // so the `^4.0.0` this used to emit resolved to a release that refused the
+  // `^4.20250109.0` types pin beside it, and `npm install` — the first step the
+  // CLI prints — failed with ERESOLVE on every new Workers project. `^4` was
+  // never a promise about that peer, so `wrangler` is held to the tested minor:
+  // a patch release keeps the peer major (its floor still moves, which the `^5`
+  // range absorbs), while a minor that changes it is admitted only by bumping
+  // this pin. The guarded `npm install` in `workers-install-e2e.test.ts` is what
+  // fails first when an upstream release breaks the set.
   if (runtime === 'cloudflare-workers') {
     return {
-      wrangler: '^4.0.0',
+      wrangler: '~4.148.0',
       typescript: '^5.7.0',
-      '@cloudflare/workers-types': '^4.20250109.0',
+      [WORKERS_TYPES_PACKAGE]: '^5.20261006.1',
     };
   }
   return {};
@@ -1367,7 +1425,9 @@ function standaloneNpmFiles(
     ...(onWorkers ? [{ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' }] : []),
     {
       path: 'tsconfig.json',
-      contents: `${JSON.stringify({ compilerOptions: tsconfigOptions(manifest) }, null, 2)}\n`,
+      contents: `${
+        JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
+      }\n`,
     },
   ];
 }
@@ -1565,7 +1625,9 @@ describe('application composition', () => {
     files.push({ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' });
     files.push({
       path: 'tsconfig.json',
-      contents: `${JSON.stringify({ compilerOptions: tsconfigOptions(manifest) }, null, 2)}\n`,
+      contents: `${
+        JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
+      }\n`,
     });
   }
 

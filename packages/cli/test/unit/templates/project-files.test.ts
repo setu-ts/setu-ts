@@ -321,6 +321,56 @@ describe('the Cloudflare Workers target', () => {
     expect(pkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
   });
 
+  it('pins wrangler and workers-types as a set whose peer ranges intersect', () => {
+    const pkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
+      devDependencies: Record<string, string>;
+    };
+
+    // Measured: wrangler 4.148.0 declares peerOptional
+    // `@cloudflare/workers-types@^5.20261006.1`, and the `^4.0.0` wrangler range
+    // beside a `^4.x` types pin made `npm install` fail with ERESOLVE on every
+    // new Workers project. A floating `^4` is refused because wrangler moved
+    // that peer's MAJOR inside its own 4.x line; the guarded npm install in
+    // `workers-install-e2e.test.ts` is what proves the set resolves.
+    expect(pkg.devDependencies['wrangler']).toBe('~4.148.0');
+    expect(pkg.devDependencies['@cloudflare/workers-types']).toBe('^5.20261006.1');
+  });
+
+  it('emits a tsconfig the generated check script can pass (X9-4)', () => {
+    const tsconfig = JSON.parse(contentsOf(filesOf(rest), 'tsconfig.json')) as {
+      compilerOptions: Record<string, unknown>;
+    };
+
+    // Every emitted import carries `.ts`, which tsc refuses (TS5097) without
+    // `allowImportingTsExtensions`, which in turn requires `noEmit`. And the
+    // types package is not `@types/*`, so tsc loads it only when named — before
+    // this it was installed and read by nothing.
+    expect(tsconfig.compilerOptions['allowImportingTsExtensions']).toBe(true);
+    expect(tsconfig.compilerOptions['noEmit']).toBe(true);
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types']);
+    expect(tsconfig.compilerOptions['lib']).toEqual(['ES2022']);
+  });
+
+  it("keeps a template's own types and lib beside the Workers ones", () => {
+    const fullStack = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+    const tsconfig = JSON.parse(contentsOf(filesOf(fullStack), 'tsconfig.json')) as {
+      compilerOptions: Record<string, unknown>;
+    };
+
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types', 'vite/client']);
+    expect(tsconfig.compilerOptions['lib']).toEqual(['DOM', 'DOM.Iterable', 'ES2022']);
+  });
+
+  it('leaves the tsconfig of every other npm target unchanged', () => {
+    const node = resolveHost(getTemplate('rest')!, 'node');
+    const tsconfig = JSON.parse(
+      contentsOf([...projectFiles('edge', 'node', node)], 'tsconfig.json'),
+    ) as { compilerOptions: Record<string, unknown> };
+
+    expect(tsconfig.compilerOptions['types']).toBeUndefined();
+    expect(tsconfig.compilerOptions['allowImportingTsExtensions']).toBeUndefined();
+  });
+
   it('documents every binding type the plugin reads (X9-9)', () => {
     const toml = contentsOf(filesOf(rest), 'wrangler.toml');
 
