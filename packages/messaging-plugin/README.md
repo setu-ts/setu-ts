@@ -241,10 +241,10 @@ permission on `Q.dead` and `Q.retry.<delay>ms`, read permission on `Q.retry.<del
 permission on the default exchange, `amq.default`, which carries every retry and dead-letter copy
 (measured on RabbitMQ 4: without them `subscribe()` fails with `403 ACCESS_REFUSED` on the first
 helper declaration, and a copy published without `amq.default` write closes the channel). Recovery
-requires confirm channels and channel `on`/`off` return listeners; `subscribe()` refuses a retrying
-consumer group on an injected facade missing either, before declaring anything, and names
-`consumerRetry: false` as the alternative. Normal publishes retain their documented
-unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack behavior.
+requires confirm channels with channel `on`/`off` return listeners and `close()`; `subscribe()`
+refuses a retrying consumer group on an injected facade missing any of them, before declaring
+anything, and names `consumerRetry: false` as the alternative. Normal publishes retain their
+documented unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack behavior.
 
 Private exclusive fan-out queues and RPC reply inboxes keep nack with requeue disabled. Measured:
 TTL dead-lettering reaches an exclusive queue while its connection lives, but discards the copy once

@@ -210,14 +210,16 @@ describe('RabbitMQ consumer retry', () => {
   // A consumer group with retries enabled needs confirms and return listeners
   // to dispose of any failure. Without them every failure stays unacked, and
   // after `prefetch` of them the consumer silently receives nothing more, so
-  // the setup is refused before anything is declared.
-  for (const missing of ['confirms', 'listeners'] as const) {
+  // the setup is refused before anything is declared. Without close() a
+  // failed disposition cannot release its channel before recovery replaces it.
+  for (const missing of ['confirms', 'listeners', 'close'] as const) {
     it(`refuses a retrying consumer group on a channel without ${missing}`, async () => {
       const client = new FakeAmqpConnection({ withoutConfirmChannel: missing === 'confirms' });
       const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
       await broker.connect();
       const channel = await client.createChannel();
       if (missing === 'listeners') Object.defineProperty(channel, 'on', { value: undefined });
+      if (missing === 'close') Object.defineProperty(channel, 'close', { value: undefined });
       await expect(broker.subscribe('t', () => {}, { queue: 'q' })).rejects.toThrow(
         'consumerRetry: false',
       );

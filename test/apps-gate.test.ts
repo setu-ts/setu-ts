@@ -541,7 +541,7 @@ describe('real-backend CI wiring', () => {
         'changing delays',
         'prefetch bounds',
         'survives a broker restart',
-        'keeps the original',
+        'recovers the original',
         'refuses reserved group names',
         'normalizes dead-letter logs',
         'a CC header never routes',

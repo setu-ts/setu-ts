@@ -5022,10 +5022,10 @@ nack-and-discard. `consumerRetry: false` retains the operator-DLX path. Prefetch
 reconnect, which re-declares retry and dead queues before consuming. Retry/dead copies are
 mandatory; correlated `basic.return` rejects disposition despite a positive confirm. The framework
 replaces `x-setu-disposition-id` per copy, preserving the message ID. Recovery requires confirm
-channels with `on`/`off` return listeners, including injected clients: `subscribe()` refuses a
-retrying consumer group without them, before declaring anything, rather than letting every failure
-stay unacked until `prefetch` stalls the consumer. With retries enabled, group names ending in
-`.dead` or `.retry.<digits>ms` are reserved, and helper names must fit 255 UTF-8 bytes. Names are
+channels with `on`/`off` return listeners and `close()`, including injected clients: `subscribe()`
+refuses a retrying consumer group without them, before declaring anything, rather than letting every
+failure stay unacked until `prefetch` stalls the consumer. With retries enabled, group names ending
+in `.dead` or `.retry.<digits>ms` are reserved, and helper names must fit 255 UTF-8 bytes. Names are
 validated before declaration (at construction for declarative instances). Rename conflicting groups
 or set `consumerRetry: false`; migrate existing queues occupying helper names before enabling
 retries.

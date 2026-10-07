@@ -827,13 +827,17 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
 
     // Without confirms and return listeners no failure can be disposed of, so
     // each stays unacked and the consumer stalls once `prefetch` is reached.
+    // Without close() a failed disposition cannot release its channel, so the
+    // replacement channel recovery opens would leave the originals stranded.
     if (
       this.#consumerOptions.retry && 'durable' in declareOptions &&
-      (!this.#confirmed || !isCloseObservable(this.#channel))
+      (!this.#confirmed || !isCloseObservable(this.#channel) ||
+        !isCloseableChannel(this.#channel))
     ) {
       throw new Error(
-        'RabbitMQ consumer retries need a confirm channel with on/off return listeners; ' +
-          'inject a connection providing createConfirmChannel() or set consumerRetry: false',
+        'RabbitMQ consumer retries need a confirm channel with on/off return listeners and ' +
+          'close(); inject a connection providing createConfirmChannel() or set ' +
+          'consumerRetry: false',
       );
     }
 

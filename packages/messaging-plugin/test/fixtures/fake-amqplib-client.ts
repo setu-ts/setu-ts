@@ -240,6 +240,15 @@ export class FakeAmqpChannel {
     this.#record('deleteQueue', [queue]);
     return Promise.resolve();
   }
+
+  /**
+   * Records the close. The fake hands out one shared channel, so closing does
+   * not invalidate it; tests that need a closed channel's behaviour emit it.
+   */
+  close(): Promise<void> {
+    this.#record('close', []);
+    return Promise.resolve();
+  }
 }
 
 /**
