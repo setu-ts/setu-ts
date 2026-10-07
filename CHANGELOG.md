@@ -673,6 +673,16 @@ All notable changes to this project are documented here. The format follows
   start command, and showed the workspace discovery map without its `<MEMBER>_HOST` override. Each
   corrected claim was checked against a project the CLI scaffolded.
 
+- **The NestJS migration guide mapped several NestJS features to hand-written code the framework
+  replaces (`docs/migration-nestjs.md`, PR pending).** Guards now map to `AuthPlugin` with
+  `requireAuth()`/`requireRole()`, in place of a hand-written global middleware that would also have
+  refused `/health`. Exception filters map to `errorHandler({ respond })`, WebSocket gateways to
+  `@Gateway`, and the testing module to `createTestApp({ app: createApp(), overrides })`. The guide
+  also says that a decorated `@Injectable` lives in the DI container, which `overrideCapability`
+  does not reach. The decorator example now passes `DiPlugin({ autoRegister: true })`, without which
+  injecting a framework capability fails at startup. The guide no longer says Setu-TS has no
+  `@Module`.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
