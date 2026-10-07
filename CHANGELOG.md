@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`DuplicateKeyError` in `@setu-ts/common`.** A write that would duplicate a primary key or a
-  unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
+- **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
+  a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
   error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s
   D1 adapter, and any store that records "already processed" with a unique insert, can raise or
   recognise it without importing `@setu-ts/database-plugin`.
@@ -402,8 +402,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
-  `@setu-ts/cloudflare-plugin`).** Every backend's unique violation reached `errorHandler` as a
-  plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB
+  `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as
+  a plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB
   Local, a duplicate primary key and a duplicate secondary unique key both answered `500`.
   `DatabaseService` now classifies SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB
   `11000`, Cosmos `409` and SQLite's `UNIQUE constraint failed` (the only signal D1 carries) as
