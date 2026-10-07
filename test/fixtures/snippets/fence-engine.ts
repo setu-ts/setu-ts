@@ -843,21 +843,24 @@ export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' 
  * fence still type-checks `createApp()`'s result against the real
  * `IKernelApplication`.
  *
- * Both fence compilers write their fences one directory below `.tmp`, so one
- * stub at `.tmp/setu.config.ts` serves `../setu.config.ts` from either.
+ * Both fence compilers write their fences one directory below `.tmp`. Tests
+ * import `../setu.config.ts`, while entry modules import `./setu.config.ts`,
+ * so each layout needs a stub.
  *
  * @param scratchDir - The directory the caller writes its fences into
  */
 export async function writeProjectStubs(scratchDir: string): Promise<void> {
   const parent = scratchDir.replace(/\/[^/]+$/, '');
-  await Deno.mkdir(parent, { recursive: true });
+  await Deno.mkdir(scratchDir, { recursive: true });
+  const source = "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
+    'export function createApp(): IKernelApplication {\n' +
+    '  return createApplication({ plugins: [] });\n' +
+    '}\n';
   await Deno.writeTextFile(
     `${parent}/setu.config.ts`,
-    "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
-      'export function createApp(): IKernelApplication {\n' +
-      '  return createApplication({ plugins: [] });\n' +
-      '}\n',
+    source,
   );
+  await Deno.writeTextFile(`${scratchDir}/setu.config.ts`, source);
 }
 
 /**

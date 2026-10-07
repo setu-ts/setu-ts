@@ -221,7 +221,7 @@ export class PricingService {
 }
 
 // Declare it beside the template's other keys in app/lib/context-keys.server.ts:
-// a key written out twice is two different keys, and every read then returns null.
+// contextKeyFor reuses one key per name; separate { defaultValue: null } objects would not.
 export const pricingContext = contextKeyFor<PricingService | null>('app.pricing', null);
 
 const app = await createFullStackAppFromConfig(() => ({

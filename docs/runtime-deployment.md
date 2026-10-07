@@ -21,16 +21,23 @@ Setu-TS applications can run in two modes:
 1. **Fetch mode**: Exports a `fetch` handler (Workers, testing)
 2. **Listen mode**: Binds to a TCP port (Node, Deno, Bun)
 
+`createApp()` builds a fresh, unstarted application; scaffolded projects export it from
+`setu.config.ts`.
+
 ```typescript
-// Fetch mode (Workers, testing)
-// On Workers, `env` comes from `cloudflare:workers` and is passed to the plugins
-// (see the Workers section below). Off Workers, `app.fetch(request)` is the test entry point.
-// Startup must precede the fetch. Share one start across concurrent first
-// requests, but forget a FAILED start so the next request retries it — caching
-// the rejection would leave the instance answering errors for its whole life.
-let starting: Promise<typeof app> | undefined;
-function started(): Promise<typeof app> {
-  starting ??= app.start().then(() => app).catch((error: unknown) => {
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createApp } from './setu.config.ts';
+
+// Fetch mode (testing; the Workers section below supplies the binding-aware factory).
+// Share startup across concurrent requests. After plugin registration begins,
+// a failed application cannot start again, so every retry builds a fresh one.
+let starting: Promise<IKernelApplication> | undefined;
+function started(): Promise<IKernelApplication> {
+  starting ??= (async () => {
+    const app = await createApp();
+    await app.start();
+    return app;
+  })().catch((error: unknown) => {
     starting = undefined;
     throw error;
   });
@@ -43,6 +50,7 @@ export default {
 };
 
 // Listen mode (Node, Deno, Bun)
+const app = await createApp();
 await app.start({ port: 3000 });
 ```
 
@@ -444,7 +452,7 @@ npx wrangler login
 
 ```typescript
 // src/index.ts
-import { createApplication } from '@setu-ts/kernel';
+import { createApplication, type IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
 import { env, waitUntil } from 'cloudflare:workers';
@@ -452,25 +460,31 @@ import { env, waitUntil } from 'cloudflare:workers';
 // `env` (bindings + variables) and `waitUntil` are imported from `cloudflare:workers`
 // and passed to the plugins. RuntimePlugin auto-detects Workers and selects
 // CloudflareWorkersHttpAdapter; `env` populates `runtime.env`.
-const raw = createApplication({
-  plugins: [
-    RuntimePlugin({ env }),
-    CloudflarePlugin({ env, waitUntil }),
-  ],
-});
+function createApp(): IKernelApplication {
+  const app = createApplication({
+    plugins: [
+      RuntimePlugin({ env }),
+      CloudflarePlugin({ env, waitUntil }),
+    ],
+  });
 
-raw.router.get('/', async (ctx) => {
-  return ctx.response.json({ message: 'Hello from Workers!' });
-});
+  app.router.get('/', async (ctx) => {
+    return ctx.response.json({ message: 'Hello from Workers!' });
+  });
+  return app;
+}
 
 // Start once, on the first request, and share that start across concurrent
-// requests. A FAILED start is forgotten rather than cached, so a transient
-// problem at cold start is retried on the next request instead of breaking the
-// isolate for its whole life.
-let application: Promise<typeof raw> | undefined;
+// requests. A FAILED attempt is forgotten, so the next request constructs a
+// fresh application: the kernel cannot retry start() once registration began.
+let application: Promise<IKernelApplication> | undefined;
 
-function app(): Promise<typeof raw> {
-  application ??= raw.start().then(() => raw).catch((error: unknown) => {
+function app(): Promise<IKernelApplication> {
+  application ??= (async () => {
+    const created = createApp();
+    await created.start();
+    return created;
+  })().catch((error: unknown) => {
     application = undefined;
     throw error;
   });

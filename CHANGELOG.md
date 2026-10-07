@@ -454,7 +454,9 @@ All notable changes to this project are documented here. The format follows
   `imports` block Node cannot use, a `node:20` Docker base below the documented Node 22 floor,
   Workers startup that cached a failed start for the isolate's life, `ctx.runtime` in request
   handlers (where `ctx` has no `runtime`), and a 120-second Workers execution limit that does not
-  exist: an HTTP Worker has no wall-clock limit, and its CPU time is what is capped.
+  exist: an HTTP Worker has no wall-clock limit, and its CPU time is what is capped. Each startup
+  retry constructs a fresh application, because the kernel refuses restarting one after plugin
+  registration has begun.
 
 - **The getting-started guide's CLI install command did not work.** It omitted `-g`, which Deno 2.9
   requires for a global install, and `-n setu`, without which the binary is named `cli` and every
