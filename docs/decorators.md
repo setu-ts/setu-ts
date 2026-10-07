@@ -56,14 +56,14 @@ import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
 const app = createApplication();
 
 app.register(RuntimePlugin());
-app.register(DiPlugin({ autoRegister: true })); // Optional: adds a container, so `scope` is honored
+app.register(DiPlugin()); // Optional: adds a container, so `scope` is honored
 app.register(DecoratorPlugin()); // Required for decorator processing
 ```
 
-`autoRegister: true` lets the container fall back to the kernel's service registry for a token it
-has no provider for. Without it, a class that injects a framework capability — `CAPABILITIES.CACHE`,
-`CAPABILITIES.LOGGER` — fails at startup with `No provider registered for DI token 'cache'`, because
-those capabilities live in the registry, not the container. The `class-based` template sets it.
+The container falls back to the kernel's service registry for a token it has no provider for, so a
+class can inject a framework capability such as `CAPABILITIES.CACHE` or `CAPABILITIES.LOGGER`, which
+live in the registry rather than the container. `DiPlugin({ autoRegister: false })` turns the
+fallback off. On `0.8.0` and earlier the default was `false`, so pass `autoRegister: true` there.
 
 `DecoratorPlugin` is required — decorators are inert without it. **`DiPlugin` is not.**
 `DecoratorPlugin` branches on the container's presence: with `DiPlugin` registered, an `@Injectable`

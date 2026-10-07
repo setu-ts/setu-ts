@@ -100,7 +100,7 @@ class AppController {
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    DiPlugin({ autoRegister: true }),
+    DiPlugin(),
     DecoratorPlugin({ controllers: [AppController] }),
   ],
 });
@@ -108,9 +108,10 @@ const app = createApplication({
 await app.start({ port: 3000 });
 ```
 
-`autoRegister: true` lets the container fall back to the kernel's service registry, so a class can
-inject a framework capability such as `CAPABILITIES.LOGGER`. Without it, that injection fails at
-startup with `No provider registered for DI token 'logger'`. The `class-based` template emits it.
+The container falls back to the kernel's service registry, so a class can inject a framework
+capability such as `CAPABILITIES.LOGGER`, as a Nest provider can inject a global module's export. On
+`0.8.0` and earlier pass `DiPlugin({ autoRegister: true })`: the default there was `false`, and the
+same injection failed at startup with `No provider registered for DI token 'logger'`.
 
 ## Controllers and Routes
 

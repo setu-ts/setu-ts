@@ -187,8 +187,8 @@ const app = createFullStackApp({
 it composes from always registers `MessagingPlugin`.
 
 None of these arms collide with the plugins this tier already bundles — `sse`, `websocket`, `di`,
-and the backplane are registered by no other arm. `di: {}` builds the container with
-`autoRegister: true`, so decorated classes can inject framework capabilities; see
+and the backplane are registered by no other arm. `di: {}` builds a container that falls back to the
+kernel registry, so decorated classes can inject framework capabilities; see
 [Constructor injection in loaders](#constructor-injection-in-loaders).
 
 The `session` arm is inherited the same way: `session: { secret, csrf: {} }` adds cookie sessions
@@ -243,11 +243,10 @@ A loader then calls `context.get(pricingContext)?.quote(4900)`.
 
 Three things to know:
 
-- **`di: {}` falls back to the kernel registry.** The arm builds the container with
-  `autoRegister: true`, which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own
-  services. On `0.8.0` and earlier the arm passed `{}` straight through, so write
-  `di: { autoRegister: true }` there, or every page answers 500 with
-  `No provider registered for DI token 'logger'`.
+- **`di: {}` falls back to the kernel registry.** `DiPlugin`'s `autoRegister` defaults to `true`,
+  which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own services. On `0.8.0`
+  and earlier it defaulted to `false`, so write `di: { autoRegister: true }` there, or every page
+  answers 500 with `No provider registered for DI token 'logger'`.
 - **There is no per-request scope.** Nothing creates a scope for each request, so a `scoped` service
   resolved from the root container acts as a singleton. For one instance per request, call
   `container.createScope()` in `populateLoadContext` and resolve from the scope.
