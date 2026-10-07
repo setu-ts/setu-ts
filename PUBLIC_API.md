@@ -11818,6 +11818,7 @@ streaming-response reader.
 | `TestAppFromPlugins`  | `src/test-app.ts`                  | Hand-assembled arm                            |
 | `TestAppFromApp`      | `src/test-app.ts`                  | Composition-root arm                          |
 | `overrideCapability`  | `src/override-capability.ts`       | Capability replacement plugin builder         |
+| `overrideProvider`    | `src/override-provider.ts`         | DI container provider replacement builder     |
 | `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                           |
 | `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                               |
 | `collectStream`       | `src/inject.ts`                    | Collect streaming response body               |
@@ -11926,6 +11927,18 @@ the ordering edge hangs on and how a plugin is depended upon at all; a provider 
 capability without declaring it fails startup with `Capability '<token>' is already registered`. For
 either, exclude the provider and supply the double ahead of its consumers —
 `without: ['mail-plugin']` plus a `createMockPlugin` at `PLUGIN_PRIORITY.HIGH`.
+
+`overrideProvider<T>(token: string, provider: Provider<T>, options?: ProviderOptions): IPlugin`
+replaces a provider in the DI container, which `overrideCapability` cannot reach: with `DiPlugin`
+registered, `DecoratorPlugin` puts each `@Injectable` class into the container, and the container
+refuses a second registration of a token. The plugin depends on `CAPABILITIES.DI_CONTAINER` and
+registers at `PLUGIN_PRIORITY.NORMAL`, so it runs after `DiPlugin` and before `DecoratorPlugin`
+(`PLUGIN_PRIORITY.LOW`). It registers the double on the container, then publishes a container that
+swallows the application's later registration of the same token and passes every other call through,
+so every class that injects the token is constructed with the double. `start()` fails from
+`register()` when the application has no container or the real provider was registered first, and
+from an `onInit` hook when nothing registered, resolved or checked for the token, which is how a
+mistyped token surfaces.
 
 > `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
 > the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the

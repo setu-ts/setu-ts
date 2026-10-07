@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR
+  pending).** With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the
+  container, where `overrideCapability()` cannot reach it, and the container refuses a second
+  registration. `overrideProvider('pricing-service', { useValue: fake })` registers the double
+  before the real class, so a decorated controller is constructed with it. A mistyped token, an
+  application without a container, or a provider registered too early fails `start()` instead of
+  testing the real class.
+
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
   error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s
