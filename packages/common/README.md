@@ -155,6 +155,8 @@ package fits the plugin architecture.
 | `parseFormBody`                      | function  |
 | `parseJsonBody`                      | function  |
 | `parseTraceparentToContext`          | function  |
+| `publishHeaderNameProblem`           | function  |
+| `publishHeaderValueProblem`          | function  |
 | `publishIdProblem`                   | function  |
 | `replaceLocale`                      | function  |
 | `replacePrincipal`                   | function  |
@@ -195,9 +197,14 @@ package fits the plugin architecture.
 | `ERROR_RESPONDER_BRAND`              | const     |
 | `ERROR_RESPONDER_STATE_KEY`          | const     |
 | `HTTP_STATUS_HINT`                   | const     |
+| `MAX_PUBLISH_HEADERS`                | const     |
+| `MAX_PUBLISH_HEADER_NAME_BYTES`      | const     |
+| `MAX_PUBLISH_HEADER_VALUE_BYTES`     | const     |
 | `MAX_PUBLISH_ID_BYTES`               | const     |
 | `ORDERING_KEY_HEADER`                | const     |
 | `PLUGIN_PRIORITY`                    | const     |
+| `RESERVED_HEADER_NAMES`              | const     |
+| `RESERVED_HEADER_PREFIXES`           | const     |
 | `RESPONSE_METADATA`                  | const     |
 | `SESSION_STATE_KEY`                  | const     |
 | `SESSION_TENANT_BINDING_KEY`         | const     |

@@ -27,7 +27,7 @@ export const DEDUPLICATION_ID_HEADER = 'x-setu-deduplication-id';
 /** Maximum UTF-8 byte length of a publish ordering key or de-duplication id. @since 0.9.0 */
 export const MAX_PUBLISH_ID_BYTES = 128;
 
-const ID_ENCODER = new TextEncoder();
+const UTF8_ENCODER = new TextEncoder();
 
 /**
  * Reports why a value is not a valid publish id (an `orderingKey` or
@@ -57,7 +57,7 @@ export function publishIdProblem(
   if (!value.isWellFormed()) return 'not-well-formed';
   if (value !== value.trim()) return 'whitespace';
   if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return 'forbidden-characters';
-  if (ID_ENCODER.encode(value).length > MAX_PUBLISH_ID_BYTES) return 'too-long';
+  if (UTF8_ENCODER.encode(value).length > MAX_PUBLISH_ID_BYTES) return 'too-long';
   return null;
 }
 
@@ -70,6 +70,104 @@ export function publishIdProblem(
  */
 export function isValidPublishId(value: unknown): value is string {
   return publishIdProblem(value) === null;
+}
+
+/** Maximum number of caller headers accepted on one publish. @since 0.9.0 */
+export const MAX_PUBLISH_HEADERS = 32;
+
+/** Maximum UTF-8 byte length of a publish header name. @since 0.9.0 */
+export const MAX_PUBLISH_HEADER_NAME_BYTES = 256;
+
+/** Maximum UTF-8 byte length of a publish header value. @since 0.9.0 */
+export const MAX_PUBLISH_HEADER_VALUE_BYTES = 1024;
+
+/**
+ * Header names a broker or its server ACTS on, compared
+ * ASCII-case-insensitively. `x-acquired-count` is measured (2026-10-07): a
+ * RabbitMQ 4 quorum-queue redelivery writes it, not `x-delivery-count`.
+ *
+ * @since 0.9.0
+ */
+export const RESERVED_HEADER_NAMES: readonly string[] = Object.freeze([
+  'traceparent',
+  'tracestate',
+  'cc',
+  'bcc',
+  'payload',
+  'x-death',
+  'x-delivery-count',
+  'x-acquired-count',
+  'x-delay',
+]);
+
+/** Reserved header-name PREFIXES, compared ASCII-case-insensitively. @since 0.9.0 */
+export const RESERVED_HEADER_PREFIXES: readonly string[] = Object.freeze([
+  'x-first-death-',
+  'x-last-death-',
+  'x-setu-',
+  'nats-',
+  'goog',
+]);
+
+/**
+ * Reports why a value is not a valid caller header NAME, or `null` when it is
+ * valid. The character rule is 1-256 bytes, every character in `0x21-0x7E`
+ * except `:` — exactly what nats.js accepts, the strictest of the seven
+ * transports.
+ *
+ * Shared, like {@linkcode publishIdProblem}, because the publish-side validator
+ * and the Cloudflare envelope reader both enforce it and neither may import the
+ * other (§2.2).
+ *
+ * @param name - The candidate name
+ * @returns The first failing rule, or `null` when the name satisfies all of them
+ * @since 0.9.0
+ */
+export function publishHeaderNameProblem(
+  name: unknown,
+):
+  | 'not-a-string'
+  | 'empty'
+  | 'not-visible-ascii'
+  | 'too-long'
+  | 'reserved'
+  | null {
+  if (typeof name !== 'string') return 'not-a-string';
+  if (name.length === 0) return 'empty';
+  for (let index = 0; index < name.length; index++) {
+    const code = name.charCodeAt(index);
+    if (code < 0x21 || code > 0x7e || code === 0x3a) return 'not-visible-ascii';
+  }
+  if (UTF8_ENCODER.encode(name).length > MAX_PUBLISH_HEADER_NAME_BYTES) return 'too-long';
+  const lower = name.toLowerCase();
+  if (RESERVED_HEADER_NAMES.includes(lower)) return 'reserved';
+  if (RESERVED_HEADER_PREFIXES.some((prefix) => lower.startsWith(prefix))) return 'reserved';
+  return null;
+}
+
+/**
+ * Reports why a value is not a valid caller header VALUE, or `null` when it is
+ * valid.
+ *
+ * @param value - The candidate value
+ * @returns The first failing rule, or `null` when the value satisfies all of them
+ * @since 0.9.0
+ */
+export function publishHeaderValueProblem(
+  value: unknown,
+):
+  | 'not-a-string'
+  | 'not-well-formed'
+  | 'whitespace'
+  | 'forbidden-characters'
+  | 'too-long'
+  | null {
+  if (typeof value !== 'string') return 'not-a-string';
+  if (!value.isWellFormed()) return 'not-well-formed';
+  if (value !== value.trim()) return 'whitespace';
+  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return 'forbidden-characters';
+  if (UTF8_ENCODER.encode(value).length > MAX_PUBLISH_HEADER_VALUE_BYTES) return 'too-long';
+  return null;
 }
 
 /**

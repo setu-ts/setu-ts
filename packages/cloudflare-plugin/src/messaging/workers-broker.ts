@@ -30,7 +30,12 @@ import type {
   SubscribeOptions,
   TimerHandle,
 } from '@setu-ts/common';
-import { publishIdProblem } from '@setu-ts/common';
+import {
+  MAX_PUBLISH_HEADERS,
+  publishHeaderNameProblem,
+  publishHeaderValueProblem,
+  publishIdProblem,
+} from '@setu-ts/common';
 
 import type { LoggerSource } from '../background/wait-until.ts';
 import type {
@@ -263,31 +268,31 @@ export class WorkersBroker implements IMessageBroker {
   }
 
   /**
-   * Validates the caller's publish options and reduces them to the two envelope
-   * fields a Cloudflare queue can carry (M106 §3.3).
+   * Validates the caller's publish options and reduces them to the envelope
+   * fields a Cloudflare queue can carry (M106 §3.3): the two option ids, and the
+   * caller's headers — which ride the envelope, because a Cloudflare queue has
+   * no transport header channel to carry them.
    *
    * Each member is read exactly ONCE (the §3.4 copy-once rule), so a getter or
-   * `Proxy` cannot answer the check one value and the envelope another.
-   *
-   * A caller `headers` record is REFUSED rather than dropped: a Cloudflare queue
-   * has no transport header channel at all, so the option cannot be honoured,
-   * and silently discarding it is the dead-option defect class. The refused
-   * value is never echoed.
+   * `Proxy` cannot answer the check one value and the envelope another. Every
+   * RULE is `common`'s, so it is the same one `messaging-plugin` enforces and
+   * there is no second copy (§11.1). A refusal never echoes the refused value.
    */
-  #optionFields(
-    options: PublishOptions | undefined,
-  ): { orderingKey?: string; deduplicationId?: string } {
+  #optionFields(options: PublishOptions | undefined): {
+    orderingKey?: string;
+    deduplicationId?: string;
+    headers?: Record<string, string>;
+  } {
     if (options === undefined) return {};
     const headers = options.headers;
     const orderingKey = options.orderingKey;
     const deduplicationId = options.deduplicationId;
-    if (headers !== undefined && Object.keys(headers).length > 0) {
-      throw new RangeError(
-        'publish options headers is not supported by the Cloudflare Workers broker: ' +
-          'a Cloudflare queue carries no transport header channel',
-      );
-    }
-    const fields: { orderingKey?: string; deduplicationId?: string } = {};
+
+    const fields: {
+      orderingKey?: string;
+      deduplicationId?: string;
+      headers?: Record<string, string>;
+    } = {};
     if (orderingKey !== undefined) {
       const problem = publishIdProblem(orderingKey);
       if (problem !== null) {
@@ -303,6 +308,43 @@ export class WorkersBroker implements IMessageBroker {
         );
       }
       fields.deduplicationId = deduplicationId as string;
+    }
+    if (headers !== undefined) {
+      if (typeof headers !== 'object' || headers === null || Array.isArray(headers)) {
+        throw new RangeError('publish options headers must be a plain object');
+      }
+      if (Object.getOwnPropertySymbols(headers).length > 0) {
+        throw new RangeError('publish options headers must not contain symbol keys');
+      }
+      const names = Object.keys(headers);
+      if (names.length > MAX_PUBLISH_HEADERS) {
+        throw new RangeError(
+          `publish options headers must contain at most ${MAX_PUBLISH_HEADERS} entries`,
+        );
+      }
+      const carried: Record<string, string> = {};
+      for (let index = 0; index < names.length; index++) {
+        const name = names[index]!;
+        const nameProblem = publishHeaderNameProblem(name);
+        if (nameProblem === 'reserved') {
+          throw new RangeError(`publish options header ${JSON.stringify(name)} is reserved`);
+        }
+        if (nameProblem !== null) {
+          throw new RangeError(
+            `publish options header at index ${index} has an invalid name: ` +
+              '1-256 bytes, each in 0x21-0x7E excluding ":"',
+          );
+        }
+        const value = (headers as Record<string, unknown>)[name];
+        const valueProblem = publishHeaderValueProblem(value);
+        if (valueProblem !== null) {
+          throw new RangeError(
+            `publish options header ${JSON.stringify(name)} value is invalid: ${valueProblem}`,
+          );
+        }
+        carried[name] = value as string;
+      }
+      fields.headers = carried;
     }
     return fields;
   }

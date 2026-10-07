@@ -4,10 +4,9 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { RESERVED_HEADER_NAMES, RESERVED_HEADER_PREFIXES } from '@setu-ts/common';
 import {
   buildTransportHeaders,
-  RESERVED_HEADER_NAMES,
-  RESERVED_HEADER_PREFIXES,
   validatePublishOptions,
 } from '../../src/brokers/publish-options.ts';
 

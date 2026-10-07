@@ -76,14 +76,41 @@ describe('WorkersBroker.publish', () => {
     });
   });
 
-  it('refuses a caller headers record, since a queue has no header channel (M106 §3.3)', async () => {
+  it('carries a caller headers record on the envelope, since a queue has none (M106 §3.3)', async () => {
     const producer = new FakeQueueProducer();
     const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
 
-    await expect(broker.publish('orders', 1, { headers: { 'x-app': 'v' } })).rejects.toThrow(
+    await broker.publish('orders', { id: 1 }, { headers: { 'x-tenant': 'acme' } });
+
+    expect(producer.sends[0]?.body).toEqual({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'id-1',
+      payload: { id: 1 },
+      headers: { 'x-tenant': 'acme' },
+    });
+  });
+
+  it('refuses a reserved name (as a rejected promise) and never reaches the platform (M106 §3.4)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await expect(broker.publish('orders', 1, { headers: { cc: 'x' } })).rejects.toThrow(RangeError);
+    await expect(broker.publish('orders', 1, { headers: { 'x-setu-ordering-key': 'k' } })).rejects
+      .toThrow(RangeError);
+    expect(producer.sends).toEqual([]);
+  });
+
+  it('refuses a header with an invalid name or value (M106 §3.4)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await expect(broker.publish('orders', 1, { headers: { 'bad:name': 'v' } })).rejects.toThrow(
       RangeError,
     );
-    // Nothing reached the platform.
+    await expect(broker.publish('orders', 1, { headers: { 'x-a': 'v'.repeat(1025) } })).rejects
+      .toThrow(RangeError);
     expect(producer.sends).toEqual([]);
   });
 
@@ -134,6 +161,37 @@ describe('WorkersBroker message metadata (M106 §3.3)', () => {
       'x-setu-ordering-key': 'agg-1',
       'x-setu-deduplication-id': 'dedup-1',
     });
+  });
+
+  it('surfaces a caller header carried on the envelope, dropping an invalid one (M106 §3.4)', async () => {
+    const metadata = await deliver({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'i',
+      payload: 1,
+      headers: {
+        'x-tenant': 'acme',
+        cc: 'sneaky',
+        'x-bad': 'v'.repeat(1025),
+        'bad:name': 'v',
+      },
+    });
+    // Only the valid entry survives; the reserved name, the over-long value and
+    // the un-encodable name are all dropped, never surfaced.
+    expect(metadata.headers).toEqual({ 'x-tenant': 'acme' });
+  });
+
+  it('ignores a non-object headers field a foreign producer wrote (M106 §3.4)', async () => {
+    const metadata = await deliver({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'i',
+      payload: 1,
+      headers: 'not-an-object',
+    });
+    expect(metadata.headers).toEqual({});
   });
 
   it('reports empty headers when the envelope carries neither field', async () => {

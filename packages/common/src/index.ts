@@ -296,9 +296,16 @@ export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from './servi
 export {
   DEDUPLICATION_ID_HEADER,
   isValidPublishId,
+  MAX_PUBLISH_HEADER_NAME_BYTES,
+  MAX_PUBLISH_HEADER_VALUE_BYTES,
+  MAX_PUBLISH_HEADERS,
   MAX_PUBLISH_ID_BYTES,
   ORDERING_KEY_HEADER,
+  publishHeaderNameProblem,
+  publishHeaderValueProblem,
   publishIdProblem,
+  RESERVED_HEADER_NAMES,
+  RESERVED_HEADER_PREFIXES,
 } from './services/messaging.ts';
 export type {
   IMessageBroker,

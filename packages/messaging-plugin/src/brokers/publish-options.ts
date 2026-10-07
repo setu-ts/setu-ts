@@ -11,18 +11,24 @@
  *   that copy is read afterwards, so a getter or `Proxy` cannot answer the
  *   validator one value and the transport another (the M98e copy-once class).
  *
- * Nothing here is exported from the package barrel: the reserved-name tables
- * and this validator are internal, shared by the seven brokers and the two
- * decorators.
+ * Nothing here is exported from the package barrel: this validator is internal,
+ * shared by the seven brokers and the two decorators. The RULES it enforces —
+ * the id rule, the header name/value rules and the reserved-name tables — live
+ * in `@setu-ts/common`, so the Cloudflare Workers envelope reader can enforce
+ * the same ones without importing this package (§2.2).
  *
  * @module
  */
 
 import {
   DEDUPLICATION_ID_HEADER,
-  hasForbiddenAliasCharacter,
+  MAX_PUBLISH_HEADER_NAME_BYTES,
+  MAX_PUBLISH_HEADER_VALUE_BYTES,
+  MAX_PUBLISH_HEADERS,
   MAX_PUBLISH_ID_BYTES,
   ORDERING_KEY_HEADER,
+  publishHeaderNameProblem,
+  publishHeaderValueProblem,
   publishIdProblem,
 } from '@setu-ts/common';
 
@@ -33,67 +39,11 @@ export interface ValidatedPublishOptions {
   readonly headers: Readonly<Record<string, string>>;
 }
 
-const ENCODER = new TextEncoder();
-
-const MAX_HEADERS = 32;
-const MAX_HEADER_NAME_BYTES = 256;
-const MAX_HEADER_VALUE_BYTES = 1024;
-
-/**
- * Header names a broker or its server ACTS on, compared ASCII-case-insensitively.
- * One internal table the conformance test iterates, never prose. `x-acquired-count`
- * is measured (2026-10-07): a RabbitMQ 4 quorum-queue redelivery writes it, not
- * `x-delivery-count`.
- *
- * @internal
- */
-export const RESERVED_HEADER_NAMES: readonly string[] = Object.freeze([
-  'traceparent',
-  'tracestate',
-  'cc',
-  'bcc',
-  'payload',
-  'x-death',
-  'x-delivery-count',
-  'x-acquired-count',
-  'x-delay',
-]);
-
-/** Reserved name PREFIXES, compared ASCII-case-insensitively. @internal */
-export const RESERVED_HEADER_PREFIXES: readonly string[] = Object.freeze([
-  'x-first-death-',
-  'x-last-death-',
-  'x-setu-',
-  'nats-',
-  'goog',
-]);
-
 /** A plain object: prototype is `Object.prototype` or `null`, and it is not an array. @internal */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
-}
-
-/** UTF-8 byte length. Called only after `isWellFormed()`, so no U+FFFD substitution. */
-function utf8ByteLength(value: string): number {
-  return ENCODER.encode(value).length;
-}
-
-/** 0x21-0x7E excluding `:` — exactly what nats.js accepts, the strictest transport. */
-function isVisibleAsciiName(name: string): boolean {
-  for (let index = 0; index < name.length; index++) {
-    const code = name.charCodeAt(index);
-    if (code < 0x21 || code > 0x7e || code === 0x3a) return false;
-  }
-  return true;
-}
-
-/** ASCII-case-insensitive reserved-name test. */
-function isReservedName(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (RESERVED_HEADER_NAMES.includes(lower)) return true;
-  return RESERVED_HEADER_PREFIXES.some((prefix) => lower.startsWith(prefix));
 }
 
 /** Maps a shared id-rule problem to the refusal text for one field. */
@@ -121,41 +71,47 @@ function validateId(field: string, value: unknown): string | undefined {
 }
 
 /**
- * Validates a header name. A name refused for its characters is identified by
- * its POSITION — it is never quoted, because it may carry anything at all.
+ * Validates one header name. The RULE is `common`'s `publishHeaderNameProblem`
+ * (ONE implementation, shared with the Cloudflare envelope reader).
+ *
+ * A name refused for its CHARACTERS is identified by its POSITION — it is never
+ * quoted, because it may carry anything at all. A RESERVED name has already
+ * passed the character check, so it is safe to quote.
  */
 function validateHeaderName(name: string, index: number): void {
-  const bytes = utf8ByteLength(name);
-  if (bytes < 1 || bytes > MAX_HEADER_NAME_BYTES || !isVisibleAsciiName(name)) {
-    throw new RangeError(
-      `publish options header at index ${index} has an invalid name: ` +
-        `1-${MAX_HEADER_NAME_BYTES} bytes, each in 0x21-0x7E excluding ":"`,
-    );
+  const problem = publishHeaderNameProblem(name);
+  if (problem === null) return;
+  if (problem === 'reserved') {
+    throw new RangeError(`publish options header ${JSON.stringify(name)} is reserved`);
   }
+  throw new RangeError(
+    `publish options header at index ${index} has an invalid name: ` +
+      `1-${MAX_PUBLISH_HEADER_NAME_BYTES} bytes, each in 0x21-0x7E excluding ":"`,
+  );
 }
 
+/** Maps a shared header-value problem to the refusal text for one header. */
+const HEADER_VALUE_PROBLEM_TEXT: Readonly<Record<string, string>> = {
+  'not-a-string': 'must be a string',
+  'not-well-formed': 'must be a well-formed string',
+  'whitespace': 'must not have leading or trailing whitespace',
+  'forbidden-characters': 'must not contain control or format characters',
+  'too-long': `must be at most ${MAX_PUBLISH_HEADER_VALUE_BYTES} UTF-8 bytes`,
+};
+
 /**
- * Validates a header value. The NAME (already checked to be visible ASCII) may
- * be quoted; the VALUE is never quoted.
+ * Validates one header value against `common`'s `publishHeaderValueProblem`.
+ * The NAME (already checked to be visible ASCII) may be quoted; the VALUE is
+ * never quoted.
  */
 function validateHeaderValue(name: string, value: unknown): string {
-  const label = `publish options header ${JSON.stringify(name)} value`;
-  if (typeof value !== 'string') {
-    throw new RangeError(`${label} must be a string`);
+  const problem = publishHeaderValueProblem(value);
+  if (problem !== null) {
+    throw new RangeError(
+      `publish options header ${JSON.stringify(name)} value ${HEADER_VALUE_PROBLEM_TEXT[problem]}`,
+    );
   }
-  if (!value.isWellFormed()) {
-    throw new RangeError(`${label} must be a well-formed string`);
-  }
-  if (value !== value.trim()) {
-    throw new RangeError(`${label} must not have leading or trailing whitespace`);
-  }
-  if (hasForbiddenAliasCharacter(value)) {
-    throw new RangeError(`${label} must not contain control or format characters`);
-  }
-  if (utf8ByteLength(value) > MAX_HEADER_VALUE_BYTES) {
-    throw new RangeError(`${label} must be at most ${MAX_HEADER_VALUE_BYTES} UTF-8 bytes`);
-  }
-  return value;
+  return value as string;
 }
 
 /**
@@ -215,18 +171,16 @@ export async function validatePublishOptions(
     } catch (error) {
       throw new RangeError('publish options headers could not be read', { cause: error });
     }
-    if (keys.length > MAX_HEADERS) {
-      throw new RangeError(`publish options headers must contain at most ${MAX_HEADERS} entries`);
+    if (keys.length > MAX_PUBLISH_HEADERS) {
+      throw new RangeError(
+        `publish options headers must contain at most ${MAX_PUBLISH_HEADERS} entries`,
+      );
     }
 
     const entries: [string, string][] = [];
     for (let index = 0; index < keys.length; index++) {
       const name = keys[index]!;
       validateHeaderName(name, index);
-      if (isReservedName(name)) {
-        // Safe to quote: the name passed the character check above.
-        throw new RangeError(`publish options header ${JSON.stringify(name)} is reserved`);
-      }
       entries.push([name, validateHeaderValue(name, values[index])]);
     }
     // `Object.fromEntries` defines own data properties, so a `__proto__` key

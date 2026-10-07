@@ -45,8 +45,13 @@ All notable changes to this project are documented here. The format follows
   envelope id as the de-duplication id, and `defineIntegrationEvent` takes an opt-in `orderingKey`
   selector. Invalid options are refused by name, case-insensitively covering the header names a
   broker or its server acts on, and a refusal never echoes the refused value. `common` gains the
-  shared `publishIdProblem` / `isValidPublishId` predicate and `MAX_PUBLISH_ID_BYTES`. The docs
-  state the guarantee honestly: `orderingKey` decides placement, not the order handlers finish in.
+  shared rule set — `publishIdProblem` / `isValidPublishId` with `MAX_PUBLISH_ID_BYTES` for the ids,
+  and `publishHeaderNameProblem` / `publishHeaderValueProblem` with `MAX_PUBLISH_HEADERS`,
+  `MAX_PUBLISH_HEADER_NAME_BYTES`, `MAX_PUBLISH_HEADER_VALUE_BYTES`, `RESERVED_HEADER_NAMES` and
+  `RESERVED_HEADER_PREFIXES` for the headers — so the seven brokers, `WorkersBroker` and the
+  envelope reader enforce one copy of every rule. `WorkersBroker` carries the caller's `headers` on
+  the envelope beside the two ids. The docs state the guarantee honestly: `orderingKey` decides
+  placement, not the order handlers finish in.
 
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver

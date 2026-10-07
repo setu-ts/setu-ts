@@ -70,8 +70,9 @@ to its siblings.
 Every option is carried as a transport header beside any native mapping, so it is observable through
 `MessageMetadata.headers` on every broker and never silently dropped. The constants
 `ORDERING_KEY_HEADER` and `DEDUPLICATION_ID_HEADER` (from `@setu-ts/common`) name the two headers.
-The `Cloudflare Workers` broker carries `orderingKey`/`deduplicationId` as envelope fields and
-refuses a caller `headers` record, because a Cloudflare queue has no transport header channel.
+The `Cloudflare Workers` broker carries `orderingKey`, `deduplicationId` and the caller's `headers`
+as envelope fields, because a Cloudflare queue has no transport header channel; on delivery all of
+them are surfaced as the same transport headers, and an entry failing the shared rules is dropped.
 
 ### What `orderingKey` promises
 

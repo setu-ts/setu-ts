@@ -18,7 +18,13 @@
  * @since 0.2.0
  */
 
-import { DEDUPLICATION_ID_HEADER, isValidPublishId, ORDERING_KEY_HEADER } from '@setu-ts/common';
+import {
+  DEDUPLICATION_ID_HEADER,
+  isValidPublishId,
+  ORDERING_KEY_HEADER,
+  publishHeaderNameProblem,
+  publishHeaderValueProblem,
+} from '@setu-ts/common';
 
 /** Current envelope version. A body carrying anything else is not ours. */
 const ENVELOPE_VERSION = 1;
@@ -39,6 +45,11 @@ export interface PublishEnvelope {
   readonly orderingKey?: string;
   /** The publisher's de-duplication id, when one was supplied (M106). */
   readonly deduplicationId?: string;
+  /**
+   * The publisher's own headers (M106). A Cloudflare queue has no transport
+   * header channel, so they ride the envelope and are surfaced on delivery.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /** An RPC request awaiting a correlated reply. */
@@ -115,7 +126,11 @@ export function encodePublishEnvelope(
   topic: string,
   id: string,
   payload: unknown,
-  fields?: { orderingKey?: string; deduplicationId?: string },
+  fields?: {
+    orderingKey?: string;
+    deduplicationId?: string;
+    headers?: Readonly<Record<string, string>>;
+  },
 ): PublishEnvelope {
   return {
     v: ENVELOPE_VERSION,
@@ -125,6 +140,7 @@ export function encodePublishEnvelope(
     payload,
     ...(fields?.orderingKey !== undefined ? { orderingKey: fields.orderingKey } : {}),
     ...(fields?.deduplicationId !== undefined ? { deduplicationId: fields.deduplicationId } : {}),
+    ...(fields?.headers !== undefined ? { headers: fields.headers } : {}),
   };
 }
 
@@ -143,6 +159,19 @@ export function encodePublishEnvelope(
 export function envelopeHeaders(envelope: QueueEnvelope): Record<string, string> {
   if (envelope.kind !== 'msg') return {};
   const headers: Record<string, string> = {};
+
+  // The caller's own headers first, so the framework's two id headers below
+  // always win. A caller cannot name those anyway: `x-setu-*` is reserved, so
+  // such an entry is dropped here by the same rule the publish side refuses.
+  const carried: unknown = envelope.headers;
+  if (typeof carried === 'object' && carried !== null && !Array.isArray(carried)) {
+    for (const [name, value] of Object.entries(carried as Record<string, unknown>)) {
+      if (publishHeaderNameProblem(name) !== null) continue;
+      if (publishHeaderValueProblem(value) !== null) continue;
+      headers[name] = value as string;
+    }
+  }
+
   if (isValidPublishId(envelope.orderingKey)) {
     headers[ORDERING_KEY_HEADER] = envelope.orderingKey;
   }
