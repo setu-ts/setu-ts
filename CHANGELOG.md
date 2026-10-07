@@ -718,6 +718,12 @@ All notable changes to this project are documented here. The format follows
   that the Compose stack pins. A scope note still sent readers to Milestone 39 for Compose. It now
   links the `telemetry` profile that shipped there.
 
+- **The MVC guide's redirect example could never take its error branch (`docs/mvc.md`, PR
+  pending).** It decided acceptance with `ctx.request.method === 'POST'` on a `POST` route, so it
+  always redirected. It now validates the submitted title, re-renders the form with `422` when it is
+  too short, and redirects with `303` otherwise; both branches were driven through a running app.
+  The guide's other claims were checked the same way and hold.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added

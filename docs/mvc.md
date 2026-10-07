@@ -167,9 +167,9 @@ export async function submit(ctx: IRequestContext) {
 
 A `@Render` handler returns its props bag — but it may also return a `HandlerResult` from
 `ctx.response`, which is what makes POST-redirect-GET expressible on a decorated route. The redirect
-short-circuits before the view runs, so no HTML body is produced. `HandlerResult` is branded, so
-widening the return union costs no type safety: a props bag of the wrong shape is still a compile
-error.
+short-circuits before the view runs, so no HTML body is produced; the rejected submission instead
+re-renders the form with a `422`. `HandlerResult` is branded, so widening the return union costs no
+type safety: a props bag of the wrong shape is still a compile error.
 
 ```tsx
 import { Controller, Ctx, Get, Params, Post, Render } from '@setu-ts/decorator-plugin';
@@ -180,7 +180,12 @@ interface TaskFormProps {
   readonly errors: Readonly<Record<string, string>>;
 }
 
-const TaskForm = (props: TaskFormProps) => <form>{props.values.title}</form>;
+const TaskForm = (props: TaskFormProps) => (
+  <form method='post' action='/tasks'>
+    <input name='title' value={props.values.title} />
+    {String(props.errors.title ?? '')}
+  </form>
+);
 
 @Controller('/tasks')
 class TasksController {
@@ -193,11 +198,14 @@ class TasksController {
   @Render(TaskForm)
   @Params(Ctx())
   @Post('/')
-  create(ctx: IRequestContext): TaskFormProps | HandlerResult {
-    const accepted = ctx.request.method === 'POST';
-    return accepted
-      ? ctx.response.redirect('/tasks', 303)
-      : { values: { title: '' }, errors: { title: 'Title must be at least 3 characters' } };
+  async create(ctx: IRequestContext): Promise<TaskFormProps | HandlerResult> {
+    const form = await ctx.request.formData?.();
+    const field = form?.get('title');
+    const title = typeof field === 'string' ? field.trim() : '';
+    if (title.length >= 3) return ctx.response.redirect('/tasks', 303);
+
+    ctx.response.status(422);
+    return { values: { title }, errors: { title: 'Title must be at least 3 characters' } };
   }
 }
 
