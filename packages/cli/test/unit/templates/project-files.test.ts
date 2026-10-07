@@ -273,26 +273,41 @@ describe('a template with a frontend build, on a Deno target', () => {
     );
   });
 
-  it('emits no development entry off Deno', () => {
-    for (const runtime of ['node', 'bun', 'cloudflare-workers'] as const) {
+  it('emits the same development entry on Node and Bun, run by a dev script', () => {
+    const deno = contentsOf([...projectFiles('shop', 'deno', host)], 'dev.ts');
+    for (const [runtime, dev] of [['node', 'tsx dev.ts'], ['bun', 'bun run dev.ts']] as const) {
       const files = [
         ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
       ];
-      expect(files.some((file) => file.path === 'dev.ts')).toBe(false);
+      expect(contentsOf(files, 'dev.ts')).toBe(deno);
+      const scripts = (JSON.parse(contentsOf(files, 'package.json')) as {
+        scripts: Record<string, string>;
+      }).scripts;
+      expect(scripts['dev']).toBe(dev);
+      expect(contentsOf(files, 'README.md')).toContain(
+        runtime === 'bun' ? '```bash\nbun run dev\n```' : '```bash\nnpm run dev\n```',
+      );
+      // `ssr` is read on these targets, not underscore-prefixed.
+      expect(contentsOf(files, 'setu.config.ts')).toContain(
+        "...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),",
+      );
     }
-    const workers = contentsOf(
-      [...projectFiles(
-        'shop',
-        'cloudflare-workers',
-        resolveHost(getTemplate('full-stack')!, 'cloudflare-workers'),
-      )],
-      'setu.config.ts',
-    );
+  });
+
+  it('emits no development entry on Workers', () => {
+    const workersHost = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+    const files = [...projectFiles('shop', 'cloudflare-workers', workersHost)];
+    expect(files.some((file) => file.path === 'dev.ts')).toBe(false);
+    const workers = contentsOf(files, 'setu.config.ts');
     // One signature on every target; Workers reads none of it.
     expect(workers).toContain(
       "  _ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
     );
     expect(workers).not.toContain('ssr === undefined');
+    const scripts = (JSON.parse(contentsOf(files, 'package.json')) as {
+      scripts: Record<string, string>;
+    }).scripts;
+    expect(scripts['dev']).not.toContain('dev.ts');
   });
 
   it('leaves a template WITHOUT a frontend build untouched', () => {

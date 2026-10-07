@@ -1401,10 +1401,15 @@ function npmScripts(
   // still begins with `bun` on Bun, which is how `detectTargetRuntime` tells a
   // Bun project from a Node one.
   const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
+  const devEntry = manifest?.npmBuild?.devEntry;
   return manifest?.npmBuild === undefined ? { start, test } : {
     build: manifest.npmBuild.script,
     start: `${build} && ${start}`,
     test: `${build} && ${test}`,
+    // No build first: Vite serves the route modules itself in development.
+    ...(devEntry === undefined ? {} : {
+      dev: runtime === 'bun' ? `bun run ${devEntry.path}` : `${NODE_RUNNER} ${devEntry.path}`,
+    }),
   };
 }
 
@@ -1692,8 +1697,10 @@ ${
 \`\`\`
 ${servedRoutesSection(host, runtime, port)}
 ${
-    runtime === 'deno' && manifest?.npmBuild?.devEntry !== undefined
-      ? `## Develop\n\n\`\`\`bash\ndeno task dev\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart. Vite\nlistens on \`VITE_PORT\` (default 5173); open the app's own port.\n\n`
+    runtime !== 'cloudflare-workers' && manifest?.npmBuild?.devEntry !== undefined
+      ? `## Develop\n\n\`\`\`bash\n${
+        runtime === 'deno' ? 'deno task dev' : runtime === 'bun' ? 'bun run dev' : 'npm run dev'
+      }\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart. Vite\nlistens on \`VITE_PORT\` (default 5173); open the app's own port.\n\n`
       : ''
   }${
     host.devtoolPort === undefined
@@ -1964,8 +1971,10 @@ ${host.wranglerToml}`,
     files.push({ path: 'main.ts', contents: serveEntry(runtime, port) });
   }
 
+  // Every server runtime, never Workers: the entry runs Vite in-process and
+  // binds sockets, which an isolate cannot.
   const devEntry = host.manifest?.npmBuild?.devEntry;
-  if (runtime === 'deno' && devEntry !== undefined) {
+  if (runtime !== 'cloudflare-workers' && devEntry !== undefined) {
     files.push({ path: devEntry.path, contents: devEntry.contents });
   }
 

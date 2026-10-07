@@ -4085,7 +4085,9 @@ app.router.get('/api/health', (ctx) => {
   the directory of each package mapped to a `file:` URL. Vite's runner then imports the module
   natively instead of loading a second copy. It is typed structurally (`ViteDevExternalsOptions`,
   `ViteDevExternalsPlugin`, `ViteDevExternalId`, `ViteResolvedEnvironments`), so this package
-  imports no Vite. `setu new --template full-stack` on Deno emits a `dev.ts` that uses it.
+  imports no Vite. `setu new --template full-stack` emits a `dev.ts` that uses it on Deno, Node and
+  Bun; on Node and Bun Vite externalises `node_modules` packages anyway, so it changes nothing
+  there.
 - `interface RouterContextKey<T>` — `{ readonly defaultValue?: T }`. Structurally identical to React
   Router's `RouterContext<T>`, so keys from this package and keys from `createContext<T>()` are
   interchangeable.

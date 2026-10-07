@@ -13,15 +13,17 @@ The mechanism below was verified end-to-end against a running kernel app on **De
 **react-router 8.4.0**, the versions `setu new --template full-stack` resolves today. Where a
 plausible-looking approach does not work, it is called out explicitly rather than omitted.
 
-> **A project scaffolded by `setu new --template full-stack` on Deno already has this loop:** run
-> `deno task dev`. Its `dev.ts` is the wiring below, plus `viteDevExternals`, which the loop needs
-> whenever a route imports a `@setu-ts` package at run time, as the skeleton's
-> `app/lib/context-keys.server.ts` does. Without it Vite's development SSR runner resolves imports
-> through `node_modules`, so on Deno, where the package is a JSR import, every page answers `500`
-> with `Cannot find module '@setu-ts/react-router-plugin'`. Marking the package external in
-> `environments.ssr.resolve.external` does not help: the runner still resolves the external through
-> `node_modules`. The dev entry has been verified on Deno only; on a Node or Bun project those
-> packages are in `node_modules`, and `setu new` emits no `dev.ts` there.
+> **A project scaffolded by `setu new --template full-stack` already has this loop:** run
+> `deno task dev`, `npm run dev` or `bun run dev`. Its `dev.ts` is the wiring below, plus
+> `viteDevExternals`, which the loop needs whenever a route imports a `@setu-ts` package at run
+> time, as the skeleton's `app/lib/context-keys.server.ts` does. Without it Vite's development SSR
+> runner resolves imports through `node_modules`, so on Deno, where the package is a JSR import,
+> every page answers `500` with `Cannot find module '@setu-ts/react-router-plugin'`. Marking the
+> package external in `environments.ssr.resolve.external` does not help: the runner still resolves
+> the external through `node_modules`. On Node and Bun those packages are in `node_modules`, which
+> Vite externalises already, so the same `dev.ts` runs unchanged; it was verified on all three
+> runtimes. A Cloudflare Workers project gets no `dev.ts`: the entry runs Vite in-process and binds
+> sockets.
 
 > **Not related to `deno desktop --hmr`.** Deno 2.9.4 added `--hmr` support for React Router, but it
 > is scoped to the `deno desktop` command, which detects `@react-router/dev` in `package.json` and

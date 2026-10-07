@@ -273,8 +273,8 @@ export interface TemplateManifest {
      */
     readonly outputDir: string;
     /**
-     * A development entry emitted on the Deno target only, with a `dev` task
-     * that runs it. Omitted → no development entry and no `dev` task.
+     * A development entry emitted on every server target (never Workers), with
+     * a `dev` task or script that runs it. Omitted → neither is emitted.
      */
     readonly devEntry?: { readonly path: string; readonly contents: string };
   };

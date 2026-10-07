@@ -319,15 +319,19 @@ export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
 };
 
 /**
- * The development entry a Deno full-stack project carries, run by `deno task dev`.
+ * The development entry a full-stack project carries on Deno, Node and Bun, run
+ * by its `dev` task or script. One body for all three: it reaches the runtime
+ * only through `createRuntimeServices`.
  *
  * Runs Vite in-process, hands its server build to the SSR plugin through
  * `createApp`'s `ssr` parameter, and proxies Vite's client URLs (all under
  * `/__vite/`) through the application's port, so a route edit is served on the
  * next request with no restart. `viteDevExternals` keeps every `@setu-ts`
- * package and workspace library external, resolved through `deno.json`: Vite
+ * package and workspace library external, resolved by the runtime: on Deno, Vite
  * cannot resolve a JSR import, and loading one itself would make a second copy
- * whose context keys match nothing.
+ * whose context keys match nothing. On Node and Bun those packages are in
+ * `node_modules`, which Vite externalises anyway, so the plugin changes nothing
+ * there — verified both with and without it on Node.
  */
 export const FULL_STACK_DEV_ENTRY: { readonly path: string; readonly contents: string } = {
   path: 'dev.ts',
@@ -344,8 +348,8 @@ import { frameworkPackages, workspaceLibraries } from './vite.config.ts';
  * Vite serves the route modules and the client graph; the application still
  * owns the port, the plugins and every non-page route. Client URLs are
  * namespaced under \`/__vite/\` so one proxy route reaches Vite without
- * colliding with application routes. Production does not use this file:
- * \`deno task start\` builds and runs \`main.ts\`.
+ * colliding with application routes. Production does not use this file: the
+ * start task or script builds and runs \`main.ts\`.
  */
 const BASE = '/__vite/';
 const runtime = createRuntimeServices();
@@ -362,7 +366,7 @@ const viteServer = await vite.createServer({
   server: { port: vitePort, strictPort: true },
   plugins: [viteDevExternals({
     packages: [...frameworkPackages, ...workspaceLibraries],
-    // Deno's resolver, so a route shares the module instances this entry holds.
+    // The runtime's resolver, so a route shares the module instances this entry holds.
     resolve: (specifier) => import.meta.resolve(specifier),
   })],
 });

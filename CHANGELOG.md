@@ -8,20 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`deno task dev` in a full-stack project serves route edits without a restart (`@setu-ts/cli`,
-  `@setu-ts/react-router-plugin`, PR pending).** On Deno, Vite's development SSR runner could not
-  load a route that imports a `@setu-ts` package: it resolves imports through `node_modules`, so
-  every page answered `500` with `Cannot find module '@setu-ts/react-router-plugin'`. And a package
-  it loaded itself would be a second copy whose `contextKeyFor()` keys match nothing. The new
-  `viteDevExternals()` resolves those packages with the runtime's own resolver and keeps them
-  external, so the dev server shares the instance the application holds.
-  `setu new --template
-  full-stack` on Deno now emits a `dev.ts` entry and a `dev` task using it.
-  The plugin is typed structurally (`ViteDevExternalsOptions`, `ViteDevExternalsPlugin`,
-  `ViteDevExternalId`, `ViteResolvedEnvironments`), so the package still imports no Vite. Verified
-  against the published JSR packages and the workspace sources: `/login` renders with its CSRF
-  token, client modules load through the app port, and an edited route is served on the next
-  request.
+- **A full-stack project's `dev` task serves route edits without a restart, on Deno, Node and Bun
+  (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR pending).** `setu new --template full-stack`
+  now emits a `dev.ts` entry and a `dev` task (`deno task dev`, `npm run dev`, `bun run dev`); a
+  Workers project gets neither, since the entry runs Vite in-process. On Deno, Vite's development
+  SSR runner could not load a route that imports a `@setu-ts` package: it resolves imports through
+  `node_modules`, so every page answered `500` with
+  `Cannot find module '@setu-ts/react-router-plugin'`, and a package it loaded itself would be a
+  second copy whose `contextKeyFor()` keys match nothing. The new `viteDevExternals()` resolves
+  those packages with the runtime's own resolver and keeps them external. On Node and Bun the
+  packages are in `node_modules`, which Vite externalises already, so the same `dev.ts` runs
+  unchanged there. The plugin is typed structurally (`ViteDevExternalsOptions`,
+  `ViteDevExternalsPlugin`, `ViteDevExternalId`, `ViteResolvedEnvironments`), so the package still
+  imports no Vite. Verified on all three runtimes against the published packages, and on Deno
+  against the workspace sources too: `/login` renders with its CSRF token, client modules load
+  through the app port, an edited route is served on the next request, and SIGINT stops the app and
+  Vite with exit code 0.
 
 - **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR
   pending).** With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the
