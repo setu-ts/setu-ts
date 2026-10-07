@@ -58,7 +58,7 @@ const TEST_FLAGS = [
   '--allow-import',
   '--allow-env',
   '--allow-sys=hostname,osRelease',
-  '--allow-run=deno,git,docker',
+  '--allow-run=deno,git,docker,npm',
   '--allow-write',
 ] as const;
 

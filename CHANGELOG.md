@@ -414,6 +414,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
+  `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
+  `@cloudflare/workers-types: '^4.20250109.0'`, and `wrangler` moved its `workers-types` peer from
+  `^4` to `^5` inside its own 4.x line — so `npm install`, the first step the CLI prints, failed
+  with ERESOLVE against `wrangler@4.148.0` for every new Workers project. The scaffold now pins
+  `wrangler: '~4.148.0'` and `@cloudflare/workers-types: '^5.20261006.1'`: a tilde range because a
+  floating `^4` was never a promise about that peer, while a patch release keeps it on `^5`. Its
+  `tsconfig.json` also gains `allowImportingTsExtensions`, `noEmit`, `lib: ['ES2022']` and
+  `types: ['@cloudflare/workers-types']`: without them the generated `npm run check` failed on a
+  pristine scaffold (TS5097, every emitted import carries `.ts`) and the types package was installed
+  and read by nothing, so `cloudflare:workers` and `KVNamespace` did not resolve. A template's own
+  `types` and `lib` are kept. Verified end to end: scaffold, `npm install`, `npm run check`,
+  `npx wrangler dev`, and `GET /` answers `200` on workerd. A new guarded e2e runs a dry-run
+  `npm install` of every Workers-capable template's generated manifest, so the next upstream peer
+  change fails the suite (including the weekly dependency-drift job) instead of reaching users; the
+  root suite grants `--allow-run=npm` for it. Existing projects can apply the same two pins and four
+  `tsconfig.json` options by hand.
 - **A scaffolded Worker kept its old bindings after a bindings-only deploy (`@setu-ts/cli`, #423).**
   The `src/index.ts` that `setu new --runtime cloudflare-workers` generates memoized the application
   built from the first request's `env` and reused it for every later request. Cloudflare may keep an
@@ -428,7 +445,6 @@ All notable changes to this project are documented here. The format follows
   request or queue batch still holds it. Only newly scaffolded projects change; an existing project
   can copy the new cache, from `interface BootedApp` through `stopQuietly`, and the
   `acquire`/`release` calls in each export into its own `src/index.ts`.
-
 - **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
   `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as
   a plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB
