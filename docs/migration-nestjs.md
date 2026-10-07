@@ -841,8 +841,11 @@ the way a hand-assembled test module can. `overrides` replaces a capability a pl
 `without: ['name']` keeps a plugin from running at all.
 
 A decorated `@Injectable` class is different: `DecoratorPlugin` registers it in the DI container,
-which `overrideCapability` does not reach. Test such a class the way Nest's `useValue` provider is
-used for unit tests, by constructing it directly with its fakes: `new UsersController(fakeService)`.
+which `overrideCapability` does not reach. `overrideProvider` replaces it there, the counterpart of
+Nest's `.overrideProvider(UsersService).useValue(fake)`: pass
+`overrides: [overrideProvider('users-service', { useValue: fakeUsers })]`, using the class's
+`@Injectable({ token })`. Every class that injects it, a controller included, is built with the
+fake, and a mistyped token fails `start()` instead of testing the real class.
 
 ## Common Patterns
 

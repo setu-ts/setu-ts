@@ -167,13 +167,8 @@ Two bounds remain, both documented rather than surprising:
 
 **A service provided by the DI container cannot be replaced this way.** With `DiPlugin` registered,
 `DecoratorPlugin` puts each `@Injectable` class into the container rather than the kernel registry,
-so `overrideCapability('pricing-service', fake)` throws that nothing provides the token.
-Re-registering on the container after start is refused too
-(`DI token 'pricing-service' is already registered. Use a child scope to override.`), and a child
-scope does not help when the application resolves from the root container. There is no supported
-route yet for replacing a container provider inside a composed application. A decorated class is
-still an ordinary class, though, so test it directly with its dependencies supplied by hand:
-`new PricingService(fakeLogger)`.
+so `overrideCapability('pricing-service', fake)` throws that nothing provides the token. Use
+[`overrideProvider`](#overrideprovider) for it.
 
 To remove the provider instead of replacing it — which also prevents its eager side effects — supply
 the double as a provider ahead of its consumers:

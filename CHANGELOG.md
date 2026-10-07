@@ -237,8 +237,10 @@ All notable changes to this project are documented here. The format follows
   capability, so `@Inject(CAPABILITIES.LOGGER)` or `CAPABILITIES.CACHE` failed at startup with "No
   provider registered for DI token". The container now falls back to the kernel `ServiceRegistry`
   for a token it does not hold; explicit container registrations still win. **Migration:** pass
-  `DiPlugin({ autoRegister: false })` to keep resolution confined to the container.
-  `createContainer()` outside the plugin is unchanged.
+  `DiPlugin({ autoRegister: false })` to keep resolution confined to the container. A starter's
+  `di: {}` arm passes its options through, so `@Inject(CAPABILITIES.LOGGER)` — the pairing both
+  starter READMEs show — now resolves there too. `createContainer()` outside the plugin is
+  unchanged.
 
 - **BREAKING: RabbitMQ consumer retry defaults (#421).** Durable messaging consumer groups now retry
   failures with five total attempts and tiered delays, create durable retry/dead queues (retry
@@ -451,14 +453,6 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
-
-- **A starter app with `di: {}` now falls back to the kernel registry for unregistered tokens
-  (`@setu-ts/rest-starter`, PR pending).** With the arm on, `DecoratorPlugin` registers every
-  `@Injectable` class as a container provider, and an `@Inject(CAPABILITIES.LOGGER)` argument — the
-  pairing both starter READMEs show — failed with `No provider registered for DI token 'logger'`.
-  The arm now builds `DiPlugin({ autoRegister: true, ...options.di })`, so the container resolves
-  framework capabilities through the registry; `di: { autoRegister: false }` restores the old
-  behaviour.
 
 - **A newly scaffolded full-stack project's smoke test now also requests `/` (`@setu-ts/cli`, PR
   pending).** `populateLoadContext` runs only on an SSR request, so any DI misconfiguration left
@@ -743,8 +737,8 @@ All notable changes to this project are documented here. The format follows
   loader reaches an injected service; the `full-stack-starter` README now shows resolving it from
   `CAPABILITIES.DI_CONTAINER` in `populateLoadContext` and carrying it on a context key, and says
   that a DI mistake starts cleanly and fails every server-rendered page. Both starter READMEs say
-  what the `di` arm turns on, and the testing README states that a container-provided service cannot
-  be replaced with `overrideCapability`.
+  what the `di` arm turns on, and the testing README points a container-provided service at
+  `overrideProvider` rather than `overrideCapability`.
 
 - **The root README's quick examples did not run as written (README, PR pending).** The first
   example registered `LoggerPlugin` without telling the reader to install it, so following the
