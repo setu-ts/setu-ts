@@ -47,9 +47,12 @@ interface FenceCounts {
 
 const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
   'docs/getting-started.md': {
-    total: 22,
-    ts: 12,
-    compile: 12,
+    // 22/12 until the cold-read pass: three byte-identical per-runtime
+    // `app.start()` blocks collapsed into one, and a "Stopping Cleanly" fence
+    // showing the portable signal handler was added.
+    total: 20,
+    ts: 10,
+    compile: 10,
     external: 0,
     pseudocode: 0,
     skipped: 10,
