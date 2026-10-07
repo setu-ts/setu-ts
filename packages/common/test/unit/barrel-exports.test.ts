@@ -380,6 +380,37 @@ describe('@setu-ts/common barrel — M90f malformed body', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The portable duplicate-key error
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — duplicate key', () => {
+  it('exports DuplicateKeyError, branded 409 with a fixed detail and the driver error as cause', () => {
+    const driver = Object.assign(new Error('Key (email)=(ada@example.com) already exists.'), {
+      code: '23505',
+    });
+    const error = new common.DuplicateKeyError('diagnostic', { entity: 'User', cause: driver });
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('DuplicateKeyError');
+    expect(error.entity).toBe('User');
+    expect(error.cause).toBe(driver);
+    expect(common.httpStatusHintOf(error)).toEqual({
+      status: 409,
+      title: 'Conflict',
+      detail:
+        'A record with the same unique key already exists. The conflicting write was rejected.',
+    });
+    // The served detail never quotes the driver's text, which carries the value.
+    expect(common.httpStatusHintOf(error)?.detail).not.toContain('ada@example.com');
+  });
+
+  it('omits entity and cause when the producer supplies neither', () => {
+    const error = new common.DuplicateKeyError('diagnostic');
+    expect(error.entity).toBeUndefined();
+    expect('cause' in error).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M92 — the view rendering contract
 // ---------------------------------------------------------------------------
 

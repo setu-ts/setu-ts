@@ -5,6 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type { IAdapterTransaction, IDataSource } from '@setu-ts/common';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
@@ -62,7 +63,9 @@ describe('BigtableTransaction', () => {
     const { store, tx } = setup();
     store.seed('User', 'u1', { cf: { id: 's:u1' } });
     await tx.createDataSource('User').create({ id: 'u1', name: 'ada' });
-    await expect(tx.commit()).rejects.toThrow(/already exists/);
+    const refusal = await tx.commit().catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(DuplicateKeyError);
+    expect((refusal as Error).message).toMatch(/already exists/);
   });
 
   it('merges several buffered writes to one row into a single mutation', async () => {

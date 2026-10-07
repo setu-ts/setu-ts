@@ -15,7 +15,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, DuplicateKeyError } from '@setu-ts/common';
 import type { HealthCheckResult, IApplication } from '@setu-ts/common';
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
@@ -262,6 +262,42 @@ describe('D1 through DatabasePlugin — Unit of Work', () => {
 
     expect(d1.batches).toEqual([]);
     expect(await db.getRepository<User>('User').count()).toBe(0);
+
+    await app.stop();
+  });
+});
+
+describe('D1 through DatabasePlugin — duplicate keys', () => {
+  // D1 carries no error code: its only signal is SQLite's own
+  // `UNIQUE constraint failed` text, which the fake's real SQLite produces too.
+  it('refuses a duplicate primary key as a DuplicateKeyError naming the entity', async () => {
+    const { app, db } = await bootApp();
+    const users = db.getRepository<User>('User');
+    await users.create({ id: 'u1', name: 'ada', age: 36 });
+
+    const refusal = await users.create({ id: 'u1', name: 'bob', age: 24 })
+      .catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(DuplicateKeyError);
+    expect((refusal as DuplicateKeyError).entity).toBe('User');
+    // The first row is untouched.
+    expect(await users.findById('u1')).toMatchObject({ name: 'ada' });
+
+    await app.stop();
+  });
+
+  it('refuses a duplicate found at commit and applies none of the batch', async () => {
+    const { app, db } = await bootApp();
+    await db.getRepository<User>('User').create({ id: 'u1', name: 'ada', age: 36 });
+
+    const refusal = await db.transaction(async (uow) => {
+      const users = uow.getRepository<User>('User');
+      await users.create({ id: 'u2', name: 'bob', age: 24 });
+      await users.create({ id: 'u1', name: 'eve', age: 51 });
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(DuplicateKeyError);
+    // The batch is atomic: `u2`, written before the duplicate, is absent too.
+    expect(await db.getRepository<User>('User').count()).toBe(1);
 
     await app.stop();
   });

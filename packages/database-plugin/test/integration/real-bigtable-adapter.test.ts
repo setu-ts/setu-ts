@@ -31,7 +31,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { FilterExpression, IDataSource, NormalizedQuery } from '@setu-ts/common';
-import { decodeCursor } from '@setu-ts/common';
+import { decodeCursor, DuplicateKeyError } from '@setu-ts/common';
+import { DatabaseService } from '../../src/services/database-service.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
 import { createLazyBigtableLoader } from '../../src/adapters/bigtable/bigtable-client.ts';
@@ -754,3 +755,29 @@ async function walkPages(
   }
   throw new Error('page walk did not terminate');
 }
+
+describe('BigtableAdapter against a real emulator — duplicate key', () => {
+  it('a create on an existing row is a DuplicateKeyError, directly and at commit', {
+    ignore: skipReal,
+  }, async () => {
+    const table = await provision(`dupkey_${suffix}`, ['cf']);
+    const adapter = await connect({ User: { table } });
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'bigtable');
+    try {
+      const repo = service.getRepository('User');
+      await repo.create({ id: 'u1', name: 'ada' });
+
+      const direct = await repo.create({ id: 'u1', name: 'eve' }).catch((e: unknown) => e);
+      expect(direct).toBeInstanceOf(DuplicateKeyError);
+      expect((direct as DuplicateKeyError).entity).toBe('User');
+
+      const atCommit = await service.transaction(async (uow) => {
+        await uow.getRepository('User').create({ id: 'u1', name: 'bob' });
+      }).catch((e: unknown) => e);
+      expect(atCommit).toBeInstanceOf(DuplicateKeyError);
+      expect(await repo.findById('u1')).toMatchObject({ name: 'ada' });
+    } finally {
+      await service.close();
+    }
+  });
+});

@@ -14,6 +14,7 @@
  */
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { DuplicateKeyError, httpStatusHintOf } from '@setu-ts/common';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
@@ -622,6 +623,9 @@ describe('MemoryAdapter', () => {
       );
       const refusal = await ds.create({ id: 'canary-key-7' }).catch((error: Error) => error);
       expect((refusal as Error).message).not.toContain('canary-key-7');
+      expect(refusal).toBeInstanceOf(DuplicateKeyError);
+      expect((refusal as DuplicateKeyError).entity).toBe('User');
+      expect(httpStatusHintOf(refusal)?.status).toBe(409);
       // The first row is untouched and still addressable.
       expect(await ds.findById('canary-key-7')).toMatchObject({ name: 'first' });
       expect(await ds.findAll(ALL)).toHaveLength(1);

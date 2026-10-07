@@ -12,6 +12,15 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Handle `409` for a duplicate key, where it used to be `500`
+
+A write that duplicates a primary key or a unique index now rejects with `DuplicateKeyError` from
+`@setu-ts/common` and answers `409 Conflict`. Before, every backend answered a masked `500`. Nothing
+in your code has to change for the new status to be correct, but a test or a client matching `500`
+for a duplicate stops matching. `instanceof DuplicateKeyError` replaces matching driver codes or
+message text. Do not retry it: unlike `SerializationConflictError`, the same write fails the same
+way.
+
 ### Update `IRedisStreamsClient` facades and Redis consumer handlers
 
 Injected messaging Redis facades must implement the required `xpending`, `xclaim`, and `xinfo`

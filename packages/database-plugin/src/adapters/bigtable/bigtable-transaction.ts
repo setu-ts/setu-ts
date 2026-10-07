@@ -21,6 +21,7 @@
  * @module
  */
 import type { IAdapterTransaction, IDataSource } from '@setu-ts/common';
+import { DuplicateKeyError } from '@setu-ts/common';
 import { BigtableTransactionScopeError } from '../../errors.ts';
 import type {
   BigtableMutation,
@@ -237,7 +238,7 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
     if (state.expects === 'absent') {
       const matched = await row.conditionalMutate([{ all: true }], { onNoMatch: mutations });
       if (matched) {
-        throw new Error(
+        throw new DuplicateKeyError(
           `Bigtable row '${state.table}'/'${state.rowKey}' already exists; the transaction's ` +
             `create was not applied.`,
         );

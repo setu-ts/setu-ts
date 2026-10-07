@@ -24,6 +24,7 @@ import type {
 } from '@setu-ts/common';
 import {
   decodeCursor,
+  DuplicateKeyError,
   keysetPredicate,
   mintNextCursor,
   resolveKeysetSort,
@@ -255,8 +256,10 @@ function immutableKeyError(entity: string): Error {
 }
 
 /** The refusal for a duplicate primary key; never echoes the key's value. */
-function duplicateKeyError(entity: string): Error {
-  return new Error(`Entity '${entity}' already has a row with this primary key`);
+function duplicateKeyError(entity: string): DuplicateKeyError {
+  return new DuplicateKeyError(`Entity '${entity}' already has a row with this primary key`, {
+    entity,
+  });
 }
 
 /**

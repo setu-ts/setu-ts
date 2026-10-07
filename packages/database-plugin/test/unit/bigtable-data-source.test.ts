@@ -5,6 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type { IDataSource, NormalizedQuery } from '@setu-ts/common';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
@@ -73,7 +74,10 @@ describe('create', () => {
   it('refuses to overwrite an existing row', async () => {
     const { source } = setup();
     await source.create({ id: 'u1', name: 'ada' });
-    await expect(source.create({ id: 'u1', name: 'bob' })).rejects.toThrow(/does not overwrite/);
+    const refusal = await source.create({ id: 'u1', name: 'bob' }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(DuplicateKeyError);
+    expect((refusal as DuplicateKeyError).entity).toBe('User');
+    expect((refusal as Error).message).toMatch(/does not overwrite/);
     expect((await source.findById('u1'))?.name).toBe('ada');
   });
 

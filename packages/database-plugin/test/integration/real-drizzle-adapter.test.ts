@@ -47,6 +47,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
 import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type { DrizzleAdapterOptions, IDatabaseService } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { NormalizedQuery } from '@setu-ts/common';
@@ -820,6 +821,67 @@ const skipLivePg = livePgUrl === undefined;
 const pgAccounts = pgTable('x90f_classified_accounts', {
   id: text('id').primaryKey(),
   balance: integer('balance').notNull(),
+});
+
+/**
+ * A primary key AND a secondary unique column, for the duplicate-key cases.
+ * The table name is unique per run, so the case never adopts, empties or drops
+ * a pre-existing table in whatever database `POSTGRES_URL` names.
+ */
+const pgMembersTable = `dupkey_members_${crypto.randomUUID().replaceAll('-', '')}`;
+const pgMembers = pgTable(pgMembersTable, {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+});
+
+describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
+  it('a duplicate primary key or unique column reaches the caller as DuplicateKeyError', {
+    ignore: skipLivePg,
+  }, async () => {
+    const pool = new Pool({ connectionString: livePgUrl!, max: 2 });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        nodePostgresDrizzle(pool),
+        (database, work) => database.transaction(work),
+      ),
+      drizzleTables: { Member: pgMembers },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'drizzle');
+    // No IF NOT EXISTS and no DELETE: the name is fresh, so creating it fails
+    // loudly rather than adopting someone else's table.
+    await pool.query(
+      `CREATE TABLE "${pgMembersTable}" (id text primary key, email text not null unique)`,
+    );
+    try {
+      const repo = service.getRepository('Member');
+      await repo.create({ id: 'm1', email: 'ada@example.com' });
+
+      for (
+        const duplicate of [{ id: 'm1', email: 'eve@example.com' }, {
+          id: 'm2',
+          email: 'ada@example.com',
+        }]
+      ) {
+        const refusal = await repo.create(duplicate).catch((e: unknown) => e);
+        expect(refusal).toBeInstanceOf(DuplicateKeyError);
+        expect((refusal as DuplicateKeyError).entity).toBe('Member');
+        // SQLSTATE 23505 stays reachable through `cause` for the log.
+        let cursor: unknown = (refusal as Error).cause;
+        let sawUniqueViolation = false;
+        for (let depth = 0; depth < 6 && cursor !== undefined && cursor !== null; depth++) {
+          if ((cursor as { code?: unknown }).code === '23505') sawUniqueViolation = true;
+          cursor = (cursor as { cause?: unknown }).cause;
+        }
+        expect(sawUniqueViolation).toBe(true);
+      }
+      expect(await repo.count()).toBe(1);
+    } finally {
+      await pool.query(`DROP TABLE IF EXISTS "${pgMembersTable}"`);
+      await pool.end();
+      await adapter.disconnect();
+    }
+  });
 });
 
 describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35-2)', () => {

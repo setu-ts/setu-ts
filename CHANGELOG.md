@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
+  a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
+  error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s
+  D1 adapter, and any store that records "already processed" with a unique insert, can raise or
+  recognise it without importing `@setu-ts/database-plugin`.
+
 - **Scaffold testing (M101g, V8-12, V8-39).** Generated factories return `IKernelApplication`, or
   its promise for starter compositions, so `createTestApp({ app: await createApp() })` type-checks.
   `setu add testing` pins `@setu-ts/testing` in Deno's import map or npm's `devDependencies`. New
@@ -394,6 +400,17 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
+  `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as
+  a plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB
+  Local, a duplicate primary key and a duplicate secondary unique key both answered `500`.
+  `DatabaseService` now classifies SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB
+  `11000`, Cosmos `409` and SQLite's `UNIQUE constraint failed` (the only signal D1 carries) as
+  `DuplicateKeyError`, and the memory, DynamoDB and Bigtable adapters raise it themselves. A
+  duplicate refused at `commit()` is mapped too, including a DynamoDB transaction cancelled by a
+  create's guard; any other commit rejection is still rethrown unchanged. The served `detail` is
+  fixed and never quotes the duplicated value.
 
 - **Redis Streams stranded messages (`@setu-ts/messaging-plugin`, #419).** Failed entries are
   reclaimed with tiered idle backoff through one delivery path, instead of staying in the pending
