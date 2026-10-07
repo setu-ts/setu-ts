@@ -5,6 +5,7 @@ import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
+import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
 interface Harness {
@@ -127,6 +128,40 @@ describe('the Workers target is deployable as documented', () => {
     expect(manifest.devDependencies?.['wrangler']).toBeDefined();
     expect(manifest.devDependencies?.['vite']).toBeDefined();
     expect(manifest.dependencies?.['@setu-ts/common']).toBeDefined();
+  });
+});
+
+describe('a template with a frontend build, on an npm target', () => {
+  // The next-step hint and the README both tell a new user to run `start`.
+  // Without a build first it crashed on a fresh project with "Failed to load
+  // React Router server build", because the server bundle did not exist yet.
+  for (
+    const [runtime, build, entry] of [
+      ['node', 'npm run build', 'tsx main.ts'],
+      ['bun', 'bun run build', 'bun run main.ts'],
+    ] as const
+  ) {
+    it(`builds before start on ${runtime}, as it already does before test`, async () => {
+      const h = harness();
+      expect(await h.run(['app', '--runtime', runtime, '--template', 'full-stack'])).toBe(0);
+      const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+        scripts: Record<string, string>;
+      };
+      expect(manifest.scripts['start']).toBe(`${build} && ${entry}`);
+      expect(manifest.scripts['test']?.startsWith(`${build} && `)).toBe(true);
+      // The start script is the runtime marker other commands read, so the
+      // build prefix must not change which runtime the project reads as.
+      expect(await detectTargetRuntime(h.fs, '/work/app')).toBe(runtime);
+    });
+  }
+
+  it('leaves start alone for a template with no frontend build', async () => {
+    const h = harness();
+    expect(await h.run(['app', '--runtime', 'node', '--template', 'rest'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      scripts: Record<string, string>;
+    };
+    expect(manifest.scripts['start']).toBe('tsx main.ts');
   });
 });
 

@@ -17,7 +17,7 @@ Dockerfile in one step:
 
 ```bash
 # Install the Setu CLI once
-deno install -A -f --min-dep-age 0 jsr:@setu-ts/cli@^0.8.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
 
 # Create a REST application (add --runtime node, bun, or cloudflare-workers to change target)
 setu new my-app

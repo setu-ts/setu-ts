@@ -414,6 +414,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A fresh full-stack project on Node or Bun crashed on its first `start` (`@setu-ts/cli`, PR
+  pending).** `setu new --template full-stack --runtime node` (or `bun`) prints
+  `npm install && npm start`, and the generated README says the same, but the `start` script ran
+  `tsx main.ts` (or `bun run main.ts`) without building first, so the React Router plugin failed
+  with "Failed to load React Router server build" because `build/server/index.js` did not exist.
+  `start` now runs the build first, as the Deno `start` task and the npm `test` script already did.
+  An existing project can prefix its own `start` with `npm run build &&` (or `bun run build &&`).
+
+- **The getting-started guide's CLI install command did not work.** It omitted `-g`, which Deno 2.9
+  requires for a global install, and `-n setu`, without which the binary is named `cli` and every
+  `setu …` command in the guide is not found. It now matches the other four documented sites, and a
+  test fails if any documented install command drifts from them.
+
 - **A scaffolded Worker kept its old bindings after a bindings-only deploy (`@setu-ts/cli`, #423).**
   The `src/index.ts` that `setu new --runtime cloudflare-workers` generates memoized the application
   built from the first request's `env` and reused it for every later request. Cloudflare may keep an

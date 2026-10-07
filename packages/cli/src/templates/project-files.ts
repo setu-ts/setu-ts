@@ -1309,9 +1309,9 @@ function denoCompilerOptions(
 /**
  * The `scripts` a generated `package.json` carries.
  *
- * A template with a frontend build gets a `build` script alongside `start`,
- * because its `start` cannot work until the build has produced the server
- * bundle the SSR plugin loads.
+ * A template with a frontend build gets a `build` script, and its `start` and
+ * `test` run it first, because neither can work until the build has produced
+ * the server bundle the SSR plugin loads.
  *
  * @param runtime - The selected runtime target
  * @param manifest - The template's manifest contributions, when it declares them
@@ -1328,12 +1328,19 @@ function npmScripts(
   // test` for `bun:test`, and `node --test` under the same loader `start` uses,
   // since the generated test is TypeScript.
   const test = runtime === 'bun' ? 'bun test' : `${NODE_RUNNER} --test`;
-  // With a frontend build the smoke test boots an app that loads it, so the
-  // test script builds first, as the Deno `test` task does.
+  // With a frontend build both scripts boot an app that loads the server
+  // bundle, so both build first, as the Deno `start` and `test` tasks do. A
+  // `start` without it is what the next-step hint and the README tell a new
+  // user to run, and it crashed with "Failed to load React Router server
+  // build" on a fresh Node or Bun project. The build runs FIRST, so `start`
+  // still begins with `bun` on Bun, which is how `detectTargetRuntime` tells a
+  // Bun project from a Node one.
   const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
-  return manifest?.npmBuild === undefined
-    ? { start, test }
-    : { build: manifest.npmBuild.script, start, test: `${build} && ${test}` };
+  return manifest?.npmBuild === undefined ? { start, test } : {
+    build: manifest.npmBuild.script,
+    start: `${build} && ${start}`,
+    test: `${build} && ${test}`,
+  };
 }
 
 /**
