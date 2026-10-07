@@ -43,6 +43,8 @@ export interface FakeAmqpOptions {
    * FakeAmqpChannel.releaseConfirms} — a broker that has stopped answering.
    */
   withholdConfirms?: boolean;
+  /** Return mandatory publishes before confirming, as RabbitMQ does for an absent queue. */
+  returnMandatory?: boolean;
 }
 
 /**
@@ -118,6 +120,11 @@ export class FakeAmqpChannel {
     }
   }
 
+  /** Delivers one basic.return to channel observers. */
+  emitReturn(message: unknown): void {
+    for (const listener of [...(this.#listeners.get('return') ?? [])]) listener(message);
+  }
+
   /** Delivers every withheld confirm (as accepted). */
   releaseConfirms(): void {
     const pending = this.#withheld;
@@ -156,6 +163,9 @@ export class FakeAmqpChannel {
     }
     if (this.confirmMode && confirm !== undefined) {
       const error = this.#options.confirmError ?? null;
+      if (this.#options.returnMandatory && (properties as { mandatory?: boolean })?.mandatory) {
+        queueMicrotask(() => this.emitReturn({ content, properties }));
+      }
       const deliver = (): void => confirm(error);
       if (this.#options.withholdConfirms) {
         this.#withheld.push(deliver);
@@ -191,6 +201,24 @@ export class FakeAmqpChannel {
     return Promise.resolve({ consumerTag });
   }
 
+  prefetch(count: number): Promise<void> {
+    this.#record('prefetch', [count]);
+    return Promise.resolve();
+  }
+
+  /** Drives one delivery and waits for its async disposition. */
+  async deliver(
+    content: string,
+    properties: Record<string, unknown> = {},
+    queue?: string,
+  ): Promise<void> {
+    for (const consumer of this.#consumers) {
+      if (queue === undefined || queue === consumer.queue) {
+        await consumer.callback(createFakeMessage(content, properties));
+      }
+    }
+  }
+
   ack(msg: unknown): void {
     this.#record('ack', [msg]);
   }
@@ -210,6 +238,15 @@ export class FakeAmqpChannel {
 
   deleteQueue(queue: string): Promise<void> {
     this.#record('deleteQueue', [queue]);
+    return Promise.resolve();
+  }
+
+  /**
+   * Records the close. The fake hands out one shared channel, so closing does
+   * not invalidate it; tests that need a closed channel's behaviour emit it.
+   */
+  close(): Promise<void> {
+    this.#record('close', []);
     return Promise.resolve();
   }
 }

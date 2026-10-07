@@ -385,6 +385,20 @@ export interface MemoryMessagingOptions extends MessagingCommonOptions {
 }
 
 /**
+ * Consumer delivery budget, tiered delays, and application failure classification.
+ * Defaults and delivery lease semantics depend on the broker.
+ * @since 0.9.0
+ */
+export interface ConsumerRetryOptions {
+  /** Positive safe integer delivery budget, including the initial attempt. @since 0.9.0 */
+  readonly maxAttempts?: number;
+  /** Nonempty, nondecreasing positive integer milliseconds ≤2147483647. @since 0.9.0 */
+  readonly delaysMs?: readonly number[];
+  /** False dead-letters immediately; a throwing classifier is logged and retries. @since 0.9.0 */
+  readonly isRetryable?: (error: unknown) => boolean;
+}
+
+/**
  * Redis Streams arm.
  *
  * @since 0.1.0
@@ -398,14 +412,7 @@ export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
    * processing by another replica. No false arm: failed messages are retried.
    * @since 0.9.0
    */
-  consumerRetry?: {
-    /** Positive safe integer delivery budget, including the initial attempt. */
-    readonly maxAttempts?: number;
-    /** Tier indexed by deliveries - 1, clamped to the final tier. */
-    readonly delaysMs?: readonly number[];
-    /** False dead-letters immediately; a throwing classifier is logged and retries. */
-    readonly isRetryable?: (error: unknown) => boolean;
-  };
+  consumerRetry?: ConsumerRetryOptions;
   /** Reclaim timer in positive integer ms ≤2147483647. Default 5000. @since 0.9.0 */
   reclaimIntervalMs?: number;
   /** Approximate DLQ MAXLEN, a positive safe integer. Default 10000. @since 0.9.0 */
@@ -427,6 +434,24 @@ export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
+  /**
+   * Durable group retries; false retains nack-and-discard for operator DLX policies.
+   * Default maxAttempts 5, delaysMs [5000, 30000, 120000, 600000].
+   * Deterministic failures dead-letter immediately. Private queues and RPC reply inboxes discard.
+   * With retries enabled, group suffixes .dead and .retry.<digits>ms are reserved.
+   * Generated helper names must fit 255 UTF-8 bytes; a retrying group on an injected channel without
+   * confirms and on/off return listeners is refused at subscribe().
+   * @since 0.9.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /**
+   * Q.dead retention cap (positive safe integer, default 10000).
+   * Changing it requires draining and deleting the existing dead queue before restart.
+   * @since 0.9.0
+   */
+  deadLetterMaxLength?: number;
+  /** Per-consumer unacked delivery limit, integer 1–65535, default 32. @since 0.9.0 */
+  prefetch?: number;
   broker: 'rabbitmq';
   url?: string;
   client?: IAmqpConnection;
@@ -736,6 +761,12 @@ export interface RedisStreamsOptions {
  * @since 0.1.0
  */
 export interface RabbitMqOptions {
+  /** Durable group retry policy. See RabbitMqMessagingOptions. @since 0.9.0 */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /** Dead queue retention cap, default 10000. @since 0.9.0 */
+  deadLetterMaxLength?: number;
+  /** Per-consumer delivery limit, default 32. @since 0.9.0 */
+  prefetch?: number;
   /** RabbitMQ connection URL. */
   url?: string;
   /** Injected AMQP connection. */

@@ -202,6 +202,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING: RabbitMQ consumer retry defaults (#421).** Durable messaging consumer groups now retry
+  failures with five total attempts and tiered delays, create durable retry/dead queues (retry
+  queues are quorum queues with at-least-once dead-lettering, so an expiring copy is never dropped),
+  and bound unacked deliveries to prefetch 32 per consumer. Handlers must be idempotent. Configure
+  `consumerRetry: false` for the existing operator-DLX behavior; private queues and RPC reply
+  inboxes retain discard behavior. `ConsumerRetryOptions` names the shared RabbitMQ/Redis shape.
+  Retry topology reserves group suffixes `.dead` and `.retry.<digits>ms`; rename conflicting groups
+  or disable retries. Generated names must fit 255 UTF-8 bytes. Injected recovery channels require
+  confirms, `on`/`off` return listeners and `close()`; without them `subscribe()` on a retrying
+  group rejects. The RabbitMQ user needs configure permission on `Q.dead`/`Q.retry.<delay>ms`, read
+  on `Q.retry.<delay>ms`, and write on `amq.default`; otherwise the helper declarations fail with
+  `403`.
+
 - **BREAKING: Redis Streams messaging recovery (#419).** Failed messages now retry across restarts;
   handlers must be idempotent. Redis ≥6.2 is required. Injected `IRedisStreamsClient` facades must
   implement `xpending`, `xclaim`, `xinfo`, and `xgroup('DELCONSUMER', ...)`. Configure
@@ -411,6 +424,19 @@ All notable changes to this project are documented here. The format follows
   duplicate refused at `commit()` is mapped too, including a DynamoDB transaction cancelled by a
   create's guard; any other commit rejection is still rethrown unchanged. The served `detail` is
   fixed and never quotes the duplicated value.
+
+- **RabbitMQ discarded handler failures (`@setu-ts/messaging-plugin`, #421).** Durable groups now
+  confirm persistent retry/dead-letter copies before acknowledging the original, preserve message
+  properties and prototype-safe transport headers, drop the broker-interpreted `userId`, `CC` and
+  `BCC`, classify deterministic failures immediately, and replay retry/dead declarations plus
+  prefetch on reconnect. Retry delays, attempt budget, classifier, dead-letter cap and prefetch are
+  configurable and validated at construction. Mandatory replacement publishes now reject correlated
+  unroutable returns before acknowledging; reserved/oversized group names are refused before
+  declarations can close the shared channel. A failed disposition now closes its channel and starts
+  the reconnect-and-replay recovery, so unacked originals return to `Q` instead of filling
+  `prefetch` on a live channel until the consumer stalls. Dead-letter diagnostics normalize
+  application-supplied queue/topic names and bound the complete log line, preventing control
+  characters from forging log records while preserving the original routing names.
 
 - **Redis Streams stranded messages (`@setu-ts/messaging-plugin`, #419).** Failed entries are
   reclaimed with tiered idle backoff through one delivery path, instead of staying in the pending

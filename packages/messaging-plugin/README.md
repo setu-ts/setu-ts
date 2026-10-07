@@ -183,6 +183,85 @@ where losing in-flight messages on a restart is acceptable. An injected `client`
 stored anything — and the broker logs one warning saying so; a real amqplib connection always has
 it.
 
+### RabbitMQ consumer recovery
+
+Since 0.9.0, durable consumer-group handlers **must be idempotent**: failures redeliver, and a crash
+after a confirmed copy but before the original ack can duplicate a message.
+
+| RabbitMQ option             | Default                         | Behavior                                                                                               |
+| --------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `consumerRetry.maxAttempts` | `5`                             | Total delivery budget, initial attempt included; positive safe integer                                 |
+| `consumerRetry.delaysMs`    | `[5000, 30000, 120000, 600000]` | Nonempty, nondecreasing positive integer milliseconds ≤2147483647; later attempts reuse the final tier |
+| `consumerRetry.isRetryable` | absent                          | False dead-letters immediately; a throwing classifier is logged and counts as retryable                |
+| `consumerRetry`             | enabled                         | `false` restores nack with requeue disabled, including any operator DLX policy                         |
+| `deadLetterMaxLength`       | `10000`                         | Positive safe integer; `x-max-length` on `Q.dead`                                                      |
+| `prefetch`                  | `32`                            | Integer 1–65535; maximum unacked deliveries per consumer, re-applied on reconnect                      |
+
+These numeric options throw `RangeError` at construction for invalid values, including `NaN`,
+fractions, empty delay arrays and decreasing tiers. `ConsumerRetryOptions` is shared with Redis
+Streams; each broker retains its own defaults and lease semantics.
+
+For group queue `Q`, each distinct delay `d` creates a durable quorum queue `Q.retry.<d>ms`, with
+queue-level `x-message-ttl: d` and default-exchange dead-letter routing back to `Q`. It uses
+at-least-once dead-lettering (`x-dead-letter-strategy: at-least-once`, `x-overflow: reject-publish`)
+because the original is acked once the copy is confirmed: classic at-most-once dead-lettering drops
+a copy that `Q` cannot take when it expires (measured on RabbitMQ 4: `Q` absent at expiry received
+nothing in 240 s; the quorum queue held the copy and delivered it about 180 s after `Q` reappeared).
+Changing delays creates new queues without a 406 redeclaration conflict; old retry queues drain into
+`Q`. No per-message expiration is copied. The default budget gives about 12.6 minutes of backoff
+before dead-lettering.
+
+With retries enabled, group names ending in `.dead` or `.retry.<digits>ms` are reserved for helper
+queues. Every generated queue name must fit 255 UTF-8 bytes. Declarative names are checked at plugin
+construction; imperative and factory subscriptions are checked before declaring anything. Rename
+conflicting groups, or set `consumerRetry: false` to keep their existing names. Before enabling
+retries, migrate any existing queues occupying `Q.dead` or `Q.retry.<delay>ms` in the same vhost.
+
+Deserialize failures and `IntegrationEventRejectedError` go straight to `Q.dead`. Other failures run
+the application classifier, then retry below the total attempt budget or dead-letter when exhausted.
+Retry copies preserve body bytes, messageId, timestamp and transport headers (including
+traceparent), adding `x-setu-attempt` (absent means initial attempt 1). Copies omit `expiration`,
+`userId` and the `CC`/`BCC` headers: RabbitMQ refuses another user's `user_id` by closing the
+channel, and CC/BCC would deliver the copy to the queues they name. Malformed attempt headers
+dead-letter immediately. Dead letters add `x-setu-attempts`, `x-setu-topic` and `x-setu-error`,
+rendered via `describeError` and bounded to 1 KiB UTF-8. Error descriptions and payloads may contain
+sensitive data: grant queue and diagnostic-log access only to readers trusted with that data, and
+apply retention policy. Dead-letter log lines normalize control and format characters in queue,
+topic and error text, and cap the complete diagnostic at 8192 Unicode code points with a visible
+truncation marker. Routing names and retained topic headers preserve their original values. When the
+dead queue exceeds its cap, RabbitMQ drops its oldest ready messages. Drain and delete `Q.dead`
+before changing `deadLetterMaxLength`; RabbitMQ rejects different `x-max-length` arguments with 406.
+
+The copy is always persistent, even if original publishes use `persistentMessages: false`. It uses
+the same confirmed publish path and timeout as normal publishes, and the original is acked only
+after that publish succeeds. Copies use mandatory publishing: an unroutable `basic.return` rejects
+the disposition even if RabbitMQ sends a positive confirm. The framework-owned
+`x-setu-disposition-id` header is replaced for each copy and correlates concurrent returns without
+changing the original message ID. Return listeners are removed on confirm, return, close or timeout.
+A failed disposition leaves the original unacked and logs the failure, then the broker closes that
+channel (returning the original to `Q`) and runs its reconnect-and-replay recovery, which
+re-declares the retry and dead queues before consuming again; otherwise the unacked originals would
+fill `prefetch` on a live channel and stall the consumer. The RabbitMQ user needs configure
+permission on `Q.dead` and `Q.retry.<delay>ms`, read permission on `Q.retry.<delay>ms`, and write
+permission on the default exchange, `amq.default`, which carries every retry and dead-letter copy
+(measured on RabbitMQ 4: without them `subscribe()` fails with `403 ACCESS_REFUSED` on the first
+helper declaration, and a copy published without `amq.default` write closes the channel). Recovery
+requires confirm channels with channel `on`/`off` return listeners and `close()`; `subscribe()`
+refuses a retrying consumer group on an injected facade missing any of them, before declaring
+anything, and names `consumerRetry: false` as the alternative. Normal publishes retain their
+documented unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack behavior.
+
+Private exclusive fan-out queues and RPC reply inboxes keep nack with requeue disabled. Measured:
+TTL dead-lettering reaches an exclusive queue while its connection lives, but discards the copy once
+the connection is gone. Durable retries therefore apply only to consumer groups. Messages unacked
+behind a slow handler stay leased until channel closure; elapsed time alone does not cause
+redelivery. A large prefetch allows more messages to wait in that consumer's memory and can increase
+their latency and reduce fairness across replicas. Handlers may run concurrently up to prefetch.
+
+Local RabbitMQ 4 measurement (2,000 persistent messages, 2 ms async handler): prefetch 1/8/32/128
+took 6554/813/209/65 ms. Default 32 bounds local backlog while reaching about 9,570 messages/s in
+this probe; these numbers describe this machine, not a throughput guarantee.
+
 ### Redis Streams recovery
 
 Redis **6.2 or newer** is required (`XPENDING IDLE`). Handlers must be idempotent: failed messages
@@ -633,16 +712,17 @@ each engine's own local time — measured, `2026-01-01T00:00:00` becomes `2025-1
 a `+05:30` host — so one event would mean a different instant on every consumer.
 
 The rejection follows the broker's OWN failure path, and that path differs per arm — it is not a
-retry guarantee. RabbitMQ nacks with requeue DISABLED, so a refused message is dead-lettered when a
-DLX is configured and discarded otherwise, and logs the failure. NATS naks, which redelivers while
-the stream retains the message, and (since PR #287) also logs it. The in-memory broker reports
-through `onDispatchError` and drops. Because a rejection here is deterministic — the same envelope
-fails the same way on every delivery — redelivery cannot resolve it, so a dead-letter queue rather
-than a retry is where a refused event is inspected. The error's `message` carries the whole
-diagnostic (reason, topic, expected against observed), because the in-memory default composition
-logs exactly `error.message` through the application's logger; the structured fields serve an
-`instanceof` branch on a path that surfaces the error object, such as a dead-letter consumer or a
-bespoke sink on the [`'custom'` broker arm](#options).
+retry guarantee. RabbitMQ durable groups now send deterministic rejections directly to `Q.dead` and
+log the failure; private queues, reply inboxes and `consumerRetry: false` retain nack with requeue
+disabled (operator DLX if configured, otherwise discard). NATS naks, which redelivers while the
+stream retains the message, and (since PR #287) also logs it. The in-memory broker reports through
+`onDispatchError` and drops. Because a rejection here is deterministic — the same envelope fails the
+same way on every delivery — redelivery cannot resolve it, so a dead-letter queue rather than a
+retry is where a refused event is inspected. The error's `message` carries the whole diagnostic
+(reason, topic, expected against observed), because the in-memory default composition logs exactly
+`error.message` through the application's logger; the structured fields serve an `instanceof` branch
+on a path that surfaces the error object, such as a dead-letter consumer or a bespoke sink on the
+[`'custom'` broker arm](#options).
 
 ### Behaviour ordering
 
@@ -815,6 +895,7 @@ publish — an operator who needs the signal can publish synthetically.
 | `ReplyInboxUnavailableError`            | class     |
 | `RequestTimeoutError`                   | class     |
 | `ServiceBusBroker`                      | class     |
+| `ConsumerRetryOptions`                  | interface |
 | `CustomMessagingOptions`                | interface |
 | `EventsMessagingBridgeOptions`          | interface |
 | `IMessageBroker`                        | interface |

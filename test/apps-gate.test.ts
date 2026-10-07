@@ -527,6 +527,37 @@ describe('real-backend CI wiring', () => {
     }
   });
 
+  it('pins real RabbitMQ consumer retries, tiers, restart, and guard', async () => {
+    const source = await Deno.readTextFile(
+      'packages/messaging-plugin/test/integration/consumer-retry-real.test.ts',
+    );
+    expect(source).toContain('REAL RabbitMQ consumer retry');
+    expect(source).toContain("Deno.env.get('RABBITMQ_URL')");
+    expect(source).toContain('ignore: rabbitUrl === undefined');
+    for (
+      const scenario of [
+        'second tier',
+        'always-failing handler',
+        'changing delays',
+        'prefetch bounds',
+        'survives a broker restart',
+        'recovers the original',
+        'declares retry queues as quorum queues',
+        'refuses reserved group names',
+        'normalizes dead-letter logs',
+        'a CC header never routes',
+      ]
+    ) expect(source).toContain(scenario);
+    expect(source).toContain("docker(['restart', containerId])");
+    expect(source).toContain('toBeGreaterThanOrEqual(200)');
+    expect(source).toContain('toBeGreaterThanOrEqual(800)');
+    const config = await readJson<{ test: { permissions: { net: string[]; run: string[] } } }>(
+      'packages/messaging-plugin/deno.json',
+    );
+    expect(config.test.permissions.net).toContain('127.0.0.1:5672');
+    expect(config.test.permissions.run).toEqual(['docker']);
+  });
+
   it('pins real Redis Streams redelivery, its ignore guard, CI broker, and endpoint grants', async () => {
     const source = await Deno.readTextFile(
       'packages/messaging-plugin/test/integration/redis-redelivery-real.test.ts',

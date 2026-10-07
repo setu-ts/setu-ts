@@ -21,6 +21,41 @@ for a duplicate stops matching. `instanceof DuplicateKeyError` replaces matching
 message text. Do not retry it: unlike `SerializationConflictError`, the same write fails the same
 way.
 
+### Make RabbitMQ handlers idempotent and configure `consumerRetry`
+
+Durable consumer groups now retry handler failures with five total attempts and delays
+`[5000, 30000, 120000, 600000]` ms. Make handlers idempotent: retries and a crash between confirmed
+copy and original ack can repeat side effects. Deserialize and integration-event rejections
+dead-letter immediately; `consumerRetry.isRetryable` can return false for other deterministic
+failures. Set `consumerRetry: false` to retain the existing operator DLX policy.
+
+Allow the application to declare durable `Q.retry.<delay>ms` quorum queues and `Q.dead`. Extend
+vhost permissions before upgrading: the RabbitMQ user needs configure permission on `Q.dead` and
+`Q.retry.<delay>ms`, read permission on `Q.retry.<delay>ms`, and write permission on the default
+exchange, `amq.default`, which carries every retry and dead-letter copy (measured on RabbitMQ 4:
+without them `subscribe()` fails with `403 ACCESS_REFUSED` on the first helper declaration, and a
+copy published without `amq.default` write closes the channel). Changing delays is safe; changing
+`deadLetterMaxLength` (default 10000) requires draining and deleting `Q.dead` before restart,
+because RabbitMQ rejects changed queue arguments. Inspect `x-setu-attempts`, `x-setu-topic` and the
+bounded `x-setu-error` in dead letters, and apply access/retention policy for their data. Default
+prefetch is now 32 per consumer; configure `prefetch` for handler concurrency and latency. Injected
+channels should implement `prefetch`. Private exclusive queues and RPC reply inboxes retain discard
+behavior. A failed copy leaves the original unacked; the broker then closes that channel, which
+returns it to `Q`, and reconnects, re-declaring the retry and dead queues before consuming again.
+
+`ConsumerRetryOptions` now names the shared RabbitMQ/Redis retry object type; Redis behavior and its
+existing option shape are unchanged.
+
+Group names ending in `.dead` or `.retry.<digits>ms` are reserved when retries are enabled, and
+generated helper names must fit 255 UTF-8 bytes. Rename conflicting groups, or set
+`consumerRetry: false` to retain existing names. Migrate queues already occupying helper names in
+the same vhost before enabling retries. Invalid names fail before declaration, so they cannot close
+the shared consumer channel with a 406. Injected recovery channels must support publisher confirms,
+`on`/`off` return listeners and `close()`; otherwise `subscribe()` on a retrying group now rejects,
+so supply `createConfirmChannel()` or set `consumerRetry: false`. Mandatory retry/dead publishes
+reject unroutable returns and leave the original unacked; `x-setu-disposition-id` is framework-owned
+and replaced on each copy.
+
 ### Update `IRedisStreamsClient` facades and Redis consumer handlers
 
 Injected messaging Redis facades must implement the required `xpending`, `xclaim`, and `xinfo`

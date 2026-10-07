@@ -10,7 +10,8 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import { createCachedProbe, deadlineRangeError, withDeadline } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import { describeError } from './describe-error.ts';
+import { describeError, describeLogText } from './describe-error.ts';
+import { IntegrationEventRejectedError } from '../errors.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
@@ -73,6 +74,98 @@ export function resolvePublishTimeoutMs(value: number | undefined): number {
   return resolved;
 }
 
+/** Resolved immutable consumer configuration shared by plugin and broker construction. */
+interface ConsumerOptions {
+  readonly retry: boolean;
+  readonly maxAttempts: number;
+  readonly delaysMs: readonly number[];
+  readonly isRetryable: ((error: unknown) => boolean) | undefined;
+  readonly deadLetterMaxLength: number;
+  readonly prefetch: number;
+}
+
+/**
+ * Validates all consumer options before any connection is opened.
+ * @param options - RabbitMQ consumer configuration
+ * @returns A snapshot of the validated configuration
+ * @throws {RangeError} For invalid budgets, delays, retention, or prefetch
+ */
+export function resolveConsumerOptions(options: RabbitMqOptions = {}): ConsumerOptions {
+  const retry = options.consumerRetry;
+  if (retry !== undefined && retry !== false && (retry === null || typeof retry !== 'object')) {
+    throw new RangeError('RabbitMqBroker consumerRetry must be false or an options object');
+  }
+  const configured = retry === false ? undefined : retry;
+  const maxAttempts = configured?.maxAttempts ?? 5;
+  const delaysMs = [...(configured?.delaysMs ?? [5000, 30000, 120000, 600000])];
+  const deadLetterMaxLength = options.deadLetterMaxLength ?? 10000;
+  const prefetch = options.prefetch ?? 32;
+  const positive = (name: string, value: number, max = Number.MAX_SAFE_INTEGER): void => {
+    if (!Number.isSafeInteger(value) || value < 1 || value > max) {
+      throw new RangeError(`RabbitMqBroker ${name} must be a positive integer within its bound`);
+    }
+  };
+  positive('consumerRetry.maxAttempts', maxAttempts);
+  positive('deadLetterMaxLength', deadLetterMaxLength);
+  // AMQP basic.qos encodes prefetch-count as an unsigned short.
+  positive('prefetch', prefetch, 65535);
+  if (delaysMs.length === 0) {
+    throw new RangeError('RabbitMqBroker consumerRetry.delaysMs must be nonempty');
+  }
+  for (const [index, delay] of delaysMs.entries()) {
+    positive('consumerRetry.delaysMs', delay, 2147483647);
+    if (index > 0 && delay < delaysMs[index - 1]!) {
+      throw new RangeError('RabbitMqBroker consumerRetry.delaysMs must be nondecreasing');
+    }
+  }
+  if (configured?.isRetryable !== undefined && typeof configured.isRetryable !== 'function') {
+    throw new RangeError('RabbitMqBroker consumerRetry.isRetryable must be a function');
+  }
+  return {
+    retry: retry !== false,
+    maxAttempts,
+    delaysMs,
+    isRetryable: configured?.isRetryable,
+    deadLetterMaxLength,
+    prefetch,
+  };
+}
+
+/** Refuses group names that occupy the retry topology's reserved namespace. */
+export function validateConsumerQueue(
+  queue: string | undefined,
+  policy: Pick<ConsumerOptions, 'retry' | 'delaysMs'>,
+  transient = false,
+): void {
+  if (queue === undefined || !policy.retry || transient) return;
+  if (/(?:\.dead|\.retry\.\d+ms)$/u.test(queue)) {
+    throw new RangeError(
+      'RabbitMQ consumer group names ending in .dead or .retry.<digits>ms are reserved; ' +
+        'rename the group or set consumerRetry: false',
+    );
+  }
+  const longest = `${queue}.retry.${policy.delaysMs[policy.delaysMs.length - 1]}ms`;
+  if (new TextEncoder().encode(longest).length > 255) {
+    throw new RangeError('RabbitMQ consumer group and helper queue names must fit 255 UTF-8 bytes');
+  }
+}
+
+/** Framework-owned identifier for correlating concurrent mandatory publish returns. */
+const DISPOSITION_ID = 'x-setu-disposition-id';
+
+/** Error description bounded to 1 KiB of UTF-8, without splitting a code point. */
+function deadLetterError(error: unknown): string {
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  let result = '';
+  for (const character of describeError(error)) {
+    bytes += encoder.encode(character).length;
+    if (bytes > 1024) break;
+    result += character;
+  }
+  return result;
+}
+
 /**
  * The publish signature of an amqplib channel. On a confirm channel the fifth
  * argument is called once the broker has accepted (`null`) or refused (an
@@ -94,8 +187,8 @@ interface PublishingChannel {
  * relies on `publishTimeoutMs` alone to settle a confirm that never arrives.
  */
 interface CloseObservable {
-  on(event: 'close', listener: () => void): unknown;
-  off(event: 'close', listener: () => void): unknown;
+  on(event: 'close' | 'return', listener: (message?: unknown) => void): unknown;
+  off(event: 'close' | 'return', listener: (message?: unknown) => void): unknown;
 }
 
 /**
@@ -130,6 +223,8 @@ function isCloseObservable(channel: unknown): channel is CloseObservable {
  * @param routingKey - Routing key
  * @param content - Message body
  * @param properties - Publish properties
+ * @param dispositionId - Framework ID of a mandatory retry/dead copy, when routing is required
+ * @param signal - Deadline cancellation for a disposition
  * @returns Resolves once RabbitMQ accepts the message
  */
 function publishConfirmed(
@@ -138,6 +233,8 @@ function publishConfirmed(
   routingKey: string,
   content: Uint8Array,
   properties: Record<string, unknown>,
+  dispositionId?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const observable = isCloseObservable(channel) ? channel : null;
@@ -148,6 +245,8 @@ function publishConfirmed(
       }
       settled = true;
       observable?.off('close', onClose);
+      if (dispositionId !== undefined) observable?.off('return', onReturn);
+      signal?.removeEventListener('abort', onAbort);
       if (err === null || err === undefined) {
         resolve();
         return;
@@ -161,12 +260,38 @@ function publishConfirmed(
       );
     };
     const onClose = (): void => settle(new Error('channel closed before the confirm arrived'));
+    const onAbort = (): void => settle(signal?.reason);
+    const onReturn = (message: unknown): void => {
+      // amqplib decodes basic.return into the same message shape as a delivery.
+      // Only our own publish ID can reject this operation; routing keys and
+      // message IDs can be identical for several in-flight copies.
+      try {
+        const returned = message as { properties?: { headers?: Record<string, unknown> } } | null;
+        const headers = returned?.properties?.headers;
+        if (
+          headers && Object.hasOwn(headers, DISPOSITION_ID) &&
+          headers[DISPOSITION_ID] === dispositionId
+        ) {
+          settle(new Error('mandatory disposition publish was returned as unroutable'));
+        }
+      } catch {
+        settle(new Error('RabbitMQ supplied an invalid publish return'));
+      }
+    };
     observable?.on('close', onClose);
+    if (dispositionId !== undefined) observable?.on('return', onReturn);
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
     try {
       channel.publish(exchange, routingKey, content, properties, settle);
     } catch (error) {
       settled = true;
       observable?.off('close', onClose);
+      if (dispositionId !== undefined) observable?.off('return', onReturn);
+      signal?.removeEventListener('abort', onAbort);
       reject(error);
     }
   });
@@ -269,6 +394,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   #defaultQueue: string;
   #persistentMessages: boolean;
   #publishTimeoutMs: number;
+  #consumerOptions: ConsumerOptions;
   #logger?: { error: (msg: string) => void; warn?: (msg: string) => void };
   #connection: IAmqpConnection | null = null;
   #channel: unknown | null = null;
@@ -284,6 +410,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   #activeConsumers: Map<string, ActiveConsumer>;
   #rr: RequestReplyCore;
   #supervisor: ReconnectSupervisor;
+  /** Channels a failed disposition is already closing (one close each). */
+  #closingChannels = new WeakSet<object>();
   /**
    * The cached, bounded reachability probe (M95b review), built at
    * `connect()` and dropped at `disconnect()`.
@@ -325,6 +453,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     this.#publishTimeoutMs = resolvePublishTimeoutMs(
       options?.publishTimeoutMs,
     );
+    this.#consumerOptions = resolveConsumerOptions(options);
     if (options?.logger) {
       this.#logger = options.logger;
     }
@@ -573,29 +702,69 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     }
 
     const content = Buffer.from(serialized, 'utf8');
-    const exchange = this.#exchangeName;
-    const confirmed = this.#confirmed;
+    await this.#publishOn(
+      realChannel,
+      this.#confirmed,
+      this.#exchangeName,
+      topic,
+      content,
+      properties,
+    );
+  }
+
+  /** One bounded publish path for original, retry, and dead-letter traffic. */
+  async #publishOn(
+    channel: PublishingChannel & {
+      assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
+    },
+    confirmed: boolean,
+    exchange: string,
+    routingKey: string,
+    content: Uint8Array,
+    properties: Record<string, unknown>,
+    requireRoute = false,
+  ): Promise<void> {
+    // Normal pub/sub may legitimately have no interested queue. A disposition
+    // may not: a positive confirm also arrives for an unroutable publish.
+    if (requireRoute && (!confirmed || !isCloseObservable(channel))) {
+      throw new Error('RabbitMQ consumer recovery requires confirms and on/off return listeners');
+    }
+    const dispositionId = requireRoute ? this.#runtime.uuid() : undefined;
+    const outgoing = dispositionId === undefined ? properties : {
+      ...properties,
+      mandatory: true,
+      headers: Object.fromEntries([
+        ...Object.entries(properties.headers as Record<string, unknown>),
+        [DISPOSITION_ID, dispositionId],
+      ]),
+    };
     const timeoutMs = this.#publishTimeoutMs;
-    // The bound covers EVERY broker round trip this publish makes — the
-    // exchange assert as well as the confirm. A paused broker keeps its socket
-    // open, so the assert alone never answers (measured): bounding only the
-    // confirm would leave publish() pending forever before the bound armed.
     await withDeadline(
-      async () => {
-        // Assert topic exchange (idempotent)
-        await realChannel.assertExchange(exchange, 'topic', { durable: true });
+      async (signal) => {
+        // The default exchange already exists and cannot be declared.
+        if (exchange !== '') {
+          await channel.assertExchange(exchange, 'topic', { durable: true });
+        }
         if (!confirmed) {
-          realChannel.publish(exchange, topic, content, properties);
+          channel.publish(exchange, routingKey, content, outgoing);
           return;
         }
-        await publishConfirmed(realChannel, exchange, topic, content, properties);
+        await publishConfirmed(
+          channel,
+          exchange,
+          routingKey,
+          content,
+          outgoing,
+          dispositionId,
+          requireRoute ? signal : undefined,
+        );
       },
       {
         timeoutMs,
         onTimeout: () =>
           new Error(
             `RabbitMQ did not accept the message published to exchange "${exchange}" ` +
-              `with routing key "${topic}" within ${timeoutMs} ms (publishTimeoutMs); ` +
+              `with routing key "${routingKey}" within ${timeoutMs} ms (publishTimeoutMs); ` +
               'it may still be accepted',
           ),
         timing: {
@@ -621,6 +790,11 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    validateConsumerQueue(
+      options?.queue,
+      this.#consumerOptions,
+      (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true,
+    );
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }
@@ -650,6 +824,22 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
         (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true
       ? { exclusive: true, autoDelete: true }
       : { durable: true };
+
+    // Without confirms and return listeners no failure can be disposed of, so
+    // each stays unacked and the consumer stalls once `prefetch` is reached.
+    // Without close() a failed disposition cannot release its channel, so the
+    // replacement channel recovery opens would leave the originals stranded.
+    if (
+      this.#consumerOptions.retry && 'durable' in declareOptions &&
+      (!this.#confirmed || !isCloseObservable(this.#channel) ||
+        !isCloseableChannel(this.#channel))
+    ) {
+      throw new Error(
+        'RabbitMQ consumer retries need a confirm channel with on/off return listeners and ' +
+          'close(); inject a connection providing createConfirmChannel() or set ' +
+          'consumerRetry: false',
+      );
+    }
 
     const subscriptionId = this.#runtime.uuid();
     const { consumerTag, channel } = await this.#consumeOn(
@@ -766,10 +956,12 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     if (typeof connection.createConfirmChannel === 'function') {
       const channel = await connection.createConfirmChannel();
       this.#confirmed = true;
+      await this.#applyPrefetch(channel);
       return channel;
     }
     const channel = await connection.createChannel();
     this.#confirmed = false;
+    await this.#applyPrefetch(channel);
     if (!this.#warnedUnconfirmed) {
       this.#warnedUnconfirmed = true;
       const message = 'RabbitMqBroker: the injected AMQP connection has no ' +
@@ -786,11 +978,23 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     return channel;
   }
 
+  /** Injected minimal facades may omit QoS; real amqplib always supplies it. */
+  async #applyPrefetch(channel: unknown): Promise<void> {
+    const qos = channel as { prefetch?: (count: number) => Promise<unknown> };
+    if (typeof qos.prefetch === 'function') {
+      await qos.prefetch(this.#consumerOptions.prefetch);
+    } else {
+      this.#logger?.error(
+        'RabbitMqBroker: injected channel has no prefetch(); deliveries are unbounded',
+      );
+    }
+  }
+
   /**
    * Re-asserts the topic exchange on the current channel (idempotent).
    */
   async #reassertExchange(): Promise<void> {
-    const realChannel = this.#channel as unknown as {
+    const realChannel = this.#channel as unknown as PublishingChannel & {
       assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
     };
     await realChannel.assertExchange(this.#exchangeName, 'topic', { durable: true });
@@ -807,7 +1011,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     handler: MessageHandler<unknown>,
     declareOptions: QueueDeclareOptions,
   ): Promise<{ consumerTag: string; channel: unknown }> {
-    const realChannel = this.#channel as unknown as {
+    const realChannel = this.#channel as unknown as PublishingChannel & {
       assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
       assertQueue(queue: string, options?: unknown): Promise<{ queue: string }>;
       bindQueue(queue: string, source: string, pattern: string): Promise<void>;
@@ -828,45 +1032,179 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     await realChannel.assertQueue(queueName, declareOptions);
     await realChannel.bindQueue(queueName, this.#exchangeName, topic);
 
+    const policy = this.#consumerOptions;
+    const retry = policy.retry && 'durable' in declareOptions;
+    const confirmed = this.#confirmed;
+    if (retry) {
+      for (const delay of new Set(policy.delaysMs)) {
+        // The original is acked once this copy is confirmed, so the copy must
+        // survive its own expiry. Classic dead-lettering is at-most-once and
+        // drops the copy when Q cannot take it (measured on RabbitMQ 4: Q
+        // absent at expiry, created a second later, received nothing in 240 s).
+        // A quorum queue with at-least-once dead-lettering holds it and
+        // redelivers once Q exists; reject-publish overflow is what that
+        // strategy requires.
+        await realChannel.assertQueue(`${queueName}.retry.${delay}ms`, {
+          durable: true,
+          arguments: {
+            'x-queue-type': 'quorum',
+            'x-dead-letter-strategy': 'at-least-once',
+            'x-overflow': 'reject-publish',
+            'x-message-ttl': delay,
+            'x-dead-letter-exchange': '',
+            'x-dead-letter-routing-key': queueName,
+          },
+        });
+      }
+      await realChannel.assertQueue(`${queueName}.dead`, {
+        durable: true,
+        arguments: { 'x-max-length': policy.deadLetterMaxLength },
+      });
+    }
+
     const result = await realChannel.consume(
       queueName,
       async (msg) => {
-        if (!msg) {
-          return;
-        }
+        if (!msg) return;
+        const delivered = msg as { content: Uint8Array; properties?: Record<string, unknown> };
+        const properties = delivered.properties ?? {};
+        let failed = false;
+        let failure: unknown;
+        let deterministic = false;
+        let deserialized: unknown;
         try {
-          // Extract message properties
-          const msgTyped = msg as { content?: unknown; properties?: Record<string, unknown> };
-          const content = new TextDecoder().decode(msgTyped.content as Uint8Array);
-          const deserialized = this.#serializer.deserialize<unknown>(content);
-
-          const metadata: MessageMetadata = {
-            topic,
-            messageId: msgTyped.properties?.messageId as string ??
-              this.#runtime.uuid(),
-            timestamp: msgTyped.properties?.timestamp as Date ??
-              new Date(this.#runtime.now()),
-            headers: normalizeTransportHeaders(
-              msgTyped.properties?.headers as
-                | Readonly<Record<string, TransportHeaderValue>>
-                | undefined,
-            ),
-          };
-
-          await handler(deserialized, metadata);
-
-          // Ack on success
-          realChannel.ack(msg);
+          deserialized = this.#serializer.deserialize<unknown>(
+            new TextDecoder().decode(delivered.content),
+          );
         } catch (error) {
-          // Nack on failure without requeue
-          realChannel.nack(msg, false, false);
-          this.#logger?.error(`Message handler failed: ${describeError(error)}`);
+          failed = true;
+          deterministic = true;
+          failure = error;
+        }
+        if (!failed) {
+          try {
+            const metadata: MessageMetadata = {
+              topic,
+              messageId: properties.messageId as string ?? this.#runtime.uuid(),
+              timestamp: properties.timestamp as Date ?? new Date(this.#runtime.now()),
+              headers: normalizeTransportHeaders(
+                properties.headers as Readonly<Record<string, TransportHeaderValue>> | undefined,
+              ),
+            };
+            await handler(deserialized, metadata);
+          } catch (error) {
+            failed = true;
+            failure = error;
+            deterministic = error instanceof IntegrationEventRejectedError;
+          }
+        }
+
+        // Disposition is outside the handler try: ack/publish failures never
+        // become handler failures and never trigger a second disposition.
+        try {
+          if (!failed) {
+            realChannel.ack(msg);
+            return;
+          }
+          if (!retry) {
+            realChannel.nack(msg, false, false);
+            this.#logger?.error(`Message handler failed: ${describeError(failure)}`);
+            return;
+          }
+          const incoming = properties.headers as Record<string, unknown> | undefined;
+          const attemptHeader = incoming?.['x-setu-attempt'];
+          const validAttempt = attemptHeader === undefined ||
+            (Number.isSafeInteger(attemptHeader) && (attemptHeader as number) >= 1);
+          const attempt = validAttempt && attemptHeader !== undefined ? attemptHeader as number : 1;
+          let retryable = !deterministic && validAttempt;
+          if (retryable && policy.isRetryable !== undefined) {
+            try {
+              retryable = policy.isRetryable(failure) !== false;
+            } catch (error) {
+              this.#logger?.error(`RabbitMQ retry classifier failed: ${describeError(error)}`);
+            }
+          }
+          const dead = !retryable || attempt >= policy.maxAttempts;
+          const delay = policy.delaysMs[Math.min(attempt - 1, policy.delaysMs.length - 1)]!;
+          const target = dead ? `${queueName}.dead` : `${queueName}.retry.${delay}ms`;
+          // fromEntries keeps even "__proto__" as an own data property.
+          // CC/BCC are sender-selected routing keys: re-published to the
+          // default exchange they deliver the copy to any queue they name.
+          const headers = Object.fromEntries([
+            ...Object.entries(incoming ?? {}).filter(([key]) => key !== 'CC' && key !== 'BCC'),
+            ...(dead
+              ? [
+                ['x-setu-attempts', attempt],
+                ['x-setu-topic', topic],
+                ['x-setu-error', deadLetterError(failure)],
+              ]
+              : [['x-setu-attempt', attempt + 1]]),
+          ]);
+          // RabbitMQ validates user_id against the publishing connection, so
+          // another user's ID closes the channel and redelivers in a loop.
+          const copied = Object.fromEntries(
+            Object.entries(properties).filter(([key]) => key !== 'expiration' && key !== 'userId'),
+          );
+          copied.headers = headers;
+          copied.persistent = true;
+          await this.#publishOn(
+            realChannel,
+            confirmed,
+            '',
+            target,
+            delivered.content,
+            copied,
+            true,
+          );
+          realChannel.ack(msg);
+          if (dead) {
+            this.#logger?.error(
+              describeLogText(
+                `RabbitMQ dead-lettered to "${target}", topic "${topic}", attempts ${attempt}: ${
+                  deadLetterError(failure)
+                }`,
+              ),
+            );
+          }
+        } catch (error) {
+          // Leave the original unacked when disposition fails; channel closure
+          // returns it to Q. A timed-out confirm can arrive late, so requeueing
+          // immediately would create an unbounded duplicate loop.
+          this.#logger?.error(
+            `RabbitMQ disposition failed; original remains unacked: ${describeError(error)}`,
+          );
+          await this.#recoverAfterDispositionFailure(realChannel);
         }
       },
       { noAck: false },
     );
 
     return { consumerTag: result.consumerTag, channel: this.#channel };
+  }
+
+  /**
+   * Closes the channel a failed disposition ran on and starts drive-mode
+   * recovery. Without it a live channel keeps every such original unacked
+   * until `prefetch` of them stall the consumer, because the fault listeners
+   * watch the connection only and closing a channel does not reach them.
+   * Closing returns the originals to `Q`; the replay re-declares the retry and
+   * dead queues before consuming, so a deleted destination is repaired too.
+   * Concurrent failures on one channel close it once, and a channel already
+   * replaced by an earlier recovery is left alone.
+   */
+  async #recoverAfterDispositionFailure(channel: object): Promise<void> {
+    if (this.#channel !== channel || this.#closingChannels.has(channel)) {
+      return;
+    }
+    this.#closingChannels.add(channel);
+    this.#supervisor.fault();
+    if (isCloseableChannel(channel)) {
+      try {
+        await channel.close();
+      } catch {
+        // Already closed by the broker or a concurrent failure.
+      }
+    }
   }
 
   /**

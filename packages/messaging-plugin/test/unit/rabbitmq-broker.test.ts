@@ -469,8 +469,8 @@ describe('RabbitMqBroker', () => {
     await broker.disconnect();
   });
 
-  // R8: failure-path - handler throws → nack(msg, false, false) called
-  it('subscribe calls nack(msg, false, false) when the handler throws', async () => {
+  // R8: failure-path - disabled retry policy → nack(msg, false, false)
+  it('consumerRetry false calls nack(msg, false, false) when the handler throws', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
     const fakeConnection = new FakeAmqpConnection({
@@ -482,7 +482,10 @@ describe('RabbitMqBroker', () => {
         },
       ],
     });
-    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+    const broker = new RabbitMqBroker(runtime, serializer, {
+      client: fakeConnection,
+      consumerRetry: false,
+    });
 
     await broker.connect();
 

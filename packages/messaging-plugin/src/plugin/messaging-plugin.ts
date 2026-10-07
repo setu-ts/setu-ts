@@ -17,7 +17,12 @@ import {
 } from '@setu-ts/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
-import { RabbitMqBroker, resolvePublishTimeoutMs } from '../brokers/rabbitmq-broker.ts';
+import {
+  RabbitMqBroker,
+  resolveConsumerOptions,
+  resolvePublishTimeoutMs,
+  validateConsumerQueue,
+} from '../brokers/rabbitmq-broker.ts';
 import { NatsBroker } from '../brokers/nats-broker.ts';
 import { KafkaBroker } from '../brokers/kafka-broker.ts';
 import { GcpPubSubBroker } from '../brokers/pubsub-broker.ts';
@@ -136,12 +141,14 @@ export function MessagingPlugin(
   options: MessagingPluginOptions = {},
 ): IPlugin {
   const brokerType: string = (options as { broker?: string }).broker ?? 'memory';
+  let rabbitConsumerOptions: ReturnType<typeof resolveConsumerOptions> | undefined;
   // Refused HERE, before any application exists, like every other bound
   // (the M90a/M101a rule) — not at `start()`, where a typo would surface as a
   // boot failure far from the line that caused it.
   if (brokerType === 'rabbitmq') {
     const rabbit = options as RabbitMqMessagingOptions;
     resolvePublishTimeoutMs(rabbit.publishTimeoutMs);
+    rabbitConsumerOptions = resolveConsumerOptions(rabbit);
     if (
       rabbit.persistentMessages !== undefined && typeof rabbit.persistentMessages !== 'boolean'
     ) {
@@ -174,6 +181,11 @@ export function MessagingPlugin(
   const subscriptionInstances = subscriptions.filter(
     (entry): entry is SubscriptionDefinition => typeof entry !== 'function',
   );
+  if (rabbitConsumerOptions !== undefined) {
+    for (const subscription of subscriptionInstances) {
+      validateConsumerQueue(subscription.options?.queue, rabbitConsumerOptions);
+    }
+  }
   const subscriptionFactories = subscriptions
     .map((entry, index) => ({ entry, index }))
     .filter(
@@ -310,6 +322,11 @@ export function MessagingPlugin(
         if (opts.publishTimeoutMs !== undefined) {
           rabbitOptions.publishTimeoutMs = opts.publishTimeoutMs;
         }
+        if (opts.consumerRetry !== undefined) rabbitOptions.consumerRetry = opts.consumerRetry;
+        if (opts.deadLetterMaxLength !== undefined) {
+          rabbitOptions.deadLetterMaxLength = opts.deadLetterMaxLength;
+        }
+        if (opts.prefetch !== undefined) rabbitOptions.prefetch = opts.prefetch;
         if (logger !== undefined) rabbitOptions.logger = logger;
         broker = new RabbitMqBroker(ctx.runtime, serializer, rabbitOptions);
       } else if (brokerType === 'nats') {

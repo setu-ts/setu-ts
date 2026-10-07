@@ -70,6 +70,7 @@ interface FakeAmqp {
   channelCloses: () => number;
   /** Number of createConfirmChannel() calls on the connection. */
   confirmChannelOpens: () => number;
+  consumerCalls: Array<readonly [string, unknown]>;
 }
 
 function makeAmqp(opts: { confirm?: boolean } = {}): FakeAmqp {
@@ -78,12 +79,21 @@ function makeAmqp(opts: { confirm?: boolean } = {}): FakeAmqp {
   let confirmOpenCalls = 0;
   let closeCalls = 0;
   const listeners = new Map<string, Array<(err?: unknown) => void>>();
+  const consumerCalls: Array<readonly [string, unknown]> = [];
 
   const makeChannel = () => ({
     assertExchange: () => Promise.resolve(),
-    assertQueue: (queue: string) => Promise.resolve({ queue }),
+    assertQueue: (queue: string) => {
+      consumerCalls.push(['queue', queue]);
+      return Promise.resolve({ queue });
+    },
+    prefetch: (count: number) => {
+      consumerCalls.push(['prefetch', count]);
+      return Promise.resolve();
+    },
     bindQueue: () => Promise.resolve(),
     consume: () => {
+      consumerCalls.push(['consume', undefined]);
       consumeCalls++;
       return Promise.resolve({ consumerTag: `c-${consumeCalls}` });
     },
@@ -92,6 +102,9 @@ function makeAmqp(opts: { confirm?: boolean } = {}): FakeAmqp {
     cancel: () => Promise.resolve(),
     deleteQueue: () => Promise.resolve(),
     publish: () => true,
+    // A real amqplib channel is an EventEmitter; retrying groups require it.
+    on: () => {},
+    off: () => {},
     close: () => {
       closeCalls++;
       return Promise.resolve();
@@ -137,10 +150,37 @@ function makeAmqp(opts: { confirm?: boolean } = {}): FakeAmqp {
     channelOpens: () => openCalls,
     confirmChannelOpens: () => confirmOpenCalls,
     channelCloses: () => closeCalls,
+    consumerCalls,
   };
 }
 
 describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
+  it('reapplies non-default prefetch and declares recovery queues before replay consumption', async () => {
+    const clock = makeClock();
+    const { client, fire, consumerCalls } = makeAmqp({ confirm: true });
+    const broker = new RabbitMqBroker(makeRuntime(clock), new JsonSerializer(), {
+      client,
+      prefetch: 7,
+      consumerRetry: { delaysMs: [17, 53] },
+      deadLetterMaxLength: 9,
+    });
+    await broker.connect();
+    await broker.subscribe('t', () => {}, { queue: 'q' });
+    const initial = [...consumerCalls];
+    expect(initial).toEqual([
+      ['prefetch', 7],
+      ['queue', 'q'],
+      ['queue', 'q.retry.17ms'],
+      ['queue', 'q.retry.53ms'],
+      ['queue', 'q.dead'],
+      ['consume', undefined],
+    ]);
+    fire('close');
+    clock.advance(10000);
+    await flush();
+    expect(consumerCalls.slice(initial.length)).toEqual(initial);
+    await broker.disconnect();
+  });
   it('reports down (not started) before connect', async () => {
     const { client } = makeAmqp();
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
