@@ -135,6 +135,24 @@ interface ActiveConsumer {
 }
 
 /**
+ * Describes a publish JetStream did not acknowledge. The client's own message
+ * is bare (`503`, `TIMEOUT`), so this names the subject and, for `503` — the
+ * code a subject no stream captures is refused with (measured on nats 2.29) —
+ * the remedy.
+ */
+function describePublishRefusal(topic: string, error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === '503') {
+    return `NATS JetStream refused the message published to ${JSON.stringify(topic)}: no ` +
+      "stream captures this subject. Add it to the stream's subjects " +
+      '(NatsOptions.streamSubjects when the broker creates the stream).';
+  }
+  return `NATS JetStream did not acknowledge the message published to ${JSON.stringify(topic)}: ${
+    describeError(error)
+  }`;
+}
+
+/**
  * NATS JetStream message broker implementation.
  *
  * @since 0.1.0
@@ -480,34 +498,46 @@ export class NatsBroker implements MessageBrokerAdapter {
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
-  publishWithHeaders<T>(
+  async publishWithHeaders<T>(
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
   ): Promise<void> {
     if (!this.#connection) {
-      return Promise.reject(new Error('NatsBroker is not connected'));
+      throw new Error('NatsBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
     const encoder = new TextEncoder();
     const data = encoder.encode(serialized);
 
+    // `js.publish` answers with a promise of the server's PubAck. Awaiting it
+    // is what makes a resolved publish mean "stored": unawaited, a refusal
+    // resolved as a success and escaped as an unhandled rejection, which
+    // terminates a Deno or Node process. The client bounds the wait itself
+    // (measured: TIMEOUT after 5 s against a paused server).
     const realJs = this.#js as unknown as {
-      publish(subject: string, data: Uint8Array, options?: { headers: INatsHeaders }): void;
+      publish(
+        subject: string,
+        data: Uint8Array,
+        options?: { headers: INatsHeaders },
+      ): Promise<unknown>;
     };
     const natsHeaders = this.#headersFactory?.();
-    if (natsHeaders) {
-      for (const [key, value] of Object.entries(headers)) natsHeaders.set(key, value);
-      realJs.publish(topic, data, { headers: natsHeaders });
-    } else {
-      // No `MsgHdrs` factory: an injected connection carries no nats module, so
-      // there is nothing to build headers with. Publishing still succeeds, but
-      // trace context cannot cross this broker — report it once rather than
-      // dropping the header silently on every publish.
-      this.#reportMissingHeaderChannel(headers);
-      realJs.publish(topic, data);
+    try {
+      if (natsHeaders) {
+        for (const [key, value] of Object.entries(headers)) natsHeaders.set(key, value);
+        await realJs.publish(topic, data, { headers: natsHeaders });
+      } else {
+        // No `MsgHdrs` factory: an injected connection carries no nats module,
+        // so there is nothing to build headers with. Publishing still
+        // succeeds, but trace context cannot cross this broker — report it
+        // once rather than dropping the header silently on every publish.
+        this.#reportMissingHeaderChannel(headers);
+        await realJs.publish(topic, data);
+      }
+    } catch (error) {
+      throw new Error(describePublishRefusal(topic, error), { cause: error });
     }
-    return Promise.resolve();
   }
 
   /**
