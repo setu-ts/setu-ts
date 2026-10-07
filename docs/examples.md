@@ -1,539 +1,392 @@
 # Examples
 
-This guide provides links to runnable example applications that demonstrate Setu-TS capabilities.
-Each example is a complete, tested application that proves specific framework features.
+The [`apps/`](../apps/) directory holds sixteen runnable applications. Each one proves a specific
+capability, and its `smoke.ts` is the proof: `deno task check:apps` type-checks every app and runs
+every smoke check, in CI as well as locally. This guide says what each app proves, how to run it,
+and which requests to try. The code itself lives in the app, not here, so this page cannot drift
+from it.
 
-## Running Examples
-
-All examples are located in the [`apps/`](../apps/) directory. To run an example:
+## Running an example
 
 ```bash
-# Navigate to the example
 cd apps/<example-name>
-
-# Run the application
-deno task start
-
-# Run the smoke tests
-deno task smoke
+deno task start          # most apps take a port as the first argument: deno task start 3400
+deno task smoke          # run the app's proof
 ```
 
-## Examples by Capability
+Every app is a standalone Deno project outside the workspace; its `deno.json` maps the `@setu-ts/*`
+packages to this repository's `packages/` sources, so an example always runs against the current
+code rather than a published release.
 
-### Getting Started
+Most apps listen on port `3000` unless you pass a port, but three do not: `graphql-demo` defaults to
+`4000`, `grpc` to `5000`, and `static-site` always binds `8000`. Two apps are demonstrations that
+print a result and exit rather than servers: `cqrs` and `microservices`.
 
-| Example                    | What It Proves                                                            | Run               |
-| -------------------------- | ------------------------------------------------------------------------- | ----------------- |
-| [minimal](../apps/minimal) | Simplest possible Setu-TS application with one route                      | `deno task start` |
-| [rest](../apps/rest-api)   | REST API with common patterns (error handling, validation, health checks) | `deno task start` |
+## How every example is laid out
 
-### Core Patterns
-
-| Example                                | What It Proves                                   | Run               |
-| -------------------------------------- | ------------------------------------------------ | ----------------- |
-| [di-decorators](../apps/di-decorators) | Dependency injection and decorator usage         | `deno task start` |
-| [database](../apps/database)           | Database operations with memory adapter          | `deno task start` |
-| [CQRS](../apps/cqrs)                   | Command-Query Responsibility Segregation pattern | `deno task start` |
-| [multi-tenancy](../apps/multi-tenant)  | Multi-tenant application with tenant resolution  | `deno task start` |
-
-### Advanced Features
-
-| Example                                      | What It Proves                                                    | Run                                |
-| -------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------- |
-| [microservices](../apps/microservices)       | Cross-service communication via messaging broker                  | `deno task start` (requires Redis) |
-| [realtime](../apps/realtime)                 | Real-time communication with WebSocket/SSE and cross-replica sync | `deno task start` (requires Redis) |
-| [realtime-clients](../apps/realtime-clients) | SDK SSE resumption/auth and WebSocket keep-alive across runtimes  | `deno task smoke`                  |
-| [graphql](../apps/graphql-demo)              | GraphQL server with schema-first and code-first support           | `deno task start`                  |
-| [grpc](../apps/grpc)                         | gRPC and Connect-ES on the same port as HTTP routes               | `deno task start`                  |
-
-### Platform-Specific
-
-| Example                                    | What It Proves                                                              | Run                                   |
-| ------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------- |
-| [cloudflare](../apps/cloudflare)           | Cloudflare Workers integration (KV, D1, Queues, Cron, Messaging, Cache API) | `deno task start` (requires Wrangler) |
-| [compiled-binary](../apps/compiled-binary) | Compiled binary using `deno compile`                                        | Build with `deno task build`          |
-
-### Full-Stack
-
-| Example                            | What It Proves                                      | Run               |
-| ---------------------------------- | --------------------------------------------------- | ----------------- |
-| [full-stack](../apps/full-stack)   | React Router SSR with database integration          | `deno task start` |
-| [static-site](../apps/static-site) | Static file serving with caching and range requests | `deno task start` |
-
-### Development
-
-| Example                                          | What It Proves                         | Run               |
-| ------------------------------------------------ | -------------------------------------- | ----------------- |
-| [plugin-development](../apps/plugin-development) | Template for developing custom plugins | `deno task start` |
-
-## Example Deep Dives
-
-### minimal
-
-The simplest possible Setu-TS application.
-
-**What it demonstrates:**
-
-- Basic application setup
-- Single route handler
-- JSON response
-- Health check endpoint
-
-**Key code:**
+Each app splits the same three ways, which is also the shape to copy into your own project. A
+factory in `src/app.ts` builds the application without starting it. `main.ts` starts it on a port.
+`smoke.ts` starts it with no port and drives it with `app.inject()`, so the proof needs no socket.
+This is `minimal`'s factory and smoke check, joined into one listing:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
-const app = createApplication();
-app.register(RuntimePlugin());
+// src/app.ts — builds the application and does not start it.
+export function createMinimalApp(): IKernelApplication {
+  const app = createApplication({ plugins: [RuntimePlugin()] });
+  app.router.get('/', (ctx) => ctx.response.json({ hello: 'world' }));
+  return app;
+}
 
-app.router.get('/', async (ctx) => {
-  return ctx.response.json({ message: 'Hello, World!' });
-});
-
-await app.start({ port: 3000 });
+// smoke.ts — starts it with no port, so nothing binds a socket.
+const app = createMinimalApp();
+await app.start();
+try {
+  const response = await app.inject({ method: 'GET', url: 'http://example.test/' });
+  if (response.statusCode !== 200 || response.body !== '{"hello":"world"}') {
+    throw new Error(`Expected GET / to return the greeting, received ${response.statusCode}`);
+  }
+} finally {
+  await app.stop();
+}
 ```
+
+`main.ts` adds the port and the `SIGTERM` handling that lets `app.stop()` run on shutdown; see
+[`apps/minimal/main.ts`](../apps/minimal/main.ts) and
+[Getting Started — Stopping Cleanly](./getting-started.md#stopping-cleanly).
+
+## Examples by capability
+
+| Example                                          | What its smoke check proves                                                                     | Needs                     |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ------------------------- |
+| [minimal](../apps/minimal)                       | The kernel and the runtime serve one `200` route                                                | —                         |
+| [rest-api](../apps/rest-api)                     | An authenticated todo API reads a written todo back and is described by OpenAPI                 | —                         |
+| [di-decorators](../apps/di-decorators)           | A decorated controller answers through an injected service; manual scopes distinguish lifetimes | —                         |
+| [database](../apps/database)                     | Repository writes read back, updates persist, and a rolled-back transaction changes nothing     | —                         |
+| [cqrs](../apps/cqrs)                             | A command's mutation is visible through a separate query bus                                    | —                         |
+| [multi-tenant](../apps/multi-tenant)             | A note written under one tenant is invisible to another                                         | —                         |
+| [plugin-development](../apps/plugin-development) | A custom plugin registers a capability that its own route resolves                              | —                         |
+| [microservices](../apps/microservices)           | Service A discovers and calls service B over HTTP, plus brokered request/reply                  | Redis for the second half |
+| [realtime](../apps/realtime)                     | A publish on one replica reaches an SSE client on another, through a Redis backplane            | Redis                     |
+| [realtime-clients](../apps/realtime-clients)     | The SDK's SSE resume and auth, and WebSocket keep-alive, against a real server                  | Node and Bun for the run  |
+| [graphql-demo](../apps/graphql-demo)             | The GraphQL endpoint answers a basic operation                                                  | —                         |
+| [grpc](../apps/grpc)                             | A descriptor-backed Connect RPC and an ordinary HTTP route share one application and one port   | —                         |
+| [cloudflare](../apps/cloudflare)                 | KV, a cron trigger, and queue-backed messaging work on real workerd                             | Wrangler                  |
+| [compiled-binary](../apps/compiled-binary)       | `deno compile` produces a binary that serves `/health`                                          | —                         |
+| [full-stack](../apps/full-stack)                 | A server-rendered React Router page shows rows read through the database capability             | — (builds with Deno)      |
+| [static-site](../apps/static-site)               | Static files are served with cache headers, ETags, conditional requests, and byte ranges        | Port 8000 free            |
+
+## Example deep dives
+
+### minimal
+
+The kernel and the runtime plugin, and one route. Nothing else is registered, so there is no
+`/health` here; the [rest-api](#rest-api) example has one.
+
+```bash
+cd apps/minimal && deno task start 3400
+curl localhost:3400/            # {"hello":"world"}
+```
+
+Read: [`src/app.ts`](../apps/minimal/src/app.ts).
 
 ---
 
-### rest
+### rest-api
 
-A complete REST API example.
+A todo API composed with `createRestApp` from `@setu-ts/rest-starter`, with the starter's `auth` and
+`openapi` options turned on. Both routes carry `requireAuth()`, so an unauthenticated write answers
+`401` in RFC 9457 Problem Details form. The starter also brings health, metrics, security headers
+and the error handler.
 
-**What it demonstrates:**
-
-- RESTful routing
-- Error handling with RFC 9457 Problem Details
-- Request validation
-- Health checks
-- Metrics collection
-- Logging
-
-**Key code:**
-
-```typescript
-import { errorHandler } from '@setu-ts/exceptions';
-import { ValidationPlugin } from '@setu-ts/validation-plugin';
-
-// `errorHandler()` returns middleware; register it as the OUTERMOST layer
-// (lowest priority) so it wraps the whole pipeline and formats any thrown
-// error (HttpError or otherwise) as a JSON / RFC 9457 response.
-app.middleware.add(errorHandler({ format: 'rfc9457' }), {
-  priority: 0,
-  name: 'error-handler',
-});
-app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
-
-app.router.post('/items', async (ctx) => {
-  const body: Record<string, unknown> = await ctx.request.json();
-  // Validation happens automatically if schema is registered
-  return ctx.response.status(201).json({ id: '1', ...body });
-});
+```bash
+cd apps/rest-api && deno task start 3400
+curl localhost:3400/health                                    # 200
+curl -X POST localhost:3400/todos -H 'content-type: application/json' -d '{"title":"x"}'          # 401 Problem Details
+# Swagger UI at http://localhost:3400/docs, the document at /openapi.json
 ```
+
+The route `schema` documents the body for OpenAPI; it does not validate it. Validation needs
+`validateBody(...)` in the route's middleware (see
+[Pipelines (Validation)](./migration-nestjs.md#pipelines-validation)). The smoke check issues a
+token through `issueDemoToken` and reads the written todo back.
+
+Read: [`src/app.ts`](../apps/rest-api/src/app.ts), [`smoke.ts`](../apps/rest-api/smoke.ts).
 
 ---
 
 ### di-decorators
 
-Dependency injection and decorators.
+A `@Controller` class whose constructor receives an `@Injectable` service through
+`@Inject('greeting-service')`, with `DiPlugin` providing the container. A second route shows that
+the framework creates no per-request scope: the app creates two scopes itself and compares what each
+returns.
 
-**What it demonstrates:**
-
-- `@Controller` and `@Get` decorators
-- `@Injectable()` for service registration
-- `@Inject('token')` for constructor injection
-- Positional parameter binding (`@Params(Param(…), Body(), Query(…))`)
-
-**Key code:**
-
-```typescript
-import { Controller, Get, Inject, Injectable } from '@setu-ts/decorator-plugin';
-
-@Injectable({ token: 'UserService' })
-class UserService {
-  async findAll() {
-    return [{ id: '1', name: 'John' }];
-  }
-}
-
-@Controller('/users')
-@Inject('UserService')
-class UserController {
-  constructor(private readonly userService: UserService) {}
-
-  @Get()
-  async list() {
-    return this.userService.findAll();
-  }
-}
+```bash
+cd apps/di-decorators && deno task start 3400
+curl localhost:3400/greetings   # {"greeting":"Hello, decorators!"}
+curl localhost:3400/lifetimes   # {"singletonShared":true,"scopeRetainsInstance":true,"scopesAreDistinct":true}
 ```
+
+Read: [`src/greeting-controller.ts`](../apps/di-decorators/src/greeting-controller.ts),
+[`src/greeting-service.ts`](../apps/di-decorators/src/greeting-service.ts),
+[`src/app.ts`](../apps/di-decorators/src/app.ts). See also
+[Decorators — Scoped Injection](./decorators.md#scoped-injection).
 
 ---
 
 ### database
 
-Database operations.
+`DatabasePlugin` on the in-memory adapter, behind a `notes` repository: create, read, update, and a
+transaction that is rolled back.
 
-**What it demonstrates:**
-
-- Database plugin configuration
-- Repository pattern
-- CRUD operations
-- Transaction support
-
-**Key code:**
-
-```typescript
-import { CAPABILITIES } from '@setu-ts/common';
-import { DatabasePlugin } from '@setu-ts/database-plugin';
-import type { IDatabaseService, IRepository } from '@setu-ts/database-plugin';
-
-app.register(DatabasePlugin({
-  type: 'memory', // Use in-memory for development
-}));
-
-const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-const itemsRepo = db.getRepository<{ id: string; name: string }>('items');
-const items = await itemsRepo.findAll();
-const item = await itemsRepo.findById('1');
-await itemsRepo.create({ name: 'New Item' });
-await itemsRepo.update('1', { name: 'Updated' });
-await itemsRepo.delete('1');
+```bash
+cd apps/database && deno task start 3400
+curl -X POST localhost:3400/notes -H 'content-type: application/json' -d '{"id":"1","text":"hello"}'   # 201
+curl localhost:3400/notes/1                                       # {"id":"1","text":"hello"}
+curl -X PATCH localhost:3400/notes/1 -H 'content-type: application/json' -d '{"text":"updated"}'
 ```
+
+The memory adapter is for development and tests; the same repository code runs against PostgreSQL
+through Drizzle or Prisma, or MongoDB and the other adapters. See
+[`@setu-ts/database-plugin`](./plugins.md#setu-tsdatabase-plugin).
+
+Read: [`src/app.ts`](../apps/database/src/app.ts), [`smoke.ts`](../apps/database/smoke.ts).
 
 ---
 
 ### cqrs
 
-Command-Query Responsibility Segregation.
+`CqrsPlugin` with one command handler and one query handler. `deno task start` sends a command,
+reads the result through the query bus, prints it and exits; it is not a server. The command handler
+is built by a factory that resolves the runtime capability, which is why the printed note carries a
+timestamp.
 
-**What it demonstrates:**
-
-- Command bus for write operations
-- Query bus for read operations
-- Handler registration
-- Pipeline behaviors
-
-**Key code:**
-
-```typescript
-import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
-import { CAPABILITIES, type CqrsCommand, type CqrsQuery } from '@setu-ts/common';
-
-app.register(CqrsPlugin());
-
-const cqrs = ctx.services.get<ICqrsFacade>(CAPABILITIES.CQRS);
-
-// Command — pass a command object matching your command handler type
-const result = await cqrs.commandBus.execute({} as unknown as CqrsCommand);
-
-// Query — pass a query object matching your query handler type
-const items = await cqrs.queryBus.execute({} as unknown as CqrsQuery);
+```bash
+cd apps/cqrs && deno task start
+# [ "CQRS keeps commands and queries separate. @ 1791396240491" ]
 ```
+
+Read: [`src/app.ts`](../apps/cqrs/src/app.ts).
 
 ---
 
-### microservices
+### multi-tenant
 
-Cross-service communication.
+`MultiTenancyPlugin` resolving the tenant from the `x-tenant-id` header, with `required: true`.
+Notes are stored per tenant, and a request with no tenant is refused.
 
-**What it demonstrates:**
-
-- Message broker (Redis Streams)
-- Request/reply pattern
-- Event publishing/subscribing
-- Service discovery
-
-**Key code:**
-
-```typescript
-import { MessagingPlugin } from '@setu-ts/messaging-plugin';
-import { CAPABILITIES, type MessageHandler } from '@setu-ts/common';
-
-// The redis-streams arm is discriminated on `broker: 'redis-streams'`.
-// `url` is the Redis connection URL (read when no client is injected);
-// `defaultQueue` is the consumer group every consumer shares.
-app.register(MessagingPlugin({
-  broker: 'redis-streams',
-  url: 'redis://localhost:6379',
-  defaultQueue: 'items-consumers',
-}));
-
-const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-
-// Subscribe — the handler receives the message payload directly
-await broker.subscribe('items.created', (message: { id: string; name: string }) => {
-  console.log('Item created:', message);
-});
-
-// Publish
-await broker.publish('items.created', { id: '1', name: 'New Item' });
-
-// Request/Reply
-const response = await broker.request('service.method', data);
+```bash
+cd apps/multi-tenant && deno task start 3400
+curl -X POST localhost:3400/notes -H 'x-tenant-id: acme' -H 'content-type: application/json' -d '{"text":"a"}'   # 201
+curl localhost:3400/notes -H 'x-tenant-id: acme'                          # [ the note ]
+curl localhost:3400/notes -H 'x-tenant-id: globex'                        # []
+curl localhost:3400/notes                                                 # 400 Tenant Required
 ```
 
----
-
-### realtime
-
-Real-time communication with cross-replica synchronization.
-
-**What it demonstrates:**
-
-- WebSocket connections
-- SSE streams
-- Room broadcasting
-- Cross-replica sync via Redis backplane
-
-**Key code:**
-
-```typescript
-import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
-import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
-import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
-
-// WebSocketPlugin options carry heartbeat/idle/limit knobs only — rooms are
-// application-level, created from the WebSocketService after registration.
-app.register(WebSocketPlugin({ heartbeatMs: 30_000, idleTimeoutMs: 90_000 }));
-
-// The redis transport fans room broadcasts across replicas. It takes a
-// connection `url` (and/or injected `client`/`subscriber`), not a `redis`
-// object — a Redis connection in subscriber mode refuses other commands, so
-// one connection cannot both publish and subscribe.
-app.register(RealtimeBackplanePlugin({
-  transport: 'redis',
-  url: 'redis://localhost:6379',
-}));
-
-// Routes + rooms are registered on the service, not in plugin options.
-const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
-ws.route('/ws/chat', {
-  onOpen: (conn) => ws.room('chat').add(conn),
-  onMessage: (conn, message: string | Uint8Array) => {
-    const text = typeof message === 'string' ? message : new TextDecoder().decode(message);
-    const userData = conn.data.get('user') as { id?: string } | undefined;
-    ws.room('chat').broadcast(text, { except: conn });
-  },
-});
-```
-
----
-
-### graphql
-
-GraphQL server.
-
-**What it demonstrates:**
-
-- Schema-first GraphQL
-- Code-first resolvers
-- GraphiQL interface
-- Subscription support
-
-**Key code:**
-
-```typescript
-import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
-
-app.register(GraphqlPlugin({
-  typeDefs: `
-    type Query {
-      hello: String
-    }
-  `,
-  resolvers: {
-    Query: {
-      hello: () => 'Hello, World!',
-    },
-  },
-}));
-```
-
----
-
-### cloudflare
-
-Cloudflare Workers integration.
-
-**What it demonstrates:**
-
-- KV namespace access
-- D1 database queries
-- Queue production
-- Cron trigger handling
-- Cache API usage
-- Messaging: a `publish` in one `fetch` invocation observed arriving at a subscriber in a separate
-  `queue` invocation
-- `detectRuntime()` answering `'cloudflare-workers'` on the real platform, which only workerd can
-  prove — the platform sends its own user agent
-
-Its smoke check runs against **real workerd** through `wrangler dev`, not a fake.
-
-**Key code:**
-
-```typescript
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
-import { CloudflarePlugin, type ICloudflareBindings } from '@setu-ts/cloudflare-plugin';
-import { CAPABILITIES } from '@setu-ts/common';
-
-// Deployment glue: `env` and `waitUntil` come from `cloudflare:workers` at
-// runtime; declared here so the block type-checks off a Worker toolchain.
-declare const env: Record<string, unknown>;
-declare const waitUntil: (promise: Promise<unknown>) => void;
-
-const app = createApplication({
-  plugins: [
-    RuntimePlugin({ env }),
-    CloudflarePlugin({ env, waitUntil }),
-  ],
-});
-
-app.router.get('/', async (ctx) => {
-  const cf = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
-
-  // KV — resolve the `KV` namespace via its named accessor.
-  await cf.kv('KV').put('key', 'value');
-  const value = await cf.kv('KV').get('key');
-
-  // D1 — resolve the `DB` database via its named accessor.
-  const result = await cf.d1('DB').prepare('SELECT * FROM items').all();
-
-  // Queue — resolve the `QUEUE` producer via its named accessor.
-  await cf.queue('QUEUE').send({ type: 'item-created', id: '1' });
-
-  return ctx.response.json({ value, rows: result.results.length });
-});
-```
-
----
-
-### full-stack
-
-React Router SSR.
-
-**What it demonstrates:**
-
-- React Router v8 framework mode
-- SSR with streaming
-- Form actions
-- Session management
-- Database integration
-
-**Key code:**
-
-```typescript
-import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
-import type { SsrRequestHandler } from '@setu-ts/react-router-plugin';
-import { SessionPlugin } from '@setu-ts/session-plugin';
-import { CAPABILITIES, type IRuntimeServices } from '@setu-ts/common';
-
-const sessionSecret = app.services
-  .get<IRuntimeServices>(CAPABILITIES.RUNTIME)
-  .env.SESSION_SECRET;
-if (sessionSecret === undefined) throw new Error('SESSION_SECRET is required');
-app.register(SessionPlugin({ secret: sessionSecret }));
-
-app.register(ReactRouterPlugin({
-  // Absolute path/URL to the React Router Vite server build (default export
-  // = ServerBuild). Derive one with
-  // `new URL('./build/server/index.js', import.meta.url).href`.
-  serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
-  // Optional seam for lazy loading the RR runtime; it returns an SsrRuntime.
-  loadRequestHandler: async (serverBuildPath, mode) => {
-    const build = await import(serverBuildPath);
-    const { createRequestHandler, RouterContextProvider } = await import('npm:react-router@8');
-    return {
-      handler: createRequestHandler(build, mode) as SsrRequestHandler,
-      createLoadContext: () => new RouterContextProvider(),
-    };
-  },
-}));
-```
+Read: [`src/app.ts`](../apps/multi-tenant/src/app.ts).
 
 ---
 
 ### plugin-development
 
-Custom plugin template.
-
-**What it demonstrates:**
-
-- Plugin structure
-- Service registration
-- Middleware addition
-- Route registration
-- Testing patterns
-
-**Key code:**
-
-```typescript
-import type { IPlugin, IPluginContext } from '@setu-ts/common';
-
-export function MyPlugin(): IPlugin {
-  return {
-    name: 'my-plugin',
-    version: '1.0.0',
-    async register(ctx: IPluginContext) {
-      // Register service
-      ctx.services.register('my-service', new MyService());
-
-      // Add middleware
-      ctx.middleware.add(async (requestCtx, next) => {
-        await next();
-      });
-
-      // Register routes
-      ctx.router.get('/my-route', async (ctx) => {
-        return ctx.response.json({ message: 'Hello from plugin' });
-      });
-    },
-  };
-}
-```
-
-## Smoke Tests
-
-Each example includes smoke tests that verify core functionality:
+A complete custom plugin: it registers a service under its own capability token and adds a route
+that resolves the service from the request context.
 
 ```bash
-# Run smoke tests
-deno task smoke
-
-# Example output:
-# ✓ GET /health returns 200
-# ✓ POST /items creates an item
-# ✓ GET /items returns created items
+cd apps/plugin-development && deno task start 3400
+curl localhost:3400/greet/ada   # {"message":"Hello, ada!"}
+deno task test                  # the plugin's own tests
 ```
 
-Smoke tests are designed to be minimal but sufficient to prove the example works. They use the
-framework's testing utilities and run without external dependencies (unless noted).
+Read: [`src/greeting-plugin.ts`](../apps/plugin-development/src/greeting-plugin.ts). See
+[Custom Plugins](./custom-plugins.md).
 
-## Running Examples in CI
+---
 
-Examples are tested in CI via `check:apps`:
+### microservices
+
+Two applications in one process. Service A finds service B through `ServiceDiscoveryPlugin` and
+calls it over HTTP. With `REDIS_URL` set, B also registers a responder on a Redis Streams broker and
+A calls it with `broker.request(...)`. `deno task start` runs both calls, prints the answers and
+exits.
 
 ```bash
-deno task check:apps
+cd apps/microservices && deno task start 3300 3301
+# Hello, service-a!
+# Set REDIS_URL to demonstrate brokered request/reply between services.
+REDIS_URL=redis://127.0.0.1:6379 deno task start 3300 3301   # both calls succeed
 ```
 
-This command:
+The two arguments are service A's and service B's ports (defaults `3000` and `3001`).
 
-1. Type-checks each example
-2. Runs smoke tests
-3. Reports failures
+Read: [`src/app.ts`](../apps/microservices/src/app.ts).
 
-## Contributing Examples
+---
 
-When adding a new example:
+### realtime
 
-1. Create the example in `apps/<name>/`
-2. Add a `deno.json` with `start` and `smoke` tasks
-3. Add a smoke test file (`smoke.ts`)
-4. Update this `examples.md` with the example description
-5. Verify `deno task check:apps` passes
+Server-Sent Events over `SsePlugin`, fanned out across replicas by `RealtimeBackplanePlugin` with
+the `'redis'` transport. `POST /publish` sends to the `news` channel and every replica's
+`GET /events` clients receive it. The smoke check starts two replicas as **separate processes**: two
+replicas in one process would share the backplane's in-process transport and prove nothing.
+
+```bash
+cd apps/realtime && deno task start 3400   # REDIS_URL defaults to redis://127.0.0.1:6379
+curl -N localhost:3400/events                                    # in one terminal
+curl -X POST localhost:3400/publish -H 'content-type: application/json' -d '{"message":"hi"}'        # 204, in another
+```
+
+WebSocket rooms are shown in [realtime-clients](#realtime-clients) and in the
+[`@setu-ts/websocket-plugin` README](https://github.com/setu-ts/setu-ts/blob/main/packages/websocket-plugin/README.md).
+
+Read: [`src/app.ts`](../apps/realtime/src/app.ts), [`smoke.ts`](../apps/realtime/smoke.ts).
+
+---
+
+### realtime-clients
+
+A server with SSE and WebSocket routes, driven by the `@setu-ts/sdk` realtime clients from Deno,
+Node, Bun and workerd: SSE reconnection resumes from the last event id, authenticated streams send
+their credentials, and a WebSocket stays alive across the server's keep-alive. Its smoke check needs
+Node and Bun installed.
+
+Read: [`src/app.ts`](../apps/realtime-clients/src/app.ts),
+[`smoke.ts`](../apps/realtime-clients/smoke.ts).
+
+---
+
+### graphql-demo
+
+`GraphqlPlugin` with a schema-first definition (`typeDefs` plus resolvers), subscriptions over both
+WebSocket and SSE, automatic persisted queries backed by `CachePlugin`, request batching, and
+GraphiQL.
+
+```bash
+cd apps/graphql-demo && deno task start          # port 4000
+curl -X POST localhost:4000/graphql -H 'content-type: application/json' -d '{"query":"{ hello }"}'   # {"data":{"hello":"world"}}
+# GraphiQL at http://localhost:4000/graphql in a browser
+```
+
+`deno task interop` drives the same server with the reference `graphql-ws` client and Apollo's
+persisted-query link; it needs their npm packages, so CI does not run it.
+
+Read: [`src/app.ts`](../apps/graphql-demo/src/app.ts),
+[`src/schema.ts`](../apps/graphql-demo/src/schema.ts).
+
+---
+
+### grpc
+
+`GrpcPlugin` serving a Connect RPC from an embedded service descriptor on the same port as an
+ordinary `GET /health` route. Connect and gRPC-Web clients can call it; native gRPC cannot, because
+it needs HTTP/2 trailers a fetch-based server does not send.
+
+```bash
+cd apps/grpc && deno task start                  # port 5000
+curl localhost:5000/health                       # {"status":"ok"}
+```
+
+Read: [`src/app.ts`](../apps/grpc/src/app.ts), [`smoke.ts`](../apps/grpc/smoke.ts). See
+[`@setu-ts/grpc-plugin`](./plugins.md#setu-tsgrpc-plugin).
+
+---
+
+### cloudflare
+
+A Worker using `CloudflarePlugin`: a KV namespace, a cron trigger whose `scheduled` handler writes
+to KV, and messaging over a Cloudflare queue (a publish in one `fetch` is received by a subscriber
+in a separate `queue` invocation), with replies through a Durable Object. Its smoke check bundles
+the Worker and runs it on **real workerd** through `wrangler dev`, and checks that `detectRuntime()`
+answers `'cloudflare-workers'` there.
+
+```bash
+cd apps/cloudflare && deno task smoke            # needs `wrangler` on PATH
+```
+
+[`worker.ts`](../apps/cloudflare/worker.ts) is the entry Wrangler deploys: it starts the application
+once per isolate, retries if that start fails, and shares the started application with the `queue`
+handler. Bindings are declared in [`wrangler.toml`](../apps/cloudflare/wrangler.toml).
+
+---
+
+### compiled-binary
+
+The same small application compiled into a standalone executable.
+
+```bash
+cd apps/compiled-binary && deno task compile     # writes ./hono-example
+./hono-example 3400               # then, in another terminal:
+curl localhost:3400/health        # {"status":"ok"}
+```
+
+Read: [`src/app.ts`](../apps/compiled-binary/src/app.ts). See
+[Runtime Deployment — Standalone binaries](./runtime-deployment.md).
+
+---
+
+### full-stack
+
+A React Router 8 framework-mode application composed with `createFullStackAppFromConfig` from
+`@setu-ts/full-stack-starter`. Its smoke check writes a row through the database capability, renders
+an SSR page that shows it (proving `populateLoadContext` reached the loader), and completes a
+`<Form>` login whose CSRF token round-trips through the session plugin.
+
+```bash
+cd apps/full-stack && deno task start            # builds first, then serves on PORT or 3000
+```
+
+`start` runs the Vite build first, under Deno's own npm support; no Node toolchain is needed.
+
+Read: [`setu.config.ts`](../apps/full-stack/setu.config.ts), the routes under
+[`app/routes/`](../apps/full-stack/app/routes), and [`smoke.ts`](../apps/full-stack/smoke.ts).
+
+---
+
+### static-site
+
+`StaticPlugin` serving `./public` at the root, beside a `GET /health` route. The smoke check
+requests the cases that once failed: a `HEAD` that must not open a body, a hashed asset that keeps
+its `immutable` policy when the brotli copy is served, conditional requests, and a resumed download
+through `Range` and `If-Range`.
+
+```bash
+cd apps/static-site && deno task start           # always port 8000
+curl -I localhost:8000/index.html
+```
+
+Port `8000` is hard-coded, so stop anything else bound there first. DynamoDB Local's default port is
+also `8000`.
+
+Read: [`main.ts`](../apps/static-site/main.ts), [`smoke.ts`](../apps/static-site/smoke.ts).
+
+## Smoke checks
+
+A smoke check asserts one behaviour and fails loudly. `deno task smoke` exits non-zero on the first
+failed assertion, with a message naming what did not happen. A check whose external prerequisite is
+missing (Redis, Wrangler) prints why and exits with code `77`, which `check:apps` records as a skip
+rather than a pass.
+
+## Running every example
+
+```bash
+deno task check:apps                                   # from the repository root
+REDIS_URL=redis://127.0.0.1:6379 deno task check:apps  # include the Redis-backed checks
+```
+
+It type-checks each app, runs its `smoke` task and, where one is declared, its `test` task. In CI a
+skip fails the job unless the app is in the `ALLOW_SKIP` list; see
+[`apps/README.md`](../apps/README.md).
+
+## Contributing an example
+
+1. Create it under `apps/<name>/` with a `deno.json` declaring `start` and `smoke` tasks.
+2. Make `smoke.ts` assert the behaviour the example exists for, not only that it started.
+3. Add it to [`apps/README.md`](../apps/README.md) and to this guide.
+4. Run `deno task check:apps`.
 
 ## Next Steps
 

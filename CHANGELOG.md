@@ -683,6 +683,15 @@ All notable changes to this project are documented here. The format follows
   injecting a framework capability fails at startup. The guide no longer says Setu-TS has no
   `@Module`.
 
+- **The examples guide described applications that are not in `apps/` (`docs/examples.md`, PR
+  pending).** Its code blocks were written as illustrations rather than taken from the apps, and had
+  drifted. They showed routes the apps do not serve (`/items`, `/users`, `/my-route`), a health
+  endpoint `minimal` does not have, D1 and Cache API use the Cloudflare example does not make, and
+  WebSocket rooms in an SSE-only `realtime` example. They also named a `build` task where
+  `compiled-binary` has `compile`. The guide also did not say that `cqrs` and `microservices` print
+  a result and exit, or which port each app uses. Each deep dive now gives the commands it was
+  checked with against the running app, and links to that app's source.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
