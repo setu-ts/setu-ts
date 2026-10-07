@@ -414,12 +414,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **A scaffolded Worker kept its old bindings after a bindings-only deploy (`@setu-ts/cli`, PR
-  pending).** The `src/index.ts` that `setu new --runtime cloudflare-workers` generates memoized the
-  application built from the first request's `env` and reused it for every later request. Cloudflare
-  may keep an isolate running across a deploy that changes only bindings, so that application kept
-  serving with the previous bindings, variables and secrets. The entry now keeps one application per
-  `env` object. On workerd, `fetch` and `queue` handlers receive the same object while bindings are
+- **A scaffolded Worker kept its old bindings after a bindings-only deploy (`@setu-ts/cli`, #423).**
+  The `src/index.ts` that `setu new --runtime cloudflare-workers` generates memoized the application
+  built from the first request's `env` and reused it for every later request. Cloudflare may keep an
+  isolate running across a deploy that changes only bindings, so that application kept serving with
+  the previous bindings, variables and secrets. The entry now keeps one application per `env`
+  object. On workerd, `fetch` and `queue` handlers receive the same object while bindings are
   unchanged, so the steady state is one lookup. Up to two applications are kept, so requests
   alternating between two versions during a gradual deployment reuse both instead of rebuilding each
   in turn; a third evicts the least recently used, and an application no request has used for 100
