@@ -201,3 +201,143 @@ deno task publish:check     # on the committed tree
   `@setu-ts/common`; maintainer decision, unowned.
 - The Workers scaffold `ERESOLVE` — `fix/workers-devdeps-peer-range`.
 - X66-6 and X66-7 — already fixed on `develop` (M101g).
+
+## 10. Completed design security review
+
+**Review completed:** 2026-10-08, for the repair design in §§0–3 and the complete
+`develop...0900494a` change range. This review is recorded after implementation, at the maintainer's
+explicit instruction to complete the design security review and then re-audit. It does not claim
+that a review existed before implementation. The subsequent implementation audit must run in an
+independent context on the commit containing this section. No exploit finding or security-policy
+exception is accepted by this review.
+
+### 10.1 Reviewed flow and trust boundaries
+
+1. HTTP caller → native `Request` → exported or detached `Application.fetch` → registered runtime
+   HTTP adapter → kernel middleware → route or SSR handler → native `Response`. Binding a callback
+   must preserve the application instance and the existing security pipeline, including refusals,
+   opaque server errors and request accounting. It must not add a second dispatch path.
+2. Worker invocation → deployment-owned bindings → application factory → plugin registration and
+   initialization → successful shared application → HTTP or queue dispatch. An invocation may
+   trigger cold start but must never reach a partially initialized application. A failed attempt
+   must release acquired resources and a later attempt must construct a fresh application. HTTP and
+   queue callers of the example's `application(env)` share the same startup gate.
+3. Application author → starter options and decorator service declarations → application-local DI
+   container → that application's kernel registry. A registry fallback is composition, not
+   authentication or tenant authorization. No request parameter may become a DI token merely because
+   the fallback default changed. Enabling the arm must preserve an explicit opt-out.
+4. CLI caller → validated/normalized project name and fixed template selection → filesystem write
+   pipeline → generated manifests, entry modules, README and smoke test. Project names cross both a
+   path boundary and text-output boundaries; validation must precede writes. First-party route
+   metadata describes existing routes and grants no authority. The new build commands are fixed
+   template commands, not a shell constructed from request or argv data.
+5. Generated smoke test → started application → `/health` plus streamed SSR `/` → consumed response
+   → assertion and application shutdown. A failing load-context callback must fail the emitted test
+   even when health is healthy. The health route is not an SSR or authentication readiness proof.
+
+Source seams reviewed: `packages/kernel/src/application/application.ts` (constructor, `fetch`,
+dispatch and failure paths), `packages/di-plugin/src/container/container.ts` (registry fallback),
+`packages/starters/rest-starter/src/app.ts` (composition), `apps/cloudflare/worker.ts` (startup and
+shared queue access), `packages/cli/src/templates/project-files.ts` (rendering, scripts and smoke
+test), `packages/cli/src/utils/names.ts` (path grammar/output escaping), and
+`packages/exceptions/src/middleware/error-handler.ts` (response masking versus operator logs).
+`docs/runtime-deployment.md` contains two startup recipes which must obey the same fresh-application
+rule as the Worker example; compiling a recipe alone cannot prove recovery.
+
+### 10.2 Assets, attackers and assumptions
+
+| Asset                                                | Attacker or failure source                                                                    | Required boundary                                                                                                                                               |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Protected route/SSR data and application credentials | Unauthenticated HTTP caller controlling URL, headers and body                                 | Existing guards run before protected handlers; callback receiver changes cannot bypass them; credentials/internal error causes do not enter client error bodies |
+| Availability and startup resources                   | HTTP/queue invocation triggering cold start; failing, synchronous-throwing or slow dependency | Failed starts cannot serve or be cached forever; concurrent invocations coalesce; teardown releases resources acquired by failed attempts                       |
+| Application-local services and configuration         | Caller trying to influence resolution; accidental cross-app singleton reuse                   | DI exposes only the owning application's registered services; unregistered names refuse; absence/explicit opt-out remains effective                             |
+| Developer filesystem, terminal and generated source  | CLI argv containing traversal, control characters or shell punctuation                        | Refuse unsafe derived path segments before writing; normalize allowed names consistently; escape refusal output; no interpolation into executable commands      |
+| Developer/CI confidence and response resources       | SSR initialization defect, including a thrown `populateLoadContext` error                     | Emitted test distinguishes failing SSR from healthy health endpoint and consumes/cancels response bodies before shutdown                                        |
+| Deployment privileges and secret material            | Incorrect operator configuration or copied deployment recipe                                  | No newly broadened permission/credential grants; deployment examples state their scope rather than promise automatic production hardening                       |
+
+Application code, installed plugins and first-party template definitions are trusted executable
+code, not sandboxed tenants. They already receive registry access; DI does not make them less
+privileged. Platform binding objects are deployment configuration, not fields taken from an HTTP
+request. The standalone Worker example assumes one binding configuration per handler lifetime; it
+does not promise the generated entry's binding-replacement behavior. Cross-app isolation is
+required; tenant isolation inside an application's singleton service remains that service's
+responsibility. No per-request DI scope is promised by the loader documentation.
+
+Operator logs are a separate, access-controlled diagnostic destination. Internal exception messages,
+causes and paths may reach that destination under the existing logging contract, but must not appear
+in opaque HTTP 500 bodies. This is not permission to log secrets: AI_GUIDELINES §13.3 still applies.
+Credential/header/password metadata must be redacted, and application code must not embed
+credentials in free-form exception text. The review does not claim that field redaction recognizes
+arbitrary secrets embedded in prose, or that `logErrors: false` disables every framework logging
+path. The audit must show the actual captured log behavior alongside wire-body checks, not infer log
+confidentiality from an opaque response.
+
+### 10.3 Resource budgets and limits of the design
+
+- **Startup state:** at most one pending startup and one successfully retained application reference
+  per Worker handler. Concurrent fetch/queue access must share it. Failure clears the pending
+  reference; repeated failures must not accumulate handler-retained applications or unclosed
+  resources for completed registration work. A retry invokes the factory again rather than
+  restarting the failed kernel instance.
+- **DI fallback state:** successful fallback entries are limited to services registered in the
+  owning application's registry; missing/prototype-named tokens must not allocate providers or
+  singletons. There is no registry populated from arbitrary HTTP keys in this change.
+- **Response lifecycle:** every emitted SSR smoke response is consumed or cancelled; application
+  shutdown runs on both assertion success and failure.
+- **Filesystem/name budget:** existing derived project path segments remain limited to 255 UTF-8
+  bytes, with the existing portable name grammar. This repair introduces no new numeric input bound.
+- **Startup deadline:** these helpers add no deadline or cancellation mechanism. A dependency that
+  never settles can hold the pending startup and callers; the platform/application must supply its
+  dependency timeout. The audit must exercise a controlled hang and report this limitation
+  explicitly, rather than claim bounded response latency or regard a hung request as a successful
+  refusal.
+- **Audit workloads, not production caps:** exercise at least 100 refused requests followed by a
+  successful request; 1,000 unknown DI tokens; and eight failed startup waves with sixteen
+  concurrent callers per wave followed by recovery. These establish regression evidence, not
+  load-test capacity.
+- No body/rate/connection bound, listener default, credential format, npm dependency or Deno
+  permission declaration is changed by these repairs. Existing broad development task grants and the
+  generated development session placeholder are not production least-privilege or secret-management
+  guarantees. Documentation's explicit `0.0.0.0` deployment listeners are intentional externally
+  reachable servers; they are not a loopback-only local control plane.
+
+### 10.4 Design findings and resolutions to verify
+
+| ID      | Threat / design concern                                                         | Design resolution and audit obligation                                                                                                                               |
+| ------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D101I-1 | Detached callback loses its receiver or bypasses middleware                     | Bind the existing Fetch method; retain adapter/pipeline dispatch; O1 and a binding-removal negative control                                                          |
+| D101I-2 | DI fallback crosses app ownership or defeats caller opt-out                     | Resolve only the owning registry, cache only existing registrations, preserve explicit false and absent arm; O2 with default/precedence controls                     |
+| D101I-3 | Failed startup serves partial state, remains cached, or leaks retry resources   | Gate all consumers, coalesce each attempt, clear rejection and construct fresh apps; O3 with retry-clear/fresh-factory controls                                      |
+| D101I-4 | Opaque response is mistaken for secret-free logging                             | Separate client response and operator diagnostic destinations; forbid credential logging, inspect actual output/redaction and record free-form error limitations; O4 |
+| D101I-5 | Project name escapes its directory or forges output/commands                    | Preserve pre-write path grammar and sink escaping; render fixed script strings and first-party route data; O5                                                        |
+| D101I-6 | Health-only test approves broken SSR or leaks stream resources                  | Execute the emitted test through real SSR/context handling, require page 200 and body consumption, stop in finally; O6 and request-removal control                   |
+| D101I-7 | Copyable deployment snippets overstate startup recovery or privilege guarantees | Exercise both startup recipes; inspect permission/dependency/listener changes and non-root Docker directives without claiming an untested deployment; O3/O7          |
+
+These rows specify required behavior, not closed implementation findings. The independent audit
+decides whether the committed implementation meets them. No Critical/High finding is pre-accepted,
+and inherited behavior is not excused solely because it predates this branch.
+
+### 10.5 Implementation-audit obligations
+
+Every obligation below requires source and raw stdout in the report, a legitimate positive control
+through the same path, and explicit limitations. A missing or nondiscriminating probe fails the
+audit. Run sandboxed, with an emptied environment and scoped local permissions, under the canonical
+security-audit procedure; do not use real credentials or remote targets.
+
+| ID | Required probe and evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| O1 | Drive bare detached Fetch and `{ fetch: app.fetch }` through the real adapter/kernel pipeline. Refuse unauthorized calls without running protected handlers, accept legitimate ones after repeated refusals, keep malformed requests out of handlers, and reject a missing adapter asynchronously. Plant internal error/cause/query canaries and inspect raw response bodies/headers. Remove binding and observe the probe fail, then restore and pass. No raw-socket framing guarantee is inferred from Fetch                                                                                                                                           |
+| O2 | Start real REST and full-stack apps with DI/decorators. Prove default capability injection, explicit false refusal, absent-arm behavior, two-app service identity isolation and no provider/singleton allocation from 1,000 missing names plus prototype-like names. Re-resolve a legitimate service after refusals. Reverse both default and explicit-option precedence separately; each relevant probe must fail                                                                                                                                                                                                                                       |
+| O3 | Use real kernel lifecycle hooks in the Worker handler, including fetch and shared application/queue startup access. Prove failed applications never dispatch; each concurrent wave uses one attempt; failure cleanup matches acquired resources; recovery uses a fresh app and a successful app is reused. Drive synchronous factory/registration throws and a controlled hung dependency, then release it and show recovery. Exercise both deployment-guide startup recipes with a transient post-registration failure. Remove retry clearing and replace fresh construction with failed-instance reuse; discriminate and restore the relevant controls |
+| O4 | Capture client bodies/headers and operator log output for successful and failing paths. Internal-error/cause/path canaries must be absent from opaque client 500s; known credential/password/header metadata canaries must be redacted in logs. Show useful legitimate responses and diagnostic logging still occur. Record any internal canaries visible in diagnostic logs and any unsupported free-form secret-redaction claim. A newly introduced path disclosing credentials is a finding, not an accepted diagnostic destination                                                                                                                   |
+| O5 | Drive the actual CLI on a scoped real filesystem with traversal, CR/LF/NUL/ESC, quotes and shell punctuation. Refused names create no files; normalized names remain contained and every captured output line and changed generated file uses safe names. Prove a legitimate scaffold works and that generated Node/Bun build-before-start commands remain fixed, with no argv substitution. No execution of hostile command text is necessary                                                                                                                                                                                                           |
+| O6 | Execute the emitted full-stack smoke test against real full-stack/SSR context handling: healthy health and SSR pass; thrown `populateLoadContext` leaves health healthy but fails the emitted test. Consume streaming bodies and observe shutdown/resource sanitizers. A faithful injected handler loader is permitted if stated; source-string assertions alone do not satisfy this obligation. Remove the emitted page probe and show the audit catches the now-passing broken app                                                                                                                                                                     |
+| O7 | Read the complete production/configuration/deployment diff for new broad permission grants, dependencies, lazy imports, credential material and externally exposed listeners. Check changed non-root Docker directives and explain intended listener exposure. Scope the fifteen-class sweep to actual added/changed controls; justify every N/A. Record unsupported native-runtime/platform/build claims and produce the PR audit record. No deployment hardening is certified from text checks alone                                                                                                                                                   |
+
+For every security control added or changed, temporarily remove it, load the changed code in a fresh
+process, observe the relevant probe fail, restore it and confirm a clean tree before the next probe.
+Existing name/redaction controls inspected as seams are not falsely counted as newly added controls.
+Re-run the previous audit's probes as well as the obligations above on the new committed revision.
+If a new finding appears, report it with severity and evidence; do not fix or choose a waiver within
+the audit pass. S101I-P1 can be closed only after the independent auditor confirms this completed
+review supplies the required design and that its obligations were driven.
