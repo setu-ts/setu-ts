@@ -35,6 +35,19 @@ All notable changes to this project are documented here. The format follows
   a container, or a provider registered too early fails `start()` instead of testing the real class.
   A child scope from `createScope()` keeps the double even when it registers the token itself.
 
+- **Publish options (M106).** `IMessageBroker.publish` takes an optional third argument, typed
+  `PublishOptions` — `orderingKey`, `deduplicationId` and `headers` — carried as `x-setu-*`
+  transport headers (`ORDERING_KEY_HEADER` / `DEDUPLICATION_ID_HEADER`) beside each broker's native
+  primitive (Kafka message `key`, Pub/Sub `orderingKey`, NATS `Nats-Msg-Id`, Service Bus and
+  RabbitMQ `messageId`), so the options are observable through `MessageMetadata.headers` on all
+  seven brokers and on `WorkersBroker`, and never silently dropped. `enableMessageOrdering` creates
+  the Pub/Sub transport's own subscriptions with ordering. `publishIntegrationEvent` passes the
+  envelope id as the de-duplication id, and `defineIntegrationEvent` takes an opt-in `orderingKey`
+  selector. Invalid options are refused by name, case-insensitively covering the header names a
+  broker or its server acts on, and a refusal never echoes the refused value. `common` gains the
+  shared `publishIdProblem` / `isValidPublishId` predicate and `MAX_PUBLISH_ID_BYTES`. The docs
+  state the guarantee honestly: `orderingKey` decides placement, not the order handlers finish in.
+
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
   error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s

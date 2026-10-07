@@ -9532,7 +9532,10 @@ finishing successfully; the messaging README's current dispatch timing remains t
 write business state and an integration-event envelope atomically, relay persisted rows with
 at-least-once delivery, and de-duplicate per consumer by stable event ID. It must decide ordering,
 retention, replay, and failure observability across the database and messaging contracts; none of
-those choices belongs in a local recorder or a typed publishing convenience API.
+those choices belongs in a local recorder or a typed publishing convenience API. The publish-side
+primitive those rows are relayed WITH ships in M106 — a per-aggregate ordering key, a stable
+de-duplication ID and transport headers — while THIS milestone owns relay ordering and the
+per-consumer de-duplication the inbox performs.
 
 ---
 

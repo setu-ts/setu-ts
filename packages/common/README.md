@@ -142,6 +142,7 @@ package fits the plugin architecture.
 | `isOk`                               | function  |
 | `isPromiseLike`                      | function  |
 | `isSome`                             | function  |
+| `isValidPublishId`                   | function  |
 | `isWebSocketUpgradeRequest`          | function  |
 | `isWorkerReadySignal`                | function  |
 | `isWorkerTaskReply`                  | function  |
@@ -154,6 +155,7 @@ package fits the plugin architecture.
 | `parseFormBody`                      | function  |
 | `parseJsonBody`                      | function  |
 | `parseTraceparentToContext`          | function  |
+| `publishIdProblem`                   | function  |
 | `replaceLocale`                      | function  |
 | `replacePrincipal`                   | function  |
 | `replaceTenant`                      | function  |
@@ -193,6 +195,7 @@ package fits the plugin architecture.
 | `ERROR_RESPONDER_BRAND`              | const     |
 | `ERROR_RESPONDER_STATE_KEY`          | const     |
 | `HTTP_STATUS_HINT`                   | const     |
+| `MAX_PUBLISH_ID_BYTES`               | const     |
 | `ORDERING_KEY_HEADER`                | const     |
 | `PLUGIN_PRIORITY`                    | const     |
 | `RESPONSE_METADATA`                  | const     |
