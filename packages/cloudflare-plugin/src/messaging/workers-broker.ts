@@ -30,12 +30,7 @@ import type {
   SubscribeOptions,
   TimerHandle,
 } from '@setu-ts/common';
-import {
-  MAX_PUBLISH_HEADERS,
-  publishHeaderNameProblem,
-  publishHeaderValueProblem,
-  publishIdProblem,
-} from '@setu-ts/common';
+import { parsePublishOptions } from '@setu-ts/common';
 
 import type { LoggerSource } from '../background/wait-until.ts';
 import type {
@@ -273,80 +268,23 @@ export class WorkersBroker implements IMessageBroker {
    * caller's headers — which ride the envelope, because a Cloudflare queue has
    * no transport header channel to carry them.
    *
-   * Each member is read exactly ONCE (the §3.4 copy-once rule), so a getter or
-   * `Proxy` cannot answer the check one value and the envelope another. Every
-   * RULE is `common`'s, so it is the same one `messaging-plugin` enforces and
-   * there is no second copy (§11.1). A refusal never echoes the refused value.
+   * The whole parse is `common`'s `parsePublishOptions`, the one implementation
+   * `messaging-plugin` uses too (§11.1): the copy-once read, every rule, the
+   * refusal text, and the `Object.fromEntries` copy that keeps a `__proto__`
+   * header on runtimes that still have the `Object.prototype.__proto__` setter.
+   * Its synchronous throw becomes a rejection inside the async `publish`.
    */
   #optionFields(options: PublishOptions | undefined): {
     orderingKey?: string;
     deduplicationId?: string;
-    headers?: Record<string, string>;
+    headers?: Readonly<Record<string, string>>;
   } {
-    if (options === undefined) return {};
-    const headers = options.headers;
-    const orderingKey = options.orderingKey;
-    const deduplicationId = options.deduplicationId;
-
-    const fields: {
-      orderingKey?: string;
-      deduplicationId?: string;
-      headers?: Record<string, string>;
-    } = {};
-    if (orderingKey !== undefined) {
-      const problem = publishIdProblem(orderingKey);
-      if (problem !== null) {
-        throw new RangeError(`publish options orderingKey is not a valid publish id: ${problem}`);
-      }
-      fields.orderingKey = orderingKey as string;
-    }
-    if (deduplicationId !== undefined) {
-      const problem = publishIdProblem(deduplicationId);
-      if (problem !== null) {
-        throw new RangeError(
-          `publish options deduplicationId is not a valid publish id: ${problem}`,
-        );
-      }
-      fields.deduplicationId = deduplicationId as string;
-    }
-    if (headers !== undefined) {
-      if (typeof headers !== 'object' || headers === null || Array.isArray(headers)) {
-        throw new RangeError('publish options headers must be a plain object');
-      }
-      if (Object.getOwnPropertySymbols(headers).length > 0) {
-        throw new RangeError('publish options headers must not contain symbol keys');
-      }
-      const names = Object.keys(headers);
-      if (names.length > MAX_PUBLISH_HEADERS) {
-        throw new RangeError(
-          `publish options headers must contain at most ${MAX_PUBLISH_HEADERS} entries`,
-        );
-      }
-      const carried: Record<string, string> = {};
-      for (let index = 0; index < names.length; index++) {
-        const name = names[index]!;
-        const nameProblem = publishHeaderNameProblem(name);
-        if (nameProblem === 'reserved') {
-          throw new RangeError(`publish options header ${JSON.stringify(name)} is reserved`);
-        }
-        if (nameProblem !== null) {
-          throw new RangeError(
-            `publish options header at index ${index} has an invalid name: ` +
-              '1-256 bytes, each in 0x21-0x7E excluding ":"',
-          );
-        }
-        const value = (headers as Record<string, unknown>)[name];
-        const valueProblem = publishHeaderValueProblem(value);
-        if (valueProblem !== null) {
-          throw new RangeError(
-            `publish options header ${JSON.stringify(name)} value is invalid: ${valueProblem}`,
-          );
-        }
-        carried[name] = value as string;
-      }
-      fields.headers = carried;
-    }
-    return fields;
+    const parsed = parsePublishOptions(options);
+    return {
+      ...(parsed.orderingKey !== undefined ? { orderingKey: parsed.orderingKey } : {}),
+      ...(parsed.deduplicationId !== undefined ? { deduplicationId: parsed.deduplicationId } : {}),
+      ...(Object.keys(parsed.headers).length > 0 ? { headers: parsed.headers } : {}),
+    };
   }
 
   /**

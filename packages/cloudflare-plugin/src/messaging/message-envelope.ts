@@ -158,7 +158,7 @@ export function encodePublishEnvelope(
  */
 export function envelopeHeaders(envelope: QueueEnvelope): Record<string, string> {
   if (envelope.kind !== 'msg') return {};
-  const headers: Record<string, string> = {};
+  const entries: [string, string][] = [];
 
   // The caller's own headers first, so the framework's two id headers below
   // always win. A caller cannot name those anyway: `x-setu-*` is reserved, so
@@ -168,17 +168,20 @@ export function envelopeHeaders(envelope: QueueEnvelope): Record<string, string>
     for (const [name, value] of Object.entries(carried as Record<string, unknown>)) {
       if (publishHeaderNameProblem(name) !== null) continue;
       if (publishHeaderValueProblem(value) !== null) continue;
-      headers[name] = value as string;
+      entries.push([name, value as string]);
     }
   }
 
   if (isValidPublishId(envelope.orderingKey)) {
-    headers[ORDERING_KEY_HEADER] = envelope.orderingKey;
+    entries.push([ORDERING_KEY_HEADER, envelope.orderingKey]);
   }
   if (isValidPublishId(envelope.deduplicationId)) {
-    headers[DEDUPLICATION_ID_HEADER] = envelope.deduplicationId;
+    entries.push([DEDUPLICATION_ID_HEADER, envelope.deduplicationId]);
   }
-  return headers;
+  // `Object.fromEntries`, never assignment: workerd keeps the
+  // `Object.prototype.__proto__` setter, which would swallow a `__proto__`
+  // header. A later entry for the same name wins, as assignment did.
+  return Object.fromEntries(entries);
 }
 
 /**

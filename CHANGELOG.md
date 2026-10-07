@@ -48,10 +48,11 @@ All notable changes to this project are documented here. The format follows
   shared rule set — `publishIdProblem` / `isValidPublishId` with `MAX_PUBLISH_ID_BYTES` for the ids,
   and `publishHeaderNameProblem` / `publishHeaderValueProblem` with `MAX_PUBLISH_HEADERS`,
   `MAX_PUBLISH_HEADER_NAME_BYTES`, `MAX_PUBLISH_HEADER_VALUE_BYTES`, `RESERVED_HEADER_NAMES` and
-  `RESERVED_HEADER_PREFIXES` for the headers — so the seven brokers, `WorkersBroker` and the
-  envelope reader enforce one copy of every rule. `WorkersBroker` carries the caller's `headers` on
-  the envelope beside the two ids. The docs state the guarantee honestly: `orderingKey` decides
-  placement, not the order handlers finish in.
+  `RESERVED_HEADER_PREFIXES` for the headers, and `parsePublishOptions` (returning
+  `ParsedPublishOptions`) — the one copy-once parse of a whole options object — so the seven
+  brokers, `WorkersBroker` and the envelope reader enforce one copy of every rule. `WorkersBroker`
+  carries the caller's `headers` on the envelope beside the two ids. The docs state the guarantee
+  honestly: `orderingKey` decides placement, not the order handlers finish in.
 
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver

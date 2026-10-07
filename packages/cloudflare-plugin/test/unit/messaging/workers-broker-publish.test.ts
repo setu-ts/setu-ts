@@ -14,6 +14,32 @@ import { FakeDurableObjectNamespace } from '../../do-fakes.ts';
 import { ExplodingQueueProducer, FakeBrokerRuntime } from '../../messaging-fakes.ts';
 
 /**
+ * Runs `fn` with the `Object.prototype.__proto__` accessor Node, Bun and workerd
+ * keep and Deno deletes, so a test running on Deno sees what those runtimes do
+ * to a `__proto__` key built by assignment. Restores the prior state after.
+ */
+function withProtoAccessor<T>(fn: () => T): T {
+  const previous = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__');
+  Object.defineProperty(Object.prototype, '__proto__', {
+    configurable: true,
+    get(this: object): object | null {
+      return Object.getPrototypeOf(this);
+    },
+    set(this: object, value: unknown): void {
+      if ((typeof value === 'object' && value !== null) || value === null) {
+        Object.setPrototypeOf(this, value);
+      }
+    },
+  });
+  try {
+    return fn();
+  } finally {
+    if (previous) Object.defineProperty(Object.prototype, '__proto__', previous);
+    else delete (Object.prototype as { __proto__?: unknown }).__proto__;
+  }
+}
+
+/**
  * Lets the inbox open and the request publish settle.
  *
  * A real macrotask rather than a counted number of microtask ticks: the open is
@@ -114,6 +140,36 @@ describe('WorkersBroker.publish', () => {
     expect(producer.sends).toEqual([]);
   });
 
+  it('keeps a __proto__ header on the envelope where the __proto__ setter exists (M106 §10 D10)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+    const headers = JSON.parse('{"__proto__":"v","x-a":"1"}');
+
+    await withProtoAccessor(() => {
+      // Vacuity guard: under the accessor, assignment really drops the key.
+      const assigned: Record<string, string> = {};
+      assigned['__proto__'] = 'v';
+      expect(Object.keys(assigned)).toEqual([]);
+      return broker.publish('orders', 1, { headers });
+    });
+
+    const sent = producer.sends[0]?.body as { headers: Record<string, string> };
+    expect(Object.keys(sent.headers)).toEqual(['__proto__', 'x-a']);
+  });
+
+  it('refuses a class instance as headers, as messaging-plugin does (M106 §3.4)', async () => {
+    class NotPlain {
+      'x-a' = '1';
+    }
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await expect(broker.publish('orders', 1, { headers: new NotPlain() as never })).rejects.toThrow(
+      'publish options headers must be a plain object',
+    );
+    expect(producer.sends).toHaveLength(0);
+  });
+
   it('accepts an empty headers record, which carries nothing', async () => {
     const producer = new FakeQueueProducer();
     const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
@@ -192,6 +248,23 @@ describe('WorkersBroker message metadata (M106 §3.3)', () => {
       headers: 'not-an-object',
     });
     expect(metadata.headers).toEqual({});
+  });
+
+  it('surfaces a __proto__ header as an own key where the __proto__ setter exists (M106 §10 D10)', async () => {
+    const envelope = JSON.parse(
+      '{"v":1,"kind":"msg","topic":"orders","id":"i","payload":1,"headers":{"__proto__":"v"}}',
+    );
+    const delivered: MessageMetadata[] = [];
+    const broker = new WorkersBroker(new FakeQueueProducer(), new FakeBrokerRuntime());
+    await broker.subscribe('orders', (_message, metadata) => {
+      delivered.push(metadata);
+    });
+    // The dispatch runs synchronously up to its first await, which is where
+    // `envelopeHeaders` builds the record — so the accessor must be live for it.
+    await withProtoAccessor(() =>
+      broker.dispatch(new FakeQueueBatch('q', [new FakeQueueMessage('m1', envelope)]))
+    );
+    expect(Object.keys(delivered[0]!.headers ?? {})).toEqual(['__proto__']);
   });
 
   it('reports empty headers when the envelope carries neither field', async () => {

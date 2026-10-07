@@ -219,6 +219,156 @@ export interface PublishOptions {
 }
 
 /**
+ * The validated, frozen copy {@linkcode parsePublishOptions} returns.
+ *
+ * @since 0.9.0
+ */
+export interface ParsedPublishOptions {
+  /** The ordering key, when the caller supplied one. */
+  readonly orderingKey?: string;
+  /** The de-duplication id, when the caller supplied one. */
+  readonly deduplicationId?: string;
+  /** The caller's headers, `{}` when none were supplied. */
+  readonly headers: Readonly<Record<string, string>>;
+}
+
+/** A plain object: prototype is `Object.prototype` or `null`, and it is not an array. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+const ID_PROBLEM_TEXT: Readonly<Record<string, string>> = {
+  'not-a-string': 'must be a non-empty string',
+  'empty': 'must be a non-empty string',
+  'not-well-formed': 'must be a well-formed string',
+  'whitespace': 'must not have leading or trailing whitespace',
+  'forbidden-characters': 'must not contain control or format characters',
+  'too-long': `must be at most ${MAX_PUBLISH_ID_BYTES} UTF-8 bytes`,
+};
+
+const HEADER_VALUE_PROBLEM_TEXT: Readonly<Record<string, string>> = {
+  'not-a-string': 'must be a string',
+  'not-well-formed': 'must be a well-formed string',
+  'whitespace': 'must not have leading or trailing whitespace',
+  'forbidden-characters': 'must not contain control or format characters',
+  'too-long': `must be at most ${MAX_PUBLISH_HEADER_VALUE_BYTES} UTF-8 bytes`,
+};
+
+function parseId(field: string, value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const problem = publishIdProblem(value);
+  if (problem !== null) {
+    throw new RangeError(`publish options ${field} ${ID_PROBLEM_TEXT[problem]}`);
+  }
+  return value as string;
+}
+
+function parseHeaders(raw: unknown): Readonly<Record<string, string>> {
+  if (!isPlainObject(raw)) {
+    throw new RangeError('publish options headers must be a plain object');
+  }
+  if (Object.getOwnPropertySymbols(raw).length > 0) {
+    throw new RangeError('publish options headers must not contain symbol keys');
+  }
+  let names: string[];
+  let values: unknown[];
+  try {
+    names = Object.keys(raw); // own enumerable string keys, in one pass
+    values = names.map((name) => raw[name]); // each value read exactly once
+  } catch (error) {
+    throw new RangeError('publish options headers could not be read', { cause: error });
+  }
+  if (names.length > MAX_PUBLISH_HEADERS) {
+    throw new RangeError(
+      `publish options headers must contain at most ${MAX_PUBLISH_HEADERS} entries`,
+    );
+  }
+  const entries: [string, string][] = [];
+  for (let index = 0; index < names.length; index++) {
+    const name = names[index]!;
+    const nameProblem = publishHeaderNameProblem(name);
+    if (nameProblem === 'reserved') {
+      // Safe to quote: a reserved name has passed the character check.
+      throw new RangeError(`publish options header ${JSON.stringify(name)} is reserved`);
+    }
+    if (nameProblem !== null) {
+      // Never quoted: a name refused for its characters may carry anything.
+      throw new RangeError(
+        `publish options header at index ${index} has an invalid name: ` +
+          `1-${MAX_PUBLISH_HEADER_NAME_BYTES} bytes, each in 0x21-0x7E excluding ":"`,
+      );
+    }
+    const valueProblem = publishHeaderValueProblem(values[index]);
+    if (valueProblem !== null) {
+      throw new RangeError(
+        `publish options header ${JSON.stringify(name)} value ${
+          HEADER_VALUE_PROBLEM_TEXT[valueProblem]
+        }`,
+      );
+    }
+    entries.push([name, values[index] as string]);
+  }
+  // `Object.fromEntries` defines own data properties. Building by assignment
+  // would hand a `__proto__` name to the `Object.prototype.__proto__` setter,
+  // which Node, Bun and workerd keep (Deno deletes it), and the header would
+  // be silently dropped.
+  return Object.freeze(Object.fromEntries(entries));
+}
+
+/**
+ * Reads and validates caller {@linkcode PublishOptions} into a frozen copy —
+ * the ONE implementation every publish entry uses, in `messaging-plugin` and
+ * `cloudflare-plugin` alike, neither of which may import the other.
+ *
+ * The caller's object is read exactly once (each member, each header value),
+ * so a getter or `Proxy` cannot answer the check one value and the transport
+ * another; only the returned copy is read afterwards. A refusal names the
+ * field and the rule and never quotes the refused value.
+ *
+ * Throws SYNCHRONOUSLY: a publish method calls it inside an `async` body, which
+ * turns the throw into the rejected promise its contract requires.
+ *
+ * @param options - The caller's options, or `undefined`
+ * @returns The frozen validated copy
+ * @throws {RangeError} When `options` is not a plain object, cannot be read, or
+ *   any member breaks the publish id or header rules
+ * @example
+ * ```typescript
+ * import { parsePublishOptions } from '@setu-ts/common';
+ *
+ * const parsed = parsePublishOptions({ orderingKey: 'order-7', headers: { 'x-tenant': 'acme' } });
+ * // parsed.headers → { 'x-tenant': 'acme' }
+ * ```
+ * @since 0.9.0
+ */
+export function parsePublishOptions(options: unknown): ParsedPublishOptions {
+  if (options === undefined) return Object.freeze({ headers: Object.freeze({}) });
+  if (!isPlainObject(options)) {
+    throw new RangeError('publish options must be a plain object or undefined');
+  }
+  let rawOrderingKey: unknown;
+  let rawDeduplicationId: unknown;
+  let rawHeaders: unknown;
+  try {
+    rawOrderingKey = options.orderingKey;
+    rawDeduplicationId = options.deduplicationId;
+    rawHeaders = options.headers;
+  } catch (error) {
+    throw new RangeError('publish options could not be read', { cause: error });
+  }
+  const orderingKey = parseId('orderingKey', rawOrderingKey);
+  const deduplicationId = parseId('deduplicationId', rawDeduplicationId);
+  const headers = rawHeaders === undefined ? Object.freeze({}) : parseHeaders(rawHeaders);
+  return Object.freeze({
+    ...(orderingKey !== undefined ? { orderingKey } : {}),
+    ...(deduplicationId !== undefined ? { deduplicationId } : {}),
+    headers,
+  });
+}
+
+/**
  * Transport metadata accompanying a delivered message.
  *
  * @since 0.1.0

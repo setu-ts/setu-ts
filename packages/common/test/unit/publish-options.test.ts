@@ -14,6 +14,7 @@ import {
   MAX_PUBLISH_HEADERS,
   MAX_PUBLISH_ID_BYTES,
   ORDERING_KEY_HEADER,
+  parsePublishOptions,
   publishHeaderNameProblem,
   publishHeaderValueProblem,
   publishIdProblem,
@@ -116,5 +117,65 @@ describe('PublishOptions contract', () => {
     expect(publishHeaderValueProblem('v'.repeat(MAX_PUBLISH_HEADER_VALUE_BYTES + 1))).toBe(
       'too-long',
     );
+  });
+});
+
+/**
+ * Runs `fn` with the `Object.prototype.__proto__` accessor Node, Bun and workerd
+ * keep and Deno deletes, so a test running on Deno sees what those runtimes do
+ * to a `__proto__` key built by assignment. Restores the prior state after.
+ */
+function withProtoAccessor<T>(fn: () => T): T {
+  const previous = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__');
+  Object.defineProperty(Object.prototype, '__proto__', {
+    configurable: true,
+    get(this: object): object | null {
+      return Object.getPrototypeOf(this);
+    },
+    set(this: object, value: unknown): void {
+      if ((typeof value === 'object' && value !== null) || value === null) {
+        Object.setPrototypeOf(this, value);
+      }
+    },
+  });
+  try {
+    return fn();
+  } finally {
+    if (previous) Object.defineProperty(Object.prototype, '__proto__', previous);
+    else delete (Object.prototype as { __proto__?: unknown }).__proto__;
+  }
+}
+
+describe('parsePublishOptions — the one parse both publish entries share', () => {
+  it('keeps a __proto__ header as an own key where the __proto__ setter exists', () => {
+    const parsed = withProtoAccessor(() => {
+      // Vacuity guard: under the accessor, assignment really drops the key.
+      const assigned: Record<string, string> = {};
+      assigned['__proto__'] = 'v';
+      expect(Object.keys(assigned)).toEqual([]);
+      return parsePublishOptions({ headers: JSON.parse('{"__proto__":"v","x-a":"1"}') });
+    });
+    expect(Object.keys(parsed.headers)).toEqual(['__proto__', 'x-a']);
+    expect(Object.getPrototypeOf(parsed.headers)).toBe(Object.prototype);
+  });
+
+  it('refuses a class instance as headers, and as the options object itself', () => {
+    class Headers2 {
+      'x-a' = '1';
+    }
+    expect(() => parsePublishOptions({ headers: new Headers2() })).toThrow(
+      'publish options headers must be a plain object',
+    );
+    expect(() => parsePublishOptions(new Headers2())).toThrow(
+      'publish options must be a plain object or undefined',
+    );
+  });
+
+  it('returns frozen copies and an empty headers record when none are supplied', () => {
+    const parsed = parsePublishOptions({ orderingKey: 'k' });
+    expect(parsed).toEqual({ orderingKey: 'k', headers: {} });
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(Object.isFrozen(parsed.headers)).toBe(true);
+    expect(parsePublishOptions(undefined)).toEqual({ headers: {} });
   });
 });
