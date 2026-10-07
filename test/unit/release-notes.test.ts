@@ -297,6 +297,22 @@ describe('release workflow wiring', () => {
     );
   });
 
+  it('fetches full history in every workflow that runs the suite', async () => {
+    // The suite runs `release:verify`, whose check 9 needs the previous `v*`
+    // tag reachable from HEAD. drift.yml checked out shallow, so the check
+    // refused there while passing on every PR, and the weekly job filed issue
+    // #413 blaming dependency drift for a failure no dependency caused.
+    // Required of the PR job too, as the reference the consumers follow.
+    const depth = activeLine('fetch-depth: 0');
+    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(jobBlock(ci, 'deno')).toMatch(depth);
+    for (const consumer of SUITE_CONSUMERS) {
+      const workflow = await Deno.readTextFile(consumer.workflow);
+      expect({ workflow: consumer.workflow, depth: depth.test(jobBlock(workflow, consumer.job)) })
+        .toEqual({ workflow: consumer.workflow, depth: true });
+    }
+  });
+
   it('starts every backend the PR job starts, in every workflow that runs the suite', async () => {
     // A backend a workflow does not start is a guarded suite that skips there
     // while passing on every PR. That is invisible: only `REDIS_URL` has a
