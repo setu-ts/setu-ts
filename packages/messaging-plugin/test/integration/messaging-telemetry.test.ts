@@ -7,7 +7,12 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES, type IMessageBroker, type IPlugin } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  type IIngressBehavior,
+  type IMessageBroker,
+  type IPlugin,
+} from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { TelemetryService } from '../../../telemetry-plugin/src/services/telemetry-service.ts';
 import { createFakeTracerHost } from '../../../telemetry-plugin/test/fixtures/fake-tracer-host.ts';
@@ -168,6 +173,61 @@ describe('MessagingPlugin telemetry integration', () => {
     await broker.publish('orders', { id: 'o-1' });
 
     expect(host.recordedSpans.map((s) => s.name)).toContain('publish orders');
+
+    await app.stop();
+  });
+
+  it('forwards publish options through BOTH decorators, keeping traceparent the framework’s (M106 §3.6)', async () => {
+    const host = createFakeTracerHost();
+    const behaviour: IIngressBehavior = { handle: (_ctx, next) => next() };
+    const app = createApplication({
+      plugins: [
+        fakeRuntimePlugin(),
+        telemetryPlugin(host),
+        MessagingPlugin({ broker: 'memory', behaviors: [behaviour] }),
+      ],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+
+    const seen: Readonly<Record<string, string>>[] = [];
+    await broker.subscribe('orders', (_message, metadata) => {
+      seen.push(metadata.headers ?? {});
+    });
+    await broker.publish('orders', { id: 1 }, {
+      orderingKey: 'agg-1',
+      deduplicationId: 'dedup-1',
+      headers: { 'x-app': 'v' },
+    });
+
+    expect(seen[0]?.['x-setu-ordering-key']).toBe('agg-1');
+    expect(seen[0]?.['x-setu-deduplication-id']).toBe('dedup-1');
+    expect(seen[0]?.['x-app']).toBe('v');
+    // TracedBroker writes traceparent on the FRAMEWORK channel; it is not the
+    // caller's to overwrite (and the reserved rule refuses the attempt).
+    expect(seen[0]?.traceparent).toBeDefined();
+
+    await app.stop();
+  });
+
+  it('rejects a reserved name before the transport, with both decorators installed (M106 §3.4)', async () => {
+    const host = createFakeTracerHost();
+    const app = createApplication({
+      plugins: [
+        fakeRuntimePlugin(),
+        telemetryPlugin(host),
+        MessagingPlugin({
+          broker: 'memory',
+          behaviors: [{ handle: (_ctx, next) => next() }],
+        }),
+      ],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+
+    await expect(broker.publish('orders', { id: 1 }, { headers: { cc: 'x' } })).rejects.toThrow(
+      RangeError,
+    );
 
     await app.stop();
   });
