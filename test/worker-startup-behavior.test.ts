@@ -65,7 +65,7 @@ describe('production Worker startup behavior', () => {
     expect(fetches).toBe(2);
   });
 
-  it('caches startup rejection for concurrent and later calls without fetching', async () => {
+  it('shares a failed startup with concurrent callers without fetching', async () => {
     const gate = deferred();
     const failure = new Error('startup failed');
     let starts = 0;
@@ -83,12 +83,38 @@ describe('production Worker startup behavior', () => {
 
     expect(await first.catch((error: unknown) => error)).toBe(failure);
     expect(await second.catch((error: unknown) => error)).toBe(failure);
-    expect(
-      await handler.fetch(new Request('https://example.test/3'), env).catch(
-        (error: unknown) => error,
-      ),
-    ).toBe(failure);
     expect(starts).toBe(1);
     expect(fetches).toBe(0);
+  });
+
+  it('retries startup on the next request after a failure', async () => {
+    // One isolate serves many invocations, so caching the rejection would leave
+    // it answering errors for its whole life (M70l X9-8).
+    let starts = 0;
+    let fetches = 0;
+    const handler = createWorkerHandler(() =>
+      fakeApp(() => {
+        starts += 1;
+        return starts === 1 ? Promise.reject(new Error('transient')) : Promise.resolve();
+      }, () => fetches += 1)
+    );
+
+    const failed = await handler.fetch(
+      new Request('https://example.test/1'),
+      env,
+    ).catch(
+      (error: unknown) => error,
+    );
+    expect(failed).toBeInstanceOf(Error);
+    expect(fetches).toBe(0);
+
+    expect(
+      (await handler.fetch(new Request('https://example.test/2'), env)).status,
+    ).toBe(200);
+    expect(
+      (await handler.fetch(new Request('https://example.test/3'), env)).status,
+    ).toBe(200);
+    expect(starts).toBe(2);
+    expect(fetches).toBe(2);
   });
 });

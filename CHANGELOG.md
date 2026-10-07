@@ -643,6 +643,13 @@ All notable changes to this project are documented here. The format follows
   `@since` gate skipped every `0.1.0` tag — that line shipped only as `0.1.0-alpha.*` — and now
   checks such a tag against the line's last prerelease instead.
 
+- **The Cloudflare example cached a failed start for the isolate's whole life (`apps/cloudflare`, PR
+  pending).** `createWorkerHandler` memoised the start promise even when it rejected, so one
+  transient failure at cold start left that isolate answering errors to every later request. It now
+  forgets a failed start and retries on the next request, the rule the generated Workers entry has
+  followed since M70l. Concurrent requests still share one start, and none reaches `fetch` on an
+  application whose start failed.
+
 - **Constructor injection in a full-stack app was undocumented (`@setu-ts/full-stack-starter`,
   `@setu-ts/rest-starter`, `@setu-ts/testing` docs, PR pending).** Nothing said how a React Router
   loader reaches an injected service; the `full-stack-starter` README now shows resolving it from
@@ -5037,14 +5044,20 @@ Nothing here requires an application change unless it is named **Breaking** belo
   ```typescript
   // Before — compiled, then threw at app.start()
   DatabasePlugin({ type: 'prisma' });
-  DatabasePlugin({ type: 'drizzle', options: { drizzleTables: { User: users } } });
+  DatabasePlugin({
+    type: 'drizzle',
+    options: { drizzleTables: { User: users } },
+  });
 
   // After
   DatabasePlugin({ type: 'prisma', options: { prismaClient } });
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { User: users },
     },
   });
@@ -5618,7 +5631,10 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { User: users },
     },
   });
@@ -6285,7 +6301,9 @@ migration.
 
   ```typescript
   app.register(OpenApiPlugin({
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    },
     security: [{ bearerAuth: [] }], // document-level default
   }));
 
