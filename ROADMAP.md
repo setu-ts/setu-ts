@@ -13018,6 +13018,11 @@ depends on reading the acknowledgement.
 - [ ] Native mappings for Kafka, Pub/Sub, NATS and Service Bus; header carriage on all seven brokers
       and `WorkersBroker`; both decorators forward the options
 - [ ] Invalid options rejected by name (never a synchronous throw from a `Promise` method)
+- [ ] Header names a broker or its server acts on (`CC`/`BCC`, `Nats-*`, `x-setu-*`, the trace
+      headers) refused case-insensitively; one portable count/byte bound; the validated copy is the
+      value on the wire; refusals never quote the value (plan §3.4)
+- [ ] README "Publish options and trust" section (plan §3.9); committed-tree security audit against
+      the plan's §10 design review
 - [ ] A conformance test over all brokers, plus real-backend tests for Kafka partition affinity and
       NATS deduplication in CI, and guarded emulator tests for Pub/Sub and Service Bus
 - [ ] The opt-in ordering selector on `defineIntegrationEvent`, and a real RabbitMQ test pinning the
