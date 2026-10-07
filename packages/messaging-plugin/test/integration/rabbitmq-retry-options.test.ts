@@ -53,6 +53,9 @@ describe('RabbitMQ retry options through MessagingPlugin', () => {
         .toEqual({
           durable: true,
           arguments: {
+            'x-queue-type': 'quorum',
+            'x-dead-letter-strategy': 'at-least-once',
+            'x-overflow': 'reject-publish',
             'x-message-ttl': 53,
             'x-dead-letter-exchange': '',
             'x-dead-letter-routing-key': 'q',

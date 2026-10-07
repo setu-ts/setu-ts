@@ -201,10 +201,15 @@ These numeric options throw `RangeError` at construction for invalid values, inc
 fractions, empty delay arrays and decreasing tiers. `ConsumerRetryOptions` is shared with Redis
 Streams; each broker retains its own defaults and lease semantics.
 
-For group queue `Q`, each distinct delay `d` creates durable `Q.retry.<d>ms`, with queue-level
-`x-message-ttl: d` and default-exchange dead-letter routing back to `Q`. Changing delays creates new
-queues without a 406 redeclaration conflict; old retry queues drain into `Q`. No per-message
-expiration is copied. The default budget gives about 12.6 minutes of backoff before dead-lettering.
+For group queue `Q`, each distinct delay `d` creates a durable quorum queue `Q.retry.<d>ms`, with
+queue-level `x-message-ttl: d` and default-exchange dead-letter routing back to `Q`. It uses
+at-least-once dead-lettering (`x-dead-letter-strategy: at-least-once`, `x-overflow: reject-publish`)
+because the original is acked once the copy is confirmed: classic at-most-once dead-lettering drops
+a copy that `Q` cannot take when it expires (measured on RabbitMQ 4: `Q` absent at expiry received
+nothing in 240 s; the quorum queue held the copy and delivered it about 180 s after `Q` reappeared).
+Changing delays creates new queues without a 406 redeclaration conflict; old retry queues drain into
+`Q`. No per-message expiration is copied. The default budget gives about 12.6 minutes of backoff
+before dead-lettering.
 
 With retries enabled, group names ending in `.dead` or `.retry.<digits>ms` are reserved for helper
 queues. Every generated queue name must fit 255 UTF-8 bytes. Declarative names are checked at plugin

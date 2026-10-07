@@ -29,8 +29,8 @@ copy and original ack can repeat side effects. Deserialize and integration-event
 dead-letter immediately; `consumerRetry.isRetryable` can return false for other deterministic
 failures. Set `consumerRetry: false` to retain the existing operator DLX policy.
 
-Allow the application to declare durable `Q.retry.<delay>ms` queues and `Q.dead`. Extend vhost
-permissions before upgrading: the RabbitMQ user needs configure permission on `Q.dead` and
+Allow the application to declare durable `Q.retry.<delay>ms` quorum queues and `Q.dead`. Extend
+vhost permissions before upgrading: the RabbitMQ user needs configure permission on `Q.dead` and
 `Q.retry.<delay>ms`, read permission on `Q.retry.<delay>ms`, and write permission on the default
 exchange, `amq.default`, which carries every retry and dead-letter copy (measured on RabbitMQ 4:
 without them `subscribe()` fails with `403 ACCESS_REFUSED` on the first helper declaration, and a

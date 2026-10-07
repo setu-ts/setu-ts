@@ -5006,29 +5006,30 @@ the logger and redaction. An injected client gets no listener — it belongs to 
 semantics are unchanged; the indicator still reports the outage.
 
 **RabbitMQ consumer recovery (0.9.0).** Durable consumer groups retry transient handler failures
-through durable `Q.retry.<delay>ms` queues (queue-level TTL, default-exchange DLX back to `Q`).
-Delays must be nonempty, nondecreasing positive integer milliseconds ≤2147483647. Total attempts and
-dead-letter cap must be positive safe integers. Invalid options throw `RangeError` at construction.
-Deserialize failures and `IntegrationEventRejectedError` dead-letter immediately; then `isRetryable`
-runs (false dead-letters, throwing logs and retries), then the attempt budget applies. The original
-is acked after the persistent retry/dead-letter publish is accepted on the same captured channel.
-Disposition failure leaves it unacked, closes that channel (returning it to `Q`) and starts the
-reconnect-and-replay recovery, which re-declares the helper queues; a late confirm or a crash
-between publish and ack can duplicate it. Handlers must be idempotent. `Q.dead` carries preserved
-properties/headers (less `expiration`, `userId`, `CC` and `BCC`, which the broker would act on) plus
-`x-setu-attempts`, `x-setu-topic`, and a 1 KiB UTF-8 `x-setu-error` description. Changing the cap
-requires draining and deleting `Q.dead`. Private exclusive queues and RPC reply inboxes retain
-nack-and-discard. `consumerRetry: false` retains the operator-DLX path. Prefetch is re-applied on
-reconnect, which re-declares retry and dead queues before consuming. Retry/dead copies are
-mandatory; correlated `basic.return` rejects disposition despite a positive confirm. The framework
-replaces `x-setu-disposition-id` per copy, preserving the message ID. Recovery requires confirm
-channels with `on`/`off` return listeners and `close()`, including injected clients: `subscribe()`
-refuses a retrying consumer group without them, before declaring anything, rather than letting every
-failure stay unacked until `prefetch` stalls the consumer. With retries enabled, group names ending
-in `.dead` or `.retry.<digits>ms` are reserved, and helper names must fit 255 UTF-8 bytes. Names are
-validated before declaration (at construction for declarative instances). Rename conflicting groups
-or set `consumerRetry: false`; migrate existing queues occupying helper names before enabling
-retries.
+through durable quorum `Q.retry.<delay>ms` queues (queue-level TTL, default-exchange DLX back to
+`Q`, at-least-once dead-lettering with `reject-publish` overflow, so a copy is held rather than
+dropped while `Q` cannot take it). Delays must be nonempty, nondecreasing positive integer
+milliseconds ≤2147483647. Total attempts and dead-letter cap must be positive safe integers. Invalid
+options throw `RangeError` at construction. Deserialize failures and `IntegrationEventRejectedError`
+dead-letter immediately; then `isRetryable` runs (false dead-letters, throwing logs and retries),
+then the attempt budget applies. The original is acked after the persistent retry/dead-letter
+publish is accepted on the same captured channel. Disposition failure leaves it unacked, closes that
+channel (returning it to `Q`) and starts the reconnect-and-replay recovery, which re-declares the
+helper queues; a late confirm or a crash between publish and ack can duplicate it. Handlers must be
+idempotent. `Q.dead` carries preserved properties/headers (less `expiration`, `userId`, `CC` and
+`BCC`, which the broker would act on) plus `x-setu-attempts`, `x-setu-topic`, and a 1 KiB UTF-8
+`x-setu-error` description. Changing the cap requires draining and deleting `Q.dead`. Private
+exclusive queues and RPC reply inboxes retain nack-and-discard. `consumerRetry: false` retains the
+operator-DLX path. Prefetch is re-applied on reconnect, which re-declares retry and dead queues
+before consuming. Retry/dead copies are mandatory; correlated `basic.return` rejects disposition
+despite a positive confirm. The framework replaces `x-setu-disposition-id` per copy, preserving the
+message ID. Recovery requires confirm channels with `on`/`off` return listeners and `close()`,
+including injected clients: `subscribe()` refuses a retrying consumer group without them, before
+declaring anything, rather than letting every failure stay unacked until `prefetch` stalls the
+consumer. With retries enabled, group names ending in `.dead` or `.retry.<digits>ms` are reserved,
+and helper names must fit 255 UTF-8 bytes. Names are validated before declaration (at construction
+for declarative instances). Rename conflicting groups or set `consumerRetry: false`; migrate
+existing queues occupying helper names before enabling retries.
 
 **Redis Streams recovery (0.9.0).** Requires Redis ≥6.2 (`XPENDING IDLE`). Failed messages
 redeliver, including after restart, so handlers must be idempotent. The first retry delay must

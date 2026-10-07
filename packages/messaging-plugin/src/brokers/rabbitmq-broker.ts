@@ -1037,9 +1037,19 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     const confirmed = this.#confirmed;
     if (retry) {
       for (const delay of new Set(policy.delaysMs)) {
+        // The original is acked once this copy is confirmed, so the copy must
+        // survive its own expiry. Classic dead-lettering is at-most-once and
+        // drops the copy when Q cannot take it (measured on RabbitMQ 4: Q
+        // absent at expiry, created a second later, received nothing in 240 s).
+        // A quorum queue with at-least-once dead-lettering holds it and
+        // redelivers once Q exists; reject-publish overflow is what that
+        // strategy requires.
         await realChannel.assertQueue(`${queueName}.retry.${delay}ms`, {
           durable: true,
           arguments: {
+            'x-queue-type': 'quorum',
+            'x-dead-letter-strategy': 'at-least-once',
+            'x-overflow': 'reject-publish',
             'x-message-ttl': delay,
             'x-dead-letter-exchange': '',
             'x-dead-letter-routing-key': queueName,

@@ -183,6 +183,42 @@ describe('REAL RabbitMQ consumer retry', () => {
     );
   }
 
+  // A classic retry queue dead-letters at most once, so a copy expiring while
+  // Q cannot take it is dropped after its original was acked. The broker must
+  // therefore have created a quorum queue: re-declaring it as classic is a 406.
+  it(
+    'declares retry queues as quorum queues with at-least-once dead-lettering',
+    guard,
+    async () => {
+      const f = await fixture();
+      const app = f.application(() => {});
+      try {
+        await app.start();
+        const connection = await f.amqp.connect(f.url);
+        try {
+          const channel = await connection.createChannel();
+          channel.on('error', () => {});
+          await expect(channel.assertQueue(`${f.queue}.retry.200ms`, {
+            durable: true,
+            arguments: {
+              'x-queue-type': 'classic',
+              'x-dead-letter-strategy': 'at-least-once',
+              'x-overflow': 'reject-publish',
+              'x-message-ttl': 200,
+              'x-dead-letter-exchange': '',
+              'x-dead-letter-routing-key': f.queue,
+            },
+          })).rejects.toThrow(/inequivalent arg 'x-queue-type'[\s\S]*quorum/);
+        } finally {
+          await connection.close().catch(() => {});
+        }
+      } finally {
+        await app.stop();
+        await f.close();
+      }
+    },
+  );
+
   it(
     'refuses reserved group names without closing the active consumer channel',
     guard,

@@ -203,8 +203,9 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **BREAKING: RabbitMQ consumer retry defaults (#421).** Durable messaging consumer groups now retry
-  failures with five total attempts and tiered delays, create durable retry/dead queues, and bound
-  unacked deliveries to prefetch 32 per consumer. Handlers must be idempotent. Configure
+  failures with five total attempts and tiered delays, create durable retry/dead queues (retry
+  queues are quorum queues with at-least-once dead-lettering, so an expiring copy is never dropped),
+  and bound unacked deliveries to prefetch 32 per consumer. Handlers must be idempotent. Configure
   `consumerRetry: false` for the existing operator-DLX behavior; private queues and RPC reply
   inboxes retain discard behavior. `ConsumerRetryOptions` names the shared RabbitMQ/Redis shape.
   Retry topology reserves group suffixes `.dead` and `.retry.<digits>ms`; rename conflicting groups
