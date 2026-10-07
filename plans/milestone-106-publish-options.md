@@ -24,12 +24,16 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
     `PubSubMessagingOptionsProduction`) for subscriptions the transport creates.
   - `publishIntegrationEvent` passing the envelope ID as the deduplication ID, and accepting caller
     options.
+  - An opt-in `orderingKey` selector on `defineIntegrationEvent`, so an event type can say which
+    envelope field orders it (§3.7).
+  - The documented ordering statement: `orderingKey` decides where a message is placed, not the
+    order handlers finish in once a retry occurs (§3.8).
 - **NOT this milestone:**
   - Awaiting NATS's JetStream acknowledgement — a defect in merged code, fixed first on
     `fix/nats-publish-ack` (§8). This milestone depends on it.
-  - Deriving `orderingKey` from the envelope's `aggregateId` by default: that changes Kafka
-    partitioning for existing producers, a changed default the versioning policy holds for a minor.
-    Recorded in CHANGELOG `Unreleased` as an entry marked for the next minor.
+  - Deriving `orderingKey` by default, now or in a later minor. It would re-partition existing Kafka
+    producers, and none of the nine frameworks surveyed (§3.2) hard-codes one: derivation is always
+    explicit configuration. The opt-in selector is the whole answer.
   - Options on `request()`/`respond()` (RPC is framework-internal correlation traffic).
   - The transactional outbox and the consumer inbox (later milestones, `ROADMAP.md` "Deferred
     reliability milestone").
@@ -39,29 +43,30 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
 
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference                                   | Source (file:line)                                                                              | Verified surface / fact                                                                                                                                      |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `IMessageBroker.publish`                    | `packages/common/src/services/messaging.ts:117`                                                 | `publish<T>(topic: string, message: T): Promise<void>` — no third parameter                                                                                  |
-| `MessageMetadata.headers`                   | `packages/common/src/services/messaging.ts:14-26`                                               | optional `Readonly<Record<string, string>>`; first-party brokers populate `{}` when no headers arrived                                                       |
-| `MessageBrokerAdapter.publishWithHeaders`   | `packages/messaging-plugin/src/brokers/message-broker.ts:41`                                    | internal header channel every broker already implements; `publish` delegates to it with `{}`                                                                 |
-| `TracedBroker.publish`                      | `packages/messaging-plugin/src/tracing/traced-broker.ts:45-69`                                  | adds `traceparent` and calls the inner `publishWithHeaders`                                                                                                  |
-| `PipelinedBroker.publish`                   | `packages/messaging-plugin/src/pipeline/pipelined-broker.ts:144`                                | decorator; must forward a new argument or drop it (the M70i dropped-argument class)                                                                          |
-| Kafka publish                               | `packages/messaging-plugin/src/brokers/kafka-broker.ts:558-584`                                 | `send({ topic, messages: [{ value, headers }] })` — no `key`                                                                                                 |
-| NATS publish                                | `packages/messaging-plugin/src/brokers/nats-broker.ts:478-506`                                  | `js.publish(subject, data, { headers })`, typed `void` and NOT awaited (defect, §8)                                                                          |
-| `IPubSubTransport.publish` (exported)       | `packages/messaging-plugin/src/brokers/pubsub-broker.ts:146`, `index.ts:117`                    | `(topic, bytes, attributes?)`; the SDK adapter builds `pubsub.topic(topic)` per call (`:253`)                                                                |
-| `IServiceBusTransport.send` (exported)      | `packages/messaging-plugin/src/brokers/service-bus-broker.ts:137`, `index.ts:125`               | `(topic, body, applicationProperties?)`; the adapter calls `sendMessages(message)` (`:474`)                                                                  |
-| RabbitMQ publish                            | `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts:669-700`                              | sets `messageId` from `runtime.uuid()` (`:689`), headers via properties                                                                                      |
-| Redis Streams publish                       | `packages/messaging-plugin/src/brokers/redis-streams-broker.ts:335`                             | header fields on the stream entry                                                                                                                            |
-| In-memory publish                           | `packages/messaging-plugin/src/brokers/in-memory-broker.ts:145`                                 | resolves on dispatch hand-off (M89c); headers delivered as given                                                                                             |
-| `WorkersBroker.publish`                     | `packages/cloudflare-plugin/src/messaging/workers-broker.ts:254`                                | `encodePublishEnvelope(topic, id, payload)` (`message-envelope.ts:107`) — no header field                                                                    |
-| `publishIntegrationEvent`                   | `packages/messaging-plugin/src/integration/publish.ts:63`                                       | `(runtime, broker, definition, payload, metadata?)` → `broker.publish(topic, envelope)`                                                                      |
-| Envelope ID                                 | `packages/messaging-plugin/src/integration/envelope.ts:38`                                      | `readonly id: string`, producer-assigned, fresh per envelope; `aggregateId` optional (`:52`)                                                                 |
-| `TRACEPARENT_HEADER`                        | `packages/common/src/trace-context.ts:11`                                                       | `'traceparent'` — the framework-owned header a caller must not overwrite                                                                                     |
-| Kafka key → partition (measured 2026-10-07) | real `apache/kafka:4.0.0`, kafkajs 2.2.4, 3 partitions                                          | 12 unkeyed messages spread over partitions 0,1,2; 3 keys × 10 messages each landed on ONE partition per key, in publish order                                |
-| NATS `msgID` (measured)                     | real `nats:2-alpine -js`, nats.js 2.29.3                                                        | second publish with the same `msgID` (and with a `Nats-Msg-Id` header) answered `duplicate: true`; stream held 1 copy each; `duplicate_window` default 120 s |
-| NATS unmatched subject (measured)           | same                                                                                            | `js.publish` returns a promise that REJECTS (`503`); through the real `NatsBroker` the publish resolved and the rejection was unhandled                      |
-| Pub/Sub `orderingKey` (measured)            | `google-cloud-cli:emulators`, `@google-cloud/pubsub@^6`                                         | publish with `orderingKey` accepted with and without `messageOrdering: true`; a non-ordering subscription received all messages                              |
-| Service Bus (measured)                      | `servicebus-emulator`, `@azure/service-bus@^7`, `docs/fixtures/servicebus-emulator-config.json` | `sessionId` on a non-session subscription delivered to a plain receiver; a repeated `messageId` delivered twice (no duplicate detection configured)          |
+| Reference                                   | Source (file:line)                                                                              | Verified surface / fact                                                                                                                                          |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IMessageBroker.publish`                    | `packages/common/src/services/messaging.ts:117`                                                 | `publish<T>(topic: string, message: T): Promise<void>` — no third parameter                                                                                      |
+| `MessageMetadata.headers`                   | `packages/common/src/services/messaging.ts:14-26`                                               | optional `Readonly<Record<string, string>>`; first-party brokers populate `{}` when no headers arrived                                                           |
+| `MessageBrokerAdapter.publishWithHeaders`   | `packages/messaging-plugin/src/brokers/message-broker.ts:41`                                    | internal header channel every broker already implements; `publish` delegates to it with `{}`                                                                     |
+| `TracedBroker.publish`                      | `packages/messaging-plugin/src/tracing/traced-broker.ts:45-69`                                  | adds `traceparent` and calls the inner `publishWithHeaders`                                                                                                      |
+| `PipelinedBroker.publish`                   | `packages/messaging-plugin/src/pipeline/pipelined-broker.ts:144`                                | decorator; must forward a new argument or drop it (the M70i dropped-argument class)                                                                              |
+| Kafka publish                               | `packages/messaging-plugin/src/brokers/kafka-broker.ts:558-584`                                 | `send({ topic, messages: [{ value, headers }] })` — no `key`                                                                                                     |
+| NATS publish                                | `packages/messaging-plugin/src/brokers/nats-broker.ts:478-506`                                  | `js.publish(subject, data, { headers })`, typed `void` and NOT awaited (defect, §8)                                                                              |
+| `IPubSubTransport.publish` (exported)       | `packages/messaging-plugin/src/brokers/pubsub-broker.ts:146`, `index.ts:117`                    | `(topic, bytes, attributes?)`; the SDK adapter builds `pubsub.topic(topic)` per call (`:253`)                                                                    |
+| `IServiceBusTransport.send` (exported)      | `packages/messaging-plugin/src/brokers/service-bus-broker.ts:137`, `index.ts:125`               | `(topic, body, applicationProperties?)`; the adapter calls `sendMessages(message)` (`:474`)                                                                      |
+| RabbitMQ publish                            | `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts:669-700`                              | sets `messageId` from `runtime.uuid()` (`:689`), headers via properties                                                                                          |
+| Redis Streams publish                       | `packages/messaging-plugin/src/brokers/redis-streams-broker.ts:335`                             | header fields on the stream entry                                                                                                                                |
+| In-memory publish                           | `packages/messaging-plugin/src/brokers/in-memory-broker.ts:145`                                 | resolves on dispatch hand-off (M89c); headers delivered as given                                                                                                 |
+| `WorkersBroker.publish`                     | `packages/cloudflare-plugin/src/messaging/workers-broker.ts:254`                                | `encodePublishEnvelope(topic, id, payload)` (`message-envelope.ts:107`) — no header field                                                                        |
+| `defineIntegrationEvent`                    | `packages/messaging-plugin/src/integration/definition.ts`                                       | options object `{ type, version, topic, parse }`, each validated with a named `TypeError`; returns the same four fields — an optional fifth is source-compatible |
+| `publishIntegrationEvent`                   | `packages/messaging-plugin/src/integration/publish.ts:63`                                       | `(runtime, broker, definition, payload, metadata?)` → `broker.publish(topic, envelope)`                                                                          |
+| Envelope ID                                 | `packages/messaging-plugin/src/integration/envelope.ts:38`                                      | `readonly id: string`, producer-assigned, fresh per envelope; `aggregateId` optional (`:52`)                                                                     |
+| `TRACEPARENT_HEADER`                        | `packages/common/src/trace-context.ts:11`                                                       | `'traceparent'` — the framework-owned header a caller must not overwrite                                                                                         |
+| Kafka key → partition (measured 2026-10-07) | real `apache/kafka:4.0.0`, kafkajs 2.2.4, 3 partitions                                          | 12 unkeyed messages spread over partitions 0,1,2; 3 keys × 10 messages each landed on ONE partition per key, in publish order                                    |
+| NATS `msgID` (measured)                     | real `nats:2-alpine -js`, nats.js 2.29.3                                                        | second publish with the same `msgID` (and with a `Nats-Msg-Id` header) answered `duplicate: true`; stream held 1 copy each; `duplicate_window` default 120 s     |
+| NATS unmatched subject (measured)           | same                                                                                            | `js.publish` returns a promise that REJECTS (`503`); through the real `NatsBroker` the publish resolved and the rejection was unhandled                          |
+| Pub/Sub `orderingKey` (measured)            | `google-cloud-cli:emulators`, `@google-cloud/pubsub@^6`                                         | publish with `orderingKey` accepted with and without `messageOrdering: true`; a non-ordering subscription received all messages                                  |
+| Service Bus (measured)                      | `servicebus-emulator`, `@azure/service-bus@^7`, `docs/fixtures/servicebus-emulator-config.json` | `sessionId` on a non-session subscription delivered to a plain receiver; a repeated `messageId` delivered twice (no duplicate detection configured)              |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -95,6 +100,12 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
   makes the option observable on every broker (`MessageMetadata.headers`), which is what a consumer
   needs to check `aggregateVersion` or de-duplicate. The guarantee differs per broker, and §3.3's
   table is the documentation and the test data.
+- **Prior art (surveyed 2026-10-07 from official docs and upstream source):** NestJS, Encore.ts,
+  Moleculer, Dapr, CloudEvents, Spring Cloud Stream, MassTransit, NServiceBus and Watermill. None
+  refuses an option the broker cannot honour. CloudEvents (the `partitionkey` extension) and
+  Watermill (keys derived from metadata) carry it as a header with no effect, which is this design.
+  Dapr and Moleculer drop it silently, and Dapr's docs do not say so; MassTransit mixes throwing
+  setters with silent no-ops. A documented, tested per-broker table is stricter than all nine.
 - **Test home:** `packages/messaging-plugin/test/integration/header-conformance.test.ts` (extended:
   one table over all seven brokers).
 
@@ -155,29 +166,73 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
 - **Test home:** `packages/messaging-plugin/test/integration/messaging-telemetry.test.ts` (options
   reach the wire with tracing and behaviours both on).
 
-### 3.7 `publishIntegrationEvent`
+### 3.7 `publishIntegrationEvent` and the opt-in ordering selector
 
-- **Decision:** gains a sixth parameter `options?: PublishOptions`. Its `deduplicationId` defaults
-  to the envelope ID; a caller-supplied one wins. It does not derive `orderingKey`.
-- **Why:** the envelope ID is the end-to-end de-duplication key (producer-assigned, fresh per
-  envelope), so this default changes nothing observable except a header and NATS/Service Bus
-  de-duplicating a re-send — which cannot occur through this API today. Deriving `orderingKey` from
-  `aggregateId` would re-partition existing Kafka producers: a changed default, held for a minor
-  (§0).
-- **Test home:** `packages/messaging-plugin/test/unit/integration/publish.test.ts`.
+- **Decision:**
+  - `publishIntegrationEvent` gains a sixth parameter `options?: PublishOptions`. `deduplicationId`
+    defaults to the envelope ID; a caller-supplied one wins.
+  - `defineIntegrationEvent` accepts an optional
+    `orderingKey?: (envelope: IntegrationEventEnvelope<T>) => string | undefined`, stored on the
+    definition as `IntegrationEventDefinition.orderingKey`. A non-function is refused with a named
+    `TypeError` at definition time, like the four existing fields.
+  - Precedence for `orderingKey`: the caller's `options.orderingKey`, then the definition's
+    selector, then none. A selector returning `undefined` means no key; a selector that throws, or
+    returns a value §3.4 refuses, makes `publishIntegrationEvent` reject — never a synchronous
+    throw.
+- **Why:**
+  - The envelope ID is the end-to-end de-duplication key (producer-assigned, fresh per envelope), so
+    that default changes nothing observable beyond a header. This is mainstream: MassTransit and
+    NServiceBus generate a message ID by default and MassTransit maps it to Service Bus's native
+    de-duplication; Dapr sends the CloudEvent `id` as NATS `Nats-Msg-Id`; CloudEvents defines
+    de-duplication by `id`.
+  - Ordering derivation is configuration everywhere it exists (Encore `orderingAttribute`, Spring
+    `partitionKeyExpression`, MassTransit `UsePartitionKeyFormatter`, Watermill partitioning
+    marshalers), and a per-type selector is that, at the place an event type is defined. Opt-in
+    changes no existing producer, so it ships in a patch. A function rather than a field name covers
+    `aggregateId` and any payload field, as MassTransit's formatter does.
+- **Test home:** `packages/messaging-plugin/test/unit/integration/definition.test.ts` (selector
+  stored; non-function refused); `packages/messaging-plugin/test/unit/integration/publish.test.ts`
+  (default `deduplicationId`, the three-step precedence, `undefined` means no key, a throwing or
+  invalid selector rejects).
+
+### 3.8 What `orderingKey` promises
+
+- **Decision:** the README, `PublishOptions` JSDoc and `PUBLIC_API.md` state the guarantee as:
+  `orderingKey` decides **placement** — the same key reaches the same partition, ordering queue or
+  ordered subscription where the broker has one — not the order handlers **finish** in. What a
+  handler failure does to order differs per broker, and the README table carries a column for it:
+  - **Order kept by blocking:** Kafka (a throwing handler leaves the offset uncommitted and kafkajs
+    redelivers from that record, `kafka-broker.ts:722`, so one failing message stalls its whole
+    partition until it succeeds) and Pub/Sub on an ordering subscription.
+  - **Order lost on retry:** RabbitMQ (retry queues since #421), Redis Streams (reclaim since #419),
+    NATS and Service Bus redelivery — later messages for the key are handled while the failed one
+    waits.
+
+  Consumers that need order compare the envelope's `aggregateVersion` and drop or defer a stale
+  event.
+- **Why:** a placement guarantee read as a processing guarantee is the most likely misuse of this
+  option. NServiceBus states the same limit outright ("processing failures and recoverability will
+  result in out-of-order processing"), as do Watermill (NATS: "with the redelivery feature, order
+  can't be guaranteed") and MassTransit (Kafka: delayed redelivery means "messages may be processed
+  out of order").
+- **Test home:** `packages/messaging-plugin/test/integration/consumer-retry-real.test.ts` (real
+  RabbitMQ: two messages with one key, the first failing once — the second is handled before the
+  first's retry, pinning the documented limit so a later change to it is deliberate).
 
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none. `options` is an optional trailing parameter, so a two-parameter
-`publish` stays assignable, and both exported transports gain an optional trailing parameter.
+`publish` stays assignable; both exported transports gain an optional trailing parameter; and
+`IntegrationEventDefinition` gains an optional member, so a hand-built definition still assigns.
 
-| Exported symbol                           | Kind  | Consumer / real code path that READS it                                            |
-| ----------------------------------------- | ----- | ---------------------------------------------------------------------------------- |
-| `PublishOptions` (`common`)               | type  | `IMessageBroker.publish`, every broker, both decorators, `publishIntegrationEvent` |
-| `ORDERING_KEY_HEADER` (`common`)          | const | every broker's header write; consumers reading `MessageMetadata.headers`           |
-| `DEDUPLICATION_ID_HEADER` (`common`)      | const | same                                                                               |
-| `IPubSubTransport.publish` 4th parameter  | param | `GcpPubSubBroker.publishWithHeaders` passes `orderingKey`                          |
-| `IServiceBusTransport.send` 4th parameter | param | `ServiceBusBroker.publishWithHeaders` passes `messageId`                           |
+| Exported symbol                           | Kind            | Consumer / real code path that READS it                                            |
+| ----------------------------------------- | --------------- | ---------------------------------------------------------------------------------- |
+| `PublishOptions` (`common`)               | type            | `IMessageBroker.publish`, every broker, both decorators, `publishIntegrationEvent` |
+| `ORDERING_KEY_HEADER` (`common`)          | const           | every broker's header write; consumers reading `MessageMetadata.headers`           |
+| `DEDUPLICATION_ID_HEADER` (`common`)      | const           | same                                                                               |
+| `IntegrationEventDefinition.orderingKey`  | optional member | `publishIntegrationEvent` reads it when the caller passes no `orderingKey`         |
+| `IPubSubTransport.publish` 4th parameter  | param           | `GcpPubSubBroker.publishWithHeaders` passes `orderingKey`                          |
+| `IServiceBusTransport.send` 4th parameter | param           | `ServiceBusBroker.publishWithHeaders` passes `messageId`                           |
 
 ### 4.1 Options — every option names its consumer
 
@@ -185,37 +240,41 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
 | ------------------------------------------------------------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------- |
 | `PublishOptions.orderingKey`                                                                                        | every broker                  | §3.3 table                                                      |
 | `PublishOptions.deduplicationId`                                                                                    | every broker                  | §3.3 table                                                      |
+| `defineIntegrationEvent({ orderingKey })`                                                                           | `publishIntegrationEvent`     | selector applied per publish; caller's key wins (§3.7)          |
 | `PublishOptions.headers`                                                                                            | every broker's header channel | written beside framework headers; reserved names refused (§3.4) |
 | `enableMessageOrdering` on both Pub/Sub arms (`PubSubMessagingOptionsInjected`, `PubSubMessagingOptionsProduction`) | the SDK adapter's `open()`    | creates the transport's subscriptions with ordering enabled     |
 
 ## 5. Implementation files
 
-| File                                                                            | Purpose                                               |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `packages/common/src/services/messaging.ts`                                     | `PublishOptions`, the header constants, the parameter |
-| `packages/common/src/index.ts`                                                  | barrel exports                                        |
-| `packages/messaging-plugin/src/brokers/publish-options.ts`                      | internal: validation and the shared header merge      |
-| `packages/messaging-plugin/src/brokers/message-broker.ts`                       | `publishWithHeaders` gains the options                |
-| `packages/messaging-plugin/src/brokers/*-broker.ts` (seven)                     | native mapping and header carriage                    |
-| `packages/messaging-plugin/src/tracing/traced-broker.ts`                        | forwards options                                      |
-| `packages/messaging-plugin/src/pipeline/pipelined-broker.ts`                    | forwards options                                      |
-| `packages/messaging-plugin/src/integration/publish.ts`                          | sixth parameter, default `deduplicationId`            |
-| `packages/messaging-plugin/src/interfaces/index.ts`                             | `enableMessageOrdering`                               |
-| `packages/cloudflare-plugin/src/messaging/{workers-broker,message-envelope}.ts` | optional envelope fields                              |
+| File                                                                            | Purpose                                                |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `packages/common/src/services/messaging.ts`                                     | `PublishOptions`, the header constants, the parameter  |
+| `packages/common/src/index.ts`                                                  | barrel exports                                         |
+| `packages/messaging-plugin/src/brokers/publish-options.ts`                      | internal: validation and the shared header merge       |
+| `packages/messaging-plugin/src/brokers/message-broker.ts`                       | `publishWithHeaders` gains the options                 |
+| `packages/messaging-plugin/src/brokers/*-broker.ts` (seven)                     | native mapping and header carriage                     |
+| `packages/messaging-plugin/src/tracing/traced-broker.ts`                        | forwards options                                       |
+| `packages/messaging-plugin/src/pipeline/pipelined-broker.ts`                    | forwards options                                       |
+| `packages/messaging-plugin/src/integration/definition.ts`                       | optional `orderingKey` selector, validated             |
+| `packages/messaging-plugin/src/integration/publish.ts`                          | sixth parameter, default `deduplicationId`, precedence |
+| `packages/messaging-plugin/src/interfaces/index.ts`                             | `enableMessageOrdering`                                |
+| `packages/cloudflare-plugin/src/messaging/{workers-broker,message-envelope}.ts` | optional envelope fields                               |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                       | src covered               | Key assertions                                                                               |
-| ------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
-| `packages/common/test/unit/publish-options.test.ts`                             | `messaging.ts`            | a two-parameter implementor assigns; barrel exports both constants                           |
-| `packages/messaging-plugin/test/unit/publish-options-validation.test.ts`        | `publish-options.ts`      | each §3.4 refusal is a rejected promise naming the field; 128-byte boundary both sides       |
-| `packages/messaging-plugin/test/integration/header-conformance.test.ts`         | all seven brokers         | one row per broker × option, asserting the wire shape from §3.3                              |
-| `packages/messaging-plugin/test/integration/kafka-real.test.ts`                 | `kafka-broker.ts`         | same key → one partition, in order; no key → unchanged                                       |
-| `packages/messaging-plugin/test/integration/nats-real.test.ts`                  | `nats-broker.ts`          | repeated `deduplicationId` stored once                                                       |
-| `packages/messaging-plugin/test/unit/pubsub-adapter.test.ts`                    | `pubsub-broker.ts`        | topic cached, `messageOrdering: true`, `resumePublishing` after a failure, subscription flag |
-| `packages/messaging-plugin/test/integration/messaging-telemetry.test.ts`        | both decorators           | options survive tracing + behaviours; `traceparent` still the framework's                    |
-| `packages/messaging-plugin/test/unit/integration/publish.test.ts`               | `integration/publish.ts`  | default `deduplicationId` = envelope ID; caller wins; no `orderingKey` derived               |
-| `packages/cloudflare-plugin/test/unit/messaging/workers-broker-publish.test.ts` | Workers broker + envelope | fields round-trip; an envelope without them still decodes                                    |
+| Test file                                                                       | src covered                 | Key assertions                                                                                               |
+| ------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `packages/common/test/unit/publish-options.test.ts`                             | `messaging.ts`              | a two-parameter implementor assigns; barrel exports both constants                                           |
+| `packages/messaging-plugin/test/unit/publish-options-validation.test.ts`        | `publish-options.ts`        | each §3.4 refusal is a rejected promise naming the field; 128-byte boundary both sides                       |
+| `packages/messaging-plugin/test/integration/header-conformance.test.ts`         | all seven brokers           | one row per broker × option, asserting the wire shape from §3.3                                              |
+| `packages/messaging-plugin/test/integration/kafka-real.test.ts`                 | `kafka-broker.ts`           | same key → one partition, in order; no key → unchanged                                                       |
+| `packages/messaging-plugin/test/integration/nats-real.test.ts`                  | `nats-broker.ts`            | repeated `deduplicationId` stored once                                                                       |
+| `packages/messaging-plugin/test/unit/pubsub-adapter.test.ts`                    | `pubsub-broker.ts`          | topic cached, `messageOrdering: true`, `resumePublishing` after a failure, subscription flag                 |
+| `packages/messaging-plugin/test/integration/messaging-telemetry.test.ts`        | both decorators             | options survive tracing + behaviours; `traceparent` still the framework's                                    |
+| `packages/messaging-plugin/test/unit/integration/definition.test.ts`            | `integration/definition.ts` | selector stored; non-function refused with a named `TypeError`                                               |
+| `packages/messaging-plugin/test/unit/integration/publish.test.ts`               | `integration/publish.ts`    | default `deduplicationId`; caller > selector > none; `undefined` = no key; throwing/invalid selector rejects |
+| `packages/messaging-plugin/test/integration/consumer-retry-real.test.ts`        | (documented limit, §3.8)    | one key, first message fails once: the second is handled before the first's retry                            |
+| `packages/cloudflare-plugin/test/unit/messaging/workers-broker-publish.test.ts` | Workers broker + envelope   | fields round-trip; an envelope without them still decodes                                                    |
 
 ## 7. Verification gates
 
@@ -233,7 +292,8 @@ deno task release:verify <version>
 ```
 
 Negative controls: drop the forwarding in `PipelinedBroker` (conformance fails); drop the Kafka
-`key` (real partition test fails); drop `Nats-Msg-Id` (NATS dedup test fails).
+`key` (real partition test fails); drop `Nats-Msg-Id` (NATS dedup test fails); make
+`publishIntegrationEvent` ignore the definition's selector (precedence test fails).
 
 ## 8. Risks & mitigations
 
@@ -248,6 +308,6 @@ Negative controls: drop the forwarding in `PipelinedBroker` (conformance fails);
 
 ## 9. Out of scope
 
-- Ordering by default in `publishIntegrationEvent` — the next minor (§0).
+- A default ordering key in `publishIntegrationEvent` — not planned for any release (§0, §3.7).
 - The outbox relay and consumer inbox — later milestones.
 - Service Bus sessions — needs a session receiver mode; no current consumer asks for it.

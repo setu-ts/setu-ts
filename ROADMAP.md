@@ -12996,7 +12996,14 @@ emulator accepted an `orderingKey`. None of it is reachable through the contract
   `orderingKey`, NATS `Nats-Msg-Id`, Service Bus `messageId`) and is carried as a transport header
   on every broker, so it is observable everywhere and never silently dropped. A per-broker guarantee
   table is the documentation, and a conformance test iterates it.
-- `publishIntegrationEvent` passes its envelope ID as the deduplication ID.
+- `publishIntegrationEvent` passes its envelope ID as the deduplication ID, and
+  `defineIntegrationEvent` takes an opt-in `orderingKey` selector (for example the envelope's
+  `aggregateId`), so ordering is configured per event type and no existing producer re-partitions.
+- The documentation states what `orderingKey` promises: where a message is placed, not the order
+  handlers finish in once a retry occurs; consumers needing order compare `aggregateVersion`.
+- Shaped by a survey of nine frameworks (NestJS, Encore.ts, Moleculer, Dapr, CloudEvents, Spring
+  Cloud Stream, MassTransit, NServiceBus, Watermill): none refuses an option the broker cannot
+  honour, and the plan records each precedent it follows or rejects.
 
 **Prerequisite (found while designing this, 2026-10-07):** `NatsBroker.publish` never awaits
 JetStream's acknowledgement. A publish to a subject no stream covers resolves as a success while the
@@ -13013,7 +13020,9 @@ depends on reading the acknowledgement.
 - [ ] Invalid options rejected by name (never a synchronous throw from a `Promise` method)
 - [ ] A conformance test over all brokers, plus real-backend tests for Kafka partition affinity and
       NATS deduplication in CI, and guarded emulator tests for Pub/Sub and Service Bus
-- [ ] PUBLIC_API.md, the messaging README's per-broker table, and CHANGELOG
+- [ ] The opt-in ordering selector on `defineIntegrationEvent`, and a real RabbitMQ test pinning the
+      documented retry-reorders limit
+- [ ] PUBLIC_API.md, the messaging README's per-broker table and ordering statement, and CHANGELOG
 
 ---
 
