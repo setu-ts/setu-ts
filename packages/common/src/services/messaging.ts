@@ -1,10 +1,76 @@
 /**
- * Message broker contract, implemented by the MessagingPlugin's broker
- * adapters (RabbitMQ, NATS, Kafka, Redis Streams, in-memory) under
- * `CAPABILITIES.MESSAGING`.
+ * Message broker contract, implemented by the MessagingPlugin's seven broker
+ * adapters (in-memory, Redis Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub and
+ * Azure Service Bus) under `CAPABILITIES.MESSAGING`.
  *
  * @module
  */
+
+/**
+ * Transport header carrying a publisher's ordering key on a broker with no
+ * native ordering primitive. Every first-party broker writes it beside any
+ * native mapping, so it is readable from {@linkcode MessageMetadata.headers}
+ * regardless of the transport.
+ *
+ * @since 0.9.0
+ */
+export const ORDERING_KEY_HEADER = 'x-setu-ordering-key';
+
+/**
+ * Transport header carrying a publisher's de-duplication id on a broker with no
+ * native de-duplication primitive.
+ *
+ * @since 0.9.0
+ */
+export const DEDUPLICATION_ID_HEADER = 'x-setu-deduplication-id';
+
+/**
+ * Options accepted by {@linkcode IMessageBroker.publish}.
+ *
+ * An option a broker has no native primitive for is carried as a transport
+ * header, never dropped and never refused, so portable producer code behaves
+ * the same on every broker and the option stays observable through
+ * {@linkcode MessageMetadata.headers}.
+ *
+ * `orderingKey` decides **placement** — the same key reaches the same
+ * partition, retry queue or ordered subscription where the broker has one — and
+ * not the order handlers **finish** in. What a handler failure does to order
+ * differs per broker; a consumer that needs order compares the delivered
+ * envelope's version and drops or defers a stale message.
+ *
+ * Every value is validated on publish and refused by name when malformed; the
+ * refused value is never echoed back. A delivered `x-setu-ordering-key` or
+ * `x-setu-deduplication-id` header is a **hint written by whoever published the
+ * message** — validation runs on the publish side only — so a consumer may use
+ * it to order or de-duplicate its own work, never to authorize anything.
+ *
+ * @since 0.9.0
+ */
+export interface PublishOptions {
+  /**
+   * Key that places the message: Kafka's message key, Pub/Sub's `orderingKey`,
+   * and {@linkcode ORDERING_KEY_HEADER} everywhere else. At most 128 UTF-8
+   * bytes, no leading/trailing whitespace, no control characters. Derive it
+   * from an aggregate the application owns — never from request input, which
+   * would let a caller concentrate load on one partition or ordering key.
+   */
+  readonly orderingKey?: string;
+  /**
+   * Id a broker uses to drop a duplicate re-send: NATS's `Nats-Msg-Id`,
+   * Service Bus's `messageId`, RabbitMQ's `messageId`, and
+   * {@linkcode DEDUPLICATION_ID_HEADER} everywhere else. At most 128 UTF-8
+   * bytes, no leading/trailing whitespace, no control characters. Derive it
+   * from a producer-assigned id — a caller-chosen value lets the caller
+   * suppress another message within the broker's de-duplication window.
+   */
+  readonly deduplicationId?: string;
+  /**
+   * Application headers written beside the framework's own. A name a transport
+   * or its server acts on (including `traceparent`, `cc`, `bcc`, `payload`,
+   * `nats-*`, `x-setu-*` and `goog`) is refused on every broker.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
+}
 
 /**
  * Transport metadata accompanying a delivered message.
@@ -113,8 +179,10 @@ export interface IMessageBroker {
    * @typeParam T - The payload type
    * @param topic - Destination topic
    * @param message - The payload (serialized by the broker adapter)
+   * @param options - Ordering, de-duplication and header options; an option the
+   *   broker has no native primitive for is carried as a transport header
    */
-  publish<T>(topic: string, message: T): Promise<void>;
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void>;
   /**
    * Subscribes to a topic.
    *

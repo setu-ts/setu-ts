@@ -188,10 +188,12 @@ package fits the plugin architecture.
 | `CAPABILITIES`                       | const     |
 | `CLIENT_IP_STATE_KEY`                | const     |
 | `DATA_CLASSIFICATIONS`               | const     |
+| `DEDUPLICATION_ID_HEADER`            | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`      | const     |
 | `ERROR_RESPONDER_BRAND`              | const     |
 | `ERROR_RESPONDER_STATE_KEY`          | const     |
 | `HTTP_STATUS_HINT`                   | const     |
+| `ORDERING_KEY_HEADER`                | const     |
 | `PLUGIN_PRIORITY`                    | const     |
 | `RESPONSE_METADATA`                  | const     |
 | `SESSION_STATE_KEY`                  | const     |
@@ -390,6 +392,7 @@ package fits the plugin architecture.
 | `ProbeTiming`                        | interface |
 | `ProcessOptions`                     | interface |
 | `ProviderOptions`                    | interface |
+| `PublishOptions`                     | interface |
 | `PutObjectOptions`                   | interface |
 | `QueueAttemptObservation`            | interface |
 | `QueueDepthObservation`              | interface |

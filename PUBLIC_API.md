@@ -5689,6 +5689,74 @@ export type {
 
 ---
 
+---
+
+### Publish options — ordering key, de-duplication ID and headers
+
+`publish` takes an optional trailing `PublishOptions` (from `@setu-ts/common`):
+
+```typescript
+interface PublishOptions {
+  readonly orderingKey?: string; // ≤ 128 UTF-8 bytes
+  readonly deduplicationId?: string; // ≤ 128 UTF-8 bytes
+  readonly headers?: Readonly<Record<string, string>>; // ≤ 32 headers, ≤ 1024 bytes each
+}
+
+publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void>;
+```
+
+Every option is carried as a transport header beside any native mapping, so it is observable through
+`MessageMetadata.headers` on every broker and never silently dropped. Use the exported constants
+`ORDERING_KEY_HEADER` (`'x-setu-ordering-key'`) and `DEDUPLICATION_ID_HEADER`
+(`'x-setu-deduplication-id'`) to read them.
+
+| Broker          | `orderingKey`                                         | `deduplicationId`                                                      |
+| --------------- | ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| Kafka           | message `key` → one partition, in order               | header only                                                            |
+| Pub/Sub         | native `orderingKey` (needs an ordering subscription) | header only                                                            |
+| NATS            | header only                                           | `Nats-Msg-Id` → server de-duplicates within the stream's dedup window  |
+| Service Bus     | header only                                           | `messageId` → de-duplicated only on an entity with duplicate detection |
+| RabbitMQ        | header only                                           | header, and the `messageId` property                                   |
+| Redis Streams   | header only                                           | header only                                                            |
+| In-memory       | header only                                           | header only                                                            |
+| `WorkersBroker` | envelope field, surfaced as the header                | envelope field, surfaced as the header                                 |
+
+**What `orderingKey` promises.** It decides **placement** — the same key reaches the same partition,
+retry queue or ordered subscription where the broker has one — not the order handlers **finish** in.
+What a handler failure does to order differs per broker:
+
+- **Order kept by blocking:** Kafka (a throwing handler leaves the offset uncommitted, so one
+  failing message stalls its whole partition until it succeeds), Pub/Sub on an ordering
+  subscription, and Service Bus (an abandoned message is redelivered before the next is handled —
+  measured 2026-10-07).
+- **Order lost on retry:** RabbitMQ, Redis Streams and NATS redelivery — later messages for the key
+  are handled while the failed one waits.
+
+A consumer that needs order compares the delivered envelope's version and drops or defers a stale
+message.
+
+**What a consumer may trust, and what a producer must not derive.**
+
+1. A delivered `x-setu-ordering-key` or `x-setu-deduplication-id` header is a **hint written by
+   whoever published the message** — validation runs on the publish side only — so a foreign or
+   compromised producer can send any value under these names. Use it to order or de-duplicate your
+   own work, **never to authorize anything**.
+2. A `deduplicationId` derived from request input lets the caller who chooses it suppress another
+   message with the same id for the broker's window (NATS's `duplicate_window`, 120 s by default;
+   Service Bus's configured detection window). Derive it from a producer-assigned id — the envelope
+   id `publishIntegrationEvent` uses by default is one.
+3. An `orderingKey` derived from request input lets a caller concentrate load on one Kafka partition
+   or one Pub/Sub ordering key (1 MB/s per key). Derive it from an aggregate the application owns.
+
+Invalid options are rejected with a `RangeError` **as a rejected promise** (never a synchronous
+throw), naming the field and the rule; a refused value is never echoed. A header name a broker or
+its server acts on (`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*`, `x-setu-*`,
+`goog`, RabbitMQ's `x-death` / `x-delivery-count` / `x-acquired-count` / `x-delay` and the
+`x-first-death-*` / `x-last-death-*` forms) is refused on **every** broker, compared
+case-insensitively.
+
+---
+
 ### Trace context across the broker
 
 When `CAPABILITIES.TELEMETRY` is registered, the plugin wraps the broker so `publish`, `subscribe`,
@@ -10636,7 +10704,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection`, `TransactionOptions`, `TransactionIsolationLevel`, `ITransactionIsolationSupport` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first); the last three carry portable transaction isolation (M90g)                                                                                                                                                                                                                                                                                             |
 | Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Messaging           | `IMessageBroker`, `PublishOptions`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`, `ORDERING_KEY_HEADER`, `DEDUPLICATION_ID_HEADER`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Ingress             | `IngressKind`, `IngressContext<TPayload>`, `BehaviorLike<TWork, TResult>`, `IIngressBehavior`, `composeBehaviorChain`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
