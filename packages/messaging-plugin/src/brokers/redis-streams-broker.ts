@@ -4,6 +4,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -14,6 +15,7 @@ import type { MessageBrokerAdapter } from './message-broker.ts';
 import { IntegrationEventRejectedError } from '../errors.ts';
 import { describeError } from './describe-error.ts';
 import { createTopicInbox } from './inbox.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import type { IRedisStreamsClient, RedisStreamsOptions } from '../interfaces/index.ts';
 
@@ -332,8 +334,8 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -341,16 +343,19 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisStreamsBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     // XADD with '*' for auto-generated ID. Headers ride as extra field/value
     // pairs beside `payload`, so `payload` is RESERVED: emitting a second field
     // with that name would shadow the body, and the reader would hand the
     // header value to the deserializer instead of the message.
-    const fields = Object.entries(headers)
+    const fields = Object.entries(wireHeaders)
       .filter(([key]) => key !== PAYLOAD_FIELD)
       .flatMap(([key, value]) => [key, value]);
     await this.#client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields);

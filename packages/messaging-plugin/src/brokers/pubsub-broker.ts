@@ -19,6 +19,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -28,6 +29,7 @@ import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError } from './describe-error.ts';
 import type { ReplyInbox } from './inbox.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
 import { PubSubSubscriptionBoundElsewhereError, ReplyInboxUnavailableError } from '../errors.ts';
@@ -92,11 +94,24 @@ function isSameTopic(boundTopic: string, requestedTopic: string, projectId: stri
  */
 export interface PubSubSdkModule {
   PubSub: new (options: { projectId: string; credentials?: unknown }) => {
-    topic(topicName: string): {
+    topic(topicName: string, options?: { messageOrdering?: boolean }): {
       publishMessage(
-        message: { data: Uint8Array; attributes?: Record<string, string> },
+        message: {
+          data: Uint8Array;
+          attributes?: Record<string, string>;
+          orderingKey?: string;
+        },
       ): Promise<string>;
-      createSubscription(subscriptionName: string): Promise<unknown[]>;
+      createSubscription(
+        subscriptionName: string,
+        options?: { enableMessageOrdering?: boolean },
+      ): Promise<unknown[]>;
+      /**
+       * Resumes a paused ordering key (M106 §3.5). The SDK pauses a key after a
+       * failed ORDERED publish and refuses further publishes for it until this
+       * is called.
+       */
+      resumePublishing(orderingKey: string): void;
     };
     subscription(subscriptionName: string): {
       on(
@@ -142,11 +157,17 @@ export interface PubSubSdkModule {
  * SDK directly.
  */
 export interface IPubSubTransport {
-  /** Publish bytes to a topic. */
+  /**
+   * Publish bytes to a topic.
+   *
+   * @param orderingKey - Native Pub/Sub ordering key (M106 §3.3); omitted means
+   *   unordered
+   */
   publish(
     topic: string,
     bytes: Uint8Array,
     attributes?: Readonly<Record<string, string>>,
+    orderingKey?: string,
   ): Promise<void>;
   /**
    * Open a subscription on a topic. Creates the subscription when absent.
@@ -211,6 +232,13 @@ export interface PubSubOptions {
   defaultQueue?: string;
   /** Shared reply topic for request-reply (must pre-exist). */
   replyTopic?: string;
+  /**
+   * Create the transport's own subscriptions with message ordering enabled
+   * (default `false`), required before a native `orderingKey` is delivered in
+   * order. Fixed at subscription creation and it costs throughput, so it is
+   * opt-in (M106 §3.5).
+   */
+  enableMessageOrdering?: boolean;
   /** Optional logger. */
   logger?: { error: (msg: string) => void };
 }
@@ -239,18 +267,44 @@ export function adaptPubSubModule(
     projectId: string;
     credentials?: unknown;
     logger?: { error: (msg: string) => void } | undefined;
+    enableMessageOrdering?: boolean | undefined;
   },
 ): IPubSubTransport {
   const pubsub = new mod.PubSub({ projectId: options.projectId, credentials: options.credentials });
+
+  // M106 §3.5: the SDK keeps its ordered queue per `Topic` OBJECT, so one cached
+  // Topic per name is required — building a fresh Topic per publish lets
+  // concurrent publishes for one key race.
+  const topics = new Map<string, ReturnType<typeof pubsub.topic>>();
 
   return {
     publish: async (
       topic: string,
       bytes: Uint8Array,
       attributes?: Readonly<Record<string, string>>,
+      orderingKey?: string,
     ): Promise<void> => {
-      const message = attributes ? { data: bytes, attributes: { ...attributes } } : { data: bytes };
-      await pubsub.topic(topic).publishMessage(message);
+      let handle = topics.get(topic);
+      if (!handle) {
+        handle = pubsub.topic(topic, { messageOrdering: true });
+        topics.set(topic, handle);
+      }
+      const message = {
+        data: bytes,
+        ...(attributes ? { attributes: { ...attributes } } : {}),
+        ...(orderingKey !== undefined ? { orderingKey } : {}),
+      };
+      try {
+        await handle.publishMessage(message);
+      } catch (error) {
+        // The SDK pauses an ordering key after a failed ORDERED publish and
+        // refuses further publishes for it until `resumePublishing`; without
+        // this one transient failure blocks that key for the process lifetime.
+        if (orderingKey !== undefined) {
+          handle.resumePublishing(orderingKey);
+        }
+        throw error;
+      }
     },
     open: async (
       topic: string,
@@ -268,9 +322,13 @@ export function adaptPubSubModule(
     ): Promise<IPubSubSubscription> => {
       const sub = pubsub.subscription(subscription);
 
-      // Create subscription on the topic if absent.
+      // Create subscription on the topic if absent. Ordering is FIXED at
+      // creation, so it is passed only when configured.
       try {
-        await pubsub.topic(topic).createSubscription(subscription);
+        await pubsub.topic(topic).createSubscription(
+          subscription,
+          options.enableMessageOrdering ? { enableMessageOrdering: true } : undefined,
+        );
       } catch (err) {
         // Narrow catch to ALREADY_EXISTS (gRPC code 6) only; rethrow everything else
         // including NOT_FOUND (gRPC code 5). Match on the documented error-code
@@ -348,6 +406,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   #injectedClient: IPubSubTransport | undefined;
   #defaultQueue: string;
   #replyTopic: string;
+  #enableMessageOrdering: boolean;
   #logger: { error: (msg: string) => void } | undefined;
   #transport: IPubSubTransport | null = null;
   #ready = false;
@@ -371,6 +430,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     this.#injectedClient = options?.client;
     this.#defaultQueue = options?.defaultQueue ?? DEFAULT_QUEUE;
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
+    this.#enableMessageOrdering = options?.enableMessageOrdering ?? false;
     this.#logger = options?.logger;
     this.#subscriptions = new Map();
     this.#rr = new RequestReplyCore({
@@ -464,6 +524,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
         projectId: this.#projectId,
         credentials: this.#credentials,
         logger: this.#logger,
+        enableMessageOrdering: this.#enableMessageOrdering,
       });
     }
 
@@ -522,8 +583,8 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     return reachable !== false;
   }
 
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -531,13 +592,16 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#transport) {
       throw new Error('GcpPubSubBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     const bytes = new TextEncoder().encode(serialized);
-    await this.#transport.publish(topic, bytes, headers);
+    await this.#transport.publish(topic, bytes, wireHeaders, validated.orderingKey);
   }
 
   async subscribe<T>(

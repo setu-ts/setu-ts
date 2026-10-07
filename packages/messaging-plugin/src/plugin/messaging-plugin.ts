@@ -372,6 +372,7 @@ export function MessagingPlugin(
           client?: import('../brokers/pubsub-broker.ts').IPubSubTransport;
           defaultQueue?: string;
           replyTopic?: string;
+          enableMessageOrdering?: boolean;
         };
         const pubSubOptions: import('../brokers/pubsub-broker.ts').PubSubOptions = {};
         if (pubSubOpts.projectId !== undefined) pubSubOptions.projectId = pubSubOpts.projectId;
@@ -383,6 +384,9 @@ export function MessagingPlugin(
           pubSubOptions.defaultQueue = pubSubOpts.defaultQueue;
         }
         if (pubSubOpts.replyTopic !== undefined) pubSubOptions.replyTopic = pubSubOpts.replyTopic;
+        if (pubSubOpts.enableMessageOrdering !== undefined) {
+          pubSubOptions.enableMessageOrdering = pubSubOpts.enableMessageOrdering;
+        }
         if (logger !== undefined) pubSubOptions.logger = logger;
         broker = new GcpPubSubBroker(ctx.runtime, serializer, pubSubOptions);
       } else if (brokerType === 'service-bus') {

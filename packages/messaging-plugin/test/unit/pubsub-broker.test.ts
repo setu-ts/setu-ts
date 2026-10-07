@@ -924,6 +924,10 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
             }
             return Promise.resolve([]);
           },
+          // This double does not model ordering; the §3.5 assertions that record
+          // resumePublishing live in pubsub-adapter.test.ts. The member exists so
+          // the double honours the widened SDK contract.
+          resumePublishing() {},
         };
       }
       subscription(subName: string) {

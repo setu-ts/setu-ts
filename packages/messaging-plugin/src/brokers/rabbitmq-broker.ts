@@ -2,6 +2,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -13,6 +14,7 @@ import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError, describeLogText } from './describe-error.ts';
 import { IntegrationEventRejectedError } from '../errors.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
@@ -666,8 +668,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -675,10 +677,13 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     const realChannel = this.#channel as unknown as PublishingChannel & {
       assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
@@ -686,12 +691,14 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
 
     // Build properties
     const properties: Record<string, unknown> = {};
-    properties.messageId = this.#runtime.uuid();
-    properties.headers = headers;
+    // RabbitMQ's native mapping: `deduplicationId` replaces the random uuid, so
+    // a consumer's `MessageMetadata.messageId` is the producer's stable id.
+    properties.messageId = validated.deduplicationId ?? this.#runtime.uuid();
+    properties.headers = wireHeaders;
     if (typeof message === 'object' && message !== null) {
       // Try to extract existing messageId/timestamp/headers if present
       const msg = message as Record<string, unknown>;
-      if (typeof msg.messageId === 'string') {
+      if (validated.deduplicationId === undefined && typeof msg.messageId === 'string') {
         properties.messageId = msg.messageId;
       }
     }

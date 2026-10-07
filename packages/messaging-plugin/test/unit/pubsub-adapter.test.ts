@@ -9,7 +9,11 @@ describe('adaptPubSubModule', () => {
     topics: Map<
       string,
       {
-        messages: Array<{ data: Uint8Array }>;
+        messages: Array<{
+          data: Uint8Array;
+          attributes?: Record<string, string>;
+          orderingKey?: string;
+        }>;
         subscriptions: Map<
           string,
           {
@@ -21,12 +25,20 @@ describe('adaptPubSubModule', () => {
       }
     >;
     subscriptions: Map<string, { topic: string; name: string; closed: boolean; deleted: boolean }>;
+    topicOptions: Map<string, { messageOrdering?: boolean | undefined }>;
+    subscriptionOptions: Map<string, { enableMessageOrdering?: boolean | undefined }>;
+    resumed: string[];
+    failNextPublish: boolean;
   } {
     const mod = {} as PubSubSdkModule & {
       topics: Map<
         string,
         {
-          messages: Array<{ data: Uint8Array }>;
+          messages: Array<{
+            data: Uint8Array;
+            attributes?: Record<string, string>;
+            orderingKey?: string;
+          }>;
           subscriptions: Map<
             string,
             {
@@ -43,27 +55,45 @@ describe('adaptPubSubModule', () => {
         string,
         { topic: string; name: string; closed: boolean; deleted: boolean }
       >;
+      topicOptions: Map<string, { messageOrdering?: boolean | undefined }>;
+      subscriptionOptions: Map<string, { enableMessageOrdering?: boolean | undefined }>;
+      resumed: string[];
+      failNextPublish: boolean;
     };
     mod.topics = new Map();
     let fakeProjectId = '';
     mod.subscriptions = new Map();
+    mod.topicOptions = new Map();
+    mod.subscriptionOptions = new Map();
+    mod.resumed = [];
+    mod.failNextPublish = false;
 
     mod.PubSub = class {
       constructor(options: { projectId: string; credentials?: unknown }) {
         // The real SDK reports topics under the project it was built for.
         fakeProjectId = options.projectId;
       }
-      topic(name: string) {
+      topic(name: string, options?: { messageOrdering?: boolean }) {
         if (!mod.topics.has(name)) {
           mod.topics.set(name, { messages: [], subscriptions: new Map() });
         }
+        mod.topicOptions.set(name, options ?? {});
         const topicData = mod.topics.get(name)!;
         return {
-          publishMessage(message: { data: Uint8Array }) {
+          publishMessage(message: {
+            data: Uint8Array;
+            attributes?: Record<string, string>;
+            orderingKey?: string;
+          }) {
+            if (mod.failNextPublish) {
+              mod.failNextPublish = false;
+              return Promise.reject(new Error('publish failed'));
+            }
             topicData.messages.push(message);
             return Promise.resolve('msg-id');
           },
-          createSubscription(subName: string) {
+          createSubscription(subName: string, options?: { enableMessageOrdering?: boolean }) {
+            mod.subscriptionOptions.set(subName, options ?? {});
             // M101b: names are project-global, as on the real service — an
             // existing subscription answers ALREADY_EXISTS whichever topic it
             // is bound to. The pre-M101b fake accepted every create.
@@ -85,6 +115,9 @@ describe('adaptPubSubModule', () => {
               });
             }
             return Promise.resolve([]);
+          },
+          resumePublishing(orderingKey: string) {
+            mod.resumed.push(orderingKey);
           },
         };
       }
@@ -143,6 +176,54 @@ describe('adaptPubSubModule', () => {
     expect(topic).toBeDefined();
     expect(topic!.messages).toHaveLength(1);
     expect(topic!.messages[0].data).toEqual(bytes);
+  });
+
+  it('caches one Topic per name, created with messageOrdering: true (M106 §3.5)', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    const bytes = new TextEncoder().encode('a');
+    await transport.publish('order-topic', bytes, undefined, 'agg-1');
+    await transport.publish('order-topic', bytes, undefined, 'agg-1');
+
+    expect(sdk.topicOptions.get('order-topic')?.messageOrdering).toBe(true);
+    expect(sdk.topics.get('order-topic')!.messages.map((m) => m.orderingKey)).toEqual([
+      'agg-1',
+      'agg-1',
+    ]);
+  });
+
+  it('resumes the ordering key after a failed ordered publish, then rethrows (M106 §3.5)', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    sdk.failNextPublish = true;
+
+    await expect(
+      transport.publish('order-topic', new TextEncoder().encode('a'), undefined, 'agg-1'),
+    ).rejects.toThrow('publish failed');
+    expect(sdk.resumed).toEqual(['agg-1']);
+  });
+
+  it('does not resume a key when an UNORDERED publish fails (M106 §3.5)', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    sdk.failNextPublish = true;
+
+    await expect(transport.publish('plain-topic', new TextEncoder().encode('a'))).rejects.toThrow(
+      'publish failed',
+    );
+    expect(sdk.resumed).toEqual([]);
+  });
+
+  it('orders a created subscription only when enableMessageOrdering is set (M106 §3.5)', async () => {
+    const plain = createFakeSdkModule();
+    await adaptPubSubModule(plain, { projectId: 'demo' }).open('t', 'sub-plain', () => {});
+    expect(plain.subscriptionOptions.get('sub-plain')?.enableMessageOrdering).toBeUndefined();
+
+    const ordered = createFakeSdkModule();
+    await adaptPubSubModule(ordered, { projectId: 'demo', enableMessageOrdering: true })
+      .open('t', 'sub-ordered', () => {});
+    expect(ordered.subscriptionOptions.get('sub-ordered')?.enableMessageOrdering).toBe(true);
   });
 
   it('maps the SDK message id and publishTime onto the delivery (X28-4)', async () => {

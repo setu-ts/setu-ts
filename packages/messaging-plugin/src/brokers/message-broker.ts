@@ -2,6 +2,7 @@ import type {
   IMessageBroker,
   ISubscription,
   MessageHandler,
+  PublishOptions,
   RequestOptions,
   SubscribeOptions,
 } from '@setu-ts/common';
@@ -37,11 +38,19 @@ import type {
  * @since 0.1.0
  */
 export interface MessageBrokerAdapter extends IMessageBroker {
-  /** Publishes a message with framework-owned transport headers. */
+  /**
+   * Publishes a message with framework-owned transport headers.
+   *
+   * `options` are the CALLER's publish options and are validated here, so every
+   * entry funnelling through this method refuses a bad option before the
+   * transport is touched. `headers` are framework-owned (for example
+   * `traceparent`) and are never validated as caller input.
+   */
   publishWithHeaders<T>(
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void>;
   /** Subscribes through the header-aware internal path. */
   subscribeWithHeaders<T>(
