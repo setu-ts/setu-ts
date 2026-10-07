@@ -4,7 +4,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createRestApp } from '../../src/index.ts';
-import type { IRequestContext } from '@setu-ts/common';
+import type { IContainer, ILogger, IRequestContext } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { CachePlugin } from '@setu-ts/cache-plugin';
 import { Controller, Get, Inject, Injectable } from '@setu-ts/decorator-plugin';
@@ -187,6 +187,45 @@ describe('rest-starter / integration', () => {
     const app = createRestApp({ realtime: { backplane: { transport: 'messaging' } } });
     app.router.get('/test', (ctx) => ctx.response.text('ok'));
     await expect(app.start()).rejects.toThrow(/MessagingPlugin/);
+  });
+
+  // I1 (X66-1): with the `di` arm on, an @Injectable class injecting a
+  // framework capability resolves through the container's fallback to the
+  // kernel ServiceRegistry — the pairing both starter READMEs document.
+  it('resolves a registry capability into a decorated service with di: {}', async () => {
+    @Injectable({ token: 'logger-holder' })
+    @Inject(CAPABILITIES.LOGGER)
+    class LoggerHolder {
+      constructor(readonly logger: ILogger) {}
+    }
+
+    const app = createRestApp({ di: {}, decorators: { services: [LoggerHolder] } });
+    await app.start();
+
+    const container = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+    const holder = container.resolve<LoggerHolder>('logger-holder');
+    expect(holder.logger).toBe(app.services.get<ILogger>(CAPABILITIES.LOGGER));
+  });
+
+  // I1: the explicit opt-out restores the pre-I1 behaviour — no registry
+  // fallback, so the injected capability is unresolvable (the X66-1 message).
+  it('throws the X66-1 message for the same service with autoRegister: false', async () => {
+    @Injectable({ token: 'logger-holder-optout' })
+    @Inject(CAPABILITIES.LOGGER)
+    class OptOutHolder {
+      constructor(readonly logger: ILogger) {}
+    }
+
+    const app = createRestApp({
+      di: { autoRegister: false },
+      decorators: { services: [OptOutHolder] },
+    });
+    await app.start();
+
+    const container = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+    expect(() => container.resolve('logger-holder-optout')).toThrow(
+      "No provider registered for DI token 'logger'.",
+    );
   });
 
   // §3.2.1: caller can register additional plugins after createRestApp returns (escape hatch)

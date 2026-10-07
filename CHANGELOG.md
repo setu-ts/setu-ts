@@ -414,6 +414,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A starter app with `di: {}` now falls back to the kernel registry for unregistered tokens
+  (`@setu-ts/rest-starter`, PR pending).** With the arm on, `DecoratorPlugin` registers every
+  `@Injectable` class as a container provider, and an `@Inject(CAPABILITIES.LOGGER)` argument — the
+  pairing both starter READMEs show — failed with `No provider registered for DI token 'logger'`.
+  The arm now builds `DiPlugin({ autoRegister: true, ...options.di })`, so the container resolves
+  framework capabilities through the registry; `di: { autoRegister: false }` restores the old
+  behaviour.
+
 - **`export default { fetch: app.fetch }` answered every Workers request with 500
   (`@setu-ts/kernel`, PR pending).** It is the Workers entry the `cloudflare-plugin` README,
   `PUBLIC_API.md`, the `rest-starter` README and the Workers adapter's own `listen()` error all

@@ -4,9 +4,10 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFullStackApp } from '../../src/index.ts';
-import type { IRequestContext } from '@setu-ts/common';
+import type { IContainer, ILogger, IRequestContext } from '@setu-ts/common';
 import { CachePlugin } from '@setu-ts/cache-plugin';
 import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
+import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 
 describe('full-stack-starter / integration (load-bearing)', () => {
   it('boots all ~22 plugins in one kernel and inject() returns 200', async () => {
@@ -104,5 +105,23 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe('ok');
+  });
+
+  // I1 (X66-1) tier inheritance: the full-stack starter composes the REST
+  // tier's plugin list, so the same `di: {}` + @Inject(capability) pairing
+  // the starter READMEs document resolves here too.
+  it('resolves a registry capability into a decorated service through createFullStackApp', async () => {
+    @Injectable({ token: 'logger-holder' })
+    @Inject(CAPABILITIES.LOGGER)
+    class LoggerHolder {
+      constructor(readonly logger: ILogger) {}
+    }
+
+    const app = createFullStackApp({ di: {}, decorators: { services: [LoggerHolder] } });
+    await app.start();
+
+    const container = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+    const holder = container.resolve<LoggerHolder>('logger-holder');
+    expect(holder.logger).toBe(app.services.get<ILogger>(CAPABILITIES.LOGGER));
   });
 });

@@ -61,7 +61,12 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
     ...(options.database ? [DatabasePlugin(options.database)] : []),
     ...(options.auth ? [AuthPlugin(options.auth)] : []),
     ...(options.session ? [SessionPlugin(options.session)] : []),
-    ...(options.di ? [DiPlugin(options.di)] : []),
+    // `autoRegister: true` first so the container falls back to the kernel
+    // ServiceRegistry for unregistered tokens — with the arm on,
+    // DecoratorPlugin registers every @Injectable class as a provider, and an
+    // @Inject(CAPABILITIES.X) argument resolves only through that fallback.
+    // `options.di` spreads LAST so an explicit `autoRegister: false` still wins.
+    ...(options.di ? [DiPlugin({ autoRegister: true, ...options.di })] : []),
     ...(options.graphql ? [GraphqlPlugin(options.graphql)] : []),
     ...(options.serviceDiscovery ? [ServiceDiscoveryPlugin(options.serviceDiscovery)] : []),
     ...(options.realtime?.backplane ? [RealtimeBackplanePlugin(options.realtime.backplane)] : []),
