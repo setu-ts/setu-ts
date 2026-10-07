@@ -445,6 +445,16 @@ All notable changes to this project are documented here. The format follows
   request or queue batch still holds it. Only newly scaffolded projects change; an existing project
   can copy the new cache, from `interface BootedApp` through `stopQuietly`, and the
   `acquire`/`release` calls in each export into its own `src/index.ts`.
+
+- **A refused NATS publish resolved as a success (`@setu-ts/messaging-plugin`, #425).** `NatsBroker`
+  never awaited JetStream's acknowledgement, so a publish to a subject no stream captures resolved
+  while the server's `503` escaped as an unhandled rejection, which terminates a Deno or Node
+  process by default; a successful publish was not confirmed either. `publish()` now resolves once
+  JetStream has stored the message and rejects with an error naming the subject (and, for `503`, the
+  `streamSubjects` remedy), keeping the client error as `cause`. An unresponsive server rejects
+  after the client's own 5 s timeout. A failed RPC reply now surfaces as a responder failure, so the
+  request is redelivered rather than its reply silently lost.
+
 - **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
   `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as
   a plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB

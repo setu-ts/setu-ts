@@ -332,6 +332,12 @@ MessagingPlugin({
 
 An existing stream is never touched, with or without `streamSubjects`.
 
+**`publish()` resolves once JetStream has stored the message.** It waits for the server's
+acknowledgement, so a publish to a subject no stream captures rejects with an error naming the
+subject (the server answers `503`), and an unresponsive server rejects after the client's own 5 s
+timeout. Before 0.9.0 the acknowledgement was not awaited: such a publish resolved as a success and
+the refusal surfaced as an unhandled rejection, which terminates a Deno or Node process by default.
+
 **Request-reply needs its subjects in the stream too.** A responder consumes the derived
 `rr.req.<topic>` subject and the requester's reply inbox is `rr.inbox.<uuid>`, so an RPC-capable
 stream must cover both — for example
