@@ -7,7 +7,7 @@
 > the work has one recorded design, and it merges as one PR from this one branch.
 >
 > Work is split across two checkouts. **Implementation** (§3.1–§3.2, I1–I2) happens in the worktree
-> `.claude/worktrees/first-run` on `fix/cli-first-run`. **Documentation** (§3.3, D1–D5) happens on
+> `.claude/worktrees/first-run` on `fix/cli-first-run`. **Documentation** (§3.3, D2–D5) happens on
 > `docs/first-run-docs`, which is cut from this branch and merged back into it before the PR opens.
 
 ## 0. Objective & scope
@@ -27,7 +27,11 @@ redesigning an API is out of scope.
   - **I1 (X66-1):** the starter `di` arm defaults `autoRegister: true`.
   - **I2 (X66-3):** the generated `full-stack` smoke test requests `/`, so a failing
     `populateLoadContext` fails `deno task test`.
-  - **D1–D5:** the X66 documentation repairs (§3.3).
+  - **I3:** `apps/cloudflare` retries a failed start instead of caching it (§3.4), done on
+    `docs/first-run-docs` because it touches no file the implementation owns.
+  - **D2–D5:** the X66 documentation repairs (§3.3). X66-5 (a "stray fence" in the
+    full-stack-starter README) was retracted: it was a misread of two concatenated `sed` ranges, and
+    the section is correct.
 - **NOT this milestone:**
   - Replacing a container-provided service with a test double (X66-4). It needs an `override` option
     on `ProviderOptions` in `@setu-ts/common` — a published-contract decision for the maintainer,
@@ -57,7 +61,6 @@ redesigning an API is out of scope.
 | #  | Conflict                                                                                                                                    | Resolution (picked side)                                                           | Doc deliverable (same PR)                                                                       |
 | -- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | C1 | `full-stack-starter` and `rest-starter` READMEs show `di: {}` beside an `@Inject(CAPABILITIES.LOGGER)` example; that pairing fails (X66-1). | The code moves (I1): `di: {}` defaults `autoRegister: true`, so the example works. | D4: both READMEs say what the arm turns on, including the registry fallback and how to opt out. |
-| C2 | `full-stack-starter` README "Realtime and DI arms" ends in a stray, unclosed fence (X66-5).                                                 | The README is wrong.                                                               | D1: repair the section.                                                                         |
 
 ## 3. Design decisions
 
@@ -105,9 +108,8 @@ redesigning an API is out of scope.
   `deno task test` must fail (it passes today). Record the before/after.
 - **Baseline:** `template-baseline.json` does not cover `full-stack`, so no hash changes; confirm.
 
-### 3.3 Documentation (D1–D5, on `docs/first-run-docs`)
+### 3.3 Documentation (D2–D5, on `docs/first-run-docs`)
 
-- **D1 (X66-5):** repair the stray fence in `full-stack-starter` README "Realtime and DI arms".
 - **D2 (X66-2):** a "Constructor injection in loaders" section in the `full-stack-starter` README:
   register `@Injectable` classes through `decorators: { services }`, turn the container on with
   `di: {}`, resolve in `populateLoadContext` from `CAPABILITIES.DI_CONTAINER`, carry the instance on
@@ -122,6 +124,19 @@ redesigning an API is out of scope.
   limitation rather than leave a reader to find it.
 - **Test home:** the package README fence compiler and `check:docs`. If a starter README is not in
   the fence compiler's list, D2's fences are compiled by hand once and the result recorded.
+
+### 3.4 I3 — the Cloudflare example retries a failed start
+
+- **Decision:** `createWorkerHandler` in `apps/cloudflare/worker.ts` keeps sharing one start across
+  concurrent requests and never fetches on a failed one, but clears its memoised promise when the
+  start rejects, so the next request retries.
+- **Why:** M38 chose to cache the rejection on the premise that "the retry policy is a fresh Worker
+  invocation". That premise is false: one isolate serves many invocations, so a cached rejection
+  outlives the request that hit it — the reason M70l (X9-8) made the generated Workers entry memoise
+  only a successful start. The example contradicted the generated entry and the guides.
+- **Test home:** `test/worker-startup-behavior.test.ts` — the concurrent-failure case keeps its
+  no-fetch assertion, and a new case asserts a failed start is retried and then serves.
+- **Negative control:** remove the clearing `catch`; the retry case must fail.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -145,15 +160,17 @@ output for newly scaffolded `full-stack` projects only.
 | `packages/starters/rest-starter/src/app.ts`   | I1: `autoRegister: true` default on the `di` arm.    |
 | `packages/cli/src/templates/project-files.ts` | I2: the `full-stack` smoke test also fetches `/`.    |
 | `CHANGELOG.md`                                | I1 `Changed` entry; I2 `Fixed` entry ("PR pending"). |
+| `apps/cloudflare/worker.ts`                   | I3: forget a failed start.                           |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                       | src covered                          | Key assertions                                                                                                      |
-| ------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `packages/starters/rest-starter/test/integration/app-integration.test.ts`       | `rest-starter/src/app.ts`            | `di: {}` resolves an injected `CAPABILITIES.LOGGER` through a real started app; `autoRegister: false` still throws. |
-| `packages/starters/full-stack-starter/test/integration/app-integration.test.ts` | (inheritance, no src change)         | `createFullStackApp({ di: {}, decorators: { services } })` resolves a logger-injected class.                        |
-| `packages/cli/test/unit/templates/project-files.test.ts`                        | `cli/src/templates/project-files.ts` | `full-stack` smoke test fetches `/` and requests `/health`; `rest` does not fetch `/`.                              |
-| `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` (unchanged)                   | generated `test/app.test.ts`         | `deno task test` on a real `full-stack` scaffold passes with the new request.                                       |
+| Test file                                                                       | src covered                                                  | Key assertions                                                                                                      |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `packages/starters/rest-starter/test/integration/app-integration.test.ts`       | `rest-starter/src/app.ts`                                    | `di: {}` resolves an injected `CAPABILITIES.LOGGER` through a real started app; `autoRegister: false` still throws. |
+| `packages/starters/full-stack-starter/test/integration/app-integration.test.ts` | (inheritance, no src change)                                 | `createFullStackApp({ di: {}, decorators: { services } })` resolves a logger-injected class.                        |
+| `packages/cli/test/unit/templates/project-files.test.ts`                        | `cli/src/templates/project-files.ts`                         | `full-stack` smoke test fetches `/` and requests `/health`; `rest` does not fetch `/`.                              |
+| `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` (unchanged)                   | generated `test/app.test.ts`                                 | `deno task test` on a real `full-stack` scaffold passes with the new request.                                       |
+| `test/worker-startup-behavior.test.ts`                                          | `apps/cloudflare/worker.ts` (example; not coverage-measured) | Concurrent failure shared without fetching; a failed start is retried and then serves.                              |
 
 ## 7. Verification gates
 

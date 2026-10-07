@@ -657,6 +657,46 @@ All notable changes to this project are documented here. The format follows
   `@since` gate skipped every `0.1.0` tag — that line shipped only as `0.1.0-alpha.*` — and now
   checks such a tag against the line's last prerelease instead.
 
+- **The Cloudflare example cached a failed start for the isolate's whole life (`apps/cloudflare`, PR
+  pending).** `createWorkerHandler` memoised the start promise even when it rejected, so one
+  transient failure at cold start left that isolate answering errors to every later request. It now
+  forgets a failed start and retries on the next request, the rule the generated Workers entry has
+  followed since M70l. Concurrent requests still share one start, and none reaches `fetch` on an
+  application whose start failed.
+
+- **Constructor injection in a full-stack app was undocumented (`@setu-ts/full-stack-starter`,
+  `@setu-ts/rest-starter`, `@setu-ts/testing` docs, PR pending).** Nothing said how a React Router
+  loader reaches an injected service; the `full-stack-starter` README now shows resolving it from
+  `CAPABILITIES.DI_CONTAINER` in `populateLoadContext` and carrying it on a context key, and says
+  that a DI mistake starts cleanly and fails every server-rendered page. Both starter READMEs say
+  what the `di` arm turns on, and the testing README states that a container-provided service cannot
+  be replaced with `overrideCapability`.
+
+- **The root README's quick examples did not run as written (README, PR pending).** The first
+  example registered `LoggerPlugin` without telling the reader to install it, so following the
+  documented install failed to resolve the import; it now says to add the package. The second read
+  `JWT_SECRET` before any plugin had registered; it now loads configuration with `loadConfig` and
+  hands the same snapshot to `ConfigPlugin({ instance })`. The feature table no longer claims event
+  sourcing, which the framework does not ship, and now lists Cosmos DB and Bigtable.
+
+- **The CLI guide described a CLI several milestones old (`docs/cli.md`, PR pending).** It said
+  `generate controller` and `generate module` need `decorator-plugin` (neither has since M70h),
+  listed fourteen schematics where there are sixteen (`ws-route` and `sse` were missing), quoted a
+  refusal message the CLI no longer prints, and left the M83 `@Module` file and `MODULES` barrel out
+  of the class-based module tree. It also miscounted the interactive questions, gave the wrong `bun`
+  start command, and showed the workspace discovery map without its `<MEMBER>_HOST` override. Each
+  corrected claim was checked against a project the CLI scaffolded.
+
+- **The NestJS migration guide mapped several NestJS features to hand-written code the framework
+  replaces (`docs/migration-nestjs.md`, PR pending).** Guards now map to `AuthPlugin` with
+  `requireAuth()`/`requireRole()`, in place of a hand-written global middleware that would also have
+  refused `/health`. Exception filters map to `errorHandler({ respond })`, WebSocket gateways to
+  `@Gateway`, and the testing module to `createTestApp({ app: createApp(), overrides })`. The guide
+  also says that a decorated `@Injectable` lives in the DI container, which `overrideCapability`
+  does not reach. The decorator example now passes `DiPlugin({ autoRegister: true })`, without which
+  injecting a framework capability fails at startup. The guide no longer says Setu-TS has no
+  `@Module`.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
@@ -5043,14 +5083,20 @@ Nothing here requires an application change unless it is named **Breaking** belo
   ```typescript
   // Before — compiled, then threw at app.start()
   DatabasePlugin({ type: 'prisma' });
-  DatabasePlugin({ type: 'drizzle', options: { drizzleTables: { User: users } } });
+  DatabasePlugin({
+    type: 'drizzle',
+    options: { drizzleTables: { User: users } },
+  });
 
   // After
   DatabasePlugin({ type: 'prisma', options: { prismaClient } });
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { User: users },
     },
   });
@@ -5624,7 +5670,10 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { User: users },
     },
   });
@@ -6291,7 +6340,9 @@ migration.
 
   ```typescript
   app.register(OpenApiPlugin({
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    },
     security: [{ bearerAuth: [] }], // document-level default
   }));
 

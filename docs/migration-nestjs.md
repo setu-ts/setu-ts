@@ -10,7 +10,7 @@ flexible.
 | ------------------------ | --------------------------- | ----------------------------------------- |
 | **Runtime**              | Node.js only                | Deno, Node.js, Bun, Cloudflare Workers    |
 | **Reflection**           | `reflect-metadata` required | Explicit injection tokens (no reflection) |
-| **Module System**        | `@Module` decorators        | Plugin composition                        |
+| **Module System**        | `@Module` decorators        | `@Module` (class style) or plugins        |
 | **HTTP Server**          | Express/Fastify             | Hono (fetch API)                          |
 | **Dependency Injection** | Automatic via reflection    | Explicit tokens (`@Inject('token')`)      |
 | **Decorators**           | Built-in                    | Optional, via `DecoratorPlugin`           |
@@ -100,13 +100,17 @@ class AppController {
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    DiPlugin(),
+    DiPlugin({ autoRegister: true }),
     DecoratorPlugin({ controllers: [AppController] }),
   ],
 });
 
 await app.start({ port: 3000 });
 ```
+
+`autoRegister: true` lets the container fall back to the kernel's service registry, so a class can
+inject a framework capability such as `CAPABILITIES.LOGGER`. Without it, that injection fails at
+startup with `No provider registered for DI token 'logger'`. The `class-based` template emits it.
 
 ## Controllers and Routes
 
@@ -329,26 +333,24 @@ export class AuthGuard implements CanActivate {
 ### Setu-TS
 
 ```typescript
-import type { MiddlewareFunction } from '@setu-ts/common';
+import { AuthPlugin, requireAuth, requireRole } from '@setu-ts/auth-plugin';
 
-export const authMiddleware: MiddlewareFunction = async (ctx, next) => {
-  const authHeader = ctx.request.headers.get('Authorization');
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+app.register(AuthPlugin({
+  jwt: { secret: 'replace-with-a-secret-from-configuration' },
+  rbac: { roles: { admin: { permissions: ['*'] } } },
+}));
 
-  if (!token) {
-    return ctx.response.status(401).json({ error: 'Unauthorized' });
-  }
-
-  // Verify token and set user
-  const user = await verifyToken(token);
-  ctx.state.set('user', user);
-
-  await next();
-};
-
-// Use middleware
-app.middleware.add(authMiddleware);
+// Guards attach per route, like @UseGuards. An unauthenticated request answers 401
+// and a principal without the role answers 403, before the handler runs.
+app.router.get('/profile', { middleware: [requireAuth()], handler });
+app.router.delete('/users/:id', { middleware: [requireAuth(), requireRole('admin')], handler });
 ```
+
+`AuthPlugin` verifies the bearer token on every request and puts the principal on
+`ctx.request.user`; it never refuses a request itself, so `/health` and other public routes keep
+answering. The guards are what refuse. In a decorated controller the same guards attach with
+`@UseGuards(requireAuth())`, and `@Roles(...)` and `@Permissions(...)` are enforced. See
+[Decorators — Guards](./decorators.md#guards).
 
 ## Interceptors
 
@@ -421,36 +423,27 @@ export class HttpExceptionFilter implements ExceptionFilter {
 ### Setu-TS
 
 ```typescript
-import type { MiddlewareFunction } from '@setu-ts/common';
-import { HttpError } from '@setu-ts/exceptions';
+import { errorHandler } from '@setu-ts/exceptions';
 
-export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
-  try {
-    await next();
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return ctx.response.status(error.statusCode).json(
-        {
-          statusCode: error.statusCode,
-          timestamp: new Date().toISOString(),
-          path: new URL(ctx.request.url).pathname,
-          message: error.message,
-        },
-      );
-    }
-
-    // Log error
-    console.error('Unhandled error', { error });
-
-    return ctx.response.status(500).json(
-      {
-        statusCode: 500,
-        message: 'Internal server error',
-      },
-    );
-  }
-};
+app.middleware.add(
+  errorHandler({
+    respond(error, ctx) {
+      return ctx.response.status(error.statusCode).json({
+        statusCode: error.statusCode,
+        path: new URL(ctx.request.url).pathname,
+        message: error.message,
+      });
+    },
+  }),
+  { priority: 0, name: 'error-handler' },
+);
 ```
+
+`errorHandler` logs the error and normalizes it to an `HttpError` before `respond` sees it. An
+unexpected error therefore arrives as a `500` with a generic message, while the original goes to the
+log. Return `undefined` from `respond` to keep the configured format (`'rfc9457'` Problem Details in
+a scaffolded project). Priority `0` makes it the outermost middleware, so it catches what every
+other stage throws.
 
 ## Pipelines (Validation)
 
@@ -481,6 +474,10 @@ app.router.post('/users', {
   },
 });
 ```
+
+In a decorated controller, `@ValidateBody(CreateUserDto)` on the handler does the same, and
+`@Params(Body())` then receives the parsed value. With `ValidationPlugin` registered the schema is
+enforced, not only documented. See [Decorators — Validation](./decorators.md#validation).
 
 ## Configuration
 
@@ -764,26 +761,25 @@ export class EventsGateway {
 ### Setu-TS
 
 ```typescript
+import type { IWebSocketConnection } from '@setu-ts/common';
+import { DecoratorPlugin, Gateway, OnMessage } from '@setu-ts/decorator-plugin';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
-import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
 
-// WebSocketPlugin options carry heartbeat/idle/limit knobs only — routes and
-// rooms are application-level, registered on the WebSocketService after the
-// plugin (no `rooms` plugin option exists).
+@Gateway('/ws')
+class EventsGateway {
+  @OnMessage
+  message(connection: IWebSocketConnection, data: string | Uint8Array): void {
+    connection.send(data);
+  }
+}
+
 app.register(WebSocketPlugin({ heartbeatMs: 30_000 }));
-await app.start({ port: 3000 });
-
-const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
-ws.route('/ws', {
-  onOpen: (conn) => {
-    console.log('Client connected');
-    ws.room('events').add(conn);
-  },
-  onMessage: (conn, message) => {
-    ws.room('events').broadcast(message, { except: conn });
-  },
-});
+app.register(DecoratorPlugin({ ingress: [EventsGateway] }));
 ```
+
+A `@Gateway` class is registered through `DecoratorPlugin`'s `ingress` list, not `controllers`. To
+broadcast, resolve `CAPABILITIES.WEBSOCKET` and use `room(name).broadcast(data, { except })`.
+Without decorators, pass the same handlers as `WebSocketPlugin({ routes: [...] })`.
 
 ## Testing
 
@@ -820,29 +816,32 @@ describe('UsersController', () => {
 ### Setu-TS
 
 ```typescript
-import { RuntimePlugin } from '@setu-ts/runtime';
-import { createTestApp, inject } from '@setu-ts/testing';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createTestApp, inject, overrideCapability } from '@setu-ts/testing';
 
 describe('Users', () => {
   it('GET /users', async () => {
+    // The application's own composition from setu.config.ts, with one plugin-provided
+    // capability replaced by a test double.
     const app = await createTestApp({
-      plugins: [RuntimePlugin()],
+      app: createApp(),
+      overrides: [overrideCapability(CAPABILITIES.MAIL, fakeMailer)],
     });
 
-    app.router.get('/users', async (ctx) => {
-      return ctx.response.json([{ id: 1, name: 'John' }]);
-    });
-
-    const response = await inject(app, {
-      method: 'GET',
-      url: '/users',
-    });
+    const response = await inject(app, { method: 'GET', url: '/users' });
     expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body).toEqual([{ id: 1, name: 'John' }]);
+    await app.stop();
   });
 });
 ```
+
+`createTestApp({ app })` boots what `main.ts` boots, so a test cannot miss middleware or a plugin
+the way a hand-assembled test module can. `overrides` replaces a capability a plugin provides, and
+`without: ['name']` keeps a plugin from running at all.
+
+A decorated `@Injectable` class is different: `DecoratorPlugin` registers it in the DI container,
+which `overrideCapability` does not reach. Test such a class the way Nest's `useValue` provider is
+used for unit tests, by constructing it directly with its fakes: `new UsersController(fakeService)`.
 
 ## Common Patterns
 
@@ -966,12 +965,13 @@ topic and returns a value, which the decorator ingress list does not model.
 - [ ] Replace `@Injectable()` with `@Injectable()` from `@setu-ts/decorator-plugin`
 - [ ] Replace `@Controller()` with programmatic routes or `@Controller()` + `DecoratorPlugin`
 - [ ] Replace constructor injection with `@Inject('token')` from `@setu-ts/decorator-plugin`
-- [ ] Replace modules with plugin factories
+- [ ] Replace `@Module` with `@Module` from `@setu-ts/decorator-plugin`, or with a plugin factory
+      for a capability that owns lifecycle work
 - [ ] Replace TypeORM with Prisma/Drizzle or other supported ORM
 - [ ] Replace `ConfigModule` with `ConfigPlugin`
 - [ ] Replace `CacheModule` with `CachePlugin`
-- [ ] Replace `@WebSocketGateway` with `WebSocketPlugin`
-- [ ] Update testing utilities to use `createTestApp` and `inject`
+- [ ] Replace `@WebSocketGateway` with `@Gateway` and `WebSocketPlugin`
+- [ ] Update tests to boot `createApp()` through `createTestApp` and drive it with `inject`
 - [ ] Update deployment configuration for target runtime
 
 ## Next Steps

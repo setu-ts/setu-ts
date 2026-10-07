@@ -46,14 +46,21 @@ export function createWorkerHandler(
   let application: Promise<IKernelApplication> | undefined;
   const app = (env: WorkerEnvironment): Promise<IKernelApplication> => {
     if (application === undefined) {
-      // Rejection is deliberately cached for the lifetime of this isolate. All
-      // concurrent and later callers observe the same startup failure, and no
-      // request reaches fetch on a partially initialized application.
-      application = (async () => {
+      // Concurrent callers share one start, and no request reaches fetch on an
+      // application whose start failed. A FAILED start is forgotten, though, so
+      // the next request retries it: one isolate serves many invocations, so a
+      // cached rejection would outlive the request that hit it and leave the
+      // isolate answering errors for its whole life (M70l X9-8). The generated
+      // Workers entry follows the same rule.
+      const attempt: Promise<IKernelApplication> = (async () => {
         const created = createApp(env);
         await created.start();
         return created;
       })();
+      application = attempt;
+      attempt.catch(() => {
+        application = undefined;
+      });
     }
     return application;
   };
