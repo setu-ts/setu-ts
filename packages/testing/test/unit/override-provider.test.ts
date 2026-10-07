@@ -184,7 +184,7 @@ describe('overrideProvider', () => {
     await expect(app.start()).rejects.toThrow(/registered on the container before the override/);
   });
 
-  it('refuses an application without a DI container', async () => {
+  it('refuses an application without a DI container', () => {
     const plugin = overrideProvider('svc', { useValue: {} });
     const ctx = { container: undefined } as unknown as IPluginContext;
     expect(() => plugin.register(ctx)).toThrow(/has no DI container/);
