@@ -1,94 +1,110 @@
 # Getting Started with Setu-TS
 
-This guide walks you through setting up your first Setu-TS application and understanding the core
-concepts.
+This guide takes you from an empty directory to a running, tested Setu-TS application, then shows
+how to add the plugins most applications need.
 
 ## Prerequisites
 
-- **Deno 2.x** or **Node.js 22+** or **Bun 1.x** — the framework uses `Promise.withResolvers`, which
-  Node 22 was the first to ship; CI verifies Node 24
+- **Deno 2.x**, **Node.js 22.18+**, or **Bun 1.x** — the framework uses `Promise.withResolvers`,
+  which Node 22 was the first to ship, and Node 22.18 is the first release that runs a `.ts` file
+  directly; CI verifies Node 24
 - Basic familiarity with TypeScript
-- Understanding of web frameworks (optional but helpful)
+
+## Two ways to start
+
+**Scaffold a project with the CLI** if you want a working layout, tests, configuration, and a
+Dockerfile in one step:
+
+```bash
+# Install the Setu CLI once
+deno install -A -f --min-dep-age 0 jsr:@setu-ts/cli@^0.8.0/main
+
+# Create a REST application (add --runtime node, bun, or cloudflare-workers to change target)
+setu new my-app
+```
+
+The generated project's README lists its commands. See the [CLI guide](./cli.md) for templates and
+code generation.
+
+**Build it by hand** if you want to see every moving part. The rest of this guide does that — it is
+three packages and about ten lines of code.
 
 ## Installation
 
-### Using Deno
+Setu-TS is published on [JSR](https://jsr.io/@setu-ts). Each runtime installs it with its own
+tooling:
+
+### Deno
 
 ```bash
-# Create a new project directory
 mkdir my-app && cd my-app
-deno init
-
-# Add Setu-TS packages
 deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
 ```
 
-### Using npm/npx (Node.js/Bun)
+`deno add` creates the `deno.json` for you.
+
+### Node.js
 
 ```bash
-# Create a new project
+mkdir my-app && cd my-app
 npm init -y
-npm install jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
+npm pkg set type=module
+npx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
 ```
 
-### Using the CLI (Recommended)
+`npm install jsr:…` does **not** work — npm has no `jsr:` protocol. `npx jsr add` writes ordinary
+npm dependencies (`"@setu-ts/kernel": "npm:@jsr/setu-ts__kernel@^0.8.0"`) plus an `.npmrc` pointing
+the `@jsr` scope at JSR's npm registry, so your imports stay `@setu-ts/kernel`.
+
+### Bun
 
 ```bash
-# Install the Setu CLI
-deno install -A -f --min-dep-age 0 jsr:@setu-ts/cli@^0.8.0/main
-
-# Create a new REST application
-setu new my-app --runtime deno
+mkdir my-app && cd my-app
+bun init -y
+bunx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
 ```
-
-Prefer the global install. For an ad-hoc `deno run` inside a project, pass `--no-config --no-lock`
-so Deno does not write the CLI's dependency graph into the project's lockfile.
 
 ## Your First Application
 
-### Minimal Application
-
-Create a file called `main.ts`:
+Create `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
-// Create the application
 const app = createApplication();
 
-// Register the runtime plugin (required)
+// Required in every application: RuntimePlugin detects whether you are on Deno,
+// Node, Bun, or Cloudflare Workers and supplies the HTTP server, timers, and
+// environment for that platform. start() throws if it is missing.
 app.register(RuntimePlugin());
 
-// Add a simple route through the router
-app.router.get('/hello', async (ctx) => {
-  return ctx.response.json({ message: 'Hello, World!' });
-});
+// A handler receives the request context and returns a response built
+// through ctx.response.
+app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
 
-// Add a health check endpoint
-app.router.get('/health', async (ctx) => {
-  return ctx.response.json({ status: 'ok' });
-});
+app.router.get('/health', (ctx) => ctx.response.json({ status: 'ok' }));
 
-// Start the server
 await app.start({ port: 3000 });
 
 console.log('Server running on http://localhost:3000');
 ```
 
+A handler may be `async` when it awaits something; these two do not need to be.
+
 ### Running the Application
 
-**Deno:**
+**Deno** — `--allow-net` to bind the port, `--allow-env` because `RuntimePlugin` reads the process
+environment:
 
 ```bash
-deno run --allow-net main.ts
+deno run --allow-net --allow-env main.ts
 ```
 
 **Node.js:**
 
 ```bash
-deno run --allow-net main.ts  # Works with Deno's npm support
-# or use the generated npm-compatible files
+node main.ts
 ```
 
 **Bun:**
@@ -97,23 +113,22 @@ deno run --allow-net main.ts  # Works with Deno's npm support
 bun run main.ts
 ```
 
-### Testing Your Application
-
-Make a request to the server:
+### Try It
 
 ```bash
-# Using curl
 curl http://localhost:3000/hello
-
-# Expected response:
 # {"message":"Hello, World!"}
 ```
 
 ## Testing Your Application
 
-### Using the Testing Utilities
+Add the testing utilities and the standard test library:
 
-Setu-TS provides testing utilities for easy application testing:
+```bash
+deno add jsr:@setu-ts/testing jsr:@std/testing jsr:@std/expect
+```
+
+Create `test/app.test.ts`:
 
 ```typescript
 import { describe, it } from '@std/testing/bdd';
@@ -123,13 +138,13 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 describe('My Application', () => {
   it('handles GET /hello', async () => {
+    // createTestApp builds AND starts the application without binding a port,
+    // so requests go straight to the handler through inject().
     const app = await createTestApp({
       plugins: [RuntimePlugin()],
     });
 
-    app.router.get('/hello', async (ctx) => {
-      return ctx.response.json({ message: 'Hello, World!' });
-    });
+    app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
 
     const response = await inject(app, {
       method: 'GET',
@@ -143,15 +158,21 @@ describe('My Application', () => {
 });
 ```
 
-### Running Tests
+Run it:
 
 ```bash
-deno test -P --allow-read --allow-import --allow-env test/
+deno test --allow-env
 ```
+
+Once your application has a real composition root (a `createApp()` the server and the tests both
+call), pass it as `createTestApp({ app: createApp() })` so tests run against exactly the plugins
+production runs — see the [`@setu-ts/testing` README](../packages/testing/README.md).
 
 ## Adding Plugins
 
-Setu-TS is built around a plugin architecture. Here's how to add common plugins:
+Everything beyond routing is a plugin you register. A plugin publishes a service under a capability
+token, and code anywhere in the application resolves it by that token. Here are the most common
+ones.
 
 ### Logger Plugin
 
@@ -164,9 +185,12 @@ app.register(LoggerPlugin());
 ### Config Plugin
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IConfig } from '@setu-ts/common';
 import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
 import { z } from 'npm:zod@^3.24.0';
 
+// A typed slice of configuration: DATABASE_URL, validated as a URL.
 const database = defineConfigSection({
   prefix: 'DATABASE_',
   keys: ['URL'],
@@ -174,15 +198,21 @@ const database = defineConfigSection({
 });
 
 app.register(ConfigPlugin({
-  // Optional: load .env files. Requires a runtime with filesystem support
-  // (absent on edge platforms). Defaults to reading only `runtime.env`.
+  // Optional: also load a .env file (not available on edge platforms). Without
+  // it, configuration comes from the process environment only.
   envFilePath: '.env',
   sections: [database],
 }));
+
+await app.start({ port: 3000 });
+
+// Sections are validated during start(), so a bad DATABASE_URL fails startup
+// rather than the first request that reads it.
+const config = app.services.get<IConfig>(CAPABILITIES.CONFIG);
+const settings = getConfigSection(config, database); // settings.URL: string
 ```
 
-Use `getConfigSection(config, database)` to read the validated typed section after resolving
-`CAPABILITIES.CONFIG`; sections are checked at application startup.
+On Deno, `envFilePath` also needs `--allow-read`.
 
 ### Database Plugin
 
@@ -190,9 +220,11 @@ Use `getConfigSection(config, database)` to read the validated typed section aft
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
 app.register(DatabasePlugin({
-  type: 'memory', // Use in-memory database for development
+  type: 'memory', // In-memory, for development; swap the arm for a real backend later
 }));
 ```
+
+The [database plugin README](../packages/database-plugin/README.md) lists the other backends.
 
 ### Auth Plugin
 
@@ -201,147 +233,151 @@ import { AuthPlugin } from '@setu-ts/auth-plugin';
 
 app.register(AuthPlugin({
   jwt: {
+    // Read this from configuration in a real application — never commit it.
     secret: 'your-secret-key',
-    // Singular algorithm matching the signing key. 'HS256' pairs with
-    // `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
+    // 'HS256' pairs with `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
     algorithm: 'HS256',
-  },
-  rbac: {
-    roles: {},
   },
 }));
 ```
 
+Roles and permissions are an optional `rbac` arm; the
+[auth plugin README](../packages/auth-plugin/README.md) covers guards, sessions, and sign-in
+providers.
+
+## Stopping Cleanly
+
+When a container runtime or `Ctrl+C` stops the process, it sends `SIGTERM`/`SIGINT`. Unless you
+catch the signal, the process dies immediately and `app.stop()` never runs — in-flight requests are
+cut and no plugin gets to disconnect. Add this to `main.ts` after `start()`:
+
+```typescript
+import { createRuntimeServices } from '@setu-ts/runtime';
+
+const runtime = createRuntimeServices();
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  // onSignal is absent where there is no signal to catch (Windows, Workers).
+  runtime.onSignal?.(signal, () => {
+    void app.stop()
+      .then(() => runtime.exit(0))
+      .catch(() => runtime.exit(1));
+  });
+}
+```
+
+This is the same block `setu new` writes into every generated `main.ts`, and it works unchanged on
+every socket runtime: Deno, Node, and Bun alike.
+
 ## Running on Different Runtimes
 
-### Deno
-
-```typescript
-// RuntimePlugin() auto-detects Deno and selects DenoHttpAdapter.
-await app.start({ port: 3000 });
-```
-
-### Node.js
-
-```typescript
-// RuntimePlugin() auto-detects Node and selects NodeHttpAdapter.
-await app.start({ port: 3000 });
-```
-
-### Bun
-
-```typescript
-// RuntimePlugin() auto-detects Bun and selects BunHttpAdapter.
-await app.start({ port: 3000 });
-```
-
-### Forcing a platform
-
-`RuntimePlugin({ platform })` overrides auto-detection. The `httpAdapters` option is a keyed
-[`HttpAdapterFactories`](../packages/runtime/src/plugin/runtime-plugin.ts) object (factory callbacks
-per platform), not an array — it is an internal testing seam, so prefer `platform` for production
-overrides:
+The application above runs unchanged on Deno, Node, and Bun: `RuntimePlugin()` detects the platform
+and picks its HTTP server. To override detection, pass `platform`:
 
 ```typescript
 import { RuntimePlugin } from '@setu-ts/runtime';
-import type { RuntimePlatform } from '@setu-ts/common';
 
-app.register(RuntimePlugin({ platform: 'node' as RuntimePlatform }));
+app.register(RuntimePlugin({ platform: 'node' }));
 await app.start({ port: 3000 });
 ```
 
 ### Cloudflare Workers
 
 On Workers there is no socket to bind, so the application exports a `fetch` handler instead of
-calling `start({ port })`. The Worker's `env` (bindings and variables) is passed to both
-`RuntimePlugin` (so `runtime.env` is populated) and `CloudflarePlugin` (which publishes typed
-binding accessors under `CAPABILITIES.CLOUDFLARE`):
+calling `start({ port })`. The Worker's bindings and variables arrive as the `env` argument to
+`fetch`; pass them to both `RuntimePlugin` (so `runtime.env` is populated) and `CloudflarePlugin`
+(which publishes typed binding accessors under `CAPABILITIES.CLOUDFLARE`):
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
 
-// Deployment glue: at runtime `env` and `waitUntil` come from
-// `import { env, waitUntil } from 'cloudflare:workers'`. That specifier is
-// unresolvable off a Worker toolchain, so this block declares them rather than
-// importing — the real Worker passes the platform's values, which satisfy
-// these shapes structurally. `CloudflareWorkerEnv` is a `Record<string, unknown>`,
-// so a minimal typed interface is compatible with it.
-declare const env: Record<string, unknown>;
-declare const waitUntil: (promise: Promise<unknown>) => void;
-
-const raw = createApplication({
-  plugins: [
-    RuntimePlugin({ env }),
-    CloudflarePlugin({ env, waitUntil }),
-  ],
-});
-
-raw.router.get('/', async (ctx) => {
-  return ctx.response.json({ message: 'Hello from Workers!' });
-});
-
-// Memoized startup: the application starts once (awaited by all concurrent
-// first requests) and the result is reused. This avoids racing two concurrent
-// cold-start requests both trying to start the app independently.
-let application: Promise<typeof raw> | undefined;
-
-async function app(): Promise<typeof raw> {
-  if (application === undefined) {
-    application = (async () => {
-      await raw.start();
-      return raw;
-    })();
-    await application;
-  }
-  return await application;
+async function boot(env: Record<string, unknown>): Promise<IKernelApplication> {
+  const app = createApplication({
+    plugins: [RuntimePlugin({ env }), CloudflarePlugin({ env })],
+  });
+  app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello from Workers!' }));
+  await app.start();
+  return app;
 }
 
-// Export the fetch handler — Workers invokes this per request.
-// Startup (app.start()) always precedes the fetch call.
+// Start once, on the first request, and share that start across concurrent
+// requests. Two cases rebuild instead of reusing:
+// - A FAILED start is forgotten rather than cached, so a transient problem at
+//   cold start is retried on the next request instead of breaking the isolate
+//   for its whole life.
+// - A NEW `env` object means the bindings changed. Cloudflare may keep running
+//   an isolate across a bindings-only deploy, and an application built from the
+//   old `env` would keep using the old bindings. While bindings are unchanged,
+//   every request receives the same `env` object, so this check costs nothing.
+let booted: Promise<IKernelApplication> | undefined;
+let bootedEnv: Record<string, unknown> | undefined;
+
+function ensureBooted(env: Record<string, unknown>): Promise<IKernelApplication> {
+  if (booted === undefined || bootedEnv !== env) {
+    const previous = booted;
+    const attempt = boot(env).catch((error: unknown) => {
+      if (booted === attempt) booted = undefined;
+      throw error;
+    });
+    booted = attempt;
+    bootedEnv = env;
+    // Release the superseded application's resources; a failure here must not
+    // affect the new one.
+    void previous?.then((app) => app.stop()).catch(() => {});
+  }
+  return booted;
+}
+
 export default {
-  fetch(request: Request): Promise<Response> {
-    return app().then((started) => started.fetch(request));
+  async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {
+    const app = await ensureBooted(env);
+    return app.fetch(request);
   },
 };
 ```
 
+`setu new my-app --runtime cloudflare-workers` scaffolds a Workers project with an entry module and
+its `wrangler.toml`.
+
 ## Next Steps
 
-- [Plugin Architecture](./plugin-architecture.md) - Deep dive into the plugin system
+- [Plugin Architecture](./plugin-architecture.md) - How plugins, capabilities, and lifecycle work
 - [Programmatic API](./programmatic-api.md) - Complete API reference
-- [Examples](./examples.md) - See real-world applications
-- [Deployment](./runtime-deployment.md) - Deploy to production
+- [Decorators](./decorators.md) - The optional class-based style, for teams coming from NestJS
+- [Examples](./examples.md) - Runnable example applications
+- [Runtime Deployment](./runtime-deployment.md) and [Deployment](./deployment.md) - Containers,
+  Kubernetes, and Workers
 
 ## Common Issues
 
-### Permission Errors
+### Permission Errors (Deno)
 
-If you get permission errors, ensure you're running with the necessary permissions:
+Deno grants nothing by default. The flags an application commonly needs:
 
-```bash
-deno run --allow-net --allow-read --allow-env main.ts
-```
+| Flag           | Needed for                                                 |
+| -------------- | ---------------------------------------------------------- |
+| `--allow-net`  | Binding the server port and any outbound connection        |
+| `--allow-env`  | `RuntimePlugin`, which reads the process environment       |
+| `--allow-read` | Loading a `.env` file, serving static files, local storage |
+| `--allow-sys`  | The health plugin's self check, which reads the hostname   |
+
+### `npm error Unsupported URL Type "jsr:"`
+
+You ran `npm install jsr:@setu-ts/…`. npm cannot install `jsr:` specifiers; use
+`npx jsr add @setu-ts/<package>` (or `bunx jsr add` on Bun).
+
+### `deno test` fails on `main_test.ts`
+
+If you started with `deno init`, it created a `main_test.ts` that imports a `handler` export your
+new `main.ts` no longer has. Delete it.
 
 ### Port Already in Use
 
-If port 3000 is already in use, try a different port:
+Start on a different port:
 
 ```typescript
 await app.start({ port: 3001 });
-```
-
-### Module Resolution
-
-For npm-based projects, ensure your `package.json` has the correct imports:
-
-```json
-{
-  "imports": {
-    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.8.0",
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0"
-  }
-}
 ```

@@ -385,7 +385,9 @@ describe('graceful shutdown in the containerized examples', () => {
     // 143) and app.stop() never runs, making terminationGracePeriodSeconds decorative.
     for (const path of MATRIX_ENTRY_POINTS) {
       const source = read(path);
-      expect(source).toContain('addSignalListener');
+      // Either the Deno listener or the portable `IRuntimeServices.onSignal`
+      // seam (M70h) that `setu new` emits — both register the handler.
+      expect(source).toMatch(/addSignalListener\(|\bonSignal\?\.\(/);
       expect(source).toContain('SIGTERM');
       expect(source).toContain('app.stop()');
     }
