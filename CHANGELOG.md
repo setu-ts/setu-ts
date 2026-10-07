@@ -665,6 +665,14 @@ All notable changes to this project are documented here. The format follows
   hands the same snapshot to `ConfigPlugin({ instance })`. The feature table no longer claims event
   sourcing, which the framework does not ship, and now lists Cosmos DB and Bigtable.
 
+- **The CLI guide described a CLI several milestones old (`docs/cli.md`, PR pending).** It said
+  `generate controller` and `generate module` need `decorator-plugin` (neither has since M70h),
+  listed fourteen schematics where there are sixteen (`ws-route` and `sse` were missing), quoted a
+  refusal message the CLI no longer prints, and left the M83 `@Module` file and `MODULES` barrel out
+  of the class-based module tree. It also miscounted the interactive questions, gave the wrong `bun`
+  start command, and showed the workspace discovery map without its `<MEMBER>_HOST` override. Each
+  corrected claim was checked against a project the CLI scaffolded.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
