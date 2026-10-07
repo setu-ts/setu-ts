@@ -9384,6 +9384,11 @@ Notes:
 - **Workers portability varies by arm.** `di`, `realtime.websocket`, `realtime.sse`, and a
   `'memory'` backplane are Workers-portable. A `'redis'` backplane is not (raw socket); a
   `'messaging'` backplane is portable only if its broker is.
+- **The full-stack tier leaves `SchedulerPlugin` out on Cloudflare Workers.** The plugin refuses
+  that platform at `register()`, so registering it unconditionally made every full-stack Workers
+  application fail to start. The starter reads the platform with `detectRuntime()`, as its own
+  `RuntimePlugin()` does, and omits the scheduler there unless a `scheduler` arm is passed; schedule
+  on Workers with `cloudflare-plugin`'s `WorkersCron`.
 - **`session` is gated because it cannot be defaulted.** `SessionPlugin` throws during `register()`
   without an adequate secret, so an always-on arm would stop every starter application from booting
   until one was supplied. It is also genuinely optional: a token-authenticated API has no cookie.
