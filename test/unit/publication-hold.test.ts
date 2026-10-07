@@ -91,6 +91,8 @@ describe('the release scripts after M98o', () => {
     ]);
     expect(out).not.toContain('publication hold — packages/diagnostics-plugin');
     expect(out).not.toMatch(/✗ .*hold/);
-    expect(code).toBe(0);
+    // The output is the failure message: without it a CI failure here reports
+    // only `1 !== 0`, which is all issue #413 had to go on.
+    expect(code, out).toBe(0);
   });
 });

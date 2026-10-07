@@ -26,6 +26,14 @@ export interface FakeNatsOptions {
    * (X28-3). Real nats rejects the probe with a raw `503`.
    */
   rejectJetstreamManager?: boolean;
+  /**
+   * How `js.publish` fails, if at all. A real nats 2.29 `js.publish` returns a
+   * promise of the server's PubAck; a subject no stream captures REJECTS it
+   * with `NatsError` `{ code: '503', message: '503' }`, and a paused server
+   * with `TIMEOUT` after 5 s (both measured). The pre-fix fake returned `void`,
+   * which is what hid an unawaited acknowledgement.
+   */
+  publishFailure?: 'no-stream' | 'timeout';
   /** Whether `streams.add` rejects (a restrictive stream policy, X28-3). */
   rejectStreamAdd?: boolean;
   /**
@@ -372,6 +380,8 @@ export class FakeNatsJetStream {
   #calls: Array<{ method: string; args: unknown[] }>;
   #seededMessages: Map<string, FakeNatsMessage[]>; // subject -> messages
   #handedOut: FakeNatsConsumer[] = [];
+  #publishFailure: FakeNatsOptions['publishFailure'];
+  #sequence = 0;
 
   constructor(
     seedMessages: Array<{
@@ -381,7 +391,9 @@ export class FakeNatsJetStream {
       timestampNanos: number;
       headers?: { keys(): Iterable<string>; get(key: string): string | undefined };
     }>,
+    publishFailure?: FakeNatsOptions['publishFailure'],
   ) {
+    this.#publishFailure = publishFailure;
     this.#calls = [];
     this.#seededMessages = new Map();
     for (const msg of seedMessages) {
@@ -423,8 +435,17 @@ export class FakeNatsJetStream {
     return [...this.#handedOut];
   }
 
-  publish(subject: string, data: Uint8Array, options?: unknown): void {
+  publish(
+    subject: string,
+    data: Uint8Array,
+    options?: unknown,
+  ): Promise<{ stream: string; seq: number; duplicate: boolean }> {
     this.#record('publish', options === undefined ? [subject, data] : [subject, data, options]);
+    if (this.#publishFailure !== undefined) {
+      const code = this.#publishFailure === 'no-stream' ? '503' : 'TIMEOUT';
+      return Promise.reject(Object.assign(new Error(code), { name: 'NatsError', code }));
+    }
+    return Promise.resolve({ stream: 'MESSAGING', seq: ++this.#sequence, duplicate: false });
   }
 
   consumers: {
@@ -514,7 +535,10 @@ export class FakeNatsConnection {
       throw new Error('Connection closed');
     }
     if (!this.#js) {
-      this.#js = new FakeNatsJetStream(this.#options.seededMessages ?? []);
+      this.#js = new FakeNatsJetStream(
+        this.#options.seededMessages ?? [],
+        this.#options.publishFailure,
+      );
     }
     return this.#js;
   }

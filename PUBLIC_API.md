@@ -11698,9 +11698,11 @@ Contract notes:
 - **`Body()`/`Query()`/`Param()` read the VALIDATED value when one exists.** Each checks `ctx.state`
   under `validatedStateKey(target)` first — presence-tested with `has`, so a validated `null` or `0`
   is honoured — and falls back to the raw source when absent. A Zod `transform` or `default`
-  therefore reaches the handler instead of being discarded. `Header()` and `Cookie()` deliberately
-  read their raw sources: headers resolve case-insensitively through `headers.get(name)`, which the
-  validated record would break, and no schema key exists for cookies.
+  therefore reaches the handler instead of being discarded. Declare that parsed type on the source —
+  `Body<T>()`, `Query<T>()` — since the source cannot infer it from the schema. `Header()` and
+  `Cookie()` deliberately read their raw sources: headers resolve case-insensitively through
+  `headers.get(name)`, which the validated record would break, and no schema key exists for cookies.
+  An absent header or cookie resolves to `undefined`, matching their `string | undefined` type.
 - **No reflection**: metadata is stored in plain `Map`s keyed by class reference, not via
   `Reflect.getMetadata()`. No `reflect-metadata` dependency.
 - **Decorator composition**: cross-cutting decorators (`@Params`, `@ValidateBody`, `@Roles`, …) run

@@ -447,6 +447,31 @@ All notable changes to this project are documented here. The format follows
   `setu …` command in the guide is not found. It now matches the other four documented sites, and a
   test fails if any documented install command drifts from them.
 
+- **An absent header resolves to `undefined`, and a validated query can be typed
+  (`@setu-ts/decorator-plugin`, PR pending).** `@Params(Header('X-Name'))` declared its source as
+  `string | undefined` but passed `null` for an absent header, because `Headers.get` answers `null`.
+  It now passes `undefined`, like a missing cookie or query parameter. **Migration:** a handler that
+  tested `=== null` for a missing header must test `=== undefined`. The whole-query source is now
+  generic like `Body`, so `Query<z.infer<typeof schema>>()` declares the shape `@ValidateQuery`
+  wrote instead of a cast. `apps/static-site` takes its port as the first argument (default `8000`).
+
+- **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
+  `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
+  `@cloudflare/workers-types: '^4.20250109.0'`, and `wrangler` moved its `workers-types` peer from
+  `^4` to `^5` inside its own 4.x line — so `npm install`, the first step the CLI prints, failed
+  with ERESOLVE against `wrangler@4.148.0` for every new Workers project. The scaffold now pins
+  `wrangler: '~4.148.0'` and `@cloudflare/workers-types: '^5.20261006.1'`: a tilde range because a
+  floating `^4` was never a promise about that peer, while a patch release keeps it on `^5`. Its
+  `tsconfig.json` also gains `allowImportingTsExtensions`, `noEmit`, `lib: ['ES2022']` and
+  `types: ['@cloudflare/workers-types']`: without them the generated `npm run check` failed on a
+  pristine scaffold (TS5097, every emitted import carries `.ts`) and the types package was installed
+  and read by nothing, so `cloudflare:workers` and `KVNamespace` did not resolve. A template's own
+  `types` and `lib` are kept. Verified end to end: scaffold, `npm install`, `npm run check`,
+  `npx wrangler dev`, and `GET /` answers `200` on workerd. A new guarded e2e runs a dry-run
+  `npm install` of every Workers-capable template's generated manifest, so the next upstream peer
+  change fails the suite (including the weekly dependency-drift job) instead of reaching users; the
+  root suite grants `--allow-run=npm` for it. Existing projects can apply the same two pins and four
+  `tsconfig.json` options by hand.
 - **A scaffolded Worker kept its old bindings after a bindings-only deploy (`@setu-ts/cli`, #423).**
   The `src/index.ts` that `setu new --runtime cloudflare-workers` generates memoized the application
   built from the first request's `env` and reused it for every later request. Cloudflare may keep an
@@ -461,6 +486,15 @@ All notable changes to this project are documented here. The format follows
   request or queue batch still holds it. Only newly scaffolded projects change; an existing project
   can copy the new cache, from `interface BootedApp` through `stopQuietly`, and the
   `acquire`/`release` calls in each export into its own `src/index.ts`.
+
+- **A refused NATS publish resolved as a success (`@setu-ts/messaging-plugin`, #425).** `NatsBroker`
+  never awaited JetStream's acknowledgement, so a publish to a subject no stream captures resolved
+  while the server's `503` escaped as an unhandled rejection, which terminates a Deno or Node
+  process by default; a successful publish was not confirmed either. `publish()` now resolves once
+  JetStream has stored the message and rejects with an error naming the subject (and, for `503`, the
+  `streamSubjects` remedy), keeping the client error as `cause`. An unresponsive server rejects
+  after the client's own 5 s timeout. A failed RPC reply now surfaces as a responder failure, so the
+  request is redelivered rather than its reply silently lost.
 
 - **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
   `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as

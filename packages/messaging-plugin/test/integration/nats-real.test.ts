@@ -119,6 +119,50 @@ describe({
       }
     });
 
+    it('a resolved publish is stored, and a subject outside the stream REJECTS', async () => {
+      // Pre-fix, js.publish was never awaited: the out-of-stream publish
+      // RESOLVED and the server's 503 escaped as an unhandled rejection,
+      // which fails this run (and terminates a Deno or Node process).
+      const nats = await import('npm:nats@2.x');
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const streamName = `M90D_ACK_${suffix}`;
+      const subjectScope = `m90dack.${suffix}`;
+
+      let broker: IMessageBroker | undefined;
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({
+            broker: 'nats',
+            url,
+            streamName,
+            streamSubjects: [`${subjectScope}.>`],
+          }),
+          brokerProbe((b) => {
+            broker = b;
+          }),
+        ],
+      });
+      const jsmConn = await nats.connect({ servers: url });
+      const jsm = await jsmConn.jetstreamManager();
+      try {
+        await app.start();
+        await broker!.publish(`${subjectScope}.orders`, { id: 1 });
+        expect((await jsm.streams.info(streamName)).state.messages).toBe(1);
+
+        const outside = `outside.${suffix}`;
+        await expect(broker!.publish(outside, { id: 2 })).rejects.toThrow(
+          `no stream captures this subject`,
+        );
+        await expect(broker!.publish(outside, { id: 2 })).rejects.toThrow(JSON.stringify(outside));
+        expect((await jsm.streams.info(streamName)).state.messages).toBe(1);
+      } finally {
+        await app.stop();
+        await jsm.streams.delete(streamName).catch(() => {});
+        await jsmConn.close();
+      }
+    });
+
     it('boots against a pre-existing stream without streamSubjects and leaves it untouched', async () => {
       const nats = await import('npm:nats@2.x');
       const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);

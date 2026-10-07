@@ -164,10 +164,20 @@ jobs:
           # deliberately resolves EVERY range fresh (`--reload --frozen=false`)
           # and then runs the whole suite against whatever upstream published
           # this week — unreviewed third-party code, by design. It needs no git
-          # credential: its only git command is a local `git ls-files`, and the
-          # issue-filing step gets its token explicitly through GH_TOKEN rather
-          # than from the git config.
+          # credential: every git command it runs is a LOCAL read (`git
+          # ls-files` here, and the suite's `git describe`/`git log` below), and
+          # the issue-filing step gets its token explicitly through GH_TOKEN
+          # rather than from the git config.
           persist-credentials: false
+          # The suite runs `release:verify`, whose check 9 lists the pull
+          # requests merged since the previous `v*` tag. A shallow checkout has
+          # no tag, so that check refused with "No release tag is reachable" and
+          # filed issue #413 as dependency drift when nothing had drifted. ci.yml
+          # and release.yml already fetch full history for the same check;
+          # `test/unit/release-notes.test.ts` now asserts every suite consumer
+          # does. The fetch happens during checkout, while the credential is
+          # still held, so dropping it above costs nothing here.
+          fetch-depth: 0
 
       - uses: denoland/setup-deno@v2
         with:
