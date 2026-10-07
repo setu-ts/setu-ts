@@ -93,12 +93,17 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/examples.md': {
-    total: 14,
-    ts: 11,
-    compile: 11,
+    // Rewritten after the examples cold read: the per-app "Key code" blocks
+    // described apps that no longer existed (routes, plugins, ports), so each
+    // deep dive now gives the shell commands it was checked with and links to
+    // the app's source. One compiled block remains: the factory/smoke shape
+    // every example shares, taken from apps/minimal.
+    total: 18,
+    ts: 1,
+    compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 3,
+    skipped: 17,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -199,13 +204,15 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 272 after the getting-started cold read: three identical per-runtime
   // blocks collapse to one and a "Stopping Cleanly" block is added (-2, all
   // compiling). 271 after the runtime-deployment cold read: the Workers
-  // execution-limits best practice became prose (-1, compiling).
-  total: 271,
-  ts: 223,
-  compile: 190,
+  // execution-limits best practice became prose (-1, compiling). 275 after
+  // the examples cold read: ten invented "Key code" blocks became shell
+  // commands and source links (-10 compiling, +14 skipped).
+  total: 275,
+  ts: 213,
+  compile: 180,
   external: 33,
   pseudocode: 0,
-  skipped: 48,
+  skipped: 62,
 };
 
 describe('actual-fence compiler — all ten guides (shared engine)', () => {

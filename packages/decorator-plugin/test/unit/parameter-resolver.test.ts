@@ -140,6 +140,14 @@ describe('parameter resolver', () => {
     expect(await resolveParameter(ctx, { index: 0, type: 'param' })).toBeUndefined();
   });
 
+  it('resolves an absent @Header(name) to undefined, never null', async () => {
+    // `Headers.get` answers null; the source is typed `string | undefined`, so a
+    // handler testing `!== undefined` must not see a missing header as present.
+    const ctx = createFakeRequestContext({ headers: {} });
+    expect(await resolveParameter(ctx, { index: 0, type: 'header', name: 'authorization' }))
+      .toBeUndefined();
+  });
+
   it('@Header without name returns undefined', async () => {
     const ctx = createFakeRequestContext({ headers: { 'x-request-id': 'rid' } });
     expect(await resolveParameter(ctx, { index: 0, type: 'header' })).toBeUndefined();

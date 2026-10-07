@@ -9,10 +9,10 @@ independence.
 | Concept              | Fastify                     | Setu-TS                                |
 | -------------------- | --------------------------- | -------------------------------------- |
 | **Runtime**          | Node.js only                | Deno, Node.js, Bun, Cloudflare Workers |
-| **Request/Response** | FastifyRequest/FastifyReply | Web-standard Request/Response          |
+| **Request/Response** | FastifyRequest/FastifyReply | `ctx.request` / `ctx.response`         |
 | **Plugin System**    | `fastify.register()`        | `app.register(plugin)`                 |
-| **Encapsulation**    | Per-instance decoration     | Capability tokens, service registry    |
-| **Decorators**       | `fastify.decorate()`        | Service registry                       |
+| **Encapsulation**    | Per-instance decoration     | None: services are application-wide    |
+| **Decorators**       | `fastify.decorate()`        | Service registry (capability tokens)   |
 | **Schema**           | JSON Schema (ajv)           | Zod (or custom validators)             |
 
 ## Basic Application
@@ -90,7 +90,7 @@ app.post<{ Body }>('/users', async (request, reply) => {
 ```typescript
 app.router.get('/users/:id', async (ctx) => {
   const id = ctx.params.id;
-  const search = new URL(ctx.request.url).searchParams.get('search');
+  const search = ctx.query.search;
   return ctx.response.json({ id, search });
 });
 
@@ -168,8 +168,12 @@ app.addHook('onError', (request, reply, error, done) => {
 
 ### Setu-TS
 
+Lifecycle hooks are registered from inside a plugin, through the `ctx` its `register(ctx)` receives;
+the application object has no `lifecycle` member. Middleware is the alternative that needs no
+plugin.
+
 ```typescript
-// Using lifecycle hooks
+// Inside a plugin's register(ctx)
 ctx.lifecycle.onRequest((ctx) => {
   console.log('Request started:', ctx.request.url);
 });
@@ -297,22 +301,30 @@ app.post('/users', {
 
 ```typescript
 import { z } from 'zod';
+import { validatedStateKey } from '@setu-ts/common';
+import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
 
 const userSchema = z.object({
   name: z.string(),
   email: z.string().email(),
 });
 
-// Manual Zod validation
-app.router.post('/users', async (ctx) => {
-  const result = userSchema.safeParse(await ctx.request.json());
-  if (!result.success) {
-    return ctx.response.status(400).json({ errors: result.error.issues });
-  }
-  const body = result.data;
-  return ctx.response.status(201).json({ created: true });
+app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
+
+app.router.post('/users', {
+  middleware: [validateBody(userSchema)],
+  handler: async (ctx) => {
+    // The parsed value, with the schema's defaults and transforms applied.
+    const body = ctx.state.get(validatedStateKey('body'));
+    return ctx.response.status(201).json({ created: body });
+  },
 });
 ```
+
+`validateBody(...)` answers an invalid body with `400` before the handler runs, like a Fastify
+`schema.body`. It also describes the body in the OpenAPI document, so the route needs no separate
+`schema.body` for documentation. A route's `schema` option documents but does not validate. To
+validate by hand instead, call `userSchema.safeParse(await ctx.request.json())` in the handler.
 
 ## Error Handling
 
@@ -329,28 +341,22 @@ app.setErrorHandler((error, request, reply) => {
 ### Setu-TS
 
 ```typescript
-import type { MiddlewareFunction } from '@setu-ts/common';
-import { HttpError } from '@setu-ts/exceptions';
+import { errorHandler } from '@setu-ts/exceptions';
 
-const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
-  try {
-    await next();
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return ctx.response.status(error.statusCode).json(
-        { error: error.message },
-      );
-    }
-
-    console.error('Unhandled error', { error });
-    return ctx.response.status(500).json(
-      { error: 'Internal server error' },
-    );
-  }
-};
-
-app.middleware.add(errorMiddleware);
+app.middleware.add(
+  errorHandler({
+    respond(error, ctx) {
+      return ctx.response.status(error.statusCode).json({ error: error.message });
+    },
+  }),
+  { priority: 0, name: 'error-handler' },
+);
 ```
+
+`errorHandler` logs the error and normalizes it to an `HttpError` before `respond` sees it, so an
+unexpected error arrives as a `500` whose message is generic while the original goes to the log.
+Omit `respond` to use the configured format (`'rfc9457'` Problem Details is what `setu new`
+scaffolds).
 
 ## Type Providers
 
@@ -410,11 +416,11 @@ ctx.lifecycle.onClose(() => {
 
 // More detailed shutdown lifecycle
 ctx.lifecycle.onStopping(() => {
-  console.log('Stopping - no new requests');
+  console.log('Stopping - still serving; deregister from discovery here');
 });
 
 ctx.lifecycle.onShutdown(() => {
-  console.log('Shutdown - draining requests');
+  console.log('Shutdown - no longer serving; close connections here');
 });
 ```
 
@@ -456,6 +462,10 @@ function MyAuthPlugin(): IPlugin {
 app.register(MyAuthPlugin());
 ```
 
+For authentication itself, `@setu-ts/auth-plugin` already does this. `AuthPlugin` verifies the token
+on every request and sets `ctx.request.user`, and `requireAuth()` in a route's `middleware` answers
+`401`.
+
 ## Server Decoration
 
 ### Fastify
@@ -471,14 +481,18 @@ app.addHook('onRequest', async (request, reply) => {
 ### Setu-TS
 
 ```typescript
-const authMiddleware: MiddlewareFunction = async (ctx, next) => {
-  // Set user on context
-  ctx.state.set('user', { id: 1, name: 'John' });
+const loadAccount: MiddlewareFunction = async (ctx, next) => {
+  // Per-request data goes in ctx.state, under a key your application owns.
+  ctx.state.set('app:account', { id: 1, name: 'John' });
   await next();
 };
 
-app.middleware.add(authMiddleware);
+app.middleware.add(loadAccount);
 ```
+
+The authenticated principal has its own place: `ctx.request.user`, which `AuthPlugin` sets. It
+accepts one write per request, so a later stage cannot silently replace the identity an earlier one
+established.
 
 ## Async Initialization
 
@@ -523,18 +537,24 @@ console.log(response.json());
 ### Setu-TS
 
 ```typescript
-import { createTestApp, inject } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createTestApp } from '@setu-ts/testing';
 
-const app = await createTestApp();
+const app = await createTestApp({ plugins: [RuntimePlugin()] });
 app.router.get('/', async (ctx) => ctx.response.json({ hello: 'world' }));
 
-const response = await inject(app, {
+const response = await app.inject({
   method: 'GET',
   url: '/',
 });
 
 console.log(response.json());
+await app.stop();
 ```
+
+`app.inject()` works like Fastify's and needs no socket. `createTestApp` starts the application
+first, and it needs a runtime plugin among `plugins`. To test your real composition, pass the
+factory your `main.ts` uses instead: `createTestApp({ app: createApp() })`.
 
 ## Common Patterns
 
@@ -553,17 +573,23 @@ app.register(async (child) => {
 
 ### Setu-TS
 
-```typescript
-// Use capability tokens for encapsulation
-ctx.services.register('child-util', { value: 'child' });
+There is no Fastify-style encapsulation: a service registered by any plugin is visible to the whole
+application. Keep a helper private by not registering it, and closing over it in the plugin instead:
 
-// Register routes in a scoped manner
-ctx.router.group('/child', (group) => {
-  group.get('/', async (ctx) => {
-    const util = ctx.services.get<{ value: string }>('child-util');
-    return ctx.response.json({ util });
-  });
-});
+```typescript
+import type { IPlugin } from '@setu-ts/common';
+
+export function ChildPlugin(): IPlugin {
+  const childUtil = () => 'child'; // visible only inside this plugin
+
+  return {
+    name: 'child',
+    version: '1.0.0',
+    register(ctx) {
+      ctx.router.get('/child', (requestCtx) => requestCtx.response.json({ util: childUtil() }));
+    },
+  };
+}
 ```
 
 ### Reply Decorators
@@ -584,11 +610,14 @@ app.get('/', async (request, reply) => {
 ### Setu-TS
 
 ```typescript
-// Use context state
-app.router.get('/', async (ctx) => {
-  ctx.state.set('user', { id: 1 });
-  return ctx.response.json({ user: ctx.state.get('user') });
-});
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
+
+// A plain function in place of a reply decorator
+function withUser(ctx: IRequestContext, user: { id: number }): HandlerResult {
+  return ctx.response.status(200).json({ user });
+}
+
+app.router.get('/', async (ctx) => withUser(ctx, { id: 1 }));
 ```
 
 ## Migration Checklist
@@ -597,10 +626,10 @@ app.router.get('/', async (ctx) => {
 - [ ] Replace `app.get/post/put/delete` with programmatic routes
 - [ ] Replace hooks with lifecycle hooks or middleware
 - [ ] Replace decorators with service registration
-- [ ] Replace JSON Schema validation with Zod
-- [ ] Replace `app.inject()` with `inject()` from testing utilities
+- [ ] Replace JSON Schema validation with a Zod schema in `validateBody(...)`
+- [ ] Keep `app.inject()` in tests, and boot the real app with `createTestApp({ app: createApp() })`
 - [ ] Update logging to use `LoggerPlugin`
-- [ ] Update error handling to use middleware
+- [ ] Replace `setErrorHandler` with `errorHandler()` from `@setu-ts/exceptions`
 - [ ] Update deployment for target runtime
 
 ## Next Steps

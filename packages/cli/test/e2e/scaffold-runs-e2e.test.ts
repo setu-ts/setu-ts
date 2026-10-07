@@ -31,6 +31,7 @@ import type { Prompter } from '../../src/prompt.ts';
 import {
   bootAndProbe,
   bootWithGeneratedPermissions,
+  unusedPort,
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
@@ -857,5 +858,86 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
     expect(result.signedIn.status).toBe(200);
     expect(result.signedIn.body).toContain('Signed in as');
     expect(result.signedIn.body).toContain('ada@example.com');
+  });
+});
+
+describe('a scaffolded full-stack project serves route edits in development', () => {
+  // `deno task dev` runs Vite in-process. Before it existed, a route importing a
+  // `@setu-ts` package answered 500 under Vite's dev SSR runner, which cannot
+  // resolve a JSR import; and a package Vite loaded itself would have been a
+  // second copy whose context keys matched nothing. This boots the generated
+  // entry and edits a route while it runs.
+  it('renders through Vite, shares context keys, and serves an edit without a restart', async () => {
+    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+    const installed = await denoRunRetry(project, ['install', '--allow-scripts']);
+    expect(installed.code, installed.output).toBe(0);
+
+    const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
+      tasks: Record<string, string>;
+    };
+    expect(manifest.tasks['dev']).toBe('deno task install && deno run -A dev.ts');
+
+    const port = unusedPort();
+    const vitePort = unusedPort();
+    // The task's own command after its install step, so the process killed
+    // below is the server itself rather than a task runner wrapping it.
+    const child = new Deno.Command(Deno.execPath(), {
+      args: ['run', '-A', 'dev.ts'],
+      cwd: project,
+      env: { PORT: String(port), VITE_PORT: String(vitePort) },
+      stdout: 'piped',
+      stderr: 'piped',
+    }).spawn();
+    const origin = `http://127.0.0.1:${port}`;
+    try {
+      let served = false;
+      for (let attempt = 0; attempt < 300 && !served; attempt++) {
+        try {
+          const response = await fetch(`${origin}/health`);
+          await response.body?.cancel();
+          served = response.ok;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      expect(served).toBe(true);
+
+      // The login loader reads the CSRF token populateLoadContext set under a
+      // contextKeyFor() key: a second module copy would leave it at its default.
+      const login = await fetch(`${origin}/login`);
+      const page = await login.text();
+      expect(login.status, page).toBe(200);
+      expect(page).toMatch(/name="_csrf"\s+value="[^"]+"/);
+
+      // A client module, through the application's port.
+      const module = /"(\/__vite\/app\/root\.tsx[^"]*)"/.exec(page)?.[1];
+      expect(module).toBeDefined();
+      const client = await fetch(`${origin}${module}`);
+      await client.body?.cancel();
+      expect(client.status).toBe(200);
+      expect(client.headers.get('content-type')).toContain('javascript');
+
+      const route = `${project}/app/routes/_auth/login.tsx`;
+      const source = await Deno.readTextFile(route);
+      expect(source).toContain('>Sign in<');
+      await Deno.writeTextFile(route, source.replace('>Sign in<', '>Sign in, edited<'));
+      let edited = '';
+      for (let attempt = 0; attempt < 50 && !edited.includes('Sign in, edited'); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        edited = await (await fetch(`${origin}/login`)).text();
+      }
+      expect(edited).toContain('Sign in, edited');
+    } finally {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Already exited; its output is still drained below.
+      }
+      await child.status;
+      await child.stdout.cancel();
+      await child.stderr.cancel();
+    }
   });
 });

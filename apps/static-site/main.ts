@@ -17,5 +17,6 @@ app.router.get('/health', (ctx) => {
   return ctx.response.json({ status: 'ok' });
 });
 
-await app.start({ port: 8000 });
-console.log('Server running on http://localhost:8000');
+const port = Number(Deno.args[0] ?? 8000);
+await app.start({ port });
+console.log(`Server running on http://localhost:${port}`);

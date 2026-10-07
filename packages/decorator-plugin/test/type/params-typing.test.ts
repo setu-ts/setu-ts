@@ -36,6 +36,28 @@ describe('@Params type checking', () => {
     expect(typeof C).toBe('function');
   });
 
+  it('lets a validated whole-query source declare the schema output type', () => {
+    interface ListQuery {
+      page: number;
+      limit: number;
+    }
+
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @Params(Query<ListQuery>())
+      list(query: ListQuery): number {
+        return query.page + query.limit;
+      }
+
+      @Get('/raw')
+      // @ts-expect-error A bare Query() is the raw string record, not ListQuery.
+      @Params(Query())
+      raw(_query: ListQuery): void {}
+    }
+    expect(typeof C).toBe('function');
+  });
+
   it('rejects a parameter whose type disagrees with its source', () => {
     @Controller('/x')
     class C {

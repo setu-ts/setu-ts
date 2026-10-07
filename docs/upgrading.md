@@ -12,6 +12,13 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Pass `autoRegister: false` to keep a container closed
+
+`DiPlugin()` now defaults `autoRegister` to `true`, so a token the container does not hold resolves
+from the kernel's service registry. Nothing changes for a project that already passed
+`autoRegister: true`. A project that relied on the old default to refuse framework capabilities
+passes `DiPlugin({ autoRegister: false })`.
+
 ### Handle `409` for a duplicate key, where it used to be `500`
 
 A write that duplicates a primary key or a unique index now rejects with `DuplicateKeyError` from

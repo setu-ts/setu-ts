@@ -67,8 +67,8 @@ const CLASS_BASED_ONLY: readonly (readonly [schematic: string, name: string])[] 
  *
  * This is the shape the class-based template's own showcase cannot reach — its service
  * has no dependencies and its controller injects an explicit provider — which is why
- * `DiPlugin()`'s `autoRegister: false` default shipped through five releases with every
- * gate green. `autoRegister` gates BOTH the container's external resolver and its
+ * `DiPlugin()`'s `autoRegister: false` default (through 0.8.0) shipped through five
+ * releases with every gate green. `autoRegister` gates BOTH the container's external resolver and its
  * registry fallback, so without it this class cannot be constructed at all and
  * `app.start()` never completes.
  *
@@ -481,9 +481,9 @@ describe('generated artifacts are wired — end to end', () => {
         expect(result['serviceToken']).toBe('widget-svc');
         // E3: a decorated service constructor-injecting a FRAMEWORK CAPABILITY resolves,
         // and what arrived is the live config service rather than a placeholder. This
-        // fails outright — `app.start()` never completes — if the template goes back to
-        // emitting a bare `DiPlugin()`, because `autoRegister` gates the container's
-        // only route to the kernel registry.
+        // fails outright — `app.start()` never completes — if the template ever emits
+        // `autoRegister: false`, because that option gates the container's only route
+        // to the kernel registry.
         expect(result['capabilityInjected']).toBe('config:function');
       }
       if (cqrs) {

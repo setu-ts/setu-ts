@@ -245,6 +245,56 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(contentsOf([...projectFiles('shop', 'deno', host)], '.gitignore')).toContain('build/\n');
   });
 
+  it('emits a development entry and a dev task that skips the production build', () => {
+    const files = [...projectFiles('shop', 'deno', host)];
+    const tasks = (manifestOf('deno') as unknown as { tasks: Record<string, string> }).tasks;
+    expect(tasks['dev']).toBe('deno task install && deno run -A dev.ts');
+    const dev = contentsOf(files, 'dev.ts');
+    expect(dev).toContain('viteDevExternals({');
+    expect(dev).toContain('packages: [...frameworkPackages, ...workspaceLibraries]');
+    expect(dev).toContain('resolve: (specifier) => import.meta.resolve(specifier)');
+    expect(dev).toContain("mode: 'development'");
+    // The externals list dev.ts imports is the one the server build uses.
+    const vite = contentsOf(files, 'vite.config.ts');
+    expect(vite).toContain('export const frameworkPackages = [');
+    expect(vite).toContain('export const workspaceLibraries: string[] = [];');
+  });
+
+  it('hands the development SSR runtime to the plugin in place of assetsDir', () => {
+    const config = contentsOf([...projectFiles('shop', 'deno', host)], 'setu.config.ts');
+    expect(config).toContain(
+      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+    );
+    expect(config).toContain(
+      "...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),",
+    );
+    expect(config).toContain(
+      "import type { ReactRouterPluginOptions } from '@setu-ts/react-router-plugin';",
+    );
+  });
+
+  it('emits no development entry off Deno', () => {
+    for (const runtime of ['node', 'bun', 'cloudflare-workers'] as const) {
+      const files = [
+        ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
+      ];
+      expect(files.some((file) => file.path === 'dev.ts')).toBe(false);
+    }
+    const workers = contentsOf(
+      [...projectFiles(
+        'shop',
+        'cloudflare-workers',
+        resolveHost(getTemplate('full-stack')!, 'cloudflare-workers'),
+      )],
+      'setu.config.ts',
+    );
+    // One signature on every target; Workers reads none of it.
+    expect(workers).toContain(
+      "  _ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+    );
+    expect(workers).not.toContain('ssr === undefined');
+  });
+
   it('leaves a template WITHOUT a frontend build untouched', () => {
     // The three settings above ride one signal, so a REST project must gain
     // none of them — a `package.json` in a Deno project is the trap M58 hit.
@@ -323,6 +373,56 @@ describe('the Cloudflare Workers target', () => {
     expect(pkg.scripts['check']).toBe('tsc --noEmit');
     expect(pkg.devDependencies['typescript']).toBeDefined();
     expect(pkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
+  });
+
+  it('pins wrangler and workers-types as a set whose peer ranges intersect', () => {
+    const pkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
+      devDependencies: Record<string, string>;
+    };
+
+    // Measured: wrangler 4.148.0 declares peerOptional
+    // `@cloudflare/workers-types@^5.20261006.1`, and the `^4.0.0` wrangler range
+    // beside a `^4.x` types pin made `npm install` fail with ERESOLVE on every
+    // new Workers project. A floating `^4` is refused because wrangler moved
+    // that peer's MAJOR inside its own 4.x line; the guarded npm install in
+    // `workers-install-e2e.test.ts` is what proves the set resolves.
+    expect(pkg.devDependencies['wrangler']).toBe('~4.148.0');
+    expect(pkg.devDependencies['@cloudflare/workers-types']).toBe('^5.20261006.1');
+  });
+
+  it('emits a tsconfig the generated check script can pass (X9-4)', () => {
+    const tsconfig = JSON.parse(contentsOf(filesOf(rest), 'tsconfig.json')) as {
+      compilerOptions: Record<string, unknown>;
+    };
+
+    // Every emitted import carries `.ts`, which tsc refuses (TS5097) without
+    // `allowImportingTsExtensions`, which in turn requires `noEmit`. And the
+    // types package is not `@types/*`, so tsc loads it only when named — before
+    // this it was installed and read by nothing.
+    expect(tsconfig.compilerOptions['allowImportingTsExtensions']).toBe(true);
+    expect(tsconfig.compilerOptions['noEmit']).toBe(true);
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types']);
+    expect(tsconfig.compilerOptions['lib']).toEqual(['ES2022']);
+  });
+
+  it("keeps a template's own types and lib beside the Workers ones", () => {
+    const fullStack = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+    const tsconfig = JSON.parse(contentsOf(filesOf(fullStack), 'tsconfig.json')) as {
+      compilerOptions: Record<string, unknown>;
+    };
+
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types', 'vite/client']);
+    expect(tsconfig.compilerOptions['lib']).toEqual(['DOM', 'DOM.Iterable', 'ES2022']);
+  });
+
+  it('leaves the tsconfig of every other npm target unchanged', () => {
+    const node = resolveHost(getTemplate('rest')!, 'node');
+    const tsconfig = JSON.parse(
+      contentsOf([...projectFiles('edge', 'node', node)], 'tsconfig.json'),
+    ) as { compilerOptions: Record<string, unknown> };
+
+    expect(tsconfig.compilerOptions['types']).toBeUndefined();
+    expect(tsconfig.compilerOptions['allowImportingTsExtensions']).toBeUndefined();
   });
 
   it('documents every binding type the plugin reads (X9-9)', () => {

@@ -132,7 +132,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M98n: +1 for the devtool-gated observed-fetch composition.
   'packages/sdk/README.md': 15,
   'packages/telemetry-plugin/README.md': 2,
-  'packages/testing/README.md': 9,
+  'packages/testing/README.md': 10,
 };
 
 /** Reads every fence the engine would compile from one README. */

@@ -60,6 +60,62 @@ describe('NatsBroker', () => {
     await broker.disconnect();
   });
 
+  // js.publish answers with a promise of the server's PubAck. Unawaited, a
+  // refused publish resolved as a success while the refusal escaped as an
+  // unhandled rejection — which terminates a Deno or Node process.
+  describe('awaits the JetStream acknowledgement', () => {
+    it('rejects, naming the subject and the remedy, when no stream captures it', async () => {
+      const fakeConnection = new FakeNatsConnection({ publishFailure: 'no-stream' });
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: fakeConnection,
+      });
+      await broker.connect();
+      const error = await broker.publish('outside.the.stream', { a: 1 }).then(
+        () => undefined,
+        (e: unknown) => e as Error & { cause?: { code?: string } },
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect(error!.message).toContain('"outside.the.stream"');
+      expect(error!.message).toContain('NatsOptions.streamSubjects');
+      expect(error!.cause?.code).toBe('503');
+      await broker.disconnect();
+    });
+
+    it('rejects, naming the subject, when the server never acknowledges', async () => {
+      const fakeConnection = new FakeNatsConnection({ publishFailure: 'timeout' });
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: fakeConnection,
+      });
+      await broker.connect();
+      const error = await broker.publishWithHeaders('orders', { id: 1 }, {}).then(
+        () => undefined,
+        (e: unknown) => e as Error & { cause?: { code?: string } },
+      );
+      expect(error!.message).toContain('"orders"');
+      expect(error!.message).not.toContain('streamSubjects');
+      expect(error!.cause?.code).toBe('TIMEOUT');
+      await broker.disconnect();
+    });
+
+    it('rejects through the header-carrying path too', async () => {
+      const fakeConnection = new FakeNatsConnection({ publishFailure: 'no-stream' });
+      const values = new Map<string, string>();
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: fakeConnection,
+        headersFactory: () => ({
+          set: (key, value) => values.set(key, value),
+          get: (key) => values.get(key),
+          keys: () => values.keys(),
+        }),
+      });
+      await broker.connect();
+      await expect(broker.publishWithHeaders('nowhere', { a: 1 }, { traceparent: '00-t' }))
+        .rejects.toThrow('"nowhere"');
+      expect(values.get('traceparent')).toBe('00-t');
+      await broker.disconnect();
+    });
+  });
+
   it('publishes supplied framework headers through the injected factory', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();

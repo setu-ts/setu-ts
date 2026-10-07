@@ -31,7 +31,9 @@ export interface DiPluginOptions {
    * automatically falls back to the kernel's ServiceRegistry. The first
    * successful fallback is cached as a singleton so subsequent resolves
    * are fast. Explicit DI registrations always take precedence. Defaults
-   * to `false`.
+   * to `true`, so a provider can inject a framework capability such as
+   * `CAPABILITIES.LOGGER`; `false` confines resolution to the container's
+   * own registrations.
    */
   readonly autoRegister?: boolean;
 }
@@ -54,10 +56,7 @@ const PLUGIN_NAME = 'di-plugin';
  * ```typescript
  * import { DiPlugin } from '@setu-ts/di-plugin';
  *
- * app.register(DiPlugin({
- *   defaultScope: 'singleton',
- *   autoRegister: true,
- * }));
+ * app.register(DiPlugin({ defaultScope: 'singleton' }));
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
@@ -65,7 +64,7 @@ const PLUGIN_NAME = 'di-plugin';
  */
 export function DiPlugin(options?: DiPluginOptions): IPlugin {
   const defaultScope = options?.defaultScope ?? DEFAULT_SCOPE;
-  const autoRegister = options?.autoRegister ?? false;
+  const autoRegister = options?.autoRegister ?? true;
 
   return {
     name: PLUGIN_NAME,

@@ -8,9 +8,20 @@ and React Fast Refresh — while the setu-ts app still serves the SSR document a
 No plugin code is required. The `loadRequestHandler` option is the seam; everything here is
 app-level configuration.
 
-Every claim below was verified end-to-end against a running kernel app on **Deno 2.9.4**, **Vite
-7.3.6**, **react-router 8.3.0**, and **@react-router/dev 8.3.0**. Where a plausible-looking approach
-does not work, it is called out explicitly rather than omitted.
+The mechanism below was verified end-to-end against a running kernel app on **Deno 2.9.4**, **Vite
+7.3.6** and **react-router 8.3.0**, and verified again on **Deno 2.9.6**, **Vite 8.3.1** and
+**react-router 8.4.0**, the versions `setu new --template full-stack` resolves today. Where a
+plausible-looking approach does not work, it is called out explicitly rather than omitted.
+
+> **A project scaffolded by `setu new --template full-stack` on Deno already has this loop:** run
+> `deno task dev`. Its `dev.ts` is the wiring below, plus `viteDevExternals`, which the loop needs
+> whenever a route imports a `@setu-ts` package at run time, as the skeleton's
+> `app/lib/context-keys.server.ts` does. Without it Vite's development SSR runner resolves imports
+> through `node_modules`, so on Deno, where the package is a JSR import, every page answers `500`
+> with `Cannot find module '@setu-ts/react-router-plugin'`. Marking the package external in
+> `environments.ssr.resolve.external` does not help: the runner still resolves the external through
+> `node_modules`. The dev entry has been verified on Deno only; on a Node or Bun project those
+> packages are in `node_modules`, and `setu new` emits no `dev.ts` there.
 
 > **Not related to `deno desktop --hmr`.** Deno 2.9.4 added `--hmr` support for React Router, but it
 > is scoped to the `deno desktop` command, which detects `@react-router/dev` in `package.json` and
@@ -41,14 +52,14 @@ The app then needs exactly one extra route: a proxy for the URLs Vite owns.
 {
   "type": "module",
   "dependencies": {
-    "react": "19.2.8", // MUST be the exact same version as react-dom
-    "react-dom": "19.2.8",
-    "react-router": "^8.3.0",
-    "isbot": "^5" // see note below
+    "react": "19.3.0", // MUST resolve to the exact same version as react-dom
+    "react-dom": "19.3.0",
+    "react-router": "^8.4.0",
+    "isbot": "^5" // only with React Router's default server entry; see note below
   },
   "devDependencies": {
-    "@react-router/dev": "^8.3.0",
-    "vite": "^7.0.0"
+    "@react-router/dev": "^8.4.0",
+    "vite": "^8.0.0"
   }
 }
 ```
@@ -59,9 +70,10 @@ at install time:
 - **`react` and `react-dom` must be the identical version**, not merely compatible ranges. `^19.0.0`
   on both resolved to `19.2.7` and `19.2.8` and produced
   `Incompatible React versions: The "react" and "react-dom" packages must have the exact same version`.
-- **Declare `isbot` yourself.** React Router's default server entry uses it, and the dev plugin
-  tries to `npm install isbot@5` on the fly when it is missing — which fails inside Deno's managed
-  `node_modules` (`npm error Cannot read properties of null`).
+- **Declare `isbot` yourself if you use React Router's default server entry.** That entry imports
+  it, and the dev plugin tries to `npm install isbot@5` on the fly when it is missing — which fails
+  inside Deno's managed `node_modules` (`npm error Cannot read properties of null`). A project from
+  `setu new --template full-stack` ships its own `app/entry.server.tsx` and does not need it.
 
 `nodeModulesDir` must be enabled, because Vite cannot be loaded from Deno's global npm cache:
 
@@ -103,7 +115,7 @@ import * as vite from 'vite';
 import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
+import { ReactRouterPlugin, viteDevExternals } from '@setu-ts/react-router-plugin';
 
 const VITE_PORT = 5199;
 const BASE = '/__vite/';
@@ -113,6 +125,12 @@ const viteServer = await vite.createServer({
   configFile: `${import.meta.dirname}/vite.config.ts`,
   server: { port: VITE_PORT, strictPort: true },
   logLevel: 'error',
+  // Every @setu-ts package a route imports, resolved by Deno so the route and
+  // this entry share one module instance (context keys are matched by identity).
+  plugins: [viteDevExternals({
+    packages: ['@setu-ts/common', '@setu-ts/react-router-plugin'],
+    resolve: (specifier) => import.meta.resolve(specifier),
+  })],
 });
 await viteServer.listen();
 
@@ -205,8 +223,14 @@ app.register(ReactRouterPlugin({
 ```
 
 Keep the dev-only Vite import and proxy route behind an environment check so neither reaches a
-production bundle. Vite stays an app-level `devDependency` and is never imported by the plugin
-(AI_GUIDELINES §12.2).
+production bundle.
+
+The example above registers `ReactRouterPlugin` on a bare application. A real application's loaders
+usually read capabilities its composition provides, such as a session, which a bare application does
+not register, so those pages answer `500` in this loop. Pass the same `loadRequestHandler` and
+`mode: 'development'` through the composition you already have instead. The full-stack starter
+forwards its `reactRouter` option to the plugin unchanged. Vite stays an app-level `devDependency`
+and is never imported by the plugin (AI_GUIDELINES §12.2).
 
 ## Notes on `entry.server.tsx` under Deno
 
@@ -222,16 +246,18 @@ the compiled build.
 
 ## Verified behavior summary
 
-| Step                                                      | Result                                  |
-| --------------------------------------------------------- | --------------------------------------- |
-| `import 'vite'` under Deno                                | works (requires `nodeModulesDir`)       |
-| `@react-router/dev/vite` under Deno                       | works                                   |
-| `vite.createServer()` in-process                          | works (real config file required)       |
-| `ssrLoadModule('virtual:react-router/server-build')`      | returns the `ServerBuild`               |
-| SSR through the build thunk on the app port               | 200 HTML                                |
-| Client modules under `base`, proxied through the app port | 200 `text/javascript`                   |
-| Vite HMR client reachable through the app port            | 200                                     |
-| Editing a route file, then re-requesting                  | new output, **no restart**              |
-| `server.origin` rewriting emitted module URLs             | **does not work** — use `base`          |
-| `configFile: false`                                       | **rejected** by the React Router plugin |
-| Mismatched `react` / `react-dom` patch versions           | **throws** at `ssrLoadModule`           |
+| Step                                                      | Result                                    |
+| --------------------------------------------------------- | ----------------------------------------- |
+| `import 'vite'` under Deno                                | works (requires `nodeModulesDir`)         |
+| A route importing `@setu-ts/*` at run time, on Deno       | **500** unless `viteDevExternals` is used |
+| The same route with `viteDevExternals`, on Deno           | 200, context keys shared                  |
+| `@react-router/dev/vite` under Deno                       | works                                     |
+| `vite.createServer()` in-process                          | works (real config file required)         |
+| `ssrLoadModule('virtual:react-router/server-build')`      | returns the `ServerBuild`                 |
+| SSR through the build thunk on the app port               | 200 HTML                                  |
+| Client modules under `base`, proxied through the app port | 200 `text/javascript`                     |
+| Vite HMR client reachable through the app port            | 200                                       |
+| Editing a route file, then re-requesting                  | new output, **no restart**                |
+| `server.origin` rewriting emitted module URLs             | **does not work** — use `base`            |
+| `configFile: false`                                       | **rejected** by the React Router plugin   |
+| Mismatched `react` / `react-dom` patch versions           | **throws** at `ssrLoadModule`             |
