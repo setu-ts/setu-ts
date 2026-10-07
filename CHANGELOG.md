@@ -724,6 +724,16 @@ All notable changes to this project are documented here. The format follows
   too short, and redirects with `303` otherwise; both branches were driven through a running app.
   The guide's other claims were checked the same way and hold.
 
+- **The decorators guide's validation examples answered `500` on every request, and it said role
+  decorators are not enforced (`docs/decorators.md`, PR pending).** `@ValidateBody` and
+  `@ValidateQuery` were given plain `{ type, required }` objects, which are not schemas the
+  validation plugin can run, so every request to those routes failed. They now use Zod schemas.
+  `@Roles` and `@Permissions` have been enforced since M89a (`401`, `403`, or `501` with no
+  authorization service), while the guide described them as metadata only. The `DiPlugin()` examples
+  now pass `autoRegister: true`; without it, injecting `CAPABILITIES.CACHE` fails at startup. Also
+  corrected: the path `@Version` produces (`/v1/api/users`, not `/v1/users`), and the
+  `MetadataStore` example, which iterated a new, empty store instead of `metadataStore`.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
