@@ -18,6 +18,8 @@
  * @since 0.2.0
  */
 
+import { DEDUPLICATION_ID_HEADER, isValidPublishId, ORDERING_KEY_HEADER } from '@setu-ts/common';
+
 /** Current envelope version. A body carrying anything else is not ours. */
 const ENVELOPE_VERSION = 1;
 
@@ -33,6 +35,10 @@ export interface PublishEnvelope {
   readonly id: string;
   /** The caller's payload. */
   readonly payload: unknown;
+  /** The publisher's ordering key, when one was supplied (M106). */
+  readonly orderingKey?: string;
+  /** The publisher's de-duplication id, when one was supplied (M106). */
+  readonly deduplicationId?: string;
 }
 
 /** An RPC request awaiting a correlated reply. */
@@ -97,6 +103,7 @@ function hasEnvelopeHead(value: object): boolean {
  * @param topic - The caller's topic
  * @param id - Message id, from `IRuntimeServices.uuid()`
  * @param payload - The caller's payload
+ * @param fields - Optional validated ordering key / de-duplication id (M106)
  * @returns The envelope to hand to the producer binding
  * @example
  * ```typescript
@@ -108,8 +115,41 @@ export function encodePublishEnvelope(
   topic: string,
   id: string,
   payload: unknown,
+  fields?: { orderingKey?: string; deduplicationId?: string },
 ): PublishEnvelope {
-  return { v: ENVELOPE_VERSION, kind: 'msg', topic, id, payload };
+  return {
+    v: ENVELOPE_VERSION,
+    kind: 'msg',
+    topic,
+    id,
+    payload,
+    ...(fields?.orderingKey !== undefined ? { orderingKey: fields.orderingKey } : {}),
+    ...(fields?.deduplicationId !== undefined ? { deduplicationId: fields.deduplicationId } : {}),
+  };
+}
+
+/**
+ * Surfaces a delivered envelope's ordering and de-duplication fields as the
+ * transport headers a handler reads (M106 §3.3).
+ *
+ * A field that is not a string satisfying the shared id rule is **dropped**,
+ * never surfaced: the envelope is a JSON body a foreign producer may have
+ * written, and this broker never re-runs the publish-side validator (§3.4).
+ *
+ * @param envelope - The decoded envelope
+ * @returns The headers to attach to `MessageMetadata`
+ * @since 0.9.0
+ */
+export function envelopeHeaders(envelope: QueueEnvelope): Record<string, string> {
+  if (envelope.kind !== 'msg') return {};
+  const headers: Record<string, string> = {};
+  if (isValidPublishId(envelope.orderingKey)) {
+    headers[ORDERING_KEY_HEADER] = envelope.orderingKey;
+  }
+  if (isValidPublishId(envelope.deduplicationId)) {
+    headers[DEDUPLICATION_ID_HEADER] = envelope.deduplicationId;
+  }
+  return headers;
 }
 
 /**

@@ -24,11 +24,13 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
   TimerHandle,
 } from '@setu-ts/common';
+import { publishIdProblem } from '@setu-ts/common';
 
 import type { LoggerSource } from '../background/wait-until.ts';
 import type {
@@ -44,6 +46,7 @@ import {
   encodePublishEnvelope,
   encodeReplyEnvelope,
   encodeRequestEnvelope,
+  envelopeHeaders,
   isQueueEnvelope,
   isReplyEnvelope,
   isRequestEnvelope,
@@ -249,10 +252,59 @@ export class WorkersBroker implements IMessageBroker {
    * @typeParam T - The payload type
    * @param topic - Destination topic
    * @param message - The payload, serialized as JSON by the platform
+   * @param options - Ordering and de-duplication options (M106); refused as a
+   *   rejected promise when invalid
    * @returns Resolves once the platform has accepted the message
    */
-  async publish<T>(topic: string, message: T): Promise<void> {
-    await this.#producer.send(encodePublishEnvelope(topic, this.#runtime.uuid(), message));
+  async publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    await this.#producer.send(
+      encodePublishEnvelope(topic, this.#runtime.uuid(), message, this.#optionFields(options)),
+    );
+  }
+
+  /**
+   * Validates the caller's publish options and reduces them to the two envelope
+   * fields a Cloudflare queue can carry (M106 §3.3).
+   *
+   * Each member is read exactly ONCE (the §3.4 copy-once rule), so a getter or
+   * `Proxy` cannot answer the check one value and the envelope another.
+   *
+   * A caller `headers` record is REFUSED rather than dropped: a Cloudflare queue
+   * has no transport header channel at all, so the option cannot be honoured,
+   * and silently discarding it is the dead-option defect class. The refused
+   * value is never echoed.
+   */
+  #optionFields(
+    options: PublishOptions | undefined,
+  ): { orderingKey?: string; deduplicationId?: string } {
+    if (options === undefined) return {};
+    const headers = options.headers;
+    const orderingKey = options.orderingKey;
+    const deduplicationId = options.deduplicationId;
+    if (headers !== undefined && Object.keys(headers).length > 0) {
+      throw new RangeError(
+        'publish options headers is not supported by the Cloudflare Workers broker: ' +
+          'a Cloudflare queue carries no transport header channel',
+      );
+    }
+    const fields: { orderingKey?: string; deduplicationId?: string } = {};
+    if (orderingKey !== undefined) {
+      const problem = publishIdProblem(orderingKey);
+      if (problem !== null) {
+        throw new RangeError(`publish options orderingKey is not a valid publish id: ${problem}`);
+      }
+      fields.orderingKey = orderingKey as string;
+    }
+    if (deduplicationId !== undefined) {
+      const problem = publishIdProblem(deduplicationId);
+      if (problem !== null) {
+        throw new RangeError(
+          `publish options deduplicationId is not a valid publish id: ${problem}`,
+        );
+      }
+      fields.deduplicationId = deduplicationId as string;
+    }
+    return fields;
   }
 
   /**
@@ -542,6 +594,10 @@ export class WorkersBroker implements IMessageBroker {
       topic: envelope.topic,
       messageId: envelope.id,
       timestamp: new Date(this.#runtime.now()),
+      // M106 §3.3: the envelope's ordering/de-duplication fields surface as the
+      // same transport headers every other broker writes. A field failing the
+      // shared id rule is dropped, never surfaced (§3.4).
+      headers: envelopeHeaders(envelope),
     };
   }
 

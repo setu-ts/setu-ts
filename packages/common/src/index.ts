@@ -293,7 +293,13 @@ export type { CursorPayload, CursorValue } from './services/cursor.ts';
 export { mintNextCursor, resolveKeysetSort, sortFingerprint } from './services/cursor.ts';
 export type { ICacheStore } from './services/cache.ts';
 export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from './services/events.ts';
-export { DEDUPLICATION_ID_HEADER, ORDERING_KEY_HEADER } from './services/messaging.ts';
+export {
+  DEDUPLICATION_ID_HEADER,
+  isValidPublishId,
+  MAX_PUBLISH_ID_BYTES,
+  ORDERING_KEY_HEADER,
+  publishIdProblem,
+} from './services/messaging.ts';
 export type {
   IMessageBroker,
   ISubscription,

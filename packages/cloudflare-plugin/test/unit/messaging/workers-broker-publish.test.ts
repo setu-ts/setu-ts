@@ -5,6 +5,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type { MessageMetadata } from '@setu-ts/common';
 
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import { WorkersBroker } from '../../../src/messaging/workers-broker.ts';
@@ -53,6 +54,104 @@ describe('WorkersBroker.publish', () => {
   it('propagates a refused send rather than reporting success', async () => {
     const broker = new WorkersBroker(new ExplodingQueueProducer(), new FakeBrokerRuntime());
     await expect(broker.publish('t', 1)).rejects.toThrow('queue send failed');
+  });
+
+  it('carries orderingKey and deduplicationId as envelope fields (M106 §3.3)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await broker.publish('orders', { id: 1 }, {
+      orderingKey: 'agg-1',
+      deduplicationId: 'dedup-1',
+    });
+
+    expect(producer.sends[0]?.body).toEqual({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'id-1',
+      payload: { id: 1 },
+      orderingKey: 'agg-1',
+      deduplicationId: 'dedup-1',
+    });
+  });
+
+  it('refuses a caller headers record, since a queue has no header channel (M106 §3.3)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await expect(broker.publish('orders', 1, { headers: { 'x-app': 'v' } })).rejects.toThrow(
+      RangeError,
+    );
+    // Nothing reached the platform.
+    expect(producer.sends).toEqual([]);
+  });
+
+  it('accepts an empty headers record, which carries nothing', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await broker.publish('orders', 1, { headers: {} });
+
+    expect(producer.sends).toHaveLength(1);
+  });
+
+  it('refuses an invalid ordering key as a rejected promise, never synchronously (M106 §3.4)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    let promise: Promise<void> | undefined;
+    expect(() => {
+      promise = broker.publish('orders', 1, { orderingKey: 'a'.repeat(129) });
+    }).not.toThrow();
+    await expect(promise!).rejects.toThrow(RangeError);
+    expect(producer.sends).toEqual([]);
+  });
+});
+
+describe('WorkersBroker message metadata (M106 §3.3)', () => {
+  async function deliver(envelope: Record<string, unknown>): Promise<MessageMetadata> {
+    const broker = new WorkersBroker(new FakeQueueProducer(), new FakeBrokerRuntime());
+    const delivered: MessageMetadata[] = [];
+    await broker.subscribe('orders', (_message, metadata) => {
+      delivered.push(metadata);
+    });
+    await broker.dispatch(new FakeQueueBatch('q', [new FakeQueueMessage('m1', envelope)]));
+    return delivered[0]!;
+  }
+
+  it('surfaces valid envelope fields as the transport headers', async () => {
+    const metadata = await deliver({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'i',
+      payload: 1,
+      orderingKey: 'agg-1',
+      deduplicationId: 'dedup-1',
+    });
+    expect(metadata.headers).toEqual({
+      'x-setu-ordering-key': 'agg-1',
+      'x-setu-deduplication-id': 'dedup-1',
+    });
+  });
+
+  it('reports empty headers when the envelope carries neither field', async () => {
+    const metadata = await deliver({ v: 1, kind: 'msg', topic: 'orders', id: 'i', payload: 1 });
+    expect(metadata.headers).toEqual({});
+  });
+
+  it('drops a field that fails the id rule, surfacing no header for it (M106 §3.4)', async () => {
+    const metadata = await deliver({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'i',
+      payload: 1,
+      orderingKey: 'a'.repeat(129),
+      deduplicationId: 42,
+    });
+    expect(metadata.headers).toEqual({});
   });
 });
 

@@ -21,7 +21,9 @@
 import {
   DEDUPLICATION_ID_HEADER,
   hasForbiddenAliasCharacter,
+  MAX_PUBLISH_ID_BYTES,
   ORDERING_KEY_HEADER,
+  publishIdProblem,
 } from '@setu-ts/common';
 
 /** The validated, frozen form of caller-supplied publish options. @internal */
@@ -33,7 +35,6 @@ export interface ValidatedPublishOptions {
 
 const ENCODER = new TextEncoder();
 
-const MAX_ID_BYTES = 128;
 const MAX_HEADERS = 32;
 const MAX_HEADER_NAME_BYTES = 256;
 const MAX_HEADER_VALUE_BYTES = 1024;
@@ -95,25 +96,28 @@ function isReservedName(name: string): boolean {
   return RESERVED_HEADER_PREFIXES.some((prefix) => lower.startsWith(prefix));
 }
 
-/** Validates one id field (`orderingKey` / `deduplicationId`); returns it unchanged. */
+/** Maps a shared id-rule problem to the refusal text for one field. */
+const ID_PROBLEM_TEXT: Readonly<Record<string, string>> = {
+  'not-a-string': 'must be a non-empty string',
+  'empty': 'must be a non-empty string',
+  'not-well-formed': 'must be a well-formed string',
+  'whitespace': 'must not have leading or trailing whitespace',
+  'forbidden-characters': 'must not contain control or format characters',
+  'too-long': `must be at most ${MAX_PUBLISH_ID_BYTES} UTF-8 bytes`,
+};
+
+/**
+ * Validates one id field (`orderingKey` / `deduplicationId`); returns it
+ * unchanged. The RULE is `common`'s `publishIdProblem` — ONE implementation,
+ * shared with the Cloudflare envelope reader, which cannot import this package.
+ */
 function validateId(field: string, value: unknown): string | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new RangeError(`publish options ${field} must be a non-empty string`);
+  const problem = publishIdProblem(value);
+  if (problem !== null) {
+    throw new RangeError(`publish options ${field} ${ID_PROBLEM_TEXT[problem]}`);
   }
-  if (!value.isWellFormed()) {
-    throw new RangeError(`publish options ${field} must be a well-formed string`);
-  }
-  if (value !== value.trim()) {
-    throw new RangeError(`publish options ${field} must not have leading or trailing whitespace`);
-  }
-  if (hasForbiddenAliasCharacter(value)) {
-    throw new RangeError(`publish options ${field} must not contain control or format characters`);
-  }
-  if (utf8ByteLength(value) > MAX_ID_BYTES) {
-    throw new RangeError(`publish options ${field} must be at most ${MAX_ID_BYTES} UTF-8 bytes`);
-  }
-  return value;
+  return value as string;
 }
 
 /**

@@ -24,6 +24,54 @@ export const ORDERING_KEY_HEADER = 'x-setu-ordering-key';
  */
 export const DEDUPLICATION_ID_HEADER = 'x-setu-deduplication-id';
 
+/** Maximum UTF-8 byte length of a publish ordering key or de-duplication id. @since 0.9.0 */
+export const MAX_PUBLISH_ID_BYTES = 128;
+
+const ID_ENCODER = new TextEncoder();
+
+/**
+ * Reports why a value is not a valid publish id (an `orderingKey` or
+ * `deduplicationId`), or `null` when it is valid.
+ *
+ * The rule lives here because TWO packages enforce it and neither may import
+ * the other (§2.2): `messaging-plugin` refuses a bad id on publish, and
+ * `cloudflare-plugin`'s Workers broker drops a bad id read out of a JSON
+ * envelope body a foreign producer may have written.
+ *
+ * @param value - The candidate value
+ * @returns The first failing rule, or `null` when the value satisfies all of them
+ * @since 0.9.0
+ */
+export function publishIdProblem(
+  value: unknown,
+):
+  | 'not-a-string'
+  | 'empty'
+  | 'not-well-formed'
+  | 'whitespace'
+  | 'forbidden-characters'
+  | 'too-long'
+  | null {
+  if (typeof value !== 'string') return 'not-a-string';
+  if (value.length === 0) return 'empty';
+  if (!value.isWellFormed()) return 'not-well-formed';
+  if (value !== value.trim()) return 'whitespace';
+  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return 'forbidden-characters';
+  if (ID_ENCODER.encode(value).length > MAX_PUBLISH_ID_BYTES) return 'too-long';
+  return null;
+}
+
+/**
+ * Whether a value is a valid publish id.
+ *
+ * @param value - The candidate value
+ * @returns `true` when {@linkcode publishIdProblem} reports no problem
+ * @since 0.9.0
+ */
+export function isValidPublishId(value: unknown): value is string {
+  return publishIdProblem(value) === null;
+}
+
 /**
  * Options accepted by {@linkcode IMessageBroker.publish}.
  *

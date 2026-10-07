@@ -6,7 +6,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IMessageBroker, PublishOptions } from '../../src/index.ts';
-import { DEDUPLICATION_ID_HEADER, ORDERING_KEY_HEADER } from '../../src/index.ts';
+import {
+  DEDUPLICATION_ID_HEADER,
+  isValidPublishId,
+  MAX_PUBLISH_ID_BYTES,
+  ORDERING_KEY_HEADER,
+  publishIdProblem,
+} from '../../src/index.ts';
 
 describe('PublishOptions contract', () => {
   it('accepts a two-parameter publish implementation (fewer params are assignable)', () => {
@@ -40,5 +46,28 @@ describe('PublishOptions contract', () => {
       headers: { 'x-app': 'v' },
     };
     expect(Object.keys(options).sort()).toEqual(['deduplicationId', 'headers', 'orderingKey']);
+  });
+
+  it('exports the shared publish-id bound', () => {
+    expect(MAX_PUBLISH_ID_BYTES).toBe(128);
+  });
+
+  it('publishIdProblem accepts a valid id and reports each failing rule', () => {
+    expect(publishIdProblem('agg-1')).toBeNull();
+    expect(publishIdProblem('a'.repeat(MAX_PUBLISH_ID_BYTES))).toBeNull();
+    expect(publishIdProblem(1)).toBe('not-a-string');
+    expect(publishIdProblem('')).toBe('empty');
+    expect(publishIdProblem('\uD800')).toBe('not-well-formed');
+    expect(publishIdProblem(' a')).toBe('whitespace');
+    expect(publishIdProblem('a\u0001b')).toBe('forbidden-characters');
+    expect(publishIdProblem('a'.repeat(MAX_PUBLISH_ID_BYTES + 1))).toBe('too-long');
+    // UTF-8 bytes, not code units: 65 × 'é' is 130 bytes.
+    expect(publishIdProblem('é'.repeat(65))).toBe('too-long');
+  });
+
+  it('isValidPublishId narrows to a string', () => {
+    expect(isValidPublishId('agg-1')).toBe(true);
+    expect(isValidPublishId('')).toBe(false);
+    expect(isValidPublishId(undefined)).toBe(false);
   });
 });
