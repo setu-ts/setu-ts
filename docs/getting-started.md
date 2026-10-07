@@ -339,8 +339,8 @@ export default {
 };
 ```
 
-`setu new my-app --runtime cloudflare-workers` generates this entry together with its
-`wrangler.toml`.
+`setu new my-app --runtime cloudflare-workers` scaffolds a Workers project with an entry module and
+its `wrangler.toml`.
 
 ## Next Steps
 
