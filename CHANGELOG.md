@@ -702,6 +702,14 @@ All notable changes to this project are documented here. The format follows
   Validation and error handling now show `validateBody(...)` and `errorHandler()` in place of
   hand-written equivalents, and query parameters come from `ctx.query`.
 
+- **The React Router development guide did not say its loop fails for the CLI's full-stack skeleton
+  on Deno (`docs/react-router-dev.md`, PR pending).** Re-verified on Deno 2.9.6, Vite 8.3.1 and
+  react-router 8.4.0: the build thunk, the `/__vite/` proxy and editing a route without a restart
+  all still work. A project from `setu new --template full-stack` imports
+  `@setu-ts/react-router-plugin` in its route modules, though. Vite's development SSR runner cannot
+  resolve that JSR import, so every page answers `500`. The guide now states this, pins Vite 8 as
+  the CLI does, and says `isbot` is needed only with React Router's default server entry.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
