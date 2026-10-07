@@ -797,6 +797,33 @@ All notable changes to this project are documented here. The format follows
   too short, and redirects with `303` otherwise; both branches were driven through a running app.
   The guide's other claims were checked the same way and hold.
 
+- **The custom-plugin guide's two test examples failed as printed (`docs/custom-plugins.md`, PR
+  pending).** The integration test registered its plugin after `createTestApp()` had started the
+  application, which throws; the unit test asserted a service its plugin never registered. Both now
+  pass when run, and every example was checked against the source or a running app. Step 1 used
+  `CAPABILITIES` without importing it, the service-registration block registered one token twice and
+  paired `override` with `multi` (which ignores it), the `subtle` example called it optional and
+  imported an HMAC key without a hash, and the sample README's outer fence closed early, so its
+  Usage and Options sections rendered as part of the guide.
+
+- **The programmatic API reference resolved capabilities before `start()`
+  (`docs/programmatic-api.md`, PR pending).** Both streaming examples and the `router.post` example
+  read a service at module scope, where the plugin providing it has not registered yet, so each
+  threw `No service registered`. They now resolve inside the handler, and the disconnect example no
+  longer closes a stream the client has already cancelled. The `middleware.add` section showed only
+  a plugin registration; it now adds a middleware. `register()` takes no options, `start()`'s
+  hostname defaults to the runtime's own, and the transcribed `IResponse` and `IRequestContext` gain
+  `html()` and `raw`.
+
+- **The plugin catalog described packages that have since changed (`docs/plugins.md`, PR pending).**
+  The kernel listed three exports it does not have (`createApplication` is its only value), the DI
+  token was `CAPABILITIES.CONTAINER` rather than `DI_CONTAINER`, the database entry listed neither
+  the MongoDB, DynamoDB, Cosmos DB nor Bigtable arms nor their drivers, telemetry omitted
+  `@opentelemetry/context-async-hooks`, audit claimed a Cloudflare KV store it does not ship,
+  multi-tenancy claimed physical schema and database isolation, LaunchDarkly was called Node-only,
+  and the CLI count was 14 schematics rather than 16. Every listed export and token is now checked
+  against its package's barrel and `CAPABILITIES`.
+
 - **The decorators guide's validation examples answered `500` on every request, and it said role
   decorators are not enforced (`docs/decorators.md`, PR pending).** `@ValidateBody` and
   `@ValidateQuery` were given plain `{ type, required }` objects, which are not schemas the

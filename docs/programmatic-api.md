@@ -10,7 +10,6 @@ decorator-based usage, see [Decorators Guide](./decorators.md).
 Creates a new application instance.
 
 ```typescript
-import type { MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication();
@@ -37,9 +36,10 @@ app.register(RuntimePlugin());
 
 ### Application Methods
 
-#### `register(plugin, options?)`
+#### `register(plugin)`
 
-Register a plugin with the application.
+Register a plugin with the application. Plugins register before `start()`; registering one after the
+application has started throws.
 
 ```typescript
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -70,22 +70,30 @@ app.router.get('/users', async (ctx) => {
 Register route handlers for other HTTP methods.
 
 ```typescript
-const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-const usersRepo = db.getRepository<{ id: string; name: string }>('users');
 app.router.post('/users', async (ctx) => {
+  // Capabilities are registered during start(), so resolve them inside the handler.
+  const usersRepo = ctx.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<{ id: string; name: string }>('users');
   const user = await usersRepo.create({ name: 'alice' });
-  return ctx.response.json(user);
+  return ctx.response.status(201).json(user);
 });
 ```
 
-#### `middleware.add(middleware)`
+#### `middleware.add(middleware, options?)`
 
-Add global middleware to the pipeline.
+Add global middleware to the pipeline. `start()` compiles the pipeline, so add middleware before it;
+adding one afterwards throws.
 
 ```typescript
-import { MetricsPlugin } from '@setu-ts/metrics-plugin';
+import type { MiddlewareFunction } from '@setu-ts/common';
 
-app.register(MetricsPlugin({ endpoint: '/metrics' }));
+const requestId: MiddlewareFunction = async (ctx, next) => {
+  await next();
+  ctx.response.header('x-request-id', ctx.id);
+};
+
+app.middleware.add(requestId);
 ```
 
 #### `start(options?)`
@@ -99,7 +107,7 @@ await app.start({ port: 3000, hostname: '0.0.0.0' });
 **Options:**
 
 - `port?: number` - Port to listen on
-- `hostname?: string` - Hostname to bind to (default: '0.0.0.0')
+- `hostname?: string` - Address to bind to (default: the runtime's own, which is every interface)
 
 #### `stop()`
 
@@ -372,6 +380,7 @@ interface IRequestContext {
   readonly state: Map<string, unknown>;
   readonly startTime: number;
   readonly signal: AbortSignal;
+  readonly raw?: Request; // the undisturbed web Request, when the adapter supplies one
 }
 ```
 
@@ -384,6 +393,7 @@ interface IResponse {
   appendHeader(name: string, value: string): IResponse;
   json<T>(body: T): HandlerResult;
   text(body: string): HandlerResult;
+  html(body: string): HandlerResult;
   send(body?: Uint8Array): HandlerResult;
   redirect(url: string, status?: number): HandlerResult;
   stream(body: ReadableStream<Uint8Array>): HandlerResult;
@@ -565,7 +575,7 @@ if (response.statusCode !== 201 || response.json<{ foo: string }>().foo !== 'bar
 await app.stop();
 ```
 
-### `createMockPlugin(options?)`
+### `createMockPlugin(options)`
 
 Create a mock plugin.
 
@@ -586,13 +596,13 @@ const mockPlugin = createMockPlugin({
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 
-const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-const delay = (ms: number) =>
-  new Promise<void>((resolve) => {
-    runtime.setTimeout(resolve, ms);
-  });
-
-app.router.get('/stream', async (ctx) => {
+app.router.get('/stream', (ctx) => {
+  // RuntimePlugin registers the runtime during start(), so resolve it per request.
+  const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  const delay = (ms: number) =>
+    new Promise<void>((resolve) => {
+      runtime.setTimeout(resolve, ms);
+    });
   const stream = new ReadableStream({
     async start(controller) {
       for (let i = 0; i < 10; i++) {
@@ -613,25 +623,25 @@ app.router.get('/stream', async (ctx) => {
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 
-const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-const delay = (ms: number) =>
-  new Promise<void>((resolve) => {
-    runtime.setTimeout(resolve, ms);
-  });
-
-app.router.get('/long-running', async (ctx) => {
+app.router.get('/long-running', (ctx) => {
+  const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  const delay = (ms: number) =>
+    new Promise<void>((resolve) => {
+      runtime.setTimeout(resolve, ms);
+    });
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        // ctx.signal aborts when the client disconnects.
         while (!ctx.signal.aborted) {
           controller.enqueue(new TextEncoder().encode('data\n'));
           await delay(1000);
         }
       } catch {
-        // Client disconnected
-      } finally {
-        controller.close();
+        // The client left between the check and the write.
       }
+      // No close(): the loop ends only after a disconnect, which has already
+      // cancelled the stream, and closing a cancelled stream throws.
     },
   });
 

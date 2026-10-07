@@ -51,25 +51,25 @@ starters. `cli` is on that list too, which is worth saying out loud because its 
 `npm:` strings: those are DATA it writes into a generated project's manifest, not specifiers it
 imports, so nothing follows them into its own dependency graph.
 
-| Package                     | Declared npm drivers                                                                                                                                | Arm that needs them                                                                 |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `auth-plugin`               | `ioredis`, `@node-saml/node-saml`                                                                                                                   | `RedisRateLimitStore`; a `saml` sign-in provider (needs `nodejs_compat` on Workers) |
-| `cache-plugin`              | `ioredis`                                                                                                                                           | `store: 'redis'`                                                                    |
-| `database-plugin`           | `drizzle-orm`                                                                                                                                       | `type: 'drizzle'` (Prisma and D1 are inject-only — neither declares a driver)       |
-| `feature-flags-plugin`      | `@launchdarkly/node-server-sdk`                                                                                                                     | `provider: 'launchdarkly'`                                                          |
-| `graphql-plugin`            | `graphql`                                                                                                                                           | always (the execution engine)                                                       |
-| `grpc-plugin`               | `@connectrpc/connect`, `@bufbuild/protobuf`                                                                                                         | always (the RPC runtime)                                                            |
-| `logger-plugin`             | `pino`                                                                                                                                              | `PinoLogger`                                                                        |
-| `mail-plugin`               | `nodemailer`, `@aws-sdk/client-sesv2`                                                                                                               | `smtp` / `ses` providers                                                            |
-| `messaging-plugin`          | `ioredis`, `amqplib`, `kafkajs`, `nats`, `@google-cloud/pubsub`, `@azure/service-bus`                                                               | the matching broker                                                                 |
-| `queue-plugin`              | `ioredis`, `amqplib`, `@aws-sdk/client-sqs`, `@aws-sdk/client-sns`                                                                                  | the matching adapter                                                                |
-| `react-router-plugin`       | `react-router`                                                                                                                                      | always (SSR request handler)                                                        |
-| `realtime-backplane-plugin` | `ioredis`                                                                                                                                           | `transport: 'redis'`                                                                |
-| `runtime`                   | `@hono/node-server`, `ws`                                                                                                                           | the Node HTTP and WebSocket adapters                                                |
-| `scheduler-plugin`          | `ioredis`                                                                                                                                           | `RedisLock`                                                                         |
-| `secrets-plugin`            | `@aws-sdk/client-secrets-manager`, `@google-cloud/secret-manager`, `@azure/identity`, `@azure/keyvault-secrets`                                     | the matching cloud provider                                                         |
-| `storage-plugin`            | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`, `@google-cloud/storage`, `@azure/storage-blob`                                               | the matching provider                                                               |
-| `telemetry-plugin`          | `@opentelemetry/{api,resources,sdk-trace-base,exporter-trace-otlp-http}` and `@opentelemetry/instrumentation-{http,undici,ioredis,amqplib,kafkajs}` | any non-noop exporter, or `instrumentations`                                        |
+| Package                     | Declared npm drivers                                                                                                                                                    | Arm that needs them                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `auth-plugin`               | `ioredis`, `@node-saml/node-saml`                                                                                                                                       | `RedisRateLimitStore`; a `saml` sign-in provider (needs `nodejs_compat` on Workers) |
+| `cache-plugin`              | `ioredis`                                                                                                                                                               | `store: 'redis'`                                                                    |
+| `database-plugin`           | `drizzle-orm`, `mongodb`, `@aws-sdk/client-dynamodb`, `@azure/cosmos`, `@google-cloud/bigtable`                                                                         | the matching `type` arm (Prisma and D1 are inject-only — neither declares a driver) |
+| `feature-flags-plugin`      | `@launchdarkly/node-server-sdk`                                                                                                                                         | `provider: 'launchdarkly'`                                                          |
+| `graphql-plugin`            | `graphql`                                                                                                                                                               | always (the execution engine)                                                       |
+| `grpc-plugin`               | `@connectrpc/connect`, `@bufbuild/protobuf`                                                                                                                             | always (the RPC runtime)                                                            |
+| `logger-plugin`             | `pino`                                                                                                                                                                  | `PinoLogger`                                                                        |
+| `mail-plugin`               | `nodemailer`, `@aws-sdk/client-sesv2`                                                                                                                                   | `smtp` / `ses` providers                                                            |
+| `messaging-plugin`          | `ioredis`, `amqplib`, `kafkajs`, `nats`, `@google-cloud/pubsub`, `@azure/service-bus`                                                                                   | the matching broker                                                                 |
+| `queue-plugin`              | `ioredis`, `amqplib`, `@aws-sdk/client-sqs`, `@aws-sdk/client-sns`                                                                                                      | the matching adapter                                                                |
+| `react-router-plugin`       | `react-router`                                                                                                                                                          | always (SSR request handler)                                                        |
+| `realtime-backplane-plugin` | `ioredis`                                                                                                                                                               | `transport: 'redis'`                                                                |
+| `runtime`                   | `@hono/node-server`, `ws`                                                                                                                                               | the Node HTTP and WebSocket adapters                                                |
+| `scheduler-plugin`          | `ioredis`                                                                                                                                                               | `RedisLock`                                                                         |
+| `secrets-plugin`            | `@aws-sdk/client-secrets-manager`, `@google-cloud/secret-manager`, `@azure/identity`, `@azure/keyvault-secrets`                                                         | the matching cloud provider                                                         |
+| `storage-plugin`            | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`, `@google-cloud/storage`, `@azure/storage-blob`                                                                   | the matching provider                                                               |
+| `telemetry-plugin`          | `@opentelemetry/{api,resources,sdk-trace-base,exporter-trace-otlp-http,context-async-hooks}` and `@opentelemetry/instrumentation-{http,undici,ioredis,amqplib,kafkajs}` | any non-noop exporter, or `instrumentations`                                        |
 
 The three `always` rows — `graphql-plugin`, `grpc-plugin` and `react-router-plugin` — have no
 zero-driver arm, and none of them claims one. Everything else here is genuinely optional: the arm
@@ -86,7 +86,7 @@ its own client never triggers the lazy import at all — see
 
 **Purpose:** Shared types, interfaces, and capability tokens used across all packages.
 
-**Capability Token:** N/A (type-only package)
+**Capability Token:** N/A (contracts and shared pure utilities)
 
 **Runtime Compatibility:**
 
@@ -123,9 +123,9 @@ lifecycle.
 
 **Key Exports:**
 
-- `createApplication()` - Application factory
-- `Router`, `LinearRouter` - Routing engine
-- `ServiceRegistry` - Service container
+- `createApplication()` - Application factory; its only value export. The router, service registry
+  and pipeline are reached through the application (`app.router`, `app.services`, `app.middleware`),
+  not imported
 
 **Links:**
 
@@ -166,7 +166,7 @@ lifecycle.
 **Purpose:** Optional dependency injection container with constructor injection and scope
 management.
 
-**Capability Token:** `CAPABILITIES.CONTAINER`
+**Capability Token:** `CAPABILITIES.DI_CONTAINER`
 
 **Runtime Compatibility:**
 
@@ -362,9 +362,13 @@ emitDecoratorMetadata).
 **Adapters:**
 
 - Memory (built-in)
-- Prisma (via npm: adapter)
-- Drizzle (via npm: adapter)
-- D1 (Cloudflare Workers)
+- Prisma (an injected Prisma v7 client)
+- Drizzle (an injected Drizzle database, wrapped with `createDrizzleDatabase`)
+- MongoDB (via npm:mongodb)
+- DynamoDB (via npm:@aws-sdk/client-dynamodb)
+- Azure Cosmos DB (via npm:@azure/cosmos)
+- Cloud Bigtable (via npm:@google-cloud/bigtable)
+- Custom (`type: 'custom'`), for example `D1Adapter` from `cloudflare-plugin`
 
 **Links:**
 
@@ -417,6 +421,9 @@ emitDecoratorMetadata).
 - RBAC with role hierarchy
 - Local strategy for login flows
 - Password hashing (PBKDF2-SHA256)
+- Tokens from an outside issuer, verified against its published key set (`issuers`)
+- Sign-in with an outside provider: OpenID Connect, OAuth 2.0 and SAML 2.0 (`signIn`)
+- Multi-factor authentication: TOTP with recovery codes, and passkeys (WebAuthn)
 
 **Links:**
 
@@ -433,9 +440,9 @@ emitDecoratorMetadata).
 
 **Runtime Compatibility:**
 
-| Deno | Node | Bun | Workers |
-| ---- | ---- | --- | ------- |
-| ✅   | ✅   | ✅  | ❌      |
+| Deno | Node | Bun | Workers                        |
+| ---- | ---- | --- | ------------------------------ |
+| ✅   | ✅   | ✅  | ❌ (see the Cloudflare plugin) |
 
 **Brokers:**
 
@@ -459,7 +466,7 @@ emitDecoratorMetadata).
 - Publish/subscribe
 - Request/reply (RPC)
 - Events bridge
-- Message persistence
+- Durable delivery where the broker provides it
 
 **Links:**
 
@@ -476,9 +483,9 @@ emitDecoratorMetadata).
 
 **Runtime Compatibility:**
 
-| Deno | Node | Bun | Workers |
-| ---- | ---- | --- | ------- |
-| ✅   | ✅   | ✅  | ❌      |
+| Deno | Node | Bun | Workers                        |
+| ---- | ---- | --- | ------------------------------ |
+| ✅   | ✅   | ✅  | ❌ (see the Cloudflare plugin) |
 
 **Adapters:**
 
@@ -513,7 +520,8 @@ emitDecoratorMetadata).
 
 - DomainEvent, IntegrationEvent
 - In-memory event bus
-- Event persistence (via messaging)
+- Aggregate-local recording (`createDomainEvents`)
+- Forwarding to a broker through `messaging-plugin`'s `EventsMessagingBridge`
 
 **Links:**
 
@@ -686,16 +694,16 @@ emitDecoratorMetadata).
 
 **Runtime Compatibility:**
 
-| Deno | Node | Bun | Workers |
-| ---- | ---- | --- | ------- |
-| ✅   | ✅   | ✅  | ✅ (KV) |
+| Deno | Node | Bun | Workers                             |
+| ---- | ---- | --- | ----------------------------------- |
+| ✅   | ✅   | ✅  | ✅ (memory, log, injected database) |
 
 **Storage:**
 
 - Memory (default)
 - File (JSONL)
-- Database
-- Cloudflare KV
+- Database (an injected client)
+- Log (routes each entry to the logger; `query()` returns `[]`)
 
 **Links:**
 
@@ -827,7 +835,7 @@ emitDecoratorMetadata).
 - Config (inline, immutable)
 - Memory (mutable)
 - Database (polling)
-- LaunchDarkly (Node-only)
+- LaunchDarkly (lazy-loads the Node server SDK)
 
 **Links:**
 
@@ -850,9 +858,9 @@ emitDecoratorMetadata).
 
 **Strategies:**
 
-- Column isolation
-- Schema isolation
-- Database isolation
+- Column isolation (the shipped memory store)
+- Schema and database isolation (names a strategy an injected `dataStore` implements; the memory
+  store refuses both at startup)
 
 **Resolvers:**
 
@@ -1251,6 +1259,9 @@ RuntimePlugin)
 | ---- | ---- | --- | ------- |
 | ✅   | ✅   | ❌  | N/A     |
 
+The table describes the importable package. The `setu` command itself (`jsr:@setu-ts/cli/main`) runs
+on Deno only; `--runtime` scaffolds projects for all four runtimes.
+
 **Commands:**
 
 - `setu new <name>` - Create a new project (`--template rest|microservice|class-based|full-stack`,
@@ -1260,8 +1271,9 @@ RuntimePlugin)
   `microservice`, and `--template class-based` is a byte-identical alias of
   `--template rest --style class-based`
 - `setu new <name> --workspace` - Create a monorepo root (`--port`, `--transport`)
-- `setu generate <type> <name>` - Generate code; 14 schematics, 11 of them wired into a registration
-  site with no edit to a file you own
+- `setu generate <type> <name>` - Generate code; 16 schematics, every one except `guard`,
+  `migration` and (in a functional project) `service` and `job` wired into a registration site with
+  no edit to a file you own
 - `setu generate app <name>` - Add a service to a workspace, allocating its port and registering it
   in every sibling's discovery map
 - `setu commands` - List the commands this project's plugins provide

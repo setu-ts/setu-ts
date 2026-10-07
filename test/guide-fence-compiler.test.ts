@@ -66,9 +66,11 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/custom-plugins.md': {
-    total: 23,
-    ts: 20,
-    compile: 20,
+    // 23/20 until the cold-read pass: the sample README's outer fence closed
+    // early, so its inner Usage block was counted as a top-level guide fence.
+    total: 22,
+    ts: 19,
+    compile: 19,
     external: 0,
     pseudocode: 0,
     skipped: 3,
@@ -206,10 +208,11 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // compiling). 271 after the runtime-deployment cold read: the Workers
   // execution-limits best practice became prose (-1, compiling). 275 after
   // the examples cold read: ten invented "Key code" blocks became shell
-  // commands and source links (-10 compiling, +14 skipped).
-  total: 275,
-  ts: 213,
-  compile: 180,
+  // commands and source links (-10 compiling, +14 skipped). 274 after the
+  // custom-plugins cold read: a nested README fence stopped leaking out (-1).
+  total: 274,
+  ts: 212,
+  compile: 179,
   external: 33,
   pseudocode: 0,
   skipped: 62,

@@ -8,6 +8,7 @@ This guide shows you how to build custom plugins for the Setu-TS framework.
 
 ```typescript
 // my-plugin.ts
+import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 export interface MyPluginOptions {
@@ -32,11 +33,13 @@ export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
         greet: (name: string) => `${config.greeting}, ${name}!`,
       });
 
-      // Add middleware
-      ctx.middleware.add(async (ctx, next) => {
-        ctx.state.set('my-plugin', { enabled: config.enabled });
-        await next();
-      });
+      // Add middleware, unless the application turned it off
+      if (config.enabled) {
+        ctx.middleware.add(async (ctx, next) => {
+          await next();
+          ctx.response.header('x-greeting', config.greeting);
+        });
+      }
 
       // Register a route
       ctx.router.get('/greet/:name', async (ctx) => {
@@ -105,17 +108,18 @@ export function CachePlugin(options: CachePluginOptions): IPlugin {
 ### Service Registration
 
 ```typescript
-// Register a singleton
+// Register a singleton. Registering a token twice throws.
 ctx.services.register('my-service', new MyService());
 
-// Register a factory (lazy instantiation)
-ctx.services.registerFactory('my-service', () => new MyService());
+// Register a factory (constructed on the first lookup)
+ctx.services.registerFactory('my-lazy-service', () => new MyService());
 
-// Register with options
-ctx.services.register('my-service', new MyService(), {
-  override: true, // Replace existing
-  multi: true, // Allow multiple providers
-});
+// Replace a token another plugin already registered
+ctx.services.register('my-service', new MyService(), { override: true });
+
+// Add one of several providers; consumers read them all with getAll()
+ctx.services.register('my-extensions', new MyService(), { multi: true });
+const extensions = ctx.services.getAll<MyService>('my-extensions');
 ```
 
 ### Middleware
@@ -306,13 +310,9 @@ ctx.environment.validate({
 ## Configuration
 
 ```typescript
-// Read configuration
-const config = ctx.config?.get('my-plugin', {
-  default: {
-    greeting: 'Hello',
-    enabled: true,
-  },
-});
+// Read a configuration key. `ctx.config` is present only when ConfigPlugin is
+// registered, and keys are flat names as they appear in the environment.
+const greeting = ctx.config?.get<string>('MY_PLUGIN_GREETING', { default: 'Hello' }) ?? 'Hello';
 ```
 
 ## Using Runtime Services
@@ -347,16 +347,14 @@ if (ctx.runtime.fs) {
   const fileContent = await ctx.runtime.fs.readFile('file.txt');
 }
 
-// SubtleCrypto (may be undefined)
-if (ctx.runtime.subtle) {
-  const importedKey = await ctx.runtime.subtle.importKey(
-    'raw',
-    new Uint8Array(32),
-    'HMAC',
-    false,
-    ['sign'],
-  );
-}
+// Web Crypto, available on every runtime
+const importedKey = await ctx.runtime.subtle.importKey(
+  'raw',
+  new Uint8Array(32),
+  { name: 'HMAC', hash: 'SHA-256' },
+  false,
+  ['sign'],
+);
 ```
 
 ## Dependencies
@@ -417,6 +415,7 @@ export function MyPlugin(): IPlugin {
 ### Unit Tests
 
 ```typescript
+import type { IPlugin } from '@setu-ts/common';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
@@ -425,8 +424,8 @@ function MyPlugin(): IPlugin {
   return {
     name: 'my-plugin',
     version: '1.0.0',
-    async register(ctx) {
-      // Plugin registration logic
+    register(ctx) {
+      ctx.services.register('my-service', { greet: (name: string) => `Hello, ${name}!` });
     },
   };
 }
@@ -463,8 +462,11 @@ describe('MyPlugin', () => {
 ### Integration Tests
 
 ```typescript
-import { createTestApp, inject } from '@setu-ts/testing';
+import type { IPlugin } from '@setu-ts/common';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { createTestApp, inject } from '@setu-ts/testing';
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 
 // Self-contained plugin for testing (no relative import)
 function MyPlugin(): IPlugin {
@@ -481,10 +483,11 @@ function MyPlugin(): IPlugin {
 
 describe('MyPlugin integration', () => {
   it('handles GET /greet/:name', async () => {
+    // createTestApp starts the application, so every plugin goes in this list:
+    // registering one after start() throws.
     const app = await createTestApp({
-      plugins: [RuntimePlugin()],
+      plugins: [RuntimePlugin(), MyPlugin()],
     });
-    app.register(MyPlugin());
 
     const response = await inject(app, {
       method: 'GET',
@@ -582,25 +585,22 @@ A custom plugin for Setu-TS.
 ```bash
 deno add jsr:@acme/my-plugin
 ```
-````
 
 ## Usage
 
 ```typescript
-// A published plugin package — import from your own package once published:
-//   import { MyPlugin } from '@acme/my-plugin';
-//   app.register(MyPlugin({ option: 'value' }));
+import { MyPlugin } from '@acme/my-plugin';
 
-// For local development, import directly:
-//   import { MyPlugin } from './src/my-plugin.ts';
-//   app.register(MyPlugin());
+app.register(MyPlugin({ greeting: 'Bonjour' }));
 ```
 
 ## Options
 
-| Option | Type   | Default   | Description |
-| ------ | ------ | --------- | ----------- |
-| option | string | 'default' | Description |
+| Option   | Type    | Default   | Description                  |
+| -------- | ------- | --------- | ---------------------------- |
+| greeting | string  | `'Hello'` | The greeting word            |
+| enabled  | boolean | `true`    | Adds the `x-greeting` header |
+````
 
 ## Next Steps
 
