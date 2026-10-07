@@ -169,9 +169,12 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 2,
   },
   'docs/runtime-deployment.md': {
-    total: 30,
-    ts: 13,
-    compile: 13,
+    // 30/13 until the cold-read pass: the Workers execution-limits best
+    // practice is prose now, because its code block computed a timeout from a
+    // wrong 120 s limit.
+    total: 29,
+    ts: 12,
+    compile: 12,
     external: 0,
     pseudocode: 0,
     skipped: 17,
@@ -195,10 +198,11 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // Scaffolding and Microservices sections add two bash fences (+2, skipped).
   // 272 after the getting-started cold read: three identical per-runtime
   // blocks collapse to one and a "Stopping Cleanly" block is added (-2, all
-  // compiling).
-  total: 272,
-  ts: 224,
-  compile: 191,
+  // compiling). 271 after the runtime-deployment cold read: the Workers
+  // execution-limits best practice became prose (-1, compiling).
+  total: 271,
+  ts: 223,
+  compile: 190,
   external: 33,
   pseudocode: 0,
   skipped: 48,

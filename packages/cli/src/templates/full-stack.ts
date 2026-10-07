@@ -172,7 +172,15 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     pkg: 'full-stack-starter',
     symbol: 'createFullStackAppFromConfig',
     args: fullStackArgs,
+    // The REST starter underneath registers these unconditionally; listed here
+    // because the factory hides them from the plugin list the README reads.
+    composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin'],
   },
+  routes: [
+    { path: '/', purpose: 'the home page, server-rendered by React Router' },
+    { path: '/products', purpose: 'a page behind sign-in; it redirects to `/login`' },
+    { path: '/login', purpose: 'the sign-in form' },
+  ],
   packageImports: [
     // The annotation that restores excess-property checking on the resolver
     // (X5-2). A type-only import, so it costs the generated project nothing at

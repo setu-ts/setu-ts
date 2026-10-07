@@ -24,6 +24,7 @@ import type { SeamArtifacts } from '../seams/seam-spec.ts';
 import type {
   MiddlewareWiring,
   RuntimeSwap,
+  ServedRoute,
   TemplateHost,
   TemplateManifest,
   Wiring,
@@ -74,6 +75,8 @@ export interface Showcase {
   readonly files: readonly GeneratedFile[];
   /** Artifact names the host itself emits, by schematic name, seeded into barrels. */
   readonly seeded: SeamArtifacts;
+  /** Routes the showcase serves, listed in the generated README. */
+  readonly routes?: readonly ServedRoute[];
 }
 
 /**
@@ -137,6 +140,7 @@ export function composeHost(recipe: TemplateRecipe, style: TemplateStyle): Templ
       pluginSpreads: seamPluginSpreads(seams),
       setupCalls: seamSetupCalls(seams),
       manifest: { ...CLASS_BASED_MODULE_MANIFEST, envFilePath: '.env' },
+      ...(showcase?.routes === undefined ? {} : { routes: showcase.routes }),
       ...(recipe.runtimeSwaps === undefined ? {} : { runtimeSwaps: recipe.runtimeSwaps }),
     };
   }
@@ -152,6 +156,7 @@ export function composeHost(recipe: TemplateRecipe, style: TemplateStyle): Templ
     pluginSpreads: seamPluginSpreads(seams),
     setupCalls: seamSetupCalls(seams),
     manifest: { ...recipe.manifest, envFilePath: '.env' },
+    ...(showcase?.routes === undefined ? {} : { routes: showcase.routes }),
     ...(recipe.runtimeSwaps === undefined ? {} : { runtimeSwaps: recipe.runtimeSwaps }),
   };
 }

@@ -25,22 +25,20 @@ Setu-TS applications can run in two modes:
 // Fetch mode (Workers, testing)
 // On Workers, `env` comes from `cloudflare:workers` and is passed to the plugins
 // (see the Workers section below). Off Workers, `app.fetch(request)` is the test entry point.
-// Startup must precede the fetch — use a memoized startup so concurrent first
-// requests all await the same start rather than racing.
-let _app: Promise<typeof app> | undefined;
-async function started(): Promise<typeof app> {
-  if (_app === undefined) {
-    _app = (async () => {
-      await app.start();
-      return app;
-    })();
-    await _app;
-  }
-  return await _app;
+// Startup must precede the fetch. Share one start across concurrent first
+// requests, but forget a FAILED start so the next request retries it — caching
+// the rejection would leave the instance answering errors for its whole life.
+let starting: Promise<typeof app> | undefined;
+function started(): Promise<typeof app> {
+  starting ??= app.start().then(() => app).catch((error: unknown) => {
+    starting = undefined;
+    throw error;
+  });
+  return starting;
 }
 export default {
-  fetch(request: Request): Promise<Response> {
-    return started().then((s) => s.fetch(request));
+  async fetch(request: Request): Promise<Response> {
+    return (await started()).fetch(request);
   },
 };
 
@@ -106,13 +104,18 @@ app.router.get('/events', async (ctx) => {
 
 ```bash
 # Create a new Node.js project
+mkdir my-app && cd my-app
 npm init -y
+npm pkg set type=module
 
-# Add Setu-TS packages via JSR
-npm install jsr:@setu-ts/kernel@^0.8.0
-npm install jsr:@setu-ts/runtime@^0.8.0
-npm install jsr:@setu-ts/common@^0.8.0
+# Add Setu-TS packages from JSR (npm has no `jsr:` protocol, so `npm install jsr:…` fails)
+npx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
+npm install --save-dev tsx
 ```
+
+`npx jsr add` writes ordinary npm dependencies and an `.npmrc` that points the `@jsr` scope at JSR's
+npm registry, so imports stay `@setu-ts/kernel`. Or let `setu new my-app --runtime node` scaffold
+all of this.
 
 ### Application
 
@@ -144,13 +147,13 @@ console.log('Server running on http://localhost:3000');
     "start": "tsx main.ts",
     "dev": "tsx watch main.ts"
   },
+  "dependencies": {
+    "@setu-ts/common": "npm:@jsr/setu-ts__common@^0.8.0",
+    "@setu-ts/kernel": "npm:@jsr/setu-ts__kernel@^0.8.0",
+    "@setu-ts/runtime": "npm:@jsr/setu-ts__runtime@^0.8.0"
+  },
   "devDependencies": {
     "tsx": "^4.20.0"
-  },
-  "imports": {
-    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.8.0",
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0"
   }
 }
 ```
@@ -168,14 +171,18 @@ console.log('Server running on http://localhost:3000');
 #### Docker
 
 ```dockerfile
-FROM node:20-alpine
+# Node 22 or later: the framework uses Promise.withResolvers.
+FROM node:24-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY package*.json .npmrc ./
 RUN npm ci
 
 COPY . .
+
+# Numeric, not `USER node`: Kubernetes' runAsNonRoot refuses an image whose user is a name.
+USER 1000:1000
 
 EXPOSE 3000
 CMD ["npm", "start"]
@@ -195,7 +202,8 @@ Use a serverless adapter for your platform (Vercel, AWS Lambda, etc.).
 
 ### Limitations
 
-- Raw sockets (for some brokers) require Node.js
+- Raw TCP sockets available, which the Redis, RabbitMQ, NATS and Kafka brokers need (Deno and Bun
+  have them too; only Workers does not)
 - Worker threads available (`worker-pool-plugin`)
 - File system fully available
 
@@ -213,8 +221,9 @@ Use a serverless adapter for your platform (Vercel, AWS Lambda, etc.).
 # Install Deno
 curl -fsSL https://deno.land/install.sh | sh
 
-# Create a new project
-deno init
+# Create a new project. `deno add` creates deno.json; skip `deno init`, whose main_test.ts
+# imports a `handler` export your main.ts will not have, which breaks `deno test`.
+mkdir my-app && cd my-app
 
 # Add Setu-TS packages
 deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
@@ -340,12 +349,11 @@ limits.
 curl -fsSL https://bun.sh/install | bash
 
 # Create a new project
-bun init
+mkdir my-app && cd my-app
+bun init -y
 
-# Add Setu-TS packages
-bun add jsr:@setu-ts/kernel@^0.8.0
-bun add jsr:@setu-ts/runtime@^0.8.0
-bun add jsr:@setu-ts/common@^0.8.0
+# Add Setu-TS packages from JSR (`bun add jsr:…` is refused as an invalid dependency name)
+bunx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
 ```
 
 ### Application
@@ -421,19 +429,15 @@ bun build --compile --outfile my-app main.ts
 ### Setup
 
 ```bash
-# Install Wrangler
-npm install -g wrangler
+# Scaffold a Worker: wrangler.toml, package.json and the entry module below
+setu new my-app --runtime cloudflare-workers
+cd my-app && npm install
 
-# Login to Cloudflare
-wrangler login
+# Or add Setu-TS to an existing Worker (npm has no `jsr:` protocol, so `npm add jsr:…` fails)
+npx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/cloudflare-plugin @setu-ts/common
 
-# Create a new Worker
-wrangler init my-app --type=typescript
-
-# Add Setu-TS packages
-npm add jsr:@setu-ts/kernel@^0.8.0
-npm add jsr:@setu-ts/runtime@^0.8.0
-npm add jsr:@setu-ts/common@^0.8.0
+# Log in to Cloudflare once, before the first deploy
+npx wrangler login
 ```
 
 ### Application
@@ -459,30 +463,32 @@ raw.router.get('/', async (ctx) => {
   return ctx.response.json({ message: 'Hello from Workers!' });
 });
 
-// Memoized startup: the application starts once (awaited by all concurrent
-// first requests) and the result is reused. This avoids racing two concurrent
-// cold-start requests both trying to start the app independently.
+// Start once, on the first request, and share that start across concurrent
+// requests. A FAILED start is forgotten rather than cached, so a transient
+// problem at cold start is retried on the next request instead of breaking the
+// isolate for its whole life.
 let application: Promise<typeof raw> | undefined;
 
-async function app(): Promise<typeof raw> {
-  if (application === undefined) {
-    application = (async () => {
-      await raw.start();
-      return raw;
-    })();
-    await application;
-  }
-  return await application;
+function app(): Promise<typeof raw> {
+  application ??= raw.start().then(() => raw).catch((error: unknown) => {
+    application = undefined;
+    throw error;
+  });
+  return application;
 }
 
 // Export the fetch handler — Workers invokes this per request.
-// Startup (app.start()) always precedes the fetch call.
 export default {
-  fetch(request: Request): Promise<Response> {
-    return app().then((started) => started.fetch(request));
+  async fetch(request: Request): Promise<Response> {
+    return (await app()).fetch(request);
   },
 };
 ```
+
+The entry `setu new --runtime cloudflare-workers` generates goes further: it takes `env` from each
+request rather than from the module, keeps one application per binding set so a deploy that changes
+only bindings is served with the new ones even when Cloudflare reuses the isolate, and stops a
+superseded application only once no request or queue batch still uses it.
 
 ### wrangler.toml
 
@@ -527,20 +533,20 @@ wrangler open
 
 ### Limitations
 
-| Feature                   | Status | Notes                            |
-| ------------------------- | ------ | -------------------------------- |
-| TCP sockets               | ❌     | Use HTTP-based services          |
-| File system               | ❌     | Use R2 or KV for storage         |
-| Worker threads            | ❌     | Use worker-pool-plugin (limited) |
-| Raw sockets (WebSocket)   | ✅     | Via WebSocket upgrade            |
-| Cron                      | ✅     | Via Wrangler triggers            |
-| Queues                    | ✅     | Via Workers Queues               |
-| Messaging (pub/sub)       | ✅     | Via Workers Queues               |
-| Messaging (request/reply) | ✅     | Via a Durable Object reply inbox |
-| KV                        | ✅     | Via KV bindings                  |
-| D1                        | ✅     | Via D1 bindings                  |
-| R2                        | ✅     | Via R2 bindings                  |
-| Durable Objects           | ✅     | Via DO bindings                  |
+| Feature                   | Status | Notes                                                                         |
+| ------------------------- | ------ | ----------------------------------------------------------------------------- |
+| TCP sockets               | ❌     | Use HTTP-based services                                                       |
+| File system               | ❌     | Use R2 or KV for storage                                                      |
+| Worker threads            | ❌     | worker-pool-plugin registers, but `run()` throws `WorkerPoolUnavailableError` |
+| Raw sockets (WebSocket)   | ✅     | Via WebSocket upgrade                                                         |
+| Cron                      | ✅     | Via Wrangler triggers                                                         |
+| Queues                    | ✅     | Via Workers Queues                                                            |
+| Messaging (pub/sub)       | ✅     | Via Workers Queues                                                            |
+| Messaging (request/reply) | ✅     | Via a Durable Object reply inbox                                              |
+| KV                        | ✅     | Via KV bindings                                                               |
+| D1                        | ✅     | Via D1 bindings                                                               |
+| R2                        | ✅     | Via R2 bindings                                                               |
+| Durable Objects           | ✅     | Via DO bindings                                                               |
 
 ### Messaging on Workers
 
@@ -675,31 +681,45 @@ app.router.get('/', async (ctx) => {
 
 ### 1. Use Runtime Detection
 
+Runtime services live in the registry under `CAPABILITIES.RUNTIME`, so a request handler resolves
+them there (only a plugin's `register` context carries them as `ctx.runtime`):
+
 ```typescript
-const platform = ctx.runtime.platform();
-if (platform === 'cloudflare-workers') {
-  // Workers-specific logic
-}
+import { CAPABILITIES, type IRuntimeServices } from '@setu-ts/common';
+
+app.router.get('/platform', (ctx) => {
+  const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  if (runtime.platform() === 'cloudflare-workers') {
+    // Workers-specific logic
+  }
+  return ctx.response.json({ platform: runtime.platform() });
+});
 ```
 
 ### 2. Handle Missing Services Gracefully
 
-```typescript
-if (ctx.runtime.fs) {
-  const content = await ctx.runtime.fs.readFile('file.txt');
-} else {
-  // Fallback for Workers
-  const content = await ctx.services.get<ICacheStore>(CAPABILITIES.CACHE).get('file.txt');
-}
-```
-
-### 3. Configure Timeouts Appropriately
+Optional runtime members such as `fs` are absent where the platform cannot provide them, so check
+before use:
 
 ```typescript
-// Workers have 120s max execution
-// Node/Deno/Bun can run longer
-const timeout = platform === 'cloudflare-workers' ? 60_000 : 300_000;
+import { CAPABILITIES, type ICacheStore, type IRuntimeServices } from '@setu-ts/common';
+
+app.router.get('/notice', async (ctx) => {
+  const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  const content = runtime.fs
+    ? await runtime.fs.readFile('notice.txt')
+    // Workers has no file system: read from a store instead
+    : await ctx.services.get<ICacheStore>(CAPABILITIES.CACHE).get<string>('notice');
+  return ctx.response.json({ content });
+});
 ```
+
+### 3. Know the Workers Execution Limits
+
+An HTTP-triggered Worker has no wall-clock limit while the client stays connected, but CPU time is
+capped: 10 ms per request on the free plan, and 30 seconds by default on paid plans, configurable up
+to 5 minutes. Background work passed to `waitUntil()` gets at most 30 seconds after the response.
+Long CPU-bound work belongs in a queue consumer or on a socket runtime.
 
 ### 4. Use Platform-Specific Storage
 

@@ -10,6 +10,7 @@
  *
  * @module
  */
+import type { ServedRoute } from './registry.ts';
 import type { Showcase } from './style.ts';
 
 /** The artifact name the greeting controller and service are generated under. */
@@ -78,6 +79,15 @@ export class GreetingController {
  * The class-based showcase: the two example source files, seeded into the
  * scaffolded controller and service barrels under {@linkcode CLASS_BASED_SHOWCASE}.
  */
+/**
+ * The two routes both greeting showcases serve: the functional controller and
+ * the decorated one answer the same paths.
+ */
+export const GREETING_ROUTES: readonly ServedRoute[] = [
+  { path: '/greetings', purpose: 'the example controller, greeting the world' },
+  { path: '/greetings/:name', purpose: 'the same controller, greeting `name`' },
+];
+
 export const CLASS_BASED_SHOWCASE_EXAMPLE: Showcase = {
   files: [
     // In the SEAM directories, under the seam naming convention (E4). A developer
@@ -90,4 +100,5 @@ export const CLASS_BASED_SHOWCASE_EXAMPLE: Showcase = {
   // keeps it on every later regeneration because it exports the symbols the
   // barrel imports.
   seeded: { controller: [CLASS_BASED_SHOWCASE], service: [CLASS_BASED_SHOWCASE] },
+  routes: GREETING_ROUTES,
 };

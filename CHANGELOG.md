@@ -414,6 +414,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`export default { fetch: app.fetch }` answered every Workers request with 500
+  (`@setu-ts/kernel`, PR pending).** It is the Workers entry the `cloudflare-plugin` README,
+  `PUBLIC_API.md`, the `rest-starter` README and the Workers adapter's own `listen()` error all
+  name, and Cloudflare calls it as `exported.fetch(request, …)`, so `this` was the exported object
+  and `Application.fetch` threw `Cannot read private member #registry`. Measured on workerd. The
+  application now binds `fetch` at construction, so it works passed around as a bare function.
+
 - **A fresh full-stack project on Node or Bun crashed on its first `start` (`@setu-ts/cli`, PR
   pending).** `setu new --template full-stack --runtime node` (or `bun`) prints
   `npm install && npm start`, and the generated README says the same, but the `start` script ran
@@ -421,6 +428,19 @@ All notable changes to this project are documented here. The format follows
   with "Failed to load React Router server build" because `build/server/index.js` did not exist.
   `start` now runs the build first, as the Deno `start` task and the npm `test` script already did.
   An existing project can prefix its own `start` with `npm run build &&` (or `bun run build &&`).
+
+- **A generated README now says what the project serves (`@setu-ts/cli`).** A new section lists each
+  route a fresh project answers, such as `/docs` (Swagger UI), `/openapi.json`, `/health` and
+  `/metrics`, with the address to reach them. The scaffold e2e requests every listed path on a
+  booted project, so the list cannot name a route that does not answer.
+
+- **The runtime deployment guide's setup commands did not run.** `npm install jsr:…`,
+  `npm add jsr:…` and `bun add jsr:…` all fail, and `wrangler init --type` takes no `--type`; the
+  guide now uses `npx jsr add` / `bunx jsr add` and `setu new`. It also showed a `package.json`
+  `imports` block Node cannot use, a `node:20` Docker base below the documented Node 22 floor,
+  Workers startup that cached a failed start for the isolate's life, `ctx.runtime` in request
+  handlers (where `ctx` has no `runtime`), and a 120-second Workers execution limit that does not
+  exist: an HTTP Worker has no wall-clock limit, and its CPU time is what is capped.
 
 - **The getting-started guide's CLI install command did not work.** It omitted `-g`, which Deno 2.9
   requires for a global install, and `-n setu`, without which the binary is named `cli` and every

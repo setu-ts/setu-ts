@@ -264,6 +264,17 @@ describe('a scaffolded project is formatted and lints clean', () => {
   }
 });
 
+/**
+ * The paths a generated README's "What it serves" section lists, with each
+ * `:name` segment filled in, so they can be requested as written.
+ */
+async function advertisedPaths(project: string): Promise<string[]> {
+  const readme = await Deno.readTextFile(`${project}/README.md`);
+  const section = readme.split('## What it serves')[1]?.split('\n## ')[0] ?? '';
+  return [...section.matchAll(/^- `([^`]+)`/gm)]
+    .map((match) => (match[1] as string).replaceAll(/:[a-z]+/g, 'Setu'));
+}
+
 describe('a scaffolded project serves its own advertised endpoints', () => {
   // Membership is asserted, not just iterated. Removing a template from
   // `BOOTABLE` makes its build-and-boot assertions VANISH rather than fail, so
@@ -317,13 +328,30 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       expect(tested.code, tested.output).toBe(0);
       expect(tested.output).toContain('1 passed');
 
+      // Every path the README's "What it serves" section lists must answer,
+      // so the section cannot advertise a route the project does not serve.
+      const advertised = await advertisedPaths(project);
+      // Vacuity guard: every bootable template lists at least `/` and the six
+      // plugin endpoints, so fewer means the section or its parser broke.
+      expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(7);
       const paths = [
-        '/health',
-        '/ready',
-        '/metrics',
-        ...(template === 'rest' ? ['/greetings', '/greetings/Setu'] : []),
+        ...new Set([
+          '/health',
+          '/ready',
+          '/metrics',
+          ...(template === 'rest' ? ['/greetings', '/greetings/Setu'] : []),
+          ...advertised,
+        ]),
       ];
       const result = await bootWithGeneratedPermissions(project, paths);
+      for (const path of advertised) {
+        // `fetch` follows redirects, so a page behind sign-in lands on the
+        // sign-in form and answers 200 as well.
+        expect({ path, status: result.statuses[path] }, result.output).toEqual({
+          path,
+          status: 200,
+        });
+      }
 
       // The assertion D2 failed: without `--allow-sys` the self indicator's
       // `runtime.hostname()` throws and the probe answers 500.

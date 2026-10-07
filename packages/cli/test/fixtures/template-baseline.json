@@ -1,6 +1,6 @@
 {
   "rest/deno": {
-    "README.md": "3c8c3f2fef43062978c91b08917a3a42110f39e940834de10a2c83bff5f8d72f",
+    "README.md": "2240d2430bc69ccb20f2a9ea4aab53837dfef22f0c295f1c506412d4fc2c0ac9",
     ".gitignore": "b3ba994a0942d443fe9b46ed84a650a5953b8a7d5bb31f57f0b9cfc019e3871a",
     "test/app.test.ts": "badbb46f117b40059155e7ce3f9d5c60dfb65836fb59a0c547a05729a280cbf0",
     "deno.json": "a8fdd08f44751ecbab45ab1e2d3bcf2337e67d2fadccb705fa0403563bbc31c0",
@@ -17,7 +17,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "rest/node": {
-    "README.md": "1d5cb753b6185579da6a8a981532d2fb56ad2fd2454aa6e12d6670313bcad453",
+    "README.md": "19f083d50c638a463e09d875ded7c2ad881710ff9508dab53b554bc3779f0927",
     ".gitignore": "4aaf43114e8b365db0af8764f9524600963ed9814090828dc1d1c36120e895a6",
     "test/app.test.ts": "bbe8bb4cee7edc1d37c08fadd7c9a39f2396e5c026050f35290a482d915a6d85",
     "package.json": "47bf2f5b6264ae09a6b15d49d44ded37f307f6c9260a28bd37570d46d313cb32",
@@ -36,7 +36,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "rest/bun": {
-    "README.md": "937d7bfbd4b4085fbdaaf053a03e0f4756483e313094e1126eca4a018053a08b",
+    "README.md": "8da5468443e36a65cede51b0bd363c221e101cb7da1bc9b7989ef64c4d63362e",
     ".gitignore": "4aaf43114e8b365db0af8764f9524600963ed9814090828dc1d1c36120e895a6",
     "test/app.test.ts": "2ac49a9bb83f11ad90cf1f384991d5ccf388ffac7bf8a0a3ff5d07214e0f934f",
     "package.json": "c5f791c9cc1c0c3638e4fcca3cbd5be034bcc633a437a67a86ecf1f31645c5b0",
@@ -55,7 +55,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "rest/cloudflare-workers": {
-    "README.md": "9a23b0d5a90884b11ee928181e2682d698bbd4362dbbc5417aebb99aa72699dc",
+    "README.md": "b707cdce448e3b31b88b9e37769ea2757b1a8849d1d60cd6ff3b116b877075f4",
     ".gitignore": "ded470af7322535c846a768fa514eafdff4fdd46095f349272289cbc8a6f9ef5",
     "deno.json": "ec92b54fc567a54735550b49273421c7a477fbb6de297c657c9a9a4ad8a43ece",
     "package.json": "47658bbd32c51e794311e828ede82bd259011219c4b3af188c5c6bb7c5e9c997",
@@ -73,7 +73,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "microservice/deno": {
-    "README.md": "3c8c3f2fef43062978c91b08917a3a42110f39e940834de10a2c83bff5f8d72f",
+    "README.md": "ac577e616b9d16b740eef29933b4492beba1b4508ee249ec9022dcf7b8928d0c",
     ".gitignore": "b3ba994a0942d443fe9b46ed84a650a5953b8a7d5bb31f57f0b9cfc019e3871a",
     "test/app.test.ts": "badbb46f117b40059155e7ce3f9d5c60dfb65836fb59a0c547a05729a280cbf0",
     "deno.json": "60839b026ed88bbc4762186b8cfcf965d84be45656d6a303e68ad8c3f215047f",
@@ -90,7 +90,7 @@
     "src/events/index.ts": "78f66f365e842c6dabb33fd039dd3d7835369e686ec37b406a68fac5c495ae46"
   },
   "microservice/node": {
-    "README.md": "1d5cb753b6185579da6a8a981532d2fb56ad2fd2454aa6e12d6670313bcad453",
+    "README.md": "a56e2089f90954d22e263d12594ccd0a1280a81fbee53f02f373eb99c0b70439",
     ".gitignore": "4aaf43114e8b365db0af8764f9524600963ed9814090828dc1d1c36120e895a6",
     "test/app.test.ts": "bbe8bb4cee7edc1d37c08fadd7c9a39f2396e5c026050f35290a482d915a6d85",
     "package.json": "4d1b7701cf8776e6b6c06be419baec239b44b403d8fda9eb74c596f9545ef162",
@@ -109,7 +109,7 @@
     "src/events/index.ts": "78f66f365e842c6dabb33fd039dd3d7835369e686ec37b406a68fac5c495ae46"
   },
   "microservice/bun": {
-    "README.md": "937d7bfbd4b4085fbdaaf053a03e0f4756483e313094e1126eca4a018053a08b",
+    "README.md": "4659739976deec4b33ba891588974a5e4943599fc12ecb3005ff1ec4c068a76c",
     ".gitignore": "4aaf43114e8b365db0af8764f9524600963ed9814090828dc1d1c36120e895a6",
     "test/app.test.ts": "2ac49a9bb83f11ad90cf1f384991d5ccf388ffac7bf8a0a3ff5d07214e0f934f",
     "package.json": "bad59a75d0d0f00a991b7ccabcbf5ce729089cb1511c59ec2de1e3c49bc2e37d",
@@ -128,7 +128,7 @@
     "src/events/index.ts": "78f66f365e842c6dabb33fd039dd3d7835369e686ec37b406a68fac5c495ae46"
   },
   "microservice/cloudflare-workers": {
-    "README.md": "9a23b0d5a90884b11ee928181e2682d698bbd4362dbbc5417aebb99aa72699dc",
+    "README.md": "0162d7bd8819bf054ff05a8bc4c8a9771b157ba25de46f63de11576858189e45",
     ".gitignore": "ded470af7322535c846a768fa514eafdff4fdd46095f349272289cbc8a6f9ef5",
     "deno.json": "fcf8338be877087a4403e591a5fa264553d99f80a0a24b9e14238a2ffd11d05d",
     "package.json": "e56922b360491bd790e1e1027cb54509d38b1838b134d36fbb1553fb1a89ff7d",
@@ -147,7 +147,7 @@
     "src/reply-inbox-object.ts": "8893a44fd1a8fd1a7ff9db9cb63463344326f2a90568bc81907e655a2f55488e"
   },
   "class-based/deno": {
-    "README.md": "3c8c3f2fef43062978c91b08917a3a42110f39e940834de10a2c83bff5f8d72f",
+    "README.md": "2240d2430bc69ccb20f2a9ea4aab53837dfef22f0c295f1c506412d4fc2c0ac9",
     ".gitignore": "b3ba994a0942d443fe9b46ed84a650a5953b8a7d5bb31f57f0b9cfc019e3871a",
     "test/app.test.ts": "badbb46f117b40059155e7ce3f9d5c60dfb65836fb59a0c547a05729a280cbf0",
     "deno.json": "3afe4e8c4576f057a855d243cc8006490f72bf339c7c41b361fe4e1d08fca265",
@@ -167,7 +167,7 @@
     "src/ingress/index.ts": "cd8cb00004bfadf61edb1bc4ea4e8749d888ebaaad78d28e4d016fcf5ce04d1c"
   },
   "class-based/node": {
-    "README.md": "1d5cb753b6185579da6a8a981532d2fb56ad2fd2454aa6e12d6670313bcad453",
+    "README.md": "19f083d50c638a463e09d875ded7c2ad881710ff9508dab53b554bc3779f0927",
     ".gitignore": "4aaf43114e8b365db0af8764f9524600963ed9814090828dc1d1c36120e895a6",
     "test/app.test.ts": "bbe8bb4cee7edc1d37c08fadd7c9a39f2396e5c026050f35290a482d915a6d85",
     "package.json": "7a61d3ba15a0b72b7e4ac7984141170aa466bc9b65044a760b6f3d6e133e7fcf",
@@ -189,7 +189,7 @@
     "src/ingress/index.ts": "cd8cb00004bfadf61edb1bc4ea4e8749d888ebaaad78d28e4d016fcf5ce04d1c"
   },
   "class-based/bun": {
-    "README.md": "937d7bfbd4b4085fbdaaf053a03e0f4756483e313094e1126eca4a018053a08b",
+    "README.md": "8da5468443e36a65cede51b0bd363c221e101cb7da1bc9b7989ef64c4d63362e",
     ".gitignore": "4aaf43114e8b365db0af8764f9524600963ed9814090828dc1d1c36120e895a6",
     "test/app.test.ts": "2ac49a9bb83f11ad90cf1f384991d5ccf388ffac7bf8a0a3ff5d07214e0f934f",
     "package.json": "a46f5a3f5e00629f7ca44602918930d3b053eabebadf0fdb66eadcff2450b542",
@@ -211,7 +211,7 @@
     "src/ingress/index.ts": "cd8cb00004bfadf61edb1bc4ea4e8749d888ebaaad78d28e4d016fcf5ce04d1c"
   },
   "class-based/cloudflare-workers": {
-    "README.md": "9a23b0d5a90884b11ee928181e2682d698bbd4362dbbc5417aebb99aa72699dc",
+    "README.md": "b707cdce448e3b31b88b9e37769ea2757b1a8849d1d60cd6ff3b116b877075f4",
     ".gitignore": "ded470af7322535c846a768fa514eafdff4fdd46095f349272289cbc8a6f9ef5",
     "deno.json": "d91a1f1fa2347023de53cf71e3d59c4a99b70ecc94a7bcf4414ebc30e7add7a1",
     "package.json": "4e778e648070b43ca94385229c6986c66fa73423c0d5be4febe7e120a693f7d4",
@@ -232,7 +232,7 @@
     "src/ingress/index.ts": "cd8cb00004bfadf61edb1bc4ea4e8749d888ebaaad78d28e4d016fcf5ce04d1c"
   },
   "minimal/deno": {
-    "README.md": "3c8c3f2fef43062978c91b08917a3a42110f39e940834de10a2c83bff5f8d72f",
+    "README.md": "cffef4ad52fc0ac2dcf42cfaeb7f8c7a42ed4e270a6d8ce8c4ccca1f8a71b338",
     ".gitignore": "5c5daf48fdf4db42e16c29b5b3de54984bafe0c2ff367a186ca97f1d4ed48290",
     "test/app.test.ts": "6a2db5a64d4bcf6ae48013a4eff9697edac019b3455c2c2b8e021db1f9ab7820",
     "deno.json": "344c7f0b771b27f32e0a1612728083413fae026709c03cd02118503609ec59d6",

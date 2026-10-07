@@ -28,6 +28,7 @@ import type {
   MiddlewareWiring,
   PackageImport,
   RuntimeSwap,
+  ServedRoute,
   TemplateHost,
   TemplateManifest,
   Wiring,
@@ -138,6 +139,8 @@ export interface ResolvedHost {
   readonly extraImports: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
+  /** Routes the template's own source serves, for the README. */
+  readonly routes: readonly ServedRoute[];
   readonly manifest?: TemplateManifest | undefined;
 }
 
@@ -179,6 +182,7 @@ export function resolveHost(
     extraTasks: { ...host.extraTasks },
     extraImports: {},
     appFactory: host.appFactory,
+    routes: host.routes ?? [],
     appFactoryContext: {
       ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
       ...host.appFactoryContext,
@@ -1495,6 +1499,70 @@ function standaloneNpmFiles(
 }
 
 /**
+ * The endpoint each first-party plugin registers at its default path.
+ *
+ * The CLI never passes these plugins a custom path, so the defaults are what a
+ * generated project serves. Order is the order the README lists them in.
+ */
+const PLUGIN_ROUTES: Readonly<Record<string, readonly ServedRoute[]>> = {
+  'health-plugin': [
+    { path: '/health', purpose: 'aggregated health of every registered indicator' },
+    { path: '/live', purpose: 'liveness probe' },
+    { path: '/ready', purpose: 'readiness probe' },
+  ],
+  'metrics-plugin': [{ path: '/metrics', purpose: 'Prometheus metrics' }],
+  'openapi-plugin': [
+    { path: '/docs', purpose: 'Swagger UI for the API' },
+    { path: '/openapi.json', purpose: 'the OpenAPI document' },
+  ],
+};
+
+/**
+ * Every route a generated project serves out of the box.
+ *
+ * A plugin-list host serves the hello-world route its config module registers;
+ * a factory-composed host declares its own `/` among its routes. Plugin
+ * endpoints come from the wirings, or from what the factory says it composes.
+ *
+ * @param host - The resolved template host
+ * @returns The routes, in README order
+ */
+export function servedRoutes(host: ResolvedHost): readonly ServedRoute[] {
+  const plugins = new Set([
+    ...packagesOf(host.plugins, host.middleware),
+    ...(host.appFactory?.composes ?? []),
+  ]);
+  return [
+    ...(host.appFactory === undefined
+      ? [{ path: '/', purpose: 'the hello-world route in `setu.config.ts`' }]
+      : []),
+    ...host.routes,
+    ...Object.entries(PLUGIN_ROUTES).flatMap(([pkg, routes]) => plugins.has(pkg) ? routes : []),
+  ];
+}
+
+/**
+ * The README section listing what a fresh project serves.
+ *
+ * The lead-in names the address rather than pointing at startup output, because
+ * only Deno's server prints one: a Node or Bun project starts silently.
+ *
+ * @param host - The resolved template host
+ * @param runtime - The selected runtime target
+ * @param port - Where the entry gets its port, for a workspace member
+ * @returns The section, starting and ending with a blank line
+ */
+function servedRoutesSection(host: ResolvedHost, runtime: TargetRuntime, port?: EntryPort): string {
+  const where = runtime === 'cloudflare-workers'
+    ? 'Under `npx wrangler dev`, at `http://localhost:8787`'
+    : port === undefined
+    ? 'At `http://localhost:3000` (set `PORT` to change it)'
+    : `On the port \`${port.from}\` exports`;
+  const lines = servedRoutes(host).map((route) => `- \`${route.path}\` — ${route.purpose}`);
+  return `\n## What it serves\n\n${where}:\n\n${lines.join('\n')}\n`;
+}
+
+/**
  * Builds the file set for one runtime target and host.
  *
  * @param projectName - The project directory and manifest name
@@ -1545,7 +1613,7 @@ ${
       : 'npm start'
   }
 \`\`\`
-
+${servedRoutesSection(host, runtime, port)}
 ${
     host.devtoolPort === undefined
       ? ''

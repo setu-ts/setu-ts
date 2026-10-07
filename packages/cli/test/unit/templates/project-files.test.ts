@@ -1,8 +1,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';
+import { projectFiles, resolveHost, servedRoutes } from '../../../src/templates/project-files.ts';
 import type { TargetRuntime } from '../../../src/constants.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
+import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
 
 /**
  * Reads one planned file's contents.
@@ -345,5 +346,62 @@ describe('the Cloudflare Workers target', () => {
     // The two facts a reader cannot infer from the stanza alone.
     expect(toml).toContain('max_batch_timeout = 0');
     expect(toml).toContain('EXPORTED from your own src/index.ts');
+  });
+});
+
+describe('the routes a generated README lists', () => {
+  // Measured by booting each template and requesting every path; the scaffold
+  // e2e re-checks the list against a running project on every run.
+  const PLUGIN_PATHS = ['/health', '/live', '/ready', '/metrics', '/docs', '/openapi.json'];
+  const pathsOf = (name: string | undefined, runtime: TargetRuntime = 'deno') =>
+    servedRoutes(
+      resolveHost(name === undefined ? MINIMAL_HOST : getTemplate(name)!, runtime),
+    ).map((route) => route.path);
+
+  it('lists only the hello-world route for the template-less host', () => {
+    expect(pathsOf(undefined)).toEqual(['/']);
+  });
+
+  it('lists the greeting showcase and the plugin endpoints for rest, in either style', () => {
+    const expected = ['/', '/greetings', '/greetings/:name', ...PLUGIN_PATHS];
+    expect(pathsOf('rest')).toEqual(expected);
+    expect(pathsOf('class-based')).toEqual(expected);
+  });
+
+  it('lists no showcase for microservice, which emits none', () => {
+    expect(pathsOf('microservice')).toEqual(['/', ...PLUGIN_PATHS]);
+  });
+
+  it('lists what the full-stack starter composes, though its plugin list is empty', () => {
+    // The factory hides HealthPlugin, MetricsPlugin and OpenApiPlugin from the
+    // wirings, so only its `composes` declaration can put them here.
+    expect(resolveHost(getTemplate('full-stack')!, 'deno').plugins).toEqual([]);
+    expect(pathsOf('full-stack')).toEqual(['/', '/products', '/login', ...PLUGIN_PATHS]);
+  });
+
+  it('keeps the list after a runtime swap', () => {
+    expect(pathsOf('microservice', 'cloudflare-workers')).toEqual(['/', ...PLUGIN_PATHS]);
+  });
+
+  it('writes the section into the README with the address for each runtime', () => {
+    const readme = (runtime: TargetRuntime) =>
+      projectFiles('proj', runtime, resolveHost(getTemplate('rest')!, runtime))
+        .find((f) => f.path === 'README.md')?.contents ?? '';
+    expect(readme('deno')).toContain('## What it serves\n\nAt `http://localhost:3000`');
+    expect(readme('node')).toContain('- `/docs` — Swagger UI for the API');
+    expect(readme('cloudflare-workers')).toContain(
+      'Under `npx wrangler dev`, at `http://localhost:8787`',
+    );
+  });
+
+  it('names the allocated port for a workspace member', () => {
+    const files = projectFiles(
+      'proj',
+      'deno',
+      resolveHost(getTemplate('rest')!, 'deno'),
+      { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
+    );
+    const readme = files.find((f) => f.path === 'README.md')?.contents ?? '';
+    expect(readme).toContain('On the port `./src/discovery/services.ts` exports:');
   });
 });

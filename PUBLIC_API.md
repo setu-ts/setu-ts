@@ -11144,6 +11144,9 @@ Contract notes:
 - **`app.fetch()` rejects rather than throwing synchronously** when no `http-adapter` capability is
   registered, so the Workers `export default { fetch: app.fetch }` entry point sees a failed promise
   instead of an unhandled exception.
+- **`app.fetch` is bound to its application**, so it works passed around as a bare function. That
+  entry point needs it: Cloudflare calls `exported.fetch(request, …)`, which made `this` the
+  exported object, and before the binding every such request answered 500.
 - **Contribution-token pattern**: `ctx.health.register()`, `ctx.metrics.register()`,
   `ctx.openapi.addSchema()`, `ctx.cli.register()`, and `ctx.decorators.register()` funnel
   contributions into multi-provider services under the Step-1 tokens; consumers retrieve them with
