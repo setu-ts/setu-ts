@@ -658,6 +658,13 @@ All notable changes to this project are documented here. The format follows
   what the `di` arm turns on, and the testing README states that a container-provided service cannot
   be replaced with `overrideCapability`.
 
+- **The root README's quick examples did not run as written (README, PR pending).** The first
+  example registered `LoggerPlugin` without telling the reader to install it, so following the
+  documented install failed to resolve the import; it now says to add the package. The second read
+  `JWT_SECRET` before any plugin had registered; it now loads configuration with `loadConfig` and
+  hands the same snapshot to `ConfigPlugin({ instance })`. The feature table no longer claims event
+  sourcing, which the framework does not ship, and now lists Cosmos DB and Bigtable.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added

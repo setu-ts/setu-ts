@@ -65,8 +65,8 @@ opinion vs. flexibility.**
 - 🌍 **Runtime independence** — Write once, run on Node.js, Deno, Bun, and Cloudflare Workers.
 - 🧩 **Plugin-first architecture** — Every capability is a plugin. Start minimal, add what you need,
   replace what you do not like.
-- 🏢 **Enterprise capabilities** — Authentication, RBAC, CQRS, event sourcing, multi-tenancy, audit
-  logging, secrets management, and more.
+- 🏢 **Enterprise capabilities** — Authentication, RBAC, CQRS, domain and integration events,
+  multi-tenancy, audit logging, secrets management, and more.
 
 Without becoming heavyweight. Without forcing opinions. Without locking you in.
 
@@ -84,7 +84,7 @@ Without becoming heavyweight. Without forcing opinions. Without locking you in.
 | **Type safety**         | Strict TypeScript throughout. No `any` in public APIs. Full type inference for services, config, and routes.         |
 | **Tree-shakeable**      | Every package uses ES modules and subpath exports. You ship only what you use.                                       |
 | **Production ready**    | Built for scale: graceful shutdown, distributed locking, circuit breakers, audit trails, and observability.          |
-| **Enterprise focused**  | Patterns that large organizations need: multi-tenancy, feature flags, secrets management, CQRS, event sourcing.      |
+| **Enterprise focused**  | Patterns that large organizations need: multi-tenancy, feature flags, secrets management, CQRS, domain events.       |
 
 ---
 
@@ -121,12 +121,12 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Data
 
-| Feature       | Status | Package                | Description                                                                      |
-| ------------- | ------ | ---------------------- | -------------------------------------------------------------------------------- |
-| Database      | ✅     | `database-plugin`      | Memory, Prisma, Drizzle, MongoDB, DynamoDB — repository pattern and Unit of Work |
-| Caching       | ✅     | `cache-plugin`         | Memory (LRU), Redis, noop; transparent response caching                          |
-| Storage       | ✅     | `storage-plugin`       | S3, B2, GCS, Azure Blob, local, memory; upload middleware                        |
-| Multi-tenancy | ✅     | `multi-tenancy-plugin` | Subdomain/header/path/JWT resolution; schema/database/column isolation           |
+| Feature       | Status | Package                | Description                                                                                           |
+| ------------- | ------ | ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| Database      | ✅     | `database-plugin`      | Memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable — repository pattern and Unit of Work |
+| Caching       | ✅     | `cache-plugin`         | Memory (LRU), Redis, noop; transparent response caching                                               |
+| Storage       | ✅     | `storage-plugin`       | S3, B2, GCS, Azure Blob, local, memory; upload middleware                                             |
+| Multi-tenancy | ✅     | `multi-tenancy-plugin` | Subdomain/header/path/JWT resolution; column isolation, schema/database strategies for a custom store |
 
 ### Messaging and background work
 
@@ -155,7 +155,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Server-Sent Events    | ✅     | `sse-plugin`                | One-way streaming, named channels, heartbeat, `Last-Event-ID`                      |
 | WebSocket             | ✅     | `websocket-plugin`          | Full-duplex on all four runtimes; rooms, heartbeat, limits                         |
 | Cross-replica fan-out | ✅     | `realtime-backplane-plugin` | Rooms and channels reach clients on other replicas                                 |
-| React SSR             | ✅     | `react-router-plugin`       | React Router v7 framework mode with file-based routing                             |
+| React SSR             | ✅     | `react-router-plugin`       | React Router v8 framework mode with file-based routing                             |
 | Server-rendered views | ✅     | `view-plugin`               | `@Render` + `renderView` over hono-jsx / hono-html engines                         |
 | Localization          | ✅     | `localization-plugin`       | Message catalogues, request locale resolution, a formatter shared with the browser |
 
@@ -270,7 +270,8 @@ Node/Bun compatibility suites as release gates. Until then, read the CHANGELOG b
 
 ## Quick Example
 
-The smallest possible application — just the kernel and a runtime:
+A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
+installed above (`deno add jsr:@setu-ts/logger-plugin@^0.8.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -291,24 +292,33 @@ app.router.get('/', (ctx) => {
 await app.start({ port: 3000 });
 ```
 
+and run it with `deno run --allow-net --allow-env main.ts` (`--allow-env` because the runtime plugin
+reads the process environment).
+
 No decorators. No DI. No modules. Just a router, a runtime, and a logger.
 
 Add capabilities as you need them:
 
 ```typescript
-import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { ConfigPlugin, loadConfig } from '@setu-ts/config-plugin';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
-app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
+// Plugin options are built before any plugin registers, so a value a plugin
+// needs at construction comes from configuration loaded first. The same
+// snapshot is then registered, so handlers read exactly these values.
+const config = await loadConfig(createRuntimeServices(), { validationSchema: AppConfigSchema });
+
+app.register(ConfigPlugin({ instance: config }));
 app.register(ValidationPlugin());
 // A Prisma v7 client is generated into an application-owned output path and
 // needs a driver adapter, so the application constructs it and injects it.
 app.register(DatabasePlugin({ type: 'prisma', options: { prismaClient } }));
-// Secrets come from the config capability — never process.env (runtime independence)
-app.register(AuthPlugin({ jwt: { secret: config.get('JWT_SECRET') } }));
+// Secrets come from configuration, never process.env (runtime independence).
+app.register(AuthPlugin({ jwt: { secret: config.getOrThrow<string>('JWT_SECRET') } }));
 app.register(OpenApiPlugin({ title: 'My API', version: '1.0.0' }));
 ```
 
