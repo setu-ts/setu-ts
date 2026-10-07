@@ -5012,8 +5012,9 @@ dead-letter cap must be positive safe integers. Invalid options throw `RangeErro
 Deserialize failures and `IntegrationEventRejectedError` dead-letter immediately; then `isRetryable`
 runs (false dead-letters, throwing logs and retries), then the attempt budget applies. The original
 is acked after the persistent retry/dead-letter publish is accepted on the same captured channel.
-Disposition failure leaves it unacked until channel closure; a late confirm or a crash between
-publish and ack can duplicate it. Handlers must be idempotent. `Q.dead` carries preserved
+Disposition failure leaves it unacked, closes that channel (returning it to `Q`) and starts the
+reconnect-and-replay recovery, which re-declares the helper queues; a late confirm or a crash
+between publish and ack can duplicate it. Handlers must be idempotent. `Q.dead` carries preserved
 properties/headers (less `expiration`, `userId`, `CC` and `BCC`, which the broker would act on) plus
 `x-setu-attempts`, `x-setu-topic`, and a 1 KiB UTF-8 `x-setu-error` description. Changing the cap
 requires draining and deleting `Q.dead`. Private exclusive queues and RPC reply inboxes retain

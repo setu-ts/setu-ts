@@ -29,14 +29,19 @@ copy and original ack can repeat side effects. Deserialize and integration-event
 dead-letter immediately; `consumerRetry.isRetryable` can return false for other deterministic
 failures. Set `consumerRetry: false` to retain the existing operator DLX policy.
 
-Allow the application to declare durable `Q.retry.<delay>ms` queues and `Q.dead`. Changing delays is
-safe; changing `deadLetterMaxLength` (default 10000) requires draining and deleting `Q.dead` before
-restart, because RabbitMQ rejects changed queue arguments. Inspect `x-setu-attempts`, `x-setu-topic`
-and the bounded `x-setu-error` in dead letters, and apply access/retention policy for their data.
-Default prefetch is now 32 per consumer; configure `prefetch` for handler concurrency and latency.
-Injected channels should implement `prefetch`. Private exclusive queues and RPC reply inboxes retain
-discard behavior. A failed copy stays unacked until channel closure; reconnect to recover deliveries
-left by a publish timeout on an otherwise live channel.
+Allow the application to declare durable `Q.retry.<delay>ms` queues and `Q.dead`. Extend vhost
+permissions before upgrading: the RabbitMQ user needs configure permission on `Q.dead` and
+`Q.retry.<delay>ms`, read permission on `Q.retry.<delay>ms`, and write permission on the default
+exchange, `amq.default`, which carries every retry and dead-letter copy (measured on RabbitMQ 4:
+without them `subscribe()` fails with `403 ACCESS_REFUSED` on the first helper declaration, and a
+copy published without `amq.default` write closes the channel). Changing delays is safe; changing
+`deadLetterMaxLength` (default 10000) requires draining and deleting `Q.dead` before restart,
+because RabbitMQ rejects changed queue arguments. Inspect `x-setu-attempts`, `x-setu-topic` and the
+bounded `x-setu-error` in dead letters, and apply access/retention policy for their data. Default
+prefetch is now 32 per consumer; configure `prefetch` for handler concurrency and latency. Injected
+channels should implement `prefetch`. Private exclusive queues and RPC reply inboxes retain discard
+behavior. A failed copy leaves the original unacked; the broker then closes that channel, which
+returns it to `Q`, and reconnects, re-declaring the retry and dead queues before consuming again.
 
 `ConsumerRetryOptions` now names the shared RabbitMQ/Redis retry object type; Redis behavior and its
 existing option shape are unchanged.

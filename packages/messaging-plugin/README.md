@@ -233,13 +233,18 @@ after that publish succeeds. Copies use mandatory publishing: an unroutable `bas
 the disposition even if RabbitMQ sends a positive confirm. The framework-owned
 `x-setu-disposition-id` header is replaced for each copy and correlates concurrent returns without
 changing the original message ID. Return listeners are removed on confirm, return, close or timeout.
-A failed disposition leaves the original unacked and logs the failure; closing the channel returns
-it to `Q`. If a timeout occurs while the channel remains open, reconnect it to recover those
-deliveries. Recovery requires confirm channels and channel `on`/`off` return listeners;
-`subscribe()` refuses a retrying consumer group on an injected facade missing either, before
-declaring anything, and names `consumerRetry: false` as the alternative. Normal publishes retain
-their documented unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack
-behavior.
+A failed disposition leaves the original unacked and logs the failure, then the broker closes that
+channel (returning the original to `Q`) and runs its reconnect-and-replay recovery, which
+re-declares the retry and dead queues before consuming again; otherwise the unacked originals would
+fill `prefetch` on a live channel and stall the consumer. The RabbitMQ user needs configure
+permission on `Q.dead` and `Q.retry.<delay>ms`, read permission on `Q.retry.<delay>ms`, and write
+permission on the default exchange, `amq.default`, which carries every retry and dead-letter copy
+(measured on RabbitMQ 4: without them `subscribe()` fails with `403 ACCESS_REFUSED` on the first
+helper declaration, and a copy published without `amq.default` write closes the channel). Recovery
+requires confirm channels and channel `on`/`off` return listeners; `subscribe()` refuses a retrying
+consumer group on an injected facade missing either, before declaring anything, and names
+`consumerRetry: false` as the alternative. Normal publishes retain their documented
+unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack behavior.
 
 Private exclusive fan-out queues and RPC reply inboxes keep nack with requeue disabled. Measured:
 TTL dead-lettering reaches an exclusive queue while its connection lives, but discards the copy once

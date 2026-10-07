@@ -210,6 +210,9 @@ All notable changes to this project are documented here. The format follows
   Retry topology reserves group suffixes `.dead` and `.retry.<digits>ms`; rename conflicting groups
   or disable retries. Generated names must fit 255 UTF-8 bytes. Injected recovery channels require
   confirms and `on`/`off` return listeners; without them `subscribe()` on a retrying group rejects.
+  The RabbitMQ user needs configure permission on `Q.dead`/`Q.retry.<delay>ms`, read on
+  `Q.retry.<delay>ms`, and write on `amq.default`; otherwise the helper declarations fail with
+  `403`.
 
 - **BREAKING: Redis Streams messaging recovery (#419).** Failed messages now retry across restarts;
   handlers must be idempotent. Redis ≥6.2 is required. Injected `IRedisStreamsClient` facades must
@@ -428,9 +431,11 @@ All notable changes to this project are documented here. The format follows
   prefetch on reconnect. Retry delays, attempt budget, classifier, dead-letter cap and prefetch are
   configurable and validated at construction. Mandatory replacement publishes now reject correlated
   unroutable returns before acknowledging; reserved/oversized group names are refused before
-  declarations can close the shared channel. Dead-letter diagnostics normalize application-supplied
-  queue/topic names and bound the complete log line, preventing control characters from forging log
-  records while preserving the original routing names.
+  declarations can close the shared channel. A failed disposition now closes its channel and starts
+  the reconnect-and-replay recovery, so unacked originals return to `Q` instead of filling
+  `prefetch` on a live channel until the consumer stalls. Dead-letter diagnostics normalize
+  application-supplied queue/topic names and bound the complete log line, preventing control
+  characters from forging log records while preserving the original routing names.
 
 - **Redis Streams stranded messages (`@setu-ts/messaging-plugin`, #419).** Failed entries are
   reclaimed with tiered idle backoff through one delivery path, instead of staying in the pending

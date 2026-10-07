@@ -142,42 +142,41 @@ describe('REAL RabbitMQ consumer retry', () => {
 
   for (const kind of ['retry', 'dead'] as const) {
     it(
-      `keeps the original when the ${kind} destination disappears before disposition`,
+      `recovers the original when the ${kind} destination disappears before disposition`,
       guard,
       async () => {
         const f = await fixture();
         const held = Promise.withResolvers<void>();
-        let started = false;
+        let calls = 0;
         const app = f.application(
           async () => {
-            started = true;
+            calls++;
+            if (calls > 1) return; // The redelivered original succeeds.
             await held.promise;
             throw Error('temporary');
           },
           [200, 800],
           kind === 'dead' ? 1 : 3,
         );
-        let recovered = 0;
-        const next = f.application(() => {
-          recovered++;
-        });
         try {
           await app.start();
           await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING).publish(f.topic, 'canary');
-          await until(() => started);
-          await f.channel.deleteQueue(
-            kind === 'dead' ? `${f.queue}.dead` : `${f.queue}.retry.200ms`,
-          );
+          await until(() => calls === 1);
+          const destination = kind === 'dead' ? `${f.queue}.dead` : `${f.queue}.retry.200ms`;
+          await f.channel.deleteQueue(destination);
           held.resolve();
-          await wait(300);
-          await app.stop(); // Closing the owning channel must recover the unacked original.
-          expect((await f.channel.checkQueue(f.queue)).messageCount).toBe(1);
-          await next.start();
-          await until(() => recovered === 1);
+          // The unroutable copy fails disposition; recovery closes the channel,
+          // which returns the unacked original to Q, and the replay re-declares
+          // the deleted destination before consuming again. No stop/restart.
+          await until(() => calls === 2);
+          expect(f.logger.entries.some((e) => e.message.includes('original remains unacked'))).toBe(
+            true,
+          );
+          await until(async () => (await f.channel.checkQueue(f.queue)).messageCount === 0);
+          expect((await f.channel.checkQueue(destination)).messageCount).toBe(0);
         } finally {
           held.resolve();
           await app.stop();
-          await next.stop();
           await f.close();
         }
       },

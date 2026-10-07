@@ -410,6 +410,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   #activeConsumers: Map<string, ActiveConsumer>;
   #rr: RequestReplyCore;
   #supervisor: ReconnectSupervisor;
+  /** Channels a failed disposition is already closing (one close each). */
+  #closingChannels = new WeakSet<object>();
   /**
    * The cached, bounded reachability probe (M95b review), built at
    * `connect()` and dropped at `disconnect()`.
@@ -1157,12 +1159,38 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
           this.#logger?.error(
             `RabbitMQ disposition failed; original remains unacked: ${describeError(error)}`,
           );
+          await this.#recoverAfterDispositionFailure(realChannel);
         }
       },
       { noAck: false },
     );
 
     return { consumerTag: result.consumerTag, channel: this.#channel };
+  }
+
+  /**
+   * Closes the channel a failed disposition ran on and starts drive-mode
+   * recovery. Without it a live channel keeps every such original unacked
+   * until `prefetch` of them stall the consumer, because the fault listeners
+   * watch the connection only and closing a channel does not reach them.
+   * Closing returns the originals to `Q`; the replay re-declares the retry and
+   * dead queues before consuming, so a deleted destination is repaired too.
+   * Concurrent failures on one channel close it once, and a channel already
+   * replaced by an earlier recovery is left alone.
+   */
+  async #recoverAfterDispositionFailure(channel: object): Promise<void> {
+    if (this.#channel !== channel || this.#closingChannels.has(channel)) {
+      return;
+    }
+    this.#closingChannels.add(channel);
+    this.#supervisor.fault();
+    if (isCloseableChannel(channel)) {
+      try {
+        await channel.close();
+      } catch {
+        // Already closed by the broker or a concurrent failure.
+      }
+    }
   }
 
   /**

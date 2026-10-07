@@ -132,6 +132,40 @@ describe('RabbitMQ consumer retry', () => {
     expect(clock.timerCount()).toBe(0);
   });
 
+  // The fault listeners watch the connection, so a failed disposition on a
+  // live channel would otherwise leave each original unacked until prefetch
+  // of them stall the consumer. Recovery closes that channel (returning the
+  // originals to Q) and replays the consumer, which re-declares its queues.
+  it('closes the channel and replays the consumer after a failed disposition', async () => {
+    const clock = clockRuntime();
+    const client = new FakeAmqpConnection({ returnMandatory: true });
+    const broker = new RabbitMqBroker(clock.runtime, new JsonSerializer(), { client });
+    await broker.connect();
+    await broker.subscribe('t', () => {
+      throw Error('temporary');
+    }, { queue: 'q' });
+    const channel = await client.createChannel();
+    let closes = 0;
+    Object.defineProperty(channel, 'close', {
+      value: () => {
+        closes++;
+        return Promise.reject(Error('already closed'));
+      },
+    });
+    const consumes = () => channel.calls.filter((c) => c.method === 'consume').length;
+    expect(consumes()).toBe(1);
+    await Promise.all([channel.deliver('1'), channel.deliver('2')]);
+    expect(channel.calls.some((c) => c.method === 'ack' || c.method === 'nack')).toBe(false);
+    expect(closes).toBe(1);
+    expect(await broker.isHealthy()).toBe(false);
+    await clock.advance(500);
+    expect(consumes()).toBe(2);
+    const declared = channel.calls.filter((c) => c.method === 'assertQueue').map((c) => c.args[0]);
+    expect(declared.filter((name) => name === 'q.dead')).toHaveLength(2);
+    await broker.disconnect();
+    expect(clock.timerCount()).toBe(0);
+  });
+
   it('correlates returned copies even with identical targets and message IDs, without acking them', async () => {
     const client = new FakeAmqpConnection({ withholdConfirms: true });
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
