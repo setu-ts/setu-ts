@@ -414,6 +414,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **An absent header resolves to `undefined`, and a validated query can be typed
+  (`@setu-ts/decorator-plugin`, PR pending).** `@Params(Header('X-Name'))` declared its source as
+  `string | undefined` but passed `null` for an absent header, because `Headers.get` answers `null`.
+  It now passes `undefined`, like a missing cookie or query parameter. **Migration:** a handler that
+  tested `=== null` for a missing header must test `=== undefined`. The whole-query source is now
+  generic like `Body`, so `Query<z.infer<typeof schema>>()` declares the shape `@ValidateQuery`
+  wrote instead of a cast. `apps/static-site` takes its port as the first argument (default `8000`).
+
 - **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
   `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
   `@cloudflare/workers-types: '^4.20250109.0'`, and `wrangler` moved its `workers-types` peer from
