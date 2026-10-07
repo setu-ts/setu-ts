@@ -134,9 +134,10 @@ describe('runtime swaps', () => {
     // One boot, not two: a second application would carry its own broker and
     // its own dispatch table, and the subscriptions registered on one would be
     // invisible to the other.
-    // M70l X9-8: boot is claimed through `ensureBooted`, which memoises only a
-    // SUCCESSFUL boot — one `boot(env)` definition, two claim sites.
-    expect(entry?.match(/await ensureBooted\(env\)/g)).toHaveLength(2);
+    // M70l X9-8: every export claims its app through the shared `acquire`
+    // cache, which keeps only a SUCCESSFUL boot — one `boot(env)` definition,
+    // two claim sites.
+    expect(entry?.match(/const booted = acquire\(env\);/g)).toHaveLength(2);
     expect(entry?.match(/async function boot/g)).toHaveLength(1);
     expect(entry).not.toContain('??=');
 
