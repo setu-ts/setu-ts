@@ -734,6 +734,15 @@ All notable changes to this project are documented here. The format follows
   corrected: the path `@Version` produces (`/v1/api/users`, not `/v1/users`), and the
   `MetadataStore` example, which iterated a new, empty store instead of `metadataStore`.
 
+- **The plugin architecture guide's replacement and testing examples failed at startup
+  (`docs/plugin-architecture.md`, PR pending).** "Plugin Replacement" registered a custom logger
+  beside `LoggerPlugin`, which the kernel refuses because a capability has one provider. The testing
+  example registered a plugin after `createTestApp` had started the application, which throws. The
+  middleware priority table now lists every first-party middleware with its real priority; it had
+  omitted the error handler, locale resolution and request logging. The shutdown hook comments now
+  say when each hook runs relative to serving, and the guide no longer says routing and middleware
+  are plugins.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
