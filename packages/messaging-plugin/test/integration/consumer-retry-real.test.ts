@@ -7,6 +7,10 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, MessageHandler } from '@setu-ts/common';
 import { MessagingPlugin } from '../../src/index.ts';
+import {
+  loggerPlugin,
+  RecordingLogger,
+} from '../../../common/test/fixtures/redis-connection-errors.ts';
 
 const rabbitUrl = Deno.env.get('RABBITMQ_URL');
 const guard = { ignore: rabbitUrl === undefined };
@@ -20,19 +24,21 @@ async function until(check: () => boolean | Promise<boolean>, timeout = 5000): P
   throw Error('Timed out waiting for RabbitMQ consumer retry');
 }
 type Amqp = typeof import('npm:amqplib@0.10.x');
-async function fixture(delaysMs: number[] = [200, 800], prefetch = 3) {
+async function fixture(delaysMs: number[] = [200, 800], prefetch = 3, topicSuffix = '') {
   const url = rabbitUrl!.replace('localhost', '127.0.0.1');
   const amqp = await import('npm:amqplib@0.10.x');
   const connection = await amqp.connect(url);
   const channel = await connection.createConfirmChannel();
   const queue = `fix2-${crypto.randomUUID()}`;
-  const topic = `${queue}.topic`;
+  const topic = `${queue}.topic${topicSuffix}`;
+  const logger = new RecordingLogger();
   const queues = new Set([queue, `${queue}.dead`, ...delaysMs.map((d) => `${queue}.retry.${d}ms`)]);
   const application = (handler: MessageHandler, delays = delaysMs, maxAttempts = 3) => {
     for (const d of delays) queues.add(`${queue}.retry.${d}ms`);
     return createApplication({
       plugins: [
         RuntimePlugin(),
+        loggerPlugin(logger),
         MessagingPlugin({
           broker: 'rabbitmq',
           url,
@@ -51,6 +57,7 @@ async function fixture(delaysMs: number[] = [200, 800], prefetch = 3) {
     channel,
     queue,
     topic,
+    logger,
     application,
     async close() {
       // A fresh connection also works when the test restarted the broker.
@@ -96,6 +103,43 @@ async function waitForBroker(amqp: Amqp, url: string, containerId: string): Prom
 }
 
 describe('REAL RabbitMQ consumer retry', () => {
+  it('normalizes dead-letter logs while preserving original routing names', guard, async () => {
+    const f = await fixture([200], 3, '\r\nFORGED');
+    let good = 0;
+    const app = f.application(
+      (message) => {
+        if (message === 'bad') throw Error('failure\nFORGED');
+        good++;
+      },
+      [200],
+      1,
+    );
+    try {
+      await app.start();
+      const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+      await broker.publish(f.topic, 'bad');
+      await until(() => f.logger.entries.some((entry) => entry.message.includes('dead-lettered')));
+      const line = f.logger.entries.find((entry) =>
+        entry.message.includes('dead-lettered')
+      )!.message;
+      expect(line).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+      expect(line).toContain(`${f.queue}.dead`);
+      expect(line).toContain('.topic FORGED');
+      expect(line).toContain('Error: failure FORGED');
+      expect([...line].length).toBeLessThanOrEqual(8192);
+      const retained = await f.channel.get(`${f.queue}.dead`, { noAck: true });
+      expect(retained).not.toBe(false);
+      if (retained === false) throw Error('Expected retained dead letter');
+      expect(retained.properties.headers?.['x-setu-topic']).toBe(f.topic);
+      expect(JSON.parse(retained.content.toString())).toBe('bad');
+      await broker.publish(f.topic, 'good');
+      await until(() => good === 1);
+    } finally {
+      await app.stop();
+      await f.close();
+    }
+  });
+
   for (const kind of ['retry', 'dead'] as const) {
     it(
       `keeps the original when the ${kind} destination disappears before disposition`,

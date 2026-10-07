@@ -10,6 +10,76 @@ import { REPLY_INBOX_TRANSIENT } from '../../src/brokers/inbox.ts';
 import { clockRuntime } from '../fixtures/clock-runtime.ts';
 
 describe('RabbitMQ consumer retry', () => {
+  for (
+    const [label, characters] of [
+      ['CR/LF', '\r\n'],
+      ['NUL', '\0'],
+      ['terminal controls', '\x1b\x7f'],
+      ['bidi format', '\u202e'],
+      ['zero-width format', '\u200d'],
+      ['line/paragraph separators', '\u2028\u2029'],
+      ['printable names', '-'],
+    ]
+  ) {
+    it(`normalizes ${label} in dead-letter logs while preserving routing names`, async () => {
+      const logs: string[] = [];
+      const client = new FakeAmqpConnection();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+        client,
+        consumerRetry: { maxAttempts: 1, delaysMs: [10] },
+        logger: { error: (message) => logs.push(message) },
+      });
+      const queue = `queue${characters}FORGED`;
+      const topic = `topic${characters}FORGED`;
+      await broker.connect();
+      try {
+        await broker.subscribe(topic, (message) => {
+          if (message === 1) throw Error('failure\nFORGED');
+        }, { queue });
+        const channel = await client.createChannel();
+        await channel.deliver('1');
+        expect(logs).toHaveLength(1);
+        expect(logs[0]).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+        expect(logs[0]).toContain('RabbitMQ dead-lettered to "queue');
+        expect(logs[0]).toContain('FORGED.dead", topic "topic');
+        expect(logs[0]).toContain('Error: failure FORGED');
+        const copy = channel.calls.find((call) => call.method === 'publish')!;
+        expect(copy.args[1]).toBe(`${queue}.dead`);
+        expect((copy.args[3] as { headers: Record<string, unknown> }).headers['x-setu-topic'])
+          .toBe(topic);
+        await channel.deliver('2');
+        expect(channel.calls.filter((call) => call.method === 'ack')).toHaveLength(2);
+        expect(channel.calls.filter((call) => call.method === 'publish')).toHaveLength(1);
+      } finally {
+        await broker.disconnect();
+      }
+    });
+  }
+
+  it('bounds the complete dead-letter diagnostic including a long topic', async () => {
+    const logs: string[] = [];
+    const client = new FakeAmqpConnection();
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      consumerRetry: { maxAttempts: 1, delaysMs: [10] },
+      logger: { error: (message) => logs.push(message) },
+    });
+    await broker.connect();
+    try {
+      await broker.subscribe('topic-🙂'.repeat(2000), () => {
+        throw Error('temporary');
+      }, { queue: 'q' });
+      const channel = await client.createChannel();
+      await channel.deliver('1');
+      expect(logs).toHaveLength(1);
+      expect([...logs[0]!].length).toBeLessThanOrEqual(8192);
+      expect(logs[0]).toMatch(/… \[truncated\]$/u);
+      expect(channel.calls.filter((call) => call.method === 'ack')).toHaveLength(1);
+    } finally {
+      await broker.disconnect();
+    }
+  });
+
   it('does not publish if the deadline expires before its scheduled publish starts', async () => {
     const client = new FakeAmqpConnection();
     const runtime = createFakeRuntime();

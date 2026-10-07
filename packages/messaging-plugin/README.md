@@ -218,9 +218,12 @@ Retry copies preserve body bytes, messageId, timestamp and transport headers (in
 traceparent), adding `x-setu-attempt` (absent means initial attempt 1). Malformed attempt headers
 dead-letter immediately. Dead letters add `x-setu-attempts`, `x-setu-topic` and `x-setu-error`,
 rendered via `describeError` and bounded to 1 KiB UTF-8. Error descriptions and payloads may contain
-sensitive data: apply queue access and retention policy. When the dead queue exceeds its cap,
-RabbitMQ drops its oldest ready messages. Drain and delete `Q.dead` before changing
-`deadLetterMaxLength`; RabbitMQ rejects different `x-max-length` arguments with 406.
+sensitive data: grant queue and diagnostic-log access only to readers trusted with that data, and
+apply retention policy. Dead-letter log lines normalize control and format characters in queue,
+topic and error text, and cap the complete diagnostic at 8192 Unicode code points with a visible
+truncation marker. Routing names and retained topic headers preserve their original values. When the
+dead queue exceeds its cap, RabbitMQ drops its oldest ready messages. Drain and delete `Q.dead`
+before changing `deadLetterMaxLength`; RabbitMQ rejects different `x-max-length` arguments with 406.
 
 The copy is always persistent, even if original publishes use `persistentMessages: false`. It uses
 the same confirmed publish path and timeout as normal publishes, and the original is acked only

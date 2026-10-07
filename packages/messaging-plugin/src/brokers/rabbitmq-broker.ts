@@ -10,7 +10,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import { createCachedProbe, deadlineRangeError, withDeadline } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import { describeError } from './describe-error.ts';
+import { describeError, describeLogText } from './describe-error.ts';
 import { IntegrationEventRejectedError } from '../errors.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
@@ -1127,9 +1127,11 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
           realChannel.ack(msg);
           if (dead) {
             this.#logger?.error(
-              `RabbitMQ dead-lettered to "${target}", topic "${topic}", attempts ${attempt}: ${
-                deadLetterError(failure)
-              }`,
+              describeLogText(
+                `RabbitMQ dead-lettered to "${target}", topic "${topic}", attempts ${attempt}: ${
+                  deadLetterError(failure)
+                }`,
+              ),
             );
           }
         } catch (error) {

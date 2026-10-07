@@ -543,6 +543,7 @@ describe('real-backend CI wiring', () => {
         'survives a broker restart',
         'keeps the original',
         'refuses reserved group names',
+        'normalizes dead-letter logs',
       ]
     ) expect(source).toContain(scenario);
     expect(source).toContain("docker(['restart', containerId])");
