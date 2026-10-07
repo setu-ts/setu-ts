@@ -14,6 +14,7 @@ import type {
   IMessageBroker,
   ISubscription,
   MessageHandler,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -27,7 +28,7 @@ const FIXED_MS = 1_700_000_000_000;
 
 /** A stand-in broker that records every `publish` call. */
 class RecordingBroker implements IMessageBroker {
-  readonly published: { topic: string; message: unknown }[] = [];
+  readonly published: { topic: string; message: unknown; options?: PublishOptions }[] = [];
   readonly rejectWith: Error | undefined;
 
   constructor(opts?: { rejectWith?: Error }) {
@@ -42,9 +43,9 @@ class RecordingBroker implements IMessageBroker {
     return Promise.resolve();
   }
 
-  publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
     if (this.rejectWith !== undefined) return Promise.reject(this.rejectWith);
-    this.published.push({ topic, message });
+    this.published.push({ topic, message, ...(options !== undefined ? { options } : {}) });
     return Promise.resolve();
   }
 
@@ -164,6 +165,113 @@ describe('publishIntegrationEvent', () => {
       caught = error;
     }
     expect(caught).toBe(boom);
+  });
+
+  it('defaults deduplicationId to the envelope id and carries empty headers (M106 §3.7)', async () => {
+    const broker = new RecordingBroker();
+
+    await publishIntegrationEvent(runtime, broker, definition, { orderId: 'o-1' });
+
+    const options = broker.published[0].options!;
+    const envelope = broker.published[0].message as { id: string };
+    expect(options.deduplicationId).toBe(envelope.id);
+    expect(options.headers).toEqual({});
+    expect('orderingKey' in options).toBe(false);
+  });
+
+  it('lets a caller-supplied deduplicationId win over the envelope id', async () => {
+    const broker = new RecordingBroker();
+
+    await publishIntegrationEvent(runtime, broker, definition, { orderId: 'o-1' }, undefined, {
+      deduplicationId: 'caller-1',
+    });
+
+    expect(broker.published[0].options?.deduplicationId).toBe('caller-1');
+  });
+
+  it('applies the definition selector as orderingKey, and the caller wins (M106 §3.7)', async () => {
+    const withSelector = defineIntegrationEvent<{ orderId: string }>({
+      type: 'orders.placed',
+      version: 1,
+      topic: 'orders.placed.v1',
+      parse: (value) => value as { orderId: string },
+      orderingKey: (envelope) => envelope.aggregateId,
+    });
+
+    const fromSelector = new RecordingBroker();
+    await publishIntegrationEvent(runtime, fromSelector, withSelector, { orderId: 'o-1' }, {
+      aggregateId: 'agg-9',
+    });
+    expect(fromSelector.published[0].options?.orderingKey).toBe('agg-9');
+
+    const callerWins = new RecordingBroker();
+    await publishIntegrationEvent(
+      runtime,
+      callerWins,
+      withSelector,
+      { orderId: 'o-1' },
+      { aggregateId: 'agg-9' },
+      { orderingKey: 'caller-key' },
+    );
+    expect(callerWins.published[0].options?.orderingKey).toBe('caller-key');
+  });
+
+  it('treats a selector returning undefined as no key at all', async () => {
+    const noKey = defineIntegrationEvent<{ orderId: string }>({
+      type: 'orders.placed',
+      version: 1,
+      topic: 'orders.placed.v1',
+      parse: (value) => value as { orderId: string },
+      orderingKey: () => undefined,
+    });
+    const broker = new RecordingBroker();
+
+    await publishIntegrationEvent(runtime, broker, noKey, { orderId: 'o-1' });
+
+    expect('orderingKey' in broker.published[0].options!).toBe(false);
+  });
+
+  it('rejects when the selector throws, never synchronously (M106 §3.7)', async () => {
+    const throwing = defineIntegrationEvent<{ orderId: string }>({
+      type: 'orders.placed',
+      version: 1,
+      topic: 'orders.placed.v1',
+      parse: (value) => value as { orderId: string },
+      orderingKey: () => {
+        throw new Error('selector boom');
+      },
+    });
+    const broker = new RecordingBroker();
+
+    await expect(publishIntegrationEvent(runtime, broker, throwing, { orderId: 'o-1' })).rejects
+      .toThrow('selector boom');
+    expect(broker.published).toHaveLength(0);
+  });
+
+  it('rejects when the selector returns a value §3.4 refuses (M106 §3.7)', async () => {
+    const invalid = defineIntegrationEvent<{ orderId: string }>({
+      type: 'orders.placed',
+      version: 1,
+      topic: 'orders.placed.v1',
+      parse: (value) => value as { orderId: string },
+      orderingKey: () => 'x'.repeat(129),
+    });
+    const broker = new RecordingBroker();
+
+    await expect(publishIntegrationEvent(runtime, broker, invalid, { orderId: 'o-1' })).rejects
+      .toThrow(RangeError);
+    expect(broker.published).toHaveLength(0);
+  });
+
+  it('validates the caller options before touching the broker (M106 §3.4)', async () => {
+    const broker = new RecordingBroker();
+
+    await expect(
+      publishIntegrationEvent(runtime, broker, definition, { orderId: 'o-1' }, undefined, {
+        headers: { cc: 'x' },
+      }),
+    ).rejects.toThrow(RangeError);
+    expect(broker.published).toHaveLength(0);
   });
 });
 
