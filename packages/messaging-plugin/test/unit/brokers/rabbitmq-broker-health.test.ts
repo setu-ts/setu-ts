@@ -102,6 +102,9 @@ function makeAmqp(opts: { confirm?: boolean } = {}): FakeAmqp {
     cancel: () => Promise.resolve(),
     deleteQueue: () => Promise.resolve(),
     publish: () => true,
+    // A real amqplib channel is an EventEmitter; retrying groups require it.
+    on: () => {},
+    off: () => {},
     close: () => {
       closeCalls++;
       return Promise.resolve();

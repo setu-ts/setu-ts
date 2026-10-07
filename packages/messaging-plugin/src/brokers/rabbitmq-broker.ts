@@ -823,6 +823,18 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       ? { exclusive: true, autoDelete: true }
       : { durable: true };
 
+    // Without confirms and return listeners no failure can be disposed of, so
+    // each stays unacked and the consumer stalls once `prefetch` is reached.
+    if (
+      this.#consumerOptions.retry && 'durable' in declareOptions &&
+      (!this.#confirmed || !isCloseObservable(this.#channel))
+    ) {
+      throw new Error(
+        'RabbitMQ consumer retries need a confirm channel with on/off return listeners; ' +
+          'inject a connection providing createConfirmChannel() or set consumerRetry: false',
+      );
+    }
+
     const subscriptionId = this.#runtime.uuid();
     const { consumerTag, channel } = await this.#consumeOn(
       queueName,

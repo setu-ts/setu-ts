@@ -439,7 +439,8 @@ export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
    * Default maxAttempts 5, delaysMs [5000, 30000, 120000, 600000].
    * Deterministic failures dead-letter immediately. Private queues and RPC reply inboxes discard.
    * With retries enabled, group suffixes .dead and .retry.<digits>ms are reserved.
-   * Generated helper names must fit 255 UTF-8 bytes; injected channels need confirms and returns.
+   * Generated helper names must fit 255 UTF-8 bytes; a retrying group on an injected channel without
+   * confirms and on/off return listeners is refused at subscribe().
    * @since 0.9.0
    */
   consumerRetry?: false | ConsumerRetryOptions;

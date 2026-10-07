@@ -209,7 +209,7 @@ All notable changes to this project are documented here. The format follows
   inboxes retain discard behavior. `ConsumerRetryOptions` names the shared RabbitMQ/Redis shape.
   Retry topology reserves group suffixes `.dead` and `.retry.<digits>ms`; rename conflicting groups
   or disable retries. Generated names must fit 255 UTF-8 bytes. Injected recovery channels require
-  confirms and `on`/`off` return listeners.
+  confirms and `on`/`off` return listeners; without them `subscribe()` on a retrying group rejects.
 
 - **BREAKING: Redis Streams messaging recovery (#419).** Failed messages now retry across restarts;
   handlers must be idempotent. Redis ≥6.2 is required. Injected `IRedisStreamsClient` facades must

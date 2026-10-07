@@ -235,9 +235,11 @@ the disposition even if RabbitMQ sends a positive confirm. The framework-owned
 changing the original message ID. Return listeners are removed on confirm, return, close or timeout.
 A failed disposition leaves the original unacked and logs the failure; closing the channel returns
 it to `Q`. If a timeout occurs while the channel remains open, reconnect it to recover those
-deliveries. Recovery requires confirm channels and channel `on`/`off` return listeners; injected
-facades missing either leave failed originals unacked. Normal publishes retain their documented
-unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack behavior.
+deliveries. Recovery requires confirm channels and channel `on`/`off` return listeners;
+`subscribe()` refuses a retrying consumer group on an injected facade missing either, before
+declaring anything, and names `consumerRetry: false` as the alternative. Normal publishes retain
+their documented unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack
+behavior.
 
 Private exclusive fan-out queues and RPC reply inboxes keep nack with requeue disabled. Measured:
 TTL dead-lettering reaches an exclusive queue while its connection lives, but discards the copy once

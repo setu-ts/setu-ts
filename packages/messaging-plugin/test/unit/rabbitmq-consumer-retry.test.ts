@@ -173,10 +173,52 @@ describe('RabbitMQ consumer retry', () => {
     await broker.disconnect();
   });
 
-  for (const missing of ['confirms', 'listeners', 'hostile return'] as const) {
+  // A consumer group with retries enabled needs confirms and return listeners
+  // to dispose of any failure. Without them every failure stays unacked, and
+  // after `prefetch` of them the consumer silently receives nothing more, so
+  // the setup is refused before anything is declared.
+  for (const missing of ['confirms', 'listeners'] as const) {
+    it(`refuses a retrying consumer group on a channel without ${missing}`, async () => {
+      const client = new FakeAmqpConnection({ withoutConfirmChannel: missing === 'confirms' });
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+      await broker.connect();
+      const channel = await client.createChannel();
+      if (missing === 'listeners') Object.defineProperty(channel, 'on', { value: undefined });
+      await expect(broker.subscribe('t', () => {}, { queue: 'q' })).rejects.toThrow(
+        'consumerRetry: false',
+      );
+      expect(channel.calls.some((c) => c.method === 'assertQueue' || c.method === 'consume'))
+        .toBe(false);
+      await broker.disconnect();
+    });
+  }
+
+  it('still serves a non-retrying subscription on an unconfirmed channel', async () => {
+    for (
+      const [consumerRetry, queue] of [[false, 'q'], [undefined, undefined]] as const
+    ) {
+      const client = new FakeAmqpConnection({ withoutConfirmChannel: true });
+      const broker = new RabbitMqBroker(
+        createFakeRuntime(),
+        new JsonSerializer(),
+        consumerRetry === false ? { client, consumerRetry } : { client },
+      );
+      await broker.connect();
+      const subscription = await broker.subscribe(
+        't',
+        () => {},
+        queue === undefined ? {} : {
+          queue,
+        },
+      );
+      await subscription.unsubscribe();
+      await broker.disconnect();
+    }
+  });
+
+  for (const missing of ['listeners', 'hostile return'] as const) {
     it(`keeps the original unacked with ${missing}`, async () => {
       const client = new FakeAmqpConnection({
-        withoutConfirmChannel: missing === 'confirms',
         withholdConfirms: missing === 'hostile return',
       });
       const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
