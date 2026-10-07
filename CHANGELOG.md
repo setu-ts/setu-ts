@@ -23,7 +23,7 @@ All notable changes to this project are documented here. The format follows
   imports no Vite. Verified on all three runtimes against the published packages, and on Deno
   against the workspace sources too: `/login` renders with its CSRF token, client modules load
   through the app port, an edited route is served on the next request, and SIGINT stops the app and
-  Vite with exit code 0.
+  Vite with exit code 0. If either fails to stop, the failure is logged and the process exits 1.
 
 - **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR #426).**
   With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the container,
@@ -31,6 +31,7 @@ All notable changes to this project are documented here. The format follows
   `overrideProvider('pricing-service', { useValue: fake })` registers the double before the real
   class, so a decorated controller is constructed with it. A mistyped token, an application without
   a container, or a provider registered too early fails `start()` instead of testing the real class.
+  A child scope from `createScope()` keeps the double even when it registers the token itself.
 
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver

@@ -1,7 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import type { IContainer, IPlugin, IPluginContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { DiPlugin } from '@setu-ts/di-plugin';
 import { Controller, DecoratorPlugin, Get, Inject, Injectable } from '@setu-ts/decorator-plugin';
@@ -68,6 +68,24 @@ describe('overrideProvider with DiPlugin and DecoratorPlugin', () => {
     try {
       const response = await app.inject({ method: 'GET', url: '/price' });
       expect(response.json()).toEqual({ price: 0 });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('keeps the double in a child scope that registers the real provider', async () => {
+    const app = await createTestApp({
+      app: createApp(),
+      overrides: [overrideProvider('pricing-service', { useValue: { price: () => 0 } })],
+    });
+    try {
+      const scope = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER).createScope();
+      scope.register('pricing-service', { useClass: PricingService }, { scope: 'transient' });
+      expect(scope.resolve<{ price(): number }>('pricing-service').price()).toBe(0);
+      // A scope of that scope is wrapped the same way.
+      const nested = scope.createScope();
+      nested.register('pricing-service', { useClass: PricingService }, { scope: 'transient' });
+      expect(nested.resolve<{ price(): number }>('pricing-service').price()).toBe(0);
     } finally {
       await app.stop();
     }

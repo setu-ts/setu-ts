@@ -17,25 +17,30 @@ import manifest from '../deno.json' with { type: 'json' };
  * application's own registration of the real provider is the one being replaced.
  * `has` and `register` for that token are recorded as evidence that the
  * application really does provide it, so a mistyped token can be refused.
+ *
+ * A child scope is wrapped the same way and shares the record. Without that, a
+ * child that registered the token itself would resolve its own provider before
+ * the inherited double.
  */
 class OverridingContainer implements IContainer {
   readonly #inner: IContainer;
   readonly #token: string;
-  #claimed = false;
+  readonly #claim: { claimed: boolean };
 
-  constructor(inner: IContainer, token: string) {
+  constructor(inner: IContainer, token: string, claim: { claimed: boolean } = { claimed: false }) {
     this.#inner = inner;
     this.#token = token;
+    this.#claim = claim;
   }
 
   /** Whether anything asked for, or tried to register, the overridden token. */
   get claimed(): boolean {
-    return this.#claimed;
+    return this.#claim.claimed;
   }
 
   register<T>(token: string, provider: Provider<T>, options?: ProviderOptions): void {
     if (token === this.#token) {
-      this.#claimed = true;
+      this.#claim.claimed = true;
       return;
     }
     this.#inner.register(token, provider, options);
@@ -43,20 +48,20 @@ class OverridingContainer implements IContainer {
 
   resolve<T>(token: string): T {
     if (token === this.#token) {
-      this.#claimed = true;
+      this.#claim.claimed = true;
     }
     return this.#inner.resolve<T>(token);
   }
 
   has(token: string): boolean {
     if (token === this.#token) {
-      this.#claimed = true;
+      this.#claim.claimed = true;
     }
     return this.#inner.has(token);
   }
 
   createScope(): IContainer {
-    return this.#inner.createScope();
+    return new OverridingContainer(this.#inner.createScope(), this.#token, this.#claim);
   }
 }
 

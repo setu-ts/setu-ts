@@ -337,6 +337,7 @@ export const FULL_STACK_DEV_ENTRY: { readonly path: string; readonly contents: s
   path: 'dev.ts',
   contents: `import * as vite from 'vite';
 import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
+import { CAPABILITIES, type ILogger } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { createApp } from './setu.config.ts';
@@ -406,9 +407,20 @@ app.router.get(\`\${BASE}*\`, async (ctx) => {
 
 await app.start({ port });
 
+const logger = app.services.has(CAPABILITIES.LOGGER)
+  ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
+  : undefined;
+
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   runtime.onSignal?.(signal, () => {
-    void Promise.allSettled([app.stop(), viteServer.close()]).then(() => runtime.exit(0));
+    // Both are stopped even when one fails; any failure exits 1, like main.ts.
+    void Promise.allSettled([app.stop(), viteServer.close()]).then((results) => {
+      const failures = results.filter((result) => result.status === 'rejected');
+      for (const failure of failures) {
+        logger?.error('Graceful shutdown failed', { error: failure.reason });
+      }
+      runtime.exit(failures.length === 0 ? 0 : 1);
+    });
   });
 }
 `,

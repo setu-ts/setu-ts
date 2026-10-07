@@ -878,6 +878,10 @@ describe('a scaffolded full-stack project serves route edits in development', ()
       tasks: Record<string, string>;
     };
     expect(manifest.tasks['dev']).toBe('deno task install && deno run -A dev.ts');
+    // `deno run` does not type-check, and the project's `check:app` does not
+    // reach the entry, so check it here.
+    const checked = await denoRunRetry(project, ['check', 'dev.ts']);
+    expect(checked.code, checked.output).toBe(0);
 
     const port = unusedPort();
     const vitePort = unusedPort();
@@ -929,6 +933,11 @@ describe('a scaffolded full-stack project serves route edits in development', ()
         edited = await (await fetch(`${origin}/login`)).text();
       }
       expect(edited).toContain('Sign in, edited');
+
+      // SIGINT runs the entry's shutdown, which stops the app and Vite and exits 0.
+      child.kill('SIGINT');
+      const stopped = await child.status;
+      expect(stopped.code).toBe(0);
     } finally {
       try {
         child.kill('SIGKILL');

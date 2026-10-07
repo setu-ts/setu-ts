@@ -109,7 +109,9 @@ Only the manifest and the start command differ, so moving a project between thos
 manifest change:
 
 - **Node → Bun:** keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
-  replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. (Bun also runs an
+  replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. A `full-stack` project
+  keeps its `build` script and builds first: `start` becomes `bun run build && bun run main.ts`,
+  `test` becomes `bun run build && bun test`, and `dev` becomes `bun run dev.ts`. (Bun also runs an
   unmodified Node project's `main.ts` directly.)
 - **Node or Bun → Deno:** _replace_ `package.json`, `.npmrc`, `tsconfig.json` and the npm lockfile
   with the `deno.json` that `setu new --runtime deno` emits. A `deno.json` added beside a kept

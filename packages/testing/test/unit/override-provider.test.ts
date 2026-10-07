@@ -133,7 +133,13 @@ describe('overrideProvider', () => {
       expect(published?.resolve('svc')).toEqual({ who: 'MOCK' });
       expect(published?.resolve('other')).toBe(1);
       expect(published?.has('other')).toBe(true);
-      expect(published?.createScope()).toBe(container);
+      // A child scope is wrapped too: the token's registration is swallowed there,
+      // so the double still answers (the fake would throw on a second register).
+      const scope = published?.createScope();
+      expect(scope).not.toBe(container);
+      scope?.register('svc', { useValue: { who: 'REAL' } });
+      expect(scope?.resolve('svc')).toEqual({ who: 'MOCK' });
+      expect(scope?.resolve('other')).toBe(1);
     } finally {
       await app.stop();
     }
