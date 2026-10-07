@@ -692,6 +692,16 @@ All notable changes to this project are documented here. The format follows
   a result and exit, or which port each app uses. Each deep dive now gives the commands it was
   checked with against the running app, and links to that app's source.
 
+- **The Fastify migration guide's testing example threw at startup, and several sections described
+  behaviour the framework does not have (`docs/migration-fastify.md`, PR pending).**
+  `createTestApp()` with no plugins throws, because the kernel requires a runtime plugin. The
+  example now passes `RuntimePlugin()`, and the guide points at `app.inject()`, which works as
+  Fastify's does. The shutdown hooks' comments were reversed (`onStopping` runs while the
+  application still serves; `onShutdown` runs after the socket closes). The encapsulation section
+  claimed capability tokens scope a service, but every registered service is application-wide.
+  Validation and error handling now show `validateBody(...)` and `errorHandler()` in place of
+  hand-written equivalents, and query parameters come from `ctx.query`.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
