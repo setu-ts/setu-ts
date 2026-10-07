@@ -11559,11 +11559,12 @@ Contract notes:
 - **Hierarchical containers**: `createScope()` returns a child container that shares singletons with
   the parent but has its own scoped-instance cache. A scope is created and disposed explicitly by
   the application; the framework creates no scope per request.
-- **Auto-registration** (`autoRegister: true`): resolving a token not in the container falls back to
-  the kernel's `ServiceRegistry`. The first successful fallback is cached as a singleton; explicit
-  DI registrations always take precedence. `ClassProvider.inject` dependencies also use this
-  two-tier resolution, so framework capability tokens (`CAPABILITIES.LOGGER`, etc.) work as
-  constructor dependencies without pre-registration.
+- **Auto-registration** (`autoRegister`, default `true` since 0.9.0): resolving a token not in the
+  container falls back to the kernel's `ServiceRegistry`; `false` confines resolution to the
+  container's own registrations. The first successful fallback is cached as a singleton; explicit DI
+  registrations always take precedence. `ClassProvider.inject` dependencies also use this two-tier
+  resolution, so framework capability tokens (`CAPABILITIES.LOGGER`, etc.) work as constructor
+  dependencies without pre-registration.
 - **No runtime-specific APIs**: the container uses no `Date.now()`, `crypto.*`, or `process.*` — it
   is pure TypeScript and runtime-independent.
 

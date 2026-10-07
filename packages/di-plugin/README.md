@@ -27,7 +27,7 @@ import { createContainer, DiPlugin } from '@setu-ts/di-plugin';
 import { CAPABILITIES, type IContainer } from '@setu-ts/common';
 
 const app = createApplication({
-  plugins: [RuntimePlugin(), DiPlugin({ defaultScope: 'singleton', autoRegister: true })],
+  plugins: [RuntimePlugin(), DiPlugin({ defaultScope: 'singleton' })],
 });
 await app.start({ port: 3000 });
 
@@ -44,7 +44,7 @@ const users = container.resolve<UserService>('user-service');
 | Option         | Type                                     | Default       | Description                                                        |
 | -------------- | ---------------------------------------- | ------------- | ------------------------------------------------------------------ |
 | `defaultScope` | `'singleton' \| 'scoped' \| 'transient'` | `'singleton'` | Lifecycle for providers registered without an explicit scope.      |
-| `autoRegister` | `boolean`                                | `false`       | Fall back to the kernel `ServiceRegistry` for unregistered tokens. |
+| `autoRegister` | `boolean`                                | `true`        | Fall back to the kernel `ServiceRegistry` for unregistered tokens. |
 
 With `autoRegister`, the first successful fallback is cached as a singleton. Explicit container
 registrations always take precedence.

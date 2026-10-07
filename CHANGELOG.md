@@ -202,6 +202,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING: `DiPlugin()` now defaults `autoRegister` to `true` (`@setu-ts/di-plugin`, PR
+  pending).** With the old `false` default, a bare `DiPlugin()` could not resolve any framework
+  capability, so `@Inject(CAPABILITIES.LOGGER)` or `CAPABILITIES.CACHE` failed at startup with "No
+  provider registered for DI token". The container now falls back to the kernel `ServiceRegistry`
+  for a token it does not hold; explicit container registrations still win. **Migration:** pass
+  `DiPlugin({ autoRegister: false })` to keep resolution confined to the container.
+  `createContainer()` outside the plugin is unchanged.
+
 - **BREAKING: RabbitMQ consumer retry defaults (#421).** Durable messaging consumer groups now retry
   failures with five total attempts and tiered delays, create durable retry/dead queues (retry
   queues are quorum queues with at-least-once dead-lettering, so an expiring copy is never dropped),
