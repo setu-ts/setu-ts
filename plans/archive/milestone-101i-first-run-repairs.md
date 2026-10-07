@@ -1,14 +1,21 @@
 # Milestone 101i — first-run repairs (`@setu-ts/cli`, `@setu-ts/kernel`, `@setu-ts/rest-starter`, docs)
 
-> **Status:** Implementation in progress. Branch: `fix/cli-first-run`. No ROADMAP entry, by the
+> **Status:** Complete; merges as one PR from `fix/cli-first-run`. No ROADMAP entry, by the
 > maintainer's direction: this is a batch of defect repairs found by cold-reading the newcomer path
 > (the getting-started guide, `setu new` on every template × runtime, the runtime deployment guide)
-> and by smoke exercise X66 (DI in the generated full-stack app). It is planned like a milestone so
-> the work has one recorded design, and it merges as one PR from this one branch.
+> and by smoke exercise X66 (DI in the generated full-stack app). It was planned like a milestone so
+> the work has one recorded design.
 >
-> Work is split across two checkouts. **Implementation** (§3.1–§3.2, I1–I2) happens in the worktree
-> `.claude/worktrees/first-run` on `fix/cli-first-run`. **Documentation** (§3.3, D2–D5) happens on
-> `docs/first-run-docs`, which is cut from this branch and merged back into it before the PR opens.
+> **Outcome, where it departs from the plan below.** I1 was superseded: rather than the starter's
+> `di` arm defaulting `autoRegister: true`, `DiPlugin` itself now defaults it to `true` (a breaking
+> change, CHANGELOG'd with migration text), and the starter passes `options.di` through unchanged,
+> so the CLI, the starter and a hand-written `DiPlugin()` agree. X66-4, listed below as out of
+> scope, was closed without a `common` change: `@setu-ts/testing` gained `overrideProvider`, which
+> swaps a container provider before `DecoratorPlugin` registers its own. The cold read of the
+> remaining guides also landed here, with three framework fixes it found: an absent header now
+> resolves to `undefined`, `Query<T>()` is generic, and the full-stack starter leaves
+> `SchedulerPlugin` out on Cloudflare Workers, where it refused to start. A Deno, Node and Bun
+> full-stack `dev` entry (`viteDevExternals`) serves route edits without a restart.
 
 ## 0. Objective & scope
 
