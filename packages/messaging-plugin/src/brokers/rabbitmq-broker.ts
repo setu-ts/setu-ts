@@ -1100,8 +1100,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
           const delay = policy.delaysMs[Math.min(attempt - 1, policy.delaysMs.length - 1)]!;
           const target = dead ? `${queueName}.dead` : `${queueName}.retry.${delay}ms`;
           // fromEntries keeps even "__proto__" as an own data property.
+          // CC/BCC are sender-selected routing keys: re-published to the
+          // default exchange they deliver the copy to any queue they name.
           const headers = Object.fromEntries([
-            ...Object.entries(incoming ?? {}),
+            ...Object.entries(incoming ?? {}).filter(([key]) => key !== 'CC' && key !== 'BCC'),
             ...(dead
               ? [
                 ['x-setu-attempts', attempt],
@@ -1110,8 +1112,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
               ]
               : [['x-setu-attempt', attempt + 1]]),
           ]);
+          // RabbitMQ validates user_id against the publishing connection, so
+          // another user's ID closes the channel and redelivers in a loop.
           const copied = Object.fromEntries(
-            Object.entries(properties).filter(([key]) => key !== 'expiration'),
+            Object.entries(properties).filter(([key]) => key !== 'expiration' && key !== 'userId'),
           );
           copied.headers = headers;
           copied.persistent = true;

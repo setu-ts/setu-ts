@@ -289,6 +289,30 @@ describe('REAL RabbitMQ consumer retry', () => {
     },
   );
 
+  it('a CC header never routes a retry or dead copy to the queue it names', guard, async () => {
+    const f = await fixture();
+    const bystander = `${f.queue}-bystander`;
+    await f.channel.assertQueue(bystander, { durable: true });
+    const app = f.application(() => {
+      throw Error('poison');
+    });
+    try {
+      await app.start();
+      f.channel.publish('messaging', f.topic, Buffer.from('"m1"'), {
+        persistent: true,
+        CC: [bystander],
+      });
+      await f.channel.waitForConfirms();
+      await until(async () => (await f.channel.checkQueue(`${f.queue}.dead`)).messageCount === 1);
+      // Copies the CC header would have routed: two retries and the dead letter.
+      expect((await f.channel.checkQueue(bystander)).messageCount).toBe(0);
+    } finally {
+      await app.stop();
+      await f.channel.deleteQueue(bystander);
+      await f.close();
+    }
+  });
+
   it('changing delays between two app boots avoids a 406', guard, async () => {
     const f = await fixture([200]);
     let first = 0;

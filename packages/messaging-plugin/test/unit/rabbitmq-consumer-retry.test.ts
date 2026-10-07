@@ -382,6 +382,40 @@ describe('RabbitMQ consumer retry', () => {
     await broker.disconnect();
   });
 
+  // RabbitMQ acts on both when the copy is re-published (measured on 4.x): a
+  // foreign `user_id` closes the channel with 406, which redelivers the original
+  // in a hot loop, and a `CC` header routes a copy to the queue it names.
+  for (const target of ['retry', 'dead'] as const) {
+    it(`drops broker-interpreted userId, CC and BCC from the ${target} copy`, async () => {
+      const client = new FakeAmqpConnection();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+        client,
+        consumerRetry: { maxAttempts: target === 'dead' ? 1 : 3, delaysMs: [200] },
+      });
+      await broker.connect();
+      await broker.subscribe('t', () => {
+        throw Error('temporary');
+      }, { queue: 'q' });
+      const channel = await client.createChannel();
+      await channel.deliver('{"m":1}', {
+        messageId: 'm1',
+        userId: 'alice',
+        headers: { CC: ['bystander'], BCC: ['hidden'], traceparent: 'trace' },
+      });
+      const publication = channel.calls.find((c) => c.method === 'publish')!;
+      expect(publication.args[1]).toBe(target === 'dead' ? 'q.dead' : 'q.retry.200ms');
+      const props = publication.args[3] as Record<string, unknown>;
+      expect(Object.hasOwn(props, 'userId')).toBe(false);
+      expect(props.messageId).toBe('m1');
+      const copied = props.headers as Record<string, unknown>;
+      expect(Object.hasOwn(copied, 'CC')).toBe(false);
+      expect(Object.hasOwn(copied, 'BCC')).toBe(false);
+      expect(copied.traceparent).toBe('trace');
+      expect(channel.calls.some((c) => c.method === 'ack')).toBe(true);
+      await broker.disconnect();
+    });
+  }
+
   for (
     const [name, body, header, error, classifier, target, attempts] of [
       ['tier two', '1', 2, Error('temporary'), undefined, 'q.retry.800ms', 3],

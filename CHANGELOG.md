@@ -423,13 +423,14 @@ All notable changes to this project are documented here. The format follows
 
 - **RabbitMQ discarded handler failures (messaging).** Durable groups now confirm persistent
   retry/dead-letter copies before acknowledging the original, preserve message properties and
-  prototype-safe transport headers, classify deterministic failures immediately, and replay
-  retry/dead declarations plus prefetch on reconnect. Retry delays, attempt budget, classifier,
-  dead-letter cap and prefetch are configurable and validated at construction. Mandatory replacement
-  publishes now reject correlated unroutable returns before acknowledging; reserved/oversized group
-  names are refused before declarations can close the shared channel. Dead-letter diagnostics
-  normalize application-supplied queue/topic names and bound the complete log line, preventing
-  control characters from forging log records while preserving the original routing names.
+  prototype-safe transport headers, drop the broker-interpreted `userId`, `CC` and `BCC`, classify
+  deterministic failures immediately, and replay retry/dead declarations plus prefetch on reconnect.
+  Retry delays, attempt budget, classifier, dead-letter cap and prefetch are configurable and
+  validated at construction. Mandatory replacement publishes now reject correlated unroutable
+  returns before acknowledging; reserved/oversized group names are refused before declarations can
+  close the shared channel. Dead-letter diagnostics normalize application-supplied queue/topic names
+  and bound the complete log line, preventing control characters from forging log records while
+  preserving the original routing names.
 
 - **Redis Streams stranded messages (`@setu-ts/messaging-plugin`, #419).** Failed entries are
   reclaimed with tiered idle backoff through one delivery path, instead of staying in the pending

@@ -544,6 +544,7 @@ describe('real-backend CI wiring', () => {
         'keeps the original',
         'refuses reserved group names',
         'normalizes dead-letter logs',
+        'a CC header never routes',
       ]
     ) expect(source).toContain(scenario);
     expect(source).toContain("docker(['restart', containerId])");

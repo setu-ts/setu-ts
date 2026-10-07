@@ -215,7 +215,9 @@ retries, migrate any existing queues occupying `Q.dead` or `Q.retry.<delay>ms` i
 Deserialize failures and `IntegrationEventRejectedError` go straight to `Q.dead`. Other failures run
 the application classifier, then retry below the total attempt budget or dead-letter when exhausted.
 Retry copies preserve body bytes, messageId, timestamp and transport headers (including
-traceparent), adding `x-setu-attempt` (absent means initial attempt 1). Malformed attempt headers
+traceparent), adding `x-setu-attempt` (absent means initial attempt 1). Copies omit `expiration`,
+`userId` and the `CC`/`BCC` headers: RabbitMQ refuses another user's `user_id` by closing the
+channel, and CC/BCC would deliver the copy to the queues they name. Malformed attempt headers
 dead-letter immediately. Dead letters add `x-setu-attempts`, `x-setu-topic` and `x-setu-error`,
 rendered via `describeError` and bounded to 1 KiB UTF-8. Error descriptions and payloads may contain
 sensitive data: grant queue and diagnostic-log access only to readers trusted with that data, and
