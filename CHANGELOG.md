@@ -414,9 +414,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`).**
-  `setu new
-  --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
+- **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
+  `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
   `@cloudflare/workers-types: '^4.20250109.0'`, and `wrangler` moved its `workers-types` peer from
   `^4` to `^5` inside its own 4.x line — so `npm install`, the first step the CLI prints, failed
   with ERESOLVE against `wrangler@4.148.0` for every new Workers project. The scaffold now pins
@@ -432,6 +431,20 @@ All notable changes to this project are documented here. The format follows
   change fails the suite (including the weekly dependency-drift job) instead of reaching users; the
   root suite grants `--allow-run=npm` for it. Existing projects can apply the same two pins and four
   `tsconfig.json` options by hand.
+- **A scaffolded Worker kept its old bindings after a bindings-only deploy (`@setu-ts/cli`, #423).**
+  The `src/index.ts` that `setu new --runtime cloudflare-workers` generates memoized the application
+  built from the first request's `env` and reused it for every later request. Cloudflare may keep an
+  isolate running across a deploy that changes only bindings, so that application kept serving with
+  the previous bindings, variables and secrets. The entry now keeps one application per `env`
+  object. On workerd, `fetch` and `queue` handlers receive the same object while bindings are
+  unchanged, so the steady state is one lookup. Up to two applications are kept, so requests
+  alternating between two versions during a gradual deployment reuse both instead of rebuilding each
+  in turn; a third evicts the least recently used, and an application no request has used for 100
+  requests is retired. Retirement waits until the application now in use has started, so a broken
+  binding never costs the working application, and a retired application is stopped only once no
+  request or queue batch still holds it. Only newly scaffolded projects change; an existing project
+  can copy the new cache, from `interface BootedApp` through `stopQuietly`, and the
+  `acquire`/`release` calls in each export into its own `src/index.ts`.
 - **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
   `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as
   a plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB
