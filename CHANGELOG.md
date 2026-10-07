@@ -430,7 +430,8 @@ All notable changes to this project are documented here. The format follows
   `npx wrangler dev`, and `GET /` answers `200` on workerd. A new guarded e2e runs a dry-run
   `npm install` of every Workers-capable template's generated manifest, so the next upstream peer
   change fails the suite (including the weekly dependency-drift job) instead of reaching users; the
-  root suite grants `--allow-run=npm` for it. Existing projects can apply the same two pins by hand.
+  root suite grants `--allow-run=npm` for it. Existing projects can apply the same two pins and four
+  `tsconfig.json` options by hand.
 - **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
   `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as
   a plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB
