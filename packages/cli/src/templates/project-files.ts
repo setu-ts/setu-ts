@@ -769,27 +769,133 @@ function workersEntry(
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
-  // The memoisation seam every entry shares. `??= boot(env)` cached the raw
-  // promise, so ONE failed boot — a mistyped binding, a broker briefly down at
-  // cold start — was permanent for the isolate's life; the catch clears the
-  // slot before rethrowing so the next request re-attempts. Synchronous on
-  // purpose: an `async` wrapper with no await fails the generated project's
-  // own `deno lint` (require-await).
-  const ensureBootedFn =
-    `function ensureBooted(env: Record<string, unknown>): Promise<IKernelApplication> {
-  if (booted === undefined) {
-    booted = boot(env).catch((error: unknown) => {
-      booted = undefined;
-      throw error;
-    });
+  // The application cache every export shares. It answers three platform facts
+  // and one earlier defect:
+  // - A FAILED boot is never cached. `??= boot(env)` cached the raw promise, so
+  //   ONE failed boot — a mistyped binding, a broker briefly down at cold start
+  //   — was permanent for the isolate's life (M70l X9-8).
+  // - Bindings can change without a new isolate. Cloudflare may keep an
+  //   isolate running across a bindings-only deploy, so an application built
+  //   from one `env` would keep its bindings forever. Apps are keyed by the
+  //   `env` OBJECT: measured on workerd, `fetch` and `queue` receive the same
+  //   object on every request while bindings are unchanged, so the steady
+  //   state is one lookup.
+  // - Requests route to versions independently during a gradual deployment,
+  //   so one isolate may see two `env` objects alternately. Two apps are kept,
+  //   so alternation reuses both instead of rebuilding and stopping each in
+  //   turn. A third evicts the least recently used.
+  // - Stopping an app cuts off work still using it. The kernel drains
+  //   in-flight HTTP requests, but a queue batch is not one, so each app counts
+  //   the requests and batches holding it and is stopped only at zero.
+  // Retirement runs only once the app now being used has STARTED: a working
+  // app is never given up for one that may yet fail. An app no request has
+  // used for RETIRE_AFTER_USES requests is retired too, which reclaims the old
+  // version once a rollout completes. Uses are counted rather than timed
+  // because timers cannot be relied on between Worker invocations.
+  // `acquire` is synchronous on purpose: an `async` function with no await
+  // fails the generated project's own `deno lint` (require-await).
+  const cacheBlock =
+    `/** One application, built from one \`env\`, and the work currently using it. */
+interface BootedApp {
+  readonly app: Promise<IKernelApplication>;
+  started: boolean;
+  /** Requests and queue batches holding this app; it is stopped only at zero. */
+  active: number;
+  /** The value of \`uses\` when this app was last acquired. */
+  lastUse: number;
+  retired: boolean;
+}
+
+/**
+ * Two apps cover a gradual deployment, where requests for two versions of the
+ * Worker can alternate in one isolate.
+ */
+const MAX_APPS = 2;
+/** An app unused for this many requests belongs to a rollout that finished. */
+const RETIRE_AFTER_USES = 100;
+
+// Keyed by the \`env\` OBJECT, least recently used first. A bindings-only
+// deploy can keep this isolate running and hand later requests a new \`env\`;
+// while bindings are unchanged, every request receives the same object.
+const apps = new Map<Record<string, unknown>, BootedApp>();
+let uses = 0;
+
+/**
+ * Builds and starts the application for one \`env\`.
+ *
+ * Workers have no socket to bind, so start() takes no port: it registers the
+ * plugins and the platform drives the app through fetch().
+ */
+${bootSignature}
+  const app = await ${bootCall};
+  await app.start();
+  return app;
+}
+
+/**
+ * Returns the application for \`env\`, building it on first use. Every call
+ * must be paired with \`release\`, in a \`finally\`.
+ */
+function acquire(env: Record<string, unknown>): BootedApp {
+  let entry = apps.get(env);
+  if (entry === undefined) {
+    const created: BootedApp = {
+      app: boot(env),
+      started: false,
+      active: 0,
+      lastUse: 0,
+      retired: false,
+    };
+    created.app.then(
+      () => {
+        created.started = true;
+        retireStale(created);
+      },
+      () => {
+        // A failed boot is forgotten, so the next request retries it.
+        if (apps.get(env) === created) apps.delete(env);
+      },
+    );
+    entry = created;
+  } else {
+    apps.delete(env);
   }
-  return booted;
+  // Re-inserting keeps the Map ordered least recently used first.
+  apps.set(env, entry);
+  entry.active++;
+  entry.lastUse = ++uses;
+  if (entry.started) retireStale(entry);
+  return entry;
+}
+
+/** Ends one request's or batch's hold on its application. */
+function release(entry: BootedApp): void {
+  entry.active--;
+  if (entry.retired && entry.active === 0) stopQuietly(entry);
+}
+
+/** Retires apps beyond the cap, and apps no request has used for a while. */
+function retireStale(current: BootedApp): void {
+  for (const [env, entry] of apps) {
+    if (entry === current) continue;
+    if (apps.size > MAX_APPS || uses - entry.lastUse >= RETIRE_AFTER_USES) {
+      apps.delete(env);
+      entry.retired = true;
+      if (entry.active === 0) stopQuietly(entry);
+    }
+  }
+}
+
+/** Stops a retired app; its failure must not reach the apps still serving. */
+function stopQuietly(entry: BootedApp): void {
+  void entry.app.then((app) => app.stop()).catch(() => {});
 }`;
 
   // One import line per contributing package, and one export per contribution.
-  // Each reuses `booted`, never a second `boot(env)`: two applications would
-  // mean two brokers with two dispatch tables, and a subscription registered on
-  // one would be invisible to the other.
+  // Each acquires from the shared cache, never a private `boot(env)`: two
+  // LIVE applications for one `env` would mean two brokers with two dispatch
+  // tables, and a subscription registered on one would be invisible to the
+  // other.
   const exportImports = workerExports
     .map((entry) =>
       `import type { ${entry.payloadType} } from '@setu-ts/${entry.payloadPkg}';\n` +
@@ -802,8 +908,13 @@ function workersEntry(
     payload: ${entry.payloadType},
     env: Record<string, unknown>,
   ): Promise<void> {
-    const app = await ensureBooted(env);
-${renderRoutes(entry)}
+    const booted = acquire(env);
+    try {
+      const app = await booted.app;
+${indent(renderRoutes(entry), '  ')}
+    } finally {
+      release(booted);
+    }
   },`
     )
     .join('');
@@ -812,49 +923,53 @@ ${renderRoutes(entry)}
   return `import type { IKernelApplication } from '@setu-ts/kernel';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
 ${waitUntilImport}${exportImports === '' ? '' : `${exportImports}\n`}
-let booted: Promise<IKernelApplication> | undefined;
-
-/**
- * Builds and starts the application once, on the first request.
- *
- * Workers have no socket to bind, so start() takes no port: it registers the
- * plugins and the platform drives the app through fetch().
- */
-${bootSignature}
-  const app = await ${bootCall};
-  await app.start();
-  return app;
-}
-
-${ensureBootedFn}
+${cacheBlock}
 
 export default {
   ${fetchSignature}
-    let app: IKernelApplication;
+    const booted = acquire(env);
     try {
-      app = await ensureBooted(env);
-    } catch (error) {
-      // A failed boot must not leak the stack to the client (M70l X9-8): the
-      // body is generic and the real error goes to the platform's logs. 503,
-      // because the instance genuinely has no application to serve with.
-      console.error('setu: application failed to start', error);
-      return new Response('Service Unavailable', { status: 503 });
-    }
-    try {
-      return await app.fetch(request);
-    } catch (error) {
-      // A REQUEST-time failure is a separate case, reported separately. Folding
-      // it into the boot catch above logged 'failed to start' for a fault that
-      // had nothing to do with startup, and answered 503 — which tells a load
-      // balancer to drain the instance — for what is a single bad request.
-      // app.fetch() does throw: the kernel rejects when no HTTP adapter is
-      // registered, and an adapter may reject on a malformed request.
-      console.error('setu: request failed', error);
-      return new Response('Internal Server Error', { status: 500 });
+      let app: IKernelApplication;
+      try {
+        app = await booted.app;
+      } catch (error) {
+        // A failed boot must not leak the stack to the client (M70l X9-8): the
+        // body is generic and the real error goes to the platform's logs. 503,
+        // because the instance genuinely has no application to serve with.
+        console.error('setu: application failed to start', error);
+        return new Response('Service Unavailable', { status: 503 });
+      }
+      try {
+        return await app.fetch(request);
+      } catch (error) {
+        // A REQUEST-time failure is a separate case, reported separately.
+        // Folding it into the boot catch above logged 'failed to start' for a
+        // fault that had nothing to do with startup, and answered 503 — which
+        // tells a load balancer to drain the instance — for what is a single
+        // bad request. app.fetch() does throw: the kernel rejects when no HTTP
+        // adapter is registered, and an adapter may reject on a malformed
+        // request.
+        console.error('setu: request failed', error);
+        return new Response('Internal Server Error', { status: 500 });
+      }
+    } finally {
+      release(booted);
     }
   },${exportBlock}
 };
 ${reExportBlock}`;
+}
+
+/**
+ * Prefixes every line of a rendered block. `renderRoutes` emits no blank lines,
+ * so no line is left unprefixed.
+ *
+ * @param block - The rendered lines
+ * @param prefix - What to prepend to each line
+ * @returns The re-indented block
+ */
+function indent(block: string, prefix: string): string {
+  return block.split('\n').map((line) => `${prefix}${line}`).join('\n');
 }
 
 /**

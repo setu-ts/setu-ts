@@ -340,7 +340,7 @@ describe('runNewCommand', () => {
       // On Workers the environment is per-request, so a factory that resolves
       // configuration before any plugin is constructed can only see it if the
       // entry hands it over. Without this the app composes from an empty
-      // config and fails on every request, since `booted` memoises the boot.
+      // config and fails on every request, since the app is cached per env.
       const h = harness();
       expect(
         await h.run(['shop', '--template', 'full-stack', '--runtime', 'cloudflare-workers']),
@@ -350,7 +350,7 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/shop/setu.config.ts');
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
-      expect(entry).toContain('await ensureBooted(env)');
+      expect(entry).toContain('const booted = acquire(env);');
       expect(entry).toContain('createApp(env)');
       expect(config).toContain('env?: Readonly<Record<string, unknown>>');
       expect(config).toContain('{ env }');
@@ -398,7 +398,7 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/api/setu.config.ts');
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
-      expect(entry).toContain('await ensureBooted(env);');
+      expect(entry).toContain('const booted = acquire(env);');
       expect(entry).toContain('createApp(env)');
       // The devtool parameter is the second one on every target (M98c), so
       // the env parameter keeps its default and the signature wraps.
@@ -893,7 +893,10 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'cloudflare-workers']);
       const entry = h.fs.read('/work/app/src/index.ts');
-      expect(entry).toContain('await ensureBooted(env);');
+      // Boot starts inside acquire(), which attaches its rejection handler
+      // in the same expression, so a failed boot is never unhandled.
+      expect(entry).toContain('const booted = acquire(env);');
+      expect(entry).toContain('created.app.then(');
       expect(entry).not.toContain('??=');
     });
 

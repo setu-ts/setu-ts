@@ -196,7 +196,10 @@ describe('the entry shutdown handler', () => {
   it('emits nothing on Cloudflare Workers', () => {
     const entry = entryFor('cloudflare-workers');
     expect(entry).not.toContain('SIGTERM');
-    expect(entry).not.toContain('app.stop()');
+    // The shutdown handler's own calls. `app.stop()` alone is not the signal:
+    // the Workers entry stops a superseded application when bindings change.
+    expect(entry).not.toContain('onSignal');
+    expect(entry).not.toContain('runtime.exit');
   });
 });
 
