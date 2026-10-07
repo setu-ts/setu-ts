@@ -28,6 +28,7 @@ import {
   FULL_STACK_CHECK_TASK,
   FULL_STACK_DENO_COMPILER_OPTIONS,
   FULL_STACK_DENO_IMPORTS,
+  FULL_STACK_DEV_ENTRY,
   FULL_STACK_NPM_DEPENDENCIES,
   FULL_STACK_NPM_DEV_DEPENDENCIES,
   FULL_STACK_TSCONFIG_OPTIONS,
@@ -63,7 +64,9 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const assets = runtime === 'cloudflare-workers'
     // Assets are served by the platform binding, not the framework.
     ? ''
-    : `\n      assetsDir: './build/client/assets',`;
+    // In development (`dev.ts`) Vite serves the client modules and there is no
+    // client build to read, so the development SSR runtime replaces assetsDir.
+    : `\n      ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),`;
 
   // Indented to sit inside `const app = await …(` at two spaces, so the
   // generated file reads as hand-written source rather than as output.
@@ -172,6 +175,12 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     pkg: 'full-stack-starter',
     symbol: 'createFullStackAppFromConfig',
     args: fullStackArgs,
+    parameter: {
+      name: 'ssr',
+      type: "Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
+      doc: 'The development SSR runtime `dev.ts` supplies; omitted in production.',
+      readOn: ['deno', 'node', 'bun'],
+    },
   },
   packageImports: [
     // The annotation that restores excess-property checking on the resolver
@@ -184,7 +193,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     { pkg: 'common', symbols: ['CAPABILITIES', 'type ILogger', 'type ISecretManager'] },
     // Imported by app/lib/context-keys.server.ts for contextKeyFor(), so the
     // manifest must carry it even though setu.config.ts names no symbol.
-    { pkg: 'react-router-plugin' },
+    { pkg: 'react-router-plugin', symbols: ['type ReactRouterPluginOptions'] },
   ],
   files: [
     ...FULL_STACK_APP_FILES,
@@ -217,6 +226,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
       // while `package.json` resolves the shim from `node_modules`.
       denoCommand: 'deno run -A npm:@react-router/dev build',
       outputDir: 'build',
+      devEntry: FULL_STACK_DEV_ENTRY,
     },
     npmDependencies: FULL_STACK_NPM_DEPENDENCIES,
     // The test packages are merged in because `setu generate module` is ungated

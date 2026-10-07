@@ -4076,6 +4076,16 @@ app.router.get('/api/health', (ctx) => {
 - `contextKeyFor<T>(name, defaultValue): RouterContextKey<T>` — returns the key for a name,
   memoised, so the same name always yields the **same object**. Use it for any key an application
   declares for itself; see the note below on why a `{ defaultValue }` literal silently fails there.
+- `viteDevExternals({ packages, resolve }): ViteDevExternalsPlugin` — a Vite plugin for development
+  mode under Deno, passed to `vite.createServer({ plugins })`. It resolves each listed package, and
+  any subpath of one, with `resolve` (pass `import.meta.resolve` from the development entry) and
+  marks the result external. It appends the resolved specifiers to the SSR environment's
+  `resolve.builtins` in `configResolved`, appending because a configured list replaces Vite's
+  default one, which holds the Node built-ins. The patterns are `jsr:` and `npm:` specifiers, plus
+  the directory of each package mapped to a `file:` URL. Vite's runner then imports the module
+  natively instead of loading a second copy. It is typed structurally (`ViteDevExternalsOptions`,
+  `ViteDevExternalsPlugin`, `ViteDevExternalId`, `ViteResolvedEnvironments`), so this package
+  imports no Vite. `setu new --template full-stack` on Deno emits a `dev.ts` that uses it.
 - `interface RouterContextKey<T>` — `{ readonly defaultValue?: T }`. Structurally identical to React
   Router's `RouterContext<T>`, so keys from this package and keys from `createContext<T>()` are
   interchangeable.
@@ -4139,6 +4149,11 @@ export default defineConfig({
 Declared under `environments.ssr.build`, deliberately: React Router builds through Vite's
 Environment API, and neither a top-level `ssr.external` nor `environments.ssr.resolve.external`
 reaches that build. `setu new --template full-stack` emits all of this already.
+
+Development mode needs the same guarantee from Vite's dev SSR runner, which loads route modules
+itself. Unaided it cannot resolve a JSR import at all, and it would inline a package mapped to a
+local path as a second copy. `viteDevExternals` keeps those packages external there too, resolved by
+the runtime.
 
 The same externalisation is what lets a **server-only** module (`*.server.ts`) import a framework
 package by value at all. Client-reachable modules must stick to `import type`, which is erased: the
