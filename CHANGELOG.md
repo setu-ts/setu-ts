@@ -710,6 +710,14 @@ All notable changes to this project are documented here. The format follows
   resolve that JSR import, so every page answers `500`. The guide now states this, pins Vite 8 as
   the CLI does, and says `isbot` is needed only with React Router's default server entry.
 
+- **The telemetry fan-out guide's validation command failed as printed
+  (`docs/telemetry-collector-fanout.md`, PR pending).** The collector config reads five credentials
+  from the environment, and `otelcol-contrib validate` rejects it while they are empty, so the
+  command exited `1` on a clean checkout. The guide now sets placeholders in the command and says
+  validation contacts no vendor. It also says the config validates on 0.156.0 and on the 0.115.1
+  that the Compose stack pins. A scope note still sent readers to Milestone 39 for Compose. It now
+  links the `telemetry` profile that shipped there.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
