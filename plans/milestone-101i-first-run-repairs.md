@@ -7,7 +7,7 @@
 > the work has one recorded design, and it merges as one PR from this one branch.
 >
 > Work is split across two checkouts. **Implementation** (§3.1–§3.2, I1–I2) happens in the worktree
-> `.claude/worktrees/first-run` on `fix/cli-first-run`. **Documentation** (§3.3, D1–D5) happens on
+> `.claude/worktrees/first-run` on `fix/cli-first-run`. **Documentation** (§3.3, D2–D5) happens on
 > `docs/first-run-docs`, which is cut from this branch and merged back into it before the PR opens.
 
 ## 0. Objective & scope
@@ -27,7 +27,9 @@ redesigning an API is out of scope.
   - **I1 (X66-1):** the starter `di` arm defaults `autoRegister: true`.
   - **I2 (X66-3):** the generated `full-stack` smoke test requests `/`, so a failing
     `populateLoadContext` fails `deno task test`.
-  - **D1–D5:** the X66 documentation repairs (§3.3).
+  - **D2–D5:** the X66 documentation repairs (§3.3). X66-5 (a "stray fence" in the
+    full-stack-starter README) was retracted: it was a misread of two concatenated `sed` ranges, and
+    the section is correct.
 - **NOT this milestone:**
   - Replacing a container-provided service with a test double (X66-4). It needs an `override` option
     on `ProviderOptions` in `@setu-ts/common` — a published-contract decision for the maintainer,
@@ -57,7 +59,6 @@ redesigning an API is out of scope.
 | #  | Conflict                                                                                                                                    | Resolution (picked side)                                                           | Doc deliverable (same PR)                                                                       |
 | -- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | C1 | `full-stack-starter` and `rest-starter` READMEs show `di: {}` beside an `@Inject(CAPABILITIES.LOGGER)` example; that pairing fails (X66-1). | The code moves (I1): `di: {}` defaults `autoRegister: true`, so the example works. | D4: both READMEs say what the arm turns on, including the registry fallback and how to opt out. |
-| C2 | `full-stack-starter` README "Realtime and DI arms" ends in a stray, unclosed fence (X66-5).                                                 | The README is wrong.                                                               | D1: repair the section.                                                                         |
 
 ## 3. Design decisions
 
@@ -105,9 +106,8 @@ redesigning an API is out of scope.
   `deno task test` must fail (it passes today). Record the before/after.
 - **Baseline:** `template-baseline.json` does not cover `full-stack`, so no hash changes; confirm.
 
-### 3.3 Documentation (D1–D5, on `docs/first-run-docs`)
+### 3.3 Documentation (D2–D5, on `docs/first-run-docs`)
 
-- **D1 (X66-5):** repair the stray fence in `full-stack-starter` README "Realtime and DI arms".
 - **D2 (X66-2):** a "Constructor injection in loaders" section in the `full-stack-starter` README:
   register `@Injectable` classes through `decorators: { services }`, turn the container on with
   `di: {}`, resolve in `populateLoadContext` from `CAPABILITIES.DI_CONTAINER`, carry the instance on

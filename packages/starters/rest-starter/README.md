@@ -205,6 +205,12 @@ application is constructed**: `DecoratorPlugin` branches on the presence of a co
 `@Injectable` class becomes a container provider honoring its `scope`. Omitted (the default), those
 classes are constructed directly and registered in the kernel's `ServiceRegistry`.
 
+The arm builds the container with `autoRegister: true`, so a token the container does not hold falls
+back to the kernel registry. That is what lets `@Inject(CAPABILITIES.LOGGER)`, or any other
+framework capability, reach a decorated class; without it the container cannot see the framework's
+own services. `di: { autoRegister: false }` turns the fallback off. On `0.8.0` and earlier the arm
+passed its options through unchanged, so write `di: { autoRegister: true }` there.
+
 That is why it is an arm rather than always-on — a starter app that never asks for it composes
 exactly as it did before the option existed.
 

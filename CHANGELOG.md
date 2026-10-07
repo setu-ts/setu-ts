@@ -643,6 +643,14 @@ All notable changes to this project are documented here. The format follows
   `@since` gate skipped every `0.1.0` tag — that line shipped only as `0.1.0-alpha.*` — and now
   checks such a tag against the line's last prerelease instead.
 
+- **Constructor injection in a full-stack app was undocumented (`@setu-ts/full-stack-starter`,
+  `@setu-ts/rest-starter`, `@setu-ts/testing` docs, PR pending).** Nothing said how a React Router
+  loader reaches an injected service; the `full-stack-starter` README now shows resolving it from
+  `CAPABILITIES.DI_CONTAINER` in `populateLoadContext` and carrying it on a context key, and says
+  that a DI mistake starts cleanly and fails every server-rendered page. Both starter READMEs say
+  what the `di` arm turns on, and the testing README states that a container-provided service cannot
+  be replaced with `overrideCapability`.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added

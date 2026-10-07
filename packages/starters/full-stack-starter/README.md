@@ -187,7 +187,9 @@ const app = createFullStackApp({
 it composes from always registers `MessagingPlugin`.
 
 None of these arms collide with the plugins this tier already bundles — `sse`, `websocket`, `di`,
-and the backplane are registered by no other arm.
+and the backplane are registered by no other arm. `di: {}` builds the container with
+`autoRegister: true`, so decorated classes can inject framework capabilities; see
+[Constructor injection in loaders](#constructor-injection-in-loaders).
 
 The `session` arm is inherited the same way: `session: { secret, csrf: {} }` adds cookie sessions
 and the form-CSRF middleware, which a server-rendered `<Form>` post needs.
@@ -195,6 +197,64 @@ and the form-CSRF middleware, which a server-rendered `<Form>` post needs.
 See
 [rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
 for the full description of each arm.
+
+## Constructor injection in loaders
+
+React Router builds its loaders and actions itself, so the container never constructs them. A loader
+reaches an injected service the same way it reaches the session: `populateLoadContext` resolves it
+for each request and puts it on a context key the loader reads.
+
+```typescript
+import { Inject, Injectable } from '@setu-ts/decorator-plugin';
+import { CAPABILITIES, type IContainer, type ILogger } from '@setu-ts/common';
+import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
+import { contextKeyFor } from '@setu-ts/react-router-plugin';
+
+@Injectable({ token: 'pricing-service', scope: 'singleton' })
+@Inject(CAPABILITIES.LOGGER)
+export class PricingService {
+  constructor(private readonly logger: ILogger) {}
+  quote(cents: number): string {
+    this.logger.debug('pricing: quote');
+    return `$${(cents / 100).toFixed(2)}`;
+  }
+}
+
+// Declare it beside the template's other keys in app/lib/context-keys.server.ts:
+// a key written out twice is two different keys, and every read then returns null.
+export const pricingContext = contextKeyFor<PricingService | null>('app.pricing', null);
+
+const app = await createFullStackAppFromConfig(() => ({
+  di: {},
+  decorators: { services: [PricingService] },
+  reactRouter: {
+    serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+    populateLoadContext: (ctx, context) => {
+      const container = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+      context.set(pricingContext, container.resolve<PricingService>('pricing-service'));
+    },
+  },
+}));
+
+await app.start({ port: 3000 });
+```
+
+A loader then calls `context.get(pricingContext)?.quote(4900)`.
+
+Three things to know:
+
+- **`di: {}` falls back to the kernel registry.** The arm builds the container with
+  `autoRegister: true`, which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own
+  services. On `0.8.0` and earlier the arm passed `{}` straight through, so write
+  `di: { autoRegister: true }` there, or every page answers 500 with
+  `No provider registered for DI token 'logger'`.
+- **There is no per-request scope.** Nothing creates a scope for each request, so a `scoped` service
+  resolved from the root container acts as a singleton. For one instance per request, call
+  `container.createScope()` in `populateLoadContext` and resolve from the scope.
+- **A DI mistake fails every page, not startup.** An unlisted service, a misspelled token, or a
+  missing `di` arm starts cleanly and answers `/health` with 200, then throws in
+  `populateLoadContext` on every server-rendered request. The smoke test `setu new` generates
+  requests `/` as well as `/health`, so `deno task test` catches it; keep that request in.
 
 ## Composing from configuration
 
