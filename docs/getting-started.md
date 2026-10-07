@@ -212,7 +212,7 @@ const config = app.services.get<IConfig>(CAPABILITIES.CONFIG);
 const settings = getConfigSection(config, database); // settings.URL: string
 ```
 
-`envFilePath` needs `--allow-read` on Deno.
+On Deno, `envFilePath` also needs `--allow-read`.
 
 ### Database Plugin
 
@@ -267,7 +267,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 ```
 
 This is the same block `setu new` writes into every generated `main.ts`, and it works unchanged on
-Deno, Node, and Bun.
+every socket runtime: Deno, Node, and Bun alike.
 
 ## Running on Different Runtimes
 
