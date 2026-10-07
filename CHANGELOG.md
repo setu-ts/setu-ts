@@ -9,10 +9,10 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **A full-stack project's `dev` task serves route edits without a restart, on Deno, Node and Bun
-  (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR pending).** `setu new --template full-stack`
-  now emits a `dev.ts` entry and a `dev` task (`deno task dev`, `npm run dev`, `bun run dev`); a
-  Workers project gets neither, since the entry runs Vite in-process. On Deno, Vite's development
-  SSR runner could not load a route that imports a `@setu-ts` package: it resolves imports through
+  (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR #426).** `setu new --template full-stack` now
+  emits a `dev.ts` entry and a `dev` task (`deno task dev`, `npm run dev`, `bun run dev`); a Workers
+  project gets neither, since the entry runs Vite in-process. On Deno, Vite's development SSR runner
+  could not load a route that imports a `@setu-ts` package: it resolves imports through
   `node_modules`, so every page answered `500` with
   `Cannot find module '@setu-ts/react-router-plugin'`, and a package it loaded itself would be a
   second copy whose `contextKeyFor()` keys match nothing. The new `viteDevExternals()` resolves
@@ -25,13 +25,12 @@ All notable changes to this project are documented here. The format follows
   through the app port, an edited route is served on the next request, and SIGINT stops the app and
   Vite with exit code 0.
 
-- **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR
-  pending).** With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the
-  container, where `overrideCapability()` cannot reach it, and the container refuses a second
-  registration. `overrideProvider('pricing-service', { useValue: fake })` registers the double
-  before the real class, so a decorated controller is constructed with it. A mistyped token, an
-  application without a container, or a provider registered too early fails `start()` instead of
-  testing the real class.
+- **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR #426).**
+  With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the container,
+  where `overrideCapability()` cannot reach it, and the container refuses a second registration.
+  `overrideProvider('pricing-service', { useValue: fake })` registers the double before the real
+  class, so a decorated controller is constructed with it. A mistyped token, an application without
+  a container, or a provider registered too early fails `start()` instead of testing the real class.
 
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
@@ -228,17 +227,17 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **A generated full-stack `setu.config.ts` takes an `ssr` parameter, and its `vite.config.ts`
-  exports `frameworkPackages` and `workspaceLibraries` (`@setu-ts/cli`, PR pending).** `dev.ts`
-  passes the development SSR runtime as `createApp`'s third argument, which replaces `assetsDir`;
-  omitted, production behaviour is unchanged. Workers projects declare the parameter as `_ssr` and
-  read none of it. Existing projects are unaffected; to adopt the dev loop, copy those changes and
-  `dev.ts` from a fresh scaffold.
+  exports `frameworkPackages` and `workspaceLibraries` (`@setu-ts/cli`, PR #426).** `dev.ts` passes
+  the development SSR runtime as `createApp`'s third argument, which replaces `assetsDir`; omitted,
+  production behaviour is unchanged. Workers projects declare the parameter as `_ssr` and read none
+  of it. Existing projects are unaffected; to adopt the dev loop, copy those changes and `dev.ts`
+  from a fresh scaffold.
 
-- **BREAKING: `DiPlugin()` now defaults `autoRegister` to `true` (`@setu-ts/di-plugin`, PR
-  pending).** With the old `false` default, a bare `DiPlugin()` could not resolve any framework
-  capability, so `@Inject(CAPABILITIES.LOGGER)` or `CAPABILITIES.CACHE` failed at startup with "No
-  provider registered for DI token". The container now falls back to the kernel `ServiceRegistry`
-  for a token it does not hold; explicit container registrations still win. **Migration:** pass
+- **BREAKING: `DiPlugin()` now defaults `autoRegister` to `true` (`@setu-ts/di-plugin`, PR #426).**
+  With the old `false` default, a bare `DiPlugin()` could not resolve any framework capability, so
+  `@Inject(CAPABILITIES.LOGGER)` or `CAPABILITIES.CACHE` failed at startup with "No provider
+  registered for DI token". The container now falls back to the kernel `ServiceRegistry` for a token
+  it does not hold; explicit container registrations still win. **Migration:** pass
   `DiPlugin({ autoRegister: false })` to keep resolution confined to the container. A starter's
   `di: {}` arm passes its options through, so `@Inject(CAPABILITIES.LOGGER)` — the pairing both
   starter READMEs show — now resolves there too. `createContainer()` outside the plugin is
@@ -457,7 +456,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - **A full-stack application could not start on Cloudflare Workers (`@setu-ts/full-stack-starter`,
-  PR pending).** The starter always registered `SchedulerPlugin`, which refuses Workers at
+  PR #426).** The starter always registered `SchedulerPlugin`, which refuses Workers at
   `register()`, so `createFullStackApp()`, and every project from
   `setu new --template full-stack --runtime cloudflare-workers`, threw `SchedulerUnavailableError`
   before serving a request. The starter now leaves the scheduler out on Workers unless a `scheduler`
@@ -466,20 +465,20 @@ All notable changes to this project are documented here. The format follows
   README's Workers section, which said the starter does not run there, is corrected.
 
 - **A newly scaffolded full-stack project's smoke test now also requests `/` (`@setu-ts/cli`, PR
-  pending).** `populateLoadContext` runs only on an SSR request, so any DI misconfiguration left
+  #426).** `populateLoadContext` runs only on an SSR request, so any DI misconfiguration left
   `/health` at 200 while every page answered 500 and the generated `deno task test` passed over it.
   The emitted `test/app.test.ts` now fetches `/` through `app.fetch` — an SSR body streams, which
   `inject()` refuses — and asserts 200; other templates are unchanged.
 
 - **`export default { fetch: app.fetch }` answered every Workers request with 500
-  (`@setu-ts/kernel`, PR pending).** It is the Workers entry the `cloudflare-plugin` README,
+  (`@setu-ts/kernel`, PR #426).** It is the Workers entry the `cloudflare-plugin` README,
   `PUBLIC_API.md`, the `rest-starter` README and the Workers adapter's own `listen()` error all
   name, and Cloudflare calls it as `exported.fetch(request, …)`, so `this` was the exported object
   and `Application.fetch` threw `Cannot read private member #registry`. Measured on workerd. The
   application now binds `fetch` at construction, so it works passed around as a bare function.
 
 - **A fresh full-stack project on Node or Bun crashed on its first `start` (`@setu-ts/cli`, PR
-  pending).** `setu new --template full-stack --runtime node` (or `bun`) prints
+  #426).** `setu new --template full-stack --runtime node` (or `bun`) prints
   `npm install && npm start`, and the generated README says the same, but the `start` script ran
   `tsx main.ts` (or `bun run main.ts`) without building first, so the React Router plugin failed
   with "Failed to load React Router server build" because `build/server/index.js` did not exist.
@@ -507,7 +506,7 @@ All notable changes to this project are documented here. The format follows
   test fails if any documented install command drifts from them.
 
 - **An absent header resolves to `undefined`, and a validated query can be typed
-  (`@setu-ts/decorator-plugin`, PR pending).** `@Params(Header('X-Name'))` declared its source as
+  (`@setu-ts/decorator-plugin`, PR #426).** `@Params(Header('X-Name'))` declared its source as
   `string | undefined` but passed `null` for an absent header, because `Headers.get` answers `null`.
   It now passes `undefined`, like a missing cookie or query parameter. **Migration:** a handler that
   tested `=== null` for a missing header must test `=== undefined`. The whole-query source is now
@@ -737,28 +736,28 @@ All notable changes to this project are documented here. The format follows
   checks such a tag against the line's last prerelease instead.
 
 - **The Cloudflare example cached a failed start for the isolate's whole life (`apps/cloudflare`, PR
-  pending).** `createWorkerHandler` memoised the start promise even when it rejected, so one
-  transient failure at cold start left that isolate answering errors to every later request. It now
-  forgets a failed start and retries on the next request, the rule the generated Workers entry has
-  followed since M70l. Concurrent requests still share one start, and none reaches `fetch` on an
-  application whose start failed.
+  #426).** `createWorkerHandler` memoised the start promise even when it rejected, so one transient
+  failure at cold start left that isolate answering errors to every later request. It now forgets a
+  failed start and retries on the next request, the rule the generated Workers entry has followed
+  since M70l. Concurrent requests still share one start, and none reaches `fetch` on an application
+  whose start failed.
 
 - **Constructor injection in a full-stack app was undocumented (`@setu-ts/full-stack-starter`,
-  `@setu-ts/rest-starter`, `@setu-ts/testing` docs, PR pending).** Nothing said how a React Router
+  `@setu-ts/rest-starter`, `@setu-ts/testing` docs, PR #426).** Nothing said how a React Router
   loader reaches an injected service; the `full-stack-starter` README now shows resolving it from
   `CAPABILITIES.DI_CONTAINER` in `populateLoadContext` and carrying it on a context key, and says
   that a DI mistake starts cleanly and fails every server-rendered page. Both starter READMEs say
   what the `di` arm turns on, and the testing README points a container-provided service at
   `overrideProvider` rather than `overrideCapability`.
 
-- **The root README's quick examples did not run as written (README, PR pending).** The first
-  example registered `LoggerPlugin` without telling the reader to install it, so following the
-  documented install failed to resolve the import; it now says to add the package. The second read
-  `JWT_SECRET` before any plugin had registered; it now loads configuration with `loadConfig` and
-  hands the same snapshot to `ConfigPlugin({ instance })`. The feature table no longer claims event
-  sourcing, which the framework does not ship, and now lists Cosmos DB and Bigtable.
+- **The root README's quick examples did not run as written (README, PR #426).** The first example
+  registered `LoggerPlugin` without telling the reader to install it, so following the documented
+  install failed to resolve the import; it now says to add the package. The second read `JWT_SECRET`
+  before any plugin had registered; it now loads configuration with `loadConfig` and hands the same
+  snapshot to `ConfigPlugin({ instance })`. The feature table no longer claims event sourcing, which
+  the framework does not ship, and now lists Cosmos DB and Bigtable.
 
-- **The CLI guide described a CLI several milestones old (`docs/cli.md`, PR pending).** It said
+- **The CLI guide described a CLI several milestones old (`docs/cli.md`, PR #426).** It said
   `generate controller` and `generate module` need `decorator-plugin` (neither has since M70h),
   listed fourteen schematics where there are sixteen (`ws-route` and `sse` were missing), quoted a
   refusal message the CLI no longer prints, and left the M83 `@Module` file and `MODULES` barrel out
@@ -767,7 +766,7 @@ All notable changes to this project are documented here. The format follows
   corrected claim was checked against a project the CLI scaffolded.
 
 - **The NestJS migration guide mapped several NestJS features to hand-written code the framework
-  replaces (`docs/migration-nestjs.md`, PR pending).** Guards now map to `AuthPlugin` with
+  replaces (`docs/migration-nestjs.md`, PR #426).** Guards now map to `AuthPlugin` with
   `requireAuth()`/`requireRole()`, in place of a hand-written global middleware that would also have
   refused `/health`. Exception filters map to `errorHandler({ respond })`, WebSocket gateways to
   `@Gateway`, and the testing module to `createTestApp({ app: createApp(), overrides })`. The guide
@@ -777,7 +776,7 @@ All notable changes to this project are documented here. The format follows
   `@Module`.
 
 - **The examples guide described applications that are not in `apps/` (`docs/examples.md`, PR
-  pending).** Its code blocks were written as illustrations rather than taken from the apps, and had
+  #426).** Its code blocks were written as illustrations rather than taken from the apps, and had
   drifted. They showed routes the apps do not serve (`/items`, `/users`, `/my-route`), a health
   endpoint `minimal` does not have, D1 and Cache API use the Cloudflare example does not make, and
   WebSocket rooms in an SSE-only `realtime` example. They also named a `build` task where
@@ -786,17 +785,17 @@ All notable changes to this project are documented here. The format follows
   checked with against the running app, and links to that app's source.
 
 - **The Fastify migration guide's testing example threw at startup, and several sections described
-  behaviour the framework does not have (`docs/migration-fastify.md`, PR pending).**
-  `createTestApp()` with no plugins throws, because the kernel requires a runtime plugin. The
-  example now passes `RuntimePlugin()`, and the guide points at `app.inject()`, which works as
-  Fastify's does. The shutdown hooks' comments were reversed (`onStopping` runs while the
-  application still serves; `onShutdown` runs after the socket closes). The encapsulation section
-  claimed capability tokens scope a service, but every registered service is application-wide.
-  Validation and error handling now show `validateBody(...)` and `errorHandler()` in place of
-  hand-written equivalents, and query parameters come from `ctx.query`.
+  behaviour the framework does not have (`docs/migration-fastify.md`, PR #426).** `createTestApp()`
+  with no plugins throws, because the kernel requires a runtime plugin. The example now passes
+  `RuntimePlugin()`, and the guide points at `app.inject()`, which works as Fastify's does. The
+  shutdown hooks' comments were reversed (`onStopping` runs while the application still serves;
+  `onShutdown` runs after the socket closes). The encapsulation section claimed capability tokens
+  scope a service, but every registered service is application-wide. Validation and error handling
+  now show `validateBody(...)` and `errorHandler()` in place of hand-written equivalents, and query
+  parameters come from `ctx.query`.
 
 - **The React Router development guide's loop failed for the CLI's full-stack skeleton on Deno
-  (`docs/react-router-dev.md`, PR pending).** Re-verified on Deno 2.9.6, Vite 8.3.1 and react-router
+  (`docs/react-router-dev.md`, PR #426).** Re-verified on Deno 2.9.6, Vite 8.3.1 and react-router
   8.4.0: the build thunk, the `/__vite/` proxy and editing a route without a restart all still work.
   A project from `setu new --template full-stack` imports `@setu-ts/react-router-plugin` in its
   route modules, though, and Vite's development SSR runner cannot resolve that JSR import, so every
@@ -805,21 +804,21 @@ All notable changes to this project are documented here. The format follows
   needed only with React Router's default server entry.
 
 - **The telemetry fan-out guide's validation command failed as printed
-  (`docs/telemetry-collector-fanout.md`, PR pending).** The collector config reads five credentials
+  (`docs/telemetry-collector-fanout.md`, PR #426).** The collector config reads five credentials
   from the environment, and `otelcol-contrib validate` rejects it while they are empty, so the
   command exited `1` on a clean checkout. The guide now sets placeholders in the command and says
   validation contacts no vendor. It also says the config validates on 0.156.0 and on the 0.115.1
   that the Compose stack pins. A scope note still sent readers to Milestone 39 for Compose. It now
   links the `telemetry` profile that shipped there.
 
-- **The MVC guide's redirect example could never take its error branch (`docs/mvc.md`, PR
-  pending).** It decided acceptance with `ctx.request.method === 'POST'` on a `POST` route, so it
-  always redirected. It now validates the submitted title, re-renders the form with `422` when it is
-  too short, and redirects with `303` otherwise; both branches were driven through a running app.
-  The guide's other claims were checked the same way and hold.
+- **The MVC guide's redirect example could never take its error branch (`docs/mvc.md`, PR #426).**
+  It decided acceptance with `ctx.request.method === 'POST'` on a `POST` route, so it always
+  redirected. It now validates the submitted title, re-renders the form with `422` when it is too
+  short, and redirects with `303` otherwise; both branches were driven through a running app. The
+  guide's other claims were checked the same way and hold.
 
 - **The custom-plugin guide's two test examples failed as printed (`docs/custom-plugins.md`, PR
-  pending).** The integration test registered its plugin after `createTestApp()` had started the
+  #426).** The integration test registered its plugin after `createTestApp()` had started the
   application, which throws; the unit test asserted a service its plugin never registered. Both now
   pass when run, and every example was checked against the source or a running app. Step 1 used
   `CAPABILITIES` without importing it, the service-registration block registered one token twice and
@@ -828,7 +827,7 @@ All notable changes to this project are documented here. The format follows
   Usage and Options sections rendered as part of the guide.
 
 - **The programmatic API reference resolved capabilities before `start()`
-  (`docs/programmatic-api.md`, PR pending).** Both streaming examples and the `router.post` example
+  (`docs/programmatic-api.md`, PR #426).** Both streaming examples and the `router.post` example
   read a service at module scope, where the plugin providing it has not registered yet, so each
   threw `No service registered`. They now resolve inside the handler, and the disconnect example no
   longer closes a stream the client has already cancelled. The `middleware.add` section showed only
@@ -836,7 +835,7 @@ All notable changes to this project are documented here. The format follows
   hostname defaults to the runtime's own, and the transcribed `IResponse` and `IRequestContext` gain
   `html()` and `raw`.
 
-- **The plugin catalog described packages that have since changed (`docs/plugins.md`, PR pending).**
+- **The plugin catalog described packages that have since changed (`docs/plugins.md`, PR #426).**
   The kernel listed three exports it does not have (`createApplication` is its only value), the DI
   token was `CAPABILITIES.CONTAINER` rather than `DI_CONTAINER`, the database entry listed neither
   the MongoDB, DynamoDB, Cosmos DB nor Bigtable arms nor their drivers, telemetry omitted
@@ -846,7 +845,7 @@ All notable changes to this project are documented here. The format follows
   against its package's barrel and `CAPABILITIES`.
 
 - **The decorators guide's validation examples answered `500` on every request, and it said role
-  decorators are not enforced (`docs/decorators.md`, PR pending).** `@ValidateBody` and
+  decorators are not enforced (`docs/decorators.md`, PR #426).** `@ValidateBody` and
   `@ValidateQuery` were given plain `{ type, required }` objects, which are not schemas the
   validation plugin can run, so every request to those routes failed. They now use Zod schemas.
   `@Roles` and `@Permissions` have been enforced since M89a (`401`, `403`, or `501` with no
@@ -856,8 +855,8 @@ All notable changes to this project are documented here. The format follows
   `MetadataStore` example, which iterated a new, empty store instead of `metadataStore`.
 
 - **The plugin architecture guide's replacement and testing examples failed at startup
-  (`docs/plugin-architecture.md`, PR pending).** "Plugin Replacement" registered a custom logger
-  beside `LoggerPlugin`, which the kernel refuses because a capability has one provider. The testing
+  (`docs/plugin-architecture.md`, PR #426).** "Plugin Replacement" registered a custom logger beside
+  `LoggerPlugin`, which the kernel refuses because a capability has one provider. The testing
   example registered a plugin after `createTestApp` had started the application, which throws. The
   middleware priority table now lists every first-party middleware with its real priority; it had
   omitted the error handler, locale resolution and request logging. The shutdown hook comments now
