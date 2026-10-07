@@ -80,16 +80,16 @@ them are surfaced as the same transport headers, and an entry failing the shared
 ordered subscription where the broker has one — not the order handlers **finish** in. Measured
 2026-10-07 against real backends:
 
-| Broker          | On a handler failure                                                                              |
-| --------------- | ------------------------------------------------------------------------------------------------- |
-| Kafka           | Order kept by blocking: the offset stays uncommitted, so one failing message stalls its partition |
-| Pub/Sub         | Order kept by blocking, on an ordering subscription (`enableMessageOrdering`)                     |
-| Service Bus     | Order kept by blocking: the abandoned message is redelivered before the next is handled           |
-| RabbitMQ        | Order lost on retry: later messages for the key are handled while the failed one waits            |
-| Redis Streams   | Order lost on retry (reclaim)                                                                     |
-| NATS            | Order lost on retry                                                                               |
-| in-memory       | Dispatch already follows publish order                                                            |
-| `WorkersBroker` | Follows `dispatch` batch order                                                                    |
+| Broker          | On a handler failure                                                                                                                                                                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kafka           | Order kept by blocking: the offset stays uncommitted, so one failing message stalls its partition                                                                                                                                                              |
+| Pub/Sub         | Order kept by blocking, on an ordering subscription (`enableMessageOrdering`)                                                                                                                                                                                  |
+| Service Bus     | Order kept by blocking ONLY at `maxConcurrentCalls: 1` (the broker's default): the abandoned message is redelivered before the next is handled. At `maxConcurrentCalls: 2` the later message is handled first, so order is LOST. Measured both ways 2026-10-07 |
+| RabbitMQ        | Order lost on retry: later messages for the key are handled while the failed one waits                                                                                                                                                                         |
+| Redis Streams   | Order lost on retry (reclaim)                                                                                                                                                                                                                                  |
+| NATS            | Order lost on retry                                                                                                                                                                                                                                            |
+| in-memory       | Dispatch already follows publish order                                                                                                                                                                                                                         |
+| `WorkersBroker` | Follows `dispatch` batch order                                                                                                                                                                                                                                 |
 
 A consumer that needs order compares the delivered envelope's version and drops or defers a stale
 message.

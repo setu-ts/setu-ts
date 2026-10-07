@@ -5726,9 +5726,12 @@ retry queue or ordered subscription where the broker has one — not the order h
 What a handler failure does to order differs per broker:
 
 - **Order kept by blocking:** Kafka (a throwing handler leaves the offset uncommitted, so one
-  failing message stalls its whole partition until it succeeds), Pub/Sub on an ordering
-  subscription, and Service Bus (an abandoned message is redelivered before the next is handled —
-  measured 2026-10-07).
+  failing message stalls its whole partition until it succeeds) and Pub/Sub on an ordering
+  subscription.
+- **Service Bus — the condition decides, so it is always stated.** Measured 2026-10-07 both ways: at
+  the broker's default `maxConcurrentCalls` (1) the abandoned message is redelivered before the next
+  is handled (order kept by blocking); at `maxConcurrentCalls: 2` the later message is handled first
+  (order lost).
 - **Order lost on retry:** RabbitMQ, Redis Streams and NATS redelivery — later messages for the key
   are handled while the failed one waits.
 

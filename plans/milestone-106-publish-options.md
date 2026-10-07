@@ -79,12 +79,12 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
 **Measurements taken during implementation (2026-10-07, M106).** Two of these correct claims the
 plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to match.
 
-| Reference                                                   | Source                                                                                                      | Verified fact                                                                                                                                                                                              |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| NATS retry ordering (measured 2026-10-07, M106)             | real `nats:2-alpine -js`, nats.js 2.29.3, explicit-ack durable consumer                                     | a message whose handler `nak()`s is redelivered only after later messages were handled: order `first-attempt-1 → second → first-attempt-2` (order LOST on retry)                                           |
-| Service Bus retry ordering (measured 2026-10-07, M106)      | `servicebus-emulator`, `@azure/service-bus@^7`, `autoCompleteMessages: false`, default `maxConcurrentCalls` | an abandoned message is redelivered before the next is handled: order `first-attempt-1 → first-attempt-2 → second` (order KEPT by blocking — corrects §3.8)                                                |
-| RabbitMQ 4 server-owned headers (measured 2026-10-07, M106) | real `rabbitmq:4-management-alpine`, amqplib 0.10.9                                                         | dead-lettering writes `x-death` + `x-first-death-*` + `x-last-death-*`; a quorum-queue redelivery writes `x-acquired-count` (1, 2, …) and NOT `x-delivery-count` — so §3.4 reserves `x-acquired-count` too |
-| Pub/Sub `goog` prefix (measured 2026-10-07, M106)           | `google-cloud-cli:emulators`, `@google-cloud/pubsub@^6`                                                     | attributes `googFoo`, `goog`, `googclient_x` were ACCEPTED by the emulator (recorded as not refused); the prefix stays reserved because the live service refuses it                                        |
+| Reference                                                   | Source                                                                        | Verified fact                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NATS retry ordering (measured 2026-10-07, M106)             | real `nats:2-alpine -js`, nats.js 2.29.3, explicit-ack durable consumer       | a message whose handler `nak()`s is redelivered only after later messages were handled: order `first-attempt-1 → second → first-attempt-2` (order LOST on retry)                                                                                                                                                                                                                                                                             |
+| Service Bus retry ordering (measured 2026-10-07, M106)      | `servicebus-emulator`, `@azure/service-bus@^7`, `autoCompleteMessages: false` | at the default `maxConcurrentCalls` (1) an abandoned message is redelivered before the next is handled — `first-attempt-1 → first-attempt-2 → second`, order KEPT by blocking; at `maxConcurrentCalls: 2` the later message IS handled first — `first-attempt-1 → second-attempt-1 → first-attempt-2 → second-attempt-2`, order LOST. The guarantee is the CONFIGURATION's, so §3.8 and the README state the condition, never a bare "kept". |
+| RabbitMQ 4 server-owned headers (measured 2026-10-07, M106) | real `rabbitmq:4-management-alpine`, amqplib 0.10.9                           | dead-lettering writes `x-death` + `x-first-death-*` + `x-last-death-*`; a quorum-queue redelivery writes `x-acquired-count` (1, 2, …) and NOT `x-delivery-count` — so §3.4 reserves `x-acquired-count` too                                                                                                                                                                                                                                   |
+| Pub/Sub `goog` prefix (measured 2026-10-07, M106)           | `google-cloud-cli:emulators`, `@google-cloud/pubsub@^6`                       | attributes `googFoo`, `goog`, `googclient_x` were ACCEPTED by the emulator (recorded as not refused). The prefix stays reserved because it is REPORTEDLY refused by the live service — third-party docs, not verified — not because anything here observed a refusal.                                                                                                                                                                        |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -198,10 +198,11 @@ plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to
     other queues, `Nats-Rollup` can purge a stream, `Nats-Expected-*` rejects the publish,
     `x-setu-*` are read back by the framework (`x-setu-attempt` is the retry count a consumer
     trusts), `payload` is silently dropped by Redis Streams, `goog` keys are reportedly refused by
-    Pub/Sub (measured during implementation, §10 obligation 1), RabbitMQ's server writes and reads
-    the `x-death` family and `x-delivery-count`, and the delayed-message plugin acts on `x-delay`,
-    and the trace headers are written by `TracedBroker`. Refusing them on every broker keeps the
-    rule portable and keeps a caller-supplied header from steering a broker.
+    Pub/Sub (third-party docs, not verified; the emulator ACCEPTS them — measured 2026-10-07),
+    RabbitMQ's server writes and reads the `x-death` family and `x-delivery-count`, and the
+    delayed-message plugin acts on `x-delay`, and the trace headers are written by `TracedBroker`.
+    Refusing them on every broker keeps the rule portable and keeps a caller-supplied header from
+    steering a broker.
 - **Test home:** `packages/messaging-plugin/test/unit/publish-options-validation.test.ts`.
 
 ### 3.5 Pub/Sub ordering
@@ -240,6 +241,12 @@ plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to
     selector, then none. A selector returning `undefined` means no key; a selector that throws, or
     returns a value §3.4 refuses, makes `publishIntegrationEvent` reject — never a synchronous
     throw.
+  - **Declaration shape (recorded after implementation).** `IntegrationEventDefinition.orderingKey`
+    is declared in METHOD syntax (`orderingKey?(envelope): string | undefined`), NOT property
+    syntax. A property-style function member makes the definition INVARIANT in its payload type
+    under `strictFunctionTypes`, so an `IntegrationEventDefinition<OrderPlaced>` no longer assigns
+    to the `IntegrationEventDefinition<unknown>` a consumer takes — a breaking change §4 forbids,
+    and one `envelope.test.ts` caught as a compile error (15 errors, all from this one member).
 - **Why:**
   - The envelope ID is the end-to-end de-duplication key (producer-assigned, fresh per envelope), so
     that default changes nothing observable beyond a header. This is mainstream: MassTransit and
@@ -264,9 +271,15 @@ plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to
   handler failure does to order differs per broker, and the README table carries a column for it:
   - **Order kept by blocking:** Kafka (a throwing handler leaves the offset uncommitted and kafkajs
     redelivers from that record, `kafka-broker.ts:723`, so one failing message stalls its whole
-    partition until it succeeds), Pub/Sub on an ordering subscription, and — measured 2026-10-07,
-    correcting this plan's first draft — Service Bus, whose abandoned message is redelivered before
-    the next is handled (`first-attempt-1 → first-attempt-2 → second`).
+    partition until it succeeds) and Pub/Sub on an ordering subscription.
+  - **Service Bus — the condition decides, and it is stated every time.** Measured 2026-10-07 both
+    ways against the emulator: at the broker's default `maxConcurrentCalls` (1) the abandoned
+    message is redelivered before the next is handled
+    (`first-attempt-1 → first-attempt-2 →
+    second`, order kept by blocking); at
+    `maxConcurrentCalls: 2` the later message IS handled first
+    (`first-attempt-1 → second-attempt-1 → first-attempt-2 → second-attempt-2`, order lost). Never
+    write "kept" without the concurrency.
   - **Order lost on retry:** RabbitMQ (retry queues since #421), Redis Streams (reclaim since #419)
     and NATS redelivery — later messages for the key are handled while the failed one waits.
     Measured 2026-10-07 for NATS: the handler order was
@@ -314,14 +327,21 @@ plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to
 `publish` stays assignable; both exported transports gain an optional trailing parameter; and
 `IntegrationEventDefinition` gains an optional member, so a hand-built definition still assigns.
 
-| Exported symbol                           | Kind            | Consumer / real code path that READS it                                            |
-| ----------------------------------------- | --------------- | ---------------------------------------------------------------------------------- |
-| `PublishOptions` (`common`)               | type            | `IMessageBroker.publish`, every broker, both decorators, `publishIntegrationEvent` |
-| `ORDERING_KEY_HEADER` (`common`)          | const           | every broker's header write; consumers reading `MessageMetadata.headers`           |
-| `DEDUPLICATION_ID_HEADER` (`common`)      | const           | same                                                                               |
-| `IntegrationEventDefinition.orderingKey`  | optional member | `publishIntegrationEvent` reads it when the caller passes no `orderingKey`         |
-| `IPubSubTransport.publish` 4th parameter  | param           | `GcpPubSubBroker.publishWithHeaders` passes `orderingKey`                          |
-| `IServiceBusTransport.send` 4th parameter | param           | `ServiceBusBroker.publishWithHeaders` passes `messageId`                           |
+| Exported symbol                                                                                     | Kind            | Consumer / real code path that READS it                                                                                                                |
+| --------------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PublishOptions` (`common`)                                                                         | type            | `IMessageBroker.publish`, every broker, both decorators, `publishIntegrationEvent`                                                                     |
+| `ORDERING_KEY_HEADER` (`common`)                                                                    | const           | every broker's header write; consumers reading `MessageMetadata.headers`                                                                               |
+| `DEDUPLICATION_ID_HEADER` (`common`)                                                                | const           | same                                                                                                                                                   |
+| `IntegrationEventDefinition.orderingKey`                                                            | optional member | `publishIntegrationEvent` reads it when the caller passes no `orderingKey`                                                                             |
+| `publishIdProblem` (`common`)                                                                       | function        | the id RULE: `messaging-plugin`'s validator and `WorkersBroker`'s option reader read it, so there is one copy, not two (§2.2 forbids the cross-import) |
+| `isValidPublishId` (`common`)                                                                       | function        | `envelopeHeaders`, deciding which delivered envelope ids to surface                                                                                    |
+| `MAX_PUBLISH_ID_BYTES` (`common`)                                                                   | const           | both readers' refusal text                                                                                                                             |
+| `publishHeaderNameProblem` (`common`)                                                               | function        | the header-name RULE: `messaging-plugin`'s validator and `WorkersBroker`                                                                               |
+| `publishHeaderValueProblem` (`common`)                                                              | function        | the header-value RULE: the same two readers                                                                                                            |
+| `MAX_PUBLISH_HEADERS`, `MAX_PUBLISH_HEADER_NAME_BYTES`, `MAX_PUBLISH_HEADER_VALUE_BYTES` (`common`) | const           | both readers' bounds (`WorkersBroker` checks the count too)                                                                                            |
+| `RESERVED_HEADER_NAMES`, `RESERVED_HEADER_PREFIXES` (`common`)                                      | const           | read by `publishHeaderNameProblem`; iterated by the three-casing validation test                                                                       |
+| `IPubSubTransport.publish` 4th parameter                                                            | param           | `GcpPubSubBroker.publishWithHeaders` passes `orderingKey`                                                                                              |
+| `IServiceBusTransport.send` 4th parameter                                                           | param           | `ServiceBusBroker.publishWithHeaders` passes `messageId`                                                                                               |
 
 ### 4.1 Options — every option names its consumer
 
@@ -461,8 +481,10 @@ each, on the publish path only. No added round trip. The delivery path is unchan
 
 1. No public publish entry reaches a transport without §3.4 validation: for every entry, a reserved
    name is refused before the transport fake records a call. The reserved table is complete for
-   every name §1 shows a broker or its server acting on, and the `goog` prefix is measured against
-   the Pub/Sub emulator (refused by the service, or recorded as not refused) rather than assumed.
+   every name §1 shows a broker or its server acting on. The `goog` prefix was measured against the
+   Pub/Sub emulator and the emulator ACCEPTED it (§1); the prefix stays reserved on the
+   third-party-docs claim that the live service refuses it, and no doc here may state that claim as
+   verified.
 2. Every reserved name and prefix is refused in lower, upper and mixed case.
 3. A header name outside `0x21-0x7E` or containing `:`, and a value or id containing a Cc, Cf, Zl or
    Zp character, a lone surrogate, or leading or trailing whitespace, is refused; every count and
