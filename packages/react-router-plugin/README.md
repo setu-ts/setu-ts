@@ -149,6 +149,7 @@ stateless.
 | `ViteDevExternalId`        | interface |
 | `ViteDevExternalsOptions`  | interface |
 | `ViteDevExternalsPlugin`   | interface |
+| `ViteHookContext`          | interface |
 | `ViteResolvedEnvironments` | interface |
 | `PopulateLoadContext`      | type      |
 | `RouteHandler`             | type      |

@@ -52,6 +52,17 @@ export interface ViteResolvedEnvironments {
 }
 
 /**
+ * The part of Vite's plugin context {@linkcode ViteDevExternalsPlugin.resolveId}
+ * reads: the environment the hook is running for.
+ *
+ * @since 0.9.0
+ */
+export interface ViteHookContext {
+  /** The environment, such as `client` or `ssr`. */
+  readonly environment: { readonly name: string };
+}
+
+/**
  * A Vite plugin, typed structurally so this package imports no Vite.
  *
  * @since 0.9.0
@@ -67,8 +78,12 @@ export interface ViteDevExternalsPlugin {
    * holds the Node built-ins.
    */
   configResolved(config: ViteResolvedEnvironments): void;
-  /** Resolves a listed package to the runtime's specifier, external. */
-  resolveId(id: string): ViteDevExternalId | null;
+  /**
+   * Resolves a listed package to the runtime's specifier, external, in the SSR
+   * environment only. A browser cannot import that specifier, so a client
+   * import is left to Vite.
+   */
+  resolveId(this: ViteHookContext, id: string): ViteDevExternalId | null;
 }
 
 /** Escapes a string for literal use inside a regular expression. */
@@ -144,8 +159,9 @@ export function viteDevExternals(options: ViteDevExternalsOptions): ViteDevExter
       if (ssr === undefined) return;
       ssr.resolve.builtins = [...ssr.resolve.builtins, ...builtinPatterns(packages, resolve)];
     },
-    resolveId(id: string): ViteDevExternalId | null {
-      return isListed(packages, id) ? { id: resolve(id), external: true } : null;
+    resolveId(this: ViteHookContext, id: string): ViteDevExternalId | null {
+      if (this.environment.name !== 'ssr' || !isListed(packages, id)) return null;
+      return { id: resolve(id), external: true };
     },
   };
 }

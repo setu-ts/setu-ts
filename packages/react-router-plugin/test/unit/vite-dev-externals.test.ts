@@ -1,7 +1,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { viteDevExternals } from '../../src/dev/vite-dev-externals.ts';
-import type { ViteResolvedEnvironments } from '../../src/dev/vite-dev-externals.ts';
+import type {
+  ViteHookContext,
+  ViteResolvedEnvironments,
+} from '../../src/dev/vite-dev-externals.ts';
+
+const SSR: ViteHookContext = { environment: { name: 'ssr' } };
+const CLIENT: ViteHookContext = { environment: { name: 'client' } };
 
 const FILE_ROOT = 'file:///work/packages/react-router-plugin/src/';
 const resolutions: Record<string, string> = {
@@ -32,23 +38,29 @@ describe('viteDevExternals', () => {
   });
 
   it('resolves a listed package with the runtime resolver, external', () => {
-    expect(plugin.resolveId('@setu-ts/common')).toEqual({
+    expect(plugin.resolveId.call(SSR, '@setu-ts/common')).toEqual({
       id: 'jsr:@setu-ts/common@^0.9.0',
       external: true,
     });
   });
 
   it('resolves a subpath of a listed package', () => {
-    expect(plugin.resolveId('@setu-ts/react-router-plugin/extra')).toEqual({
+    expect(plugin.resolveId.call(SSR, '@setu-ts/react-router-plugin/extra')).toEqual({
       id: `${FILE_ROOT}extra.ts`,
       external: true,
     });
   });
 
+  it('leaves a client import of a listed package to Vite', () => {
+    // A browser cannot import the runtime's jsr:/file: specifier.
+    expect(plugin.resolveId.call(CLIENT, '@setu-ts/common')).toBeNull();
+    expect(plugin.resolveId.call(CLIENT, '@setu-ts/react-router-plugin/extra')).toBeNull();
+  });
+
   it('leaves an unlisted or prefix-sharing specifier to Vite', () => {
-    expect(plugin.resolveId('react-router')).toBeNull();
-    expect(plugin.resolveId('@setu-ts/common-extra')).toBeNull();
-    expect(plugin.resolveId('/app/root.tsx')).toBeNull();
+    expect(plugin.resolveId.call(SSR, 'react-router')).toBeNull();
+    expect(plugin.resolveId.call(SSR, '@setu-ts/common-extra')).toBeNull();
+    expect(plugin.resolveId.call(SSR, '/app/root.tsx')).toBeNull();
   });
 
   it('appends to the SSR built-ins and keeps the existing ones', () => {

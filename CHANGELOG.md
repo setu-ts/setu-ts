@@ -16,14 +16,16 @@ All notable changes to this project are documented here. The format follows
   `node_modules`, so every page answered `500` with
   `Cannot find module '@setu-ts/react-router-plugin'`, and a package it loaded itself would be a
   second copy whose `contextKeyFor()` keys match nothing. The new `viteDevExternals()` resolves
-  those packages with the runtime's own resolver and keeps them external. On Node and Bun the
-  packages are in `node_modules`, which Vite externalises already, so the same `dev.ts` runs
+  those packages with the runtime's own resolver and keeps them external in the SSR environment; a
+  client import, which a browser could not load from that specifier, is left to Vite. On Node and
+  Bun the packages are in `node_modules`, which Vite externalises already, so the same `dev.ts` runs
   unchanged there. The plugin is typed structurally (`ViteDevExternalsOptions`,
-  `ViteDevExternalsPlugin`, `ViteDevExternalId`, `ViteResolvedEnvironments`), so the package still
-  imports no Vite. Verified on all three runtimes against the published packages, and on Deno
-  against the workspace sources too: `/login` renders with its CSRF token, client modules load
-  through the app port, an edited route is served on the next request, and SIGINT stops the app and
-  Vite with exit code 0. If either fails to stop, the failure is logged and the process exits 1.
+  `ViteDevExternalsPlugin`, `ViteDevExternalId`, `ViteHookContext`, `ViteResolvedEnvironments`), so
+  the package still imports no Vite. Verified on all three runtimes against the published packages,
+  and on Deno against the workspace sources too: `/login` renders with its CSRF token, client
+  modules load through the app port, an edited route is served on the next request, and SIGINT stops
+  the app and Vite with exit code 0. If either fails to stop, the failure is logged and the process
+  exits 1.
 
 - **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR #426).**
   With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the container,

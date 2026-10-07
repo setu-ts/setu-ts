@@ -31,6 +31,7 @@ import type {
   ViteDevExternalId,
   ViteDevExternalsOptions,
   ViteDevExternalsPlugin,
+  ViteHookContext,
   ViteResolvedEnvironments,
 } from '../../src/index.ts';
 
@@ -40,7 +41,8 @@ describe('barrel exports', () => {
     const plugin: ViteDevExternalsPlugin = viteDevExternals(options);
     const config: ViteResolvedEnvironments = { environments: {} };
     plugin.configResolved(config);
-    const resolved: ViteDevExternalId | null = plugin.resolveId('x');
+    const ssr: ViteHookContext = { environment: { name: 'ssr' } };
+    const resolved: ViteDevExternalId | null = plugin.resolveId.call(ssr, 'x');
     expect(resolved).toBeNull();
   });
 

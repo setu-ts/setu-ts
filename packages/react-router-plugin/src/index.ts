@@ -36,6 +36,7 @@ export type {
   ViteDevExternalId,
   ViteDevExternalsOptions,
   ViteDevExternalsPlugin,
+  ViteHookContext,
   ViteResolvedEnvironments,
 } from './dev/vite-dev-externals.ts';
 export type {
