@@ -304,17 +304,29 @@ async function boot(env: Record<string, unknown>): Promise<IKernelApplication> {
 }
 
 // Start once, on the first request, and share that start across concurrent
-// requests. A FAILED start is forgotten rather than cached, so a transient
-// problem at cold start is retried on the next request instead of breaking the
-// isolate for its whole life.
+// requests. Two cases rebuild instead of reusing:
+// - A FAILED start is forgotten rather than cached, so a transient problem at
+//   cold start is retried on the next request instead of breaking the isolate
+//   for its whole life.
+// - A NEW `env` object means the bindings changed. Cloudflare may keep running
+//   an isolate across a bindings-only deploy, and an application built from the
+//   old `env` would keep using the old bindings. While bindings are unchanged,
+//   every request receives the same `env` object, so this check costs nothing.
 let booted: Promise<IKernelApplication> | undefined;
+let bootedEnv: Record<string, unknown> | undefined;
 
 function ensureBooted(env: Record<string, unknown>): Promise<IKernelApplication> {
-  if (booted === undefined) {
-    booted = boot(env).catch((error: unknown) => {
-      booted = undefined;
+  if (booted === undefined || bootedEnv !== env) {
+    const previous = booted;
+    const attempt = boot(env).catch((error: unknown) => {
+      if (booted === attempt) booted = undefined;
       throw error;
     });
+    booted = attempt;
+    bootedEnv = env;
+    // Release the superseded application's resources; a failure here must not
+    // affect the new one.
+    void previous?.then((app) => app.stop()).catch(() => {});
   }
   return booted;
 }
