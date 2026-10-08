@@ -13312,7 +13312,9 @@ and Brandur Leach's Postgres idempotency article.
 **Deliverables**
 
 - [ ] The store port and token in `common`; tiers A and B; memory, Redis and Durable Object stores
-- [ ] Route middleware and decorator, refusing a streaming route at registration
+- [ ] Route middleware and decorator; `@Idempotent` on a safe method is refused at registration, and
+      a streaming response is recorded status-only at request time (no registration-time signal
+      exists for it — plan §2 C3)
 - [ ] The ingress behaviour, releasing on a failed job or message
 - [ ] `within()` tier C per backend, or refused by name
 - [ ] The SDK `idempotencyKey` option, with a test that every retry carries the same key
