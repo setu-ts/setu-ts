@@ -41,16 +41,20 @@ type DispatchOf<T> = T extends { dispatch(): infer R } ? R : never;
 const dispatchReturnsVoid: DispatchOf<IOutbox> extends void ? true : false = true;
 
 describe('outbox barrel exports', () => {
-  it('exports the five outbox error classes as constructors', () => {
+  it('exports the six outbox error classes as constructors', () => {
     const errors = [
       messaging.OutboxEnvelopeTooLargeError,
       messaging.OutboxNotReadyError,
       messaging.OutboxRelayUnscheduledError,
       messaging.OutboxRowStateError,
+      messaging.OutboxStoreVerifyTimeoutError,
       messaging.OutboxUnknownTenantError,
     ];
     for (const ctor of errors) expect(typeof ctor).toBe('function');
     expect(new messaging.OutboxRelayUnscheduledError().name).toBe('OutboxRelayUnscheduledError');
+    expect(new messaging.OutboxStoreVerifyTimeoutError(5).name).toBe(
+      'OutboxStoreVerifyTimeoutError',
+    );
   });
 
   it('keeps the outbox internals out of the barrel', () => {
@@ -66,6 +70,7 @@ describe('outbox barrel exports', () => {
         'PositionClock',
         'encodeOutboxRecord',
         'decodeOutboxRecord',
+        'MAX_STORED_OPTIONS_LENGTH',
       ]
     ) {
       expect(internal in messaging).toBe(false);

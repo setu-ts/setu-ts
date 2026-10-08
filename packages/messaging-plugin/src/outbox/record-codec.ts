@@ -12,6 +12,10 @@
 import type { OutboxRecord, ParsedPublishOptions } from '@setu-ts/common';
 import {
   hasForbiddenAliasCharacter,
+  MAX_PUBLISH_HEADER_NAME_BYTES,
+  MAX_PUBLISH_HEADER_VALUE_BYTES,
+  MAX_PUBLISH_HEADERS,
+  MAX_PUBLISH_ID_BYTES,
   OUTBOX_RECORD_KIND,
   parsePublishOptions,
 } from '@setu-ts/common';
@@ -23,6 +27,23 @@ import { OutboxEnvelopeTooLargeError } from './errors.ts';
 const MAX_TOPIC_BYTES = 255;
 
 const UTF8 = new TextEncoder();
+
+/**
+ * The longest `options` text (in UTF-16 code units, so the check is O(1)) a
+ * row written by {@linkcode encodeOutboxRecord} can carry. Derived from the
+ * M106 bounds rather than chosen: every stored byte escapes to at most six
+ * code units (`\u00XX`), plus the quotes, colons and commas around the
+ * ordering key, the de-duplication id and each header, and the fixed keys.
+ * Anything longer was not written by the outbox, so it is refused before the
+ * parse it would otherwise cost.
+ *
+ * @internal
+ */
+export const MAX_STORED_OPTIONS_LENGTH = 6 *
+    (2 * MAX_PUBLISH_ID_BYTES +
+      MAX_PUBLISH_HEADERS * (MAX_PUBLISH_HEADER_NAME_BYTES + MAX_PUBLISH_HEADER_VALUE_BYTES)) +
+  MAX_PUBLISH_HEADERS * 6 +
+  64;
 
 /**
  * Everything the writer knows about one row before it is appended.
@@ -102,6 +123,7 @@ export type InvalidRowCause =
   | 'envelope-not-json'
   | 'envelope-id-mismatch'
   | 'options-invalid'
+  | 'options-too-large'
   | 'ordering-key-mismatch'
   | 'topic-invalid';
 
@@ -149,6 +171,9 @@ export function decodeOutboxRecord(
   const envelope = parseJson(record.envelope);
   if (!isObject(envelope)) return { ok: false, cause: 'envelope-not-json' };
   if (envelope.id !== record.id) return { ok: false, cause: 'envelope-id-mismatch' };
+  if (typeof record.options === 'string' && record.options.length > MAX_STORED_OPTIONS_LENGTH) {
+    return { ok: false, cause: 'options-too-large' };
+  }
   const rawOptions = parseJson(record.options);
   let options: ParsedPublishOptions;
   try {

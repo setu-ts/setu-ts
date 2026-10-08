@@ -86,12 +86,13 @@ All notable changes to this project are documented here. The format follows
   `OutboxHealthOptions`; `write` takes `OutboxWriteInput` and `sweep` resolves `OutboxSweepResult`.
   Refusals are `OutboxEnvelopeTooLargeError` (inside the transaction, so the business write rolls
   back), `OutboxRelayUnscheduledError` (a scheduled relay with no `CAPABILITIES.SCHEDULER`),
-  `OutboxUnknownTenantError`, `OutboxRowStateError` (`release` of a row that is not `failed`) and
-  `OutboxNotReadyError`. On Cloudflare Workers the relay runs from a Cron Trigger with
-  `relay: { schedule: false }` and `background: waitUntil`. Driven against real PostgreSQL with real
-  RabbitMQ 4 and Redis Streams (including a process dying between a publish and its status write), a
-  MongoDB replica set, DynamoDB Local, the Bigtable emulator, the Cosmos emulator, and the real
-  OpenTelemetry SDK; the Workers composition is driven at unit level, not on real workerd.
+  `OutboxUnknownTenantError`, `OutboxRowStateError` (`release` of a row that is not `failed`),
+  `OutboxNotReadyError` and `OutboxStoreVerifyTimeoutError` (a store's startup `verify()` did not
+  settle within `relay.storeTimeoutMs`). On Cloudflare Workers the relay runs from a Cron Trigger
+  with `relay: { schedule: false }` and `background: waitUntil`. Driven against real PostgreSQL with
+  real RabbitMQ 4 and Redis Streams (including a process dying between a publish and its status
+  write), a MongoDB replica set, DynamoDB Local, the Bigtable emulator, the Cosmos emulator, and the
+  real OpenTelemetry SDK; the Workers composition is driven at unit level, not on real workerd.
 
 - **The outbox store port in `@setu-ts/common` (M107).** `IOutboxStore` — `append`, `scanPending`,
   `failedKeys`, `markSent`, `markFailure`, `release`, `stats`, `purge` and `verify`, every method

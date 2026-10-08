@@ -5743,6 +5743,7 @@ export {
   OutboxNotReadyError,
   OutboxRelayUnscheduledError,
   OutboxRowStateError,
+  OutboxStoreVerifyTimeoutError,
   OutboxUnknownTenantError,
 } from '@setu-ts/messaging-plugin';
 export type {
@@ -6153,21 +6154,22 @@ replicas, provided the writers' clocks agree; delivery order as the broker gives
 compare `aggregateVersion`. Never exactly once — a re-send carries the same envelope id as its
 de-duplication id.
 
-| Export                        | Kind      | Notes                                                                                                                                         |
-| ----------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IOutbox`                     | interface | `write(scope, definition, payload, input?)` → envelope id; `dispatch()` (never throws); `sweep()`; `purge()`; `release(id, action, options?)` |
-| `OutboxOptions`               | type      | `OutboxCommonOptions` plus exactly one of `store` (one store) and `stores` (per tenant id); supplying both is a compile error                 |
-| `OutboxCommonOptions`         | interface | `maxEnvelopeBytes`, `background`, `relay`, `health`, `retainSentMs`, `purgeBatch`, `purgeIntervalMs`                                          |
-| `OutboxRelayOptions`          | interface | `schedule`, `intervalMs`, `pageSize`, `scanLimit`, `publishLimit`, `maxFailedScan`, `maxAttempts`, backoff bounds, the sweep deadline         |
-| `OutboxHealthOptions`         | interface | `degradedAfterMs` (default 60 000), `overlapWindowMs` (default 600 000)                                                                       |
-| `OutboxStoreEntry`            | type      | an `IOutboxStore` or a `RegistryFactory<IOutboxStore>`, resolved in `onInit`                                                                  |
-| `OutboxWriteInput`            | interface | `metadata?`, `options?` (`PublishOptions`, the `publishIntegrationEvent` precedence), `tenantId?`                                             |
-| `OutboxSweepResult`           | interface | `origin`, `scanned`, `published`, `failures`, `poisoned`, `endedBy`                                                                           |
-| `OutboxEnvelopeTooLargeError` | class     | `write` — the serialized envelope exceeds `maxEnvelopeBytes` (`bytes`, `limit`); the caller's transaction rolls back                          |
-| `OutboxRelayUnscheduledError` | class     | `start()` — the relay is scheduled (the default) but no `CAPABILITIES.SCHEDULER` is registered                                                |
-| `OutboxUnknownTenantError`    | class     | `write` / `release` with per-tenant `stores` naming no tenant, or one with no store; the tenant id is never quoted                            |
-| `OutboxRowStateError`         | class     | `release` — `outcome: 'missing'` or `'not-failed'` (with the row's `status`)                                                                  |
-| `OutboxNotReadyError`         | class     | any call before `onInit` resolved and verified the store                                                                                      |
+| Export                          | Kind      | Notes                                                                                                                                         |
+| ------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IOutbox`                       | interface | `write(scope, definition, payload, input?)` → envelope id; `dispatch()` (never throws); `sweep()`; `purge()`; `release(id, action, options?)` |
+| `OutboxOptions`                 | type      | `OutboxCommonOptions` plus exactly one of `store` (one store) and `stores` (per tenant id); supplying both is a compile error                 |
+| `OutboxCommonOptions`           | interface | `maxEnvelopeBytes`, `background`, `relay`, `health`, `retainSentMs`, `purgeBatch`, `purgeIntervalMs`                                          |
+| `OutboxRelayOptions`            | interface | `schedule`, `intervalMs`, `pageSize`, `scanLimit`, `publishLimit`, `maxFailedScan`, `maxAttempts`, backoff bounds, the sweep deadline         |
+| `OutboxHealthOptions`           | interface | `degradedAfterMs` (default 60 000), `overlapWindowMs` (default 600 000)                                                                       |
+| `OutboxStoreEntry`              | type      | an `IOutboxStore` or a `RegistryFactory<IOutboxStore>`, resolved in `onInit`                                                                  |
+| `OutboxWriteInput`              | interface | `metadata?`, `options?` (`PublishOptions`, the `publishIntegrationEvent` precedence), `tenantId?`                                             |
+| `OutboxSweepResult`             | interface | `origin`, `scanned`, `published`, `failures`, `poisoned`, `endedBy`                                                                           |
+| `OutboxEnvelopeTooLargeError`   | class     | `write` — the serialized envelope exceeds `maxEnvelopeBytes` (`bytes`, `limit`); the caller's transaction rolls back                          |
+| `OutboxRelayUnscheduledError`   | class     | `start()` — the relay is scheduled (the default) but no `CAPABILITIES.SCHEDULER` is registered                                                |
+| `OutboxUnknownTenantError`      | class     | `write` / `release` with per-tenant `stores` naming no tenant, or one with no store; the tenant id is never quoted                            |
+| `OutboxRowStateError`           | class     | `release` — `outcome: 'missing'` or `'not-failed'` (with the row's `status`)                                                                  |
+| `OutboxNotReadyError`           | class     | any call before `onInit` resolved and verified the store                                                                                      |
+| `OutboxStoreVerifyTimeoutError` | class     | `start()` — a store's `verify()` did not settle within `relay.storeTimeoutMs` (`timeoutMs`); no tenant or store is named                      |
 
 **Wiring.** With `outbox` set the plugin also provides `CAPABILITIES.OUTBOX` (`outbox.<name>` for a
 named instance), declares `CAPABILITIES.SCHEDULER` and `CAPABILITIES.METRICS` as optional

@@ -16,7 +16,9 @@ import {
   createCapabilityToken,
   createConnectionErrorReporter,
   PLUGIN_PRIORITY,
+  resolveProbeTiming,
   resolveRegistryEntry,
+  withDeadline,
 } from '@setu-ts/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
@@ -35,7 +37,7 @@ import { asBrokerAdapter } from '../brokers/custom-adapter.ts';
 import { TracedBroker } from '../tracing/traced-broker.ts';
 import { PipelinedBroker } from '../pipeline/pipelined-broker.ts';
 import { JsonSerializer } from '../serializers/json-serializer.ts';
-import { OutboxRelayUnscheduledError } from '../outbox/errors.ts';
+import { OutboxRelayUnscheduledError, OutboxStoreVerifyTimeoutError } from '../outbox/errors.ts';
 import { OutboxCollector } from '../outbox/outbox-collector.ts';
 import { createOutboxHealthIndicator } from '../outbox/outbox-health.ts';
 import type { ActiveOutboxStores } from '../outbox/outbox-service.ts';
@@ -743,8 +745,14 @@ function registerOutbox(ctx: IPluginContext, registration: OutboxRegistration): 
     const stores = active.kind === 'single' ? [active.store] : [...active.stores.values()];
     for (const store of stores) {
       // A refusal (`OutboxStoreUnavailableError` from the database bridge)
-      // propagates and fails `start()` by name.
-      await store.verify();
+      // propagates and fails `start()` by name. The bound turns a store that
+      // never answers into a named startup failure rather than a `start()`
+      // that waits on the driver's own timeout, which may be none.
+      await withDeadline(() => store.verify(), {
+        timeoutMs: options.storeTimeoutMs,
+        onTimeout: () => new OutboxStoreVerifyTimeoutError(options.storeTimeoutMs),
+        timing: resolveProbeTiming(ctx.runtime),
+      });
     }
     service.activate(active);
     if (scheduler === undefined) return;

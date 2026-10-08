@@ -36,7 +36,11 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 import { createMockPlugin } from '@setu-ts/testing';
 
-import { MessagingPlugin, OutboxRelayUnscheduledError } from '../../src/index.ts';
+import {
+  MessagingPlugin,
+  OutboxRelayUnscheduledError,
+  OutboxStoreVerifyTimeoutError,
+} from '../../src/index.ts';
 import type { IOutbox, MessagingPluginOptions, OutboxOptions } from '../../src/index.ts';
 import { FakeOutboxBroker, FaultStore, orderPlaced } from '../fixtures/outbox.ts';
 
@@ -208,6 +212,31 @@ describe('MessagingPlugin outbox wiring', () => {
     await expect(app.start()).rejects.toBe(refusal);
     expect(store.store().count('verify')).toBe(1);
     // verify ran before activation: nothing else reached the store.
+    expect(store.store().calls.map((c) => c.method)).toEqual(['verify']);
+    expect(broker.events).toContain('disconnect');
+  });
+
+  it('a verify() that never settles fails start() with OutboxStoreVerifyTimeoutError', async () => {
+    // A database that accepts the connection and never answers. Without the
+    // bound, start() would wait on the driver's own timeout — none for `pg`.
+    const store = capturedStore();
+    const broker = new RecordingBroker();
+    const app = buildApp({
+      outbox: {
+        store: (services) => {
+          const wrapped = store.entry(services) as FaultStore;
+          wrapped.faults.verify = () => new Promise<void>(() => {});
+          return wrapped;
+        },
+        relay: { storeTimeoutMs: 50 },
+      },
+      messaging: { broker: 'custom', instance: broker },
+    });
+    const refusal = await app.start().catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(OutboxStoreVerifyTimeoutError);
+    expect((refusal as OutboxStoreVerifyTimeoutError).timeoutMs).toBe(50);
+    expect((refusal as Error).message).toContain('relay.storeTimeoutMs');
+    // Nothing past verify reached the store, and the close path still ran.
     expect(store.store().calls.map((c) => c.method)).toEqual(['verify']);
     expect(broker.events).toContain('disconnect');
   });

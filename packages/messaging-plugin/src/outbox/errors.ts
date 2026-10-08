@@ -115,3 +115,33 @@ export class OutboxNotReadyError extends Error {
     this.name = 'OutboxNotReadyError';
   }
 }
+
+/**
+ * Rejects application `start()` when a store's startup `verify()` did not
+ * settle within `relay.storeTimeoutMs` — a database that accepts the
+ * connection and never answers. Without the bound, `start()` would wait for
+ * as long as the driver does, which for some drivers is forever.
+ *
+ * The message names neither the tenant nor the store: a tenant id may carry
+ * anything.
+ *
+ * @since 0.9.0
+ */
+export class OutboxStoreVerifyTimeoutError extends Error {
+  /** The bound that expired, in milliseconds. */
+  readonly timeoutMs: number;
+
+  /**
+   * Builds the refusal naming the bound that expired.
+   *
+   * @param timeoutMs - The `relay.storeTimeoutMs` bound that expired
+   */
+  constructor(timeoutMs: number) {
+    super(
+      `outbox: the store's startup verify() did not settle within ${timeoutMs} ms ` +
+        '(relay.storeTimeoutMs)',
+    );
+    this.name = 'OutboxStoreVerifyTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}

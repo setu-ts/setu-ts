@@ -1155,10 +1155,10 @@ so the scan moves past a blocked key's rows and reaches an unblocked key behind 
 
 A publish failure is retried with backoff (`baseBackoffMs` doubled per attempt up to
 `maxBackoffMs`); after `maxAttempts` (default 10) the row becomes `failed`. A row that cannot be
-decoded — its envelope is not JSON, too large or carries another id; its options fail validation or
-disagree with its `orderingKey` column; or its topic is empty, over 255 bytes or carries a control
-character — is `failed` at once with `lastError: 'invalid-row'`. Either way it blocks its key until
-an operator calls `release`.
+decoded — its envelope is not JSON, too large or carries another id; its options are longer than any
+the outbox writes, fail validation or disagree with its `orderingKey` column; or its topic is empty,
+over 255 bytes or carries a control character — is `failed` at once with `lastError: 'invalid-row'`.
+Either way it blocks its key until an operator calls `release`.
 
 **`release` carries no built-in authorization.** It is an operator capability: gate the route that
 calls it. `'retry'` returns the row to `pending` with zero attempts; `'discard'` settles it without
@@ -1224,6 +1224,15 @@ key and topic format — and a row failing any check is `invalid-row`, never pub
 row edited to name another topic is published there. Anyone with write access to the table can
 therefore publish under this service's broker identity, which is a stronger capability than the
 broker's own trust boundary assumes.
+
+A failed row's `lastError` column holds the broker's error message, with control characters removed
+and cut to 1 024 characters. A broker may quote part of the message it refused in that text, so the
+column can carry payload data: it is covered by the same protection as the rest of the table.
+
+**Startup is bounded.** Each store's `verify()` runs under `relay.storeTimeoutMs` (default 5 000). A
+database that accepts the connection and never answers fails `start()` with
+`OutboxStoreVerifyTimeoutError` instead of waiting on the driver's own timeout, which `pg` does not
+set by default.
 
 ### Health and metrics
 
@@ -1431,6 +1440,7 @@ publish — an operator who needs the signal can publish synthetically.
 | `OutboxNotReadyError`                   | class     |
 | `OutboxRelayUnscheduledError`           | class     |
 | `OutboxRowStateError`                   | class     |
+| `OutboxStoreVerifyTimeoutError`         | class     |
 | `OutboxUnknownTenantError`              | class     |
 | `PubSubSubscriptionBoundElsewhereError` | class     |
 | `RabbitMqBroker`                        | class     |

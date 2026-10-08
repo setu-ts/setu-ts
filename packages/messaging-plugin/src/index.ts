@@ -91,6 +91,7 @@ export {
   OutboxNotReadyError,
   OutboxRelayUnscheduledError,
   OutboxRowStateError,
+  OutboxStoreVerifyTimeoutError,
   OutboxUnknownTenantError,
 } from './outbox/errors.ts';
 export type {

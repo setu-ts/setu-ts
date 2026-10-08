@@ -9,10 +9,21 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { OutboxRecord } from '@setu-ts/common';
-import { OUTBOX_RECORD_KIND } from '@setu-ts/common';
+import {
+  MAX_PUBLISH_HEADER_NAME_BYTES,
+  MAX_PUBLISH_HEADER_VALUE_BYTES,
+  MAX_PUBLISH_HEADERS,
+  MAX_PUBLISH_ID_BYTES,
+  OUTBOX_RECORD_KIND,
+  parsePublishOptions,
+} from '@setu-ts/common';
 
 import { OutboxEnvelopeTooLargeError } from '../../../src/outbox/errors.ts';
-import { decodeOutboxRecord, encodeOutboxRecord } from '../../../src/outbox/record-codec.ts';
+import {
+  decodeOutboxRecord,
+  encodeOutboxRecord,
+  MAX_STORED_OPTIONS_LENGTH,
+} from '../../../src/outbox/record-codec.ts';
 
 const ENVELOPE = {
   id: 'e-1',
@@ -142,6 +153,38 @@ describe('decodeOutboxRecord', () => {
       expect(decodeOutboxRecord({ ...valid, ...change }, 1024)).toEqual({ ok: false, cause });
     });
   }
+
+  it('decodes the largest options the outbox can write, which fit the stored bound', () => {
+    // Every M106 bound at its maximum, with values that escape (a `"` costs
+    // two code units), so the derived bound is shown to be an upper bound.
+    const key = 'k'.repeat(MAX_PUBLISH_ID_BYTES);
+    const headers: Record<string, string> = {};
+    for (let n = 0; n < MAX_PUBLISH_HEADERS; n++) {
+      const name = `x-h${String(n).padStart(2, '0')}`;
+      headers[name.padEnd(MAX_PUBLISH_HEADER_NAME_BYTES, 'a')] = '"'.repeat(
+        MAX_PUBLISH_HEADER_VALUE_BYTES,
+      );
+    }
+    const options = parsePublishOptions({ orderingKey: key, deduplicationId: key, headers });
+    const record = encode({ options });
+    expect(record.options.length).toBeLessThanOrEqual(MAX_STORED_OPTIONS_LENGTH);
+    const decoded = decodeOutboxRecord(record, 1024);
+    expect(decoded.ok).toBe(true);
+  });
+
+  it('refuses options over the stored bound before parsing them', () => {
+    // Not JSON at all: refused by LENGTH, so the parse is never paid.
+    const options = '['.repeat(MAX_STORED_OPTIONS_LENGTH + 1);
+    expect(decodeOutboxRecord({ ...valid, options }, 1024)).toEqual({
+      ok: false,
+      cause: 'options-too-large',
+    });
+    // One code unit shorter is parsed, and refused for what it is.
+    expect(decodeOutboxRecord({ ...valid, options: options.slice(1) }, 1024)).toEqual({
+      ok: false,
+      cause: 'options-invalid',
+    });
+  });
 
   it('accepts a 255-byte topic', () => {
     const decoded = decodeOutboxRecord({ ...valid, topic: 't'.repeat(255) }, 1024);
