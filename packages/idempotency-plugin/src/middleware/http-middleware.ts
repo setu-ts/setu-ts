@@ -19,7 +19,7 @@ import {
   replay,
 } from '../core/record.ts';
 import type { ServiceDeps } from '../service/idempotency-service.ts';
-import { safeLog } from '../core/safe-log.ts';
+import { describeThrown, safeLog } from '../core/safe-log.ts';
 
 /** The warn message shared by every lease-lapse settle. */
 const LEASE_LAPSED = 'idempotency lease lapsed before completion; the work may have run twice';
@@ -100,7 +100,7 @@ export function createHttpMiddleware(
         safeLog(deps.logger, 'warn', LEASE_LAPSED, { namespace });
       }
     } catch (error) {
-      safeLog(deps.logger, 'error', 'idempotency release failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency release failed', { error: describeThrown(error) });
     }
   };
   const complete = async (
@@ -114,7 +114,9 @@ export function createHttpMiddleware(
         safeLog(deps.logger, 'warn', LEASE_LAPSED, { namespace });
       }
     } catch (error) {
-      safeLog(deps.logger, 'error', 'idempotency complete failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency complete failed', {
+        error: describeThrown(error),
+      });
     }
   };
 
@@ -194,7 +196,7 @@ export function createHttpMiddleware(
         ttlMs: resolved.ttlMs,
       });
     } catch (error) {
-      safeLog(deps.logger, 'error', 'idempotency claim failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency claim failed', { error: describeThrown(error) });
       respondWithError(ctx, {
         status: 503,
         title: 'Service Unavailable',

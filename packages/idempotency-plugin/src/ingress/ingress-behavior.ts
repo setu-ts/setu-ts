@@ -17,7 +17,7 @@ import { parseKeyValue } from '../core/key.ts';
 import type { ResolvedIngressOptions } from '../core/options.ts';
 import { IdempotencyRefusedError } from '../errors.ts';
 import type { ServiceDeps } from '../service/idempotency-service.ts';
-import { safeLog } from '../core/safe-log.ts';
+import { describeThrown, safeLog } from '../core/safe-log.ts';
 
 /** The queue job id, when the payload carries a string `id`. */
 function jobId(payload: unknown): string | undefined {
@@ -99,7 +99,7 @@ export function createIngressBehavior(
         );
       }
     } catch (error) {
-      safeLog(deps.logger, 'error', 'idempotency release failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency release failed', { error: describeThrown(error) });
     }
   };
   const completeSafe = async (key: string, token: string, ctx: IngressContext): Promise<void> => {
@@ -116,7 +116,9 @@ export function createIngressBehavior(
         );
       }
     } catch (error) {
-      safeLog(deps.logger, 'error', 'idempotency complete failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency complete failed', {
+        error: describeThrown(error),
+      });
     }
   };
 

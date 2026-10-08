@@ -221,6 +221,24 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
     expect(failing.calls.release).toHaveLength(1);
   });
 
+  it('a store rejection with no string form answers 503, not 500 (audit round 5)', async () => {
+    const store: IIdempotencyStore = {
+      name: 'hostile',
+      connect: () => Promise.resolve(),
+      claim: () => Promise.reject(Object.create(null)),
+      complete: () => Promise.resolve('settled'),
+      release: () => Promise.resolve('settled'),
+    };
+    const { ctx, captured } = makeCtx({});
+    let ran = 0;
+    await middleware(store, {})(ctx, () => {
+      ran += 1;
+      return Promise.resolve();
+    });
+    expect(captured.status).toBe(503);
+    expect(ran).toBe(0);
+  });
+
   it('warns for an oversize body and a redaction miss', async () => {
     const { logger, warnings } = captureLogger();
     const { store } = recordingStore({ outcome: 'claimed', takeover: false });

@@ -7,7 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { ILogger } from '@setu-ts/common';
-import { safeLog } from '../../src/core/safe-log.ts';
+import { describeThrown, safeLog } from '../../src/core/safe-log.ts';
 
 describe('safeLog', () => {
   it('writes through the logger the thunk returns, at the given level', () => {
@@ -42,5 +42,26 @@ describe('safeLog', () => {
 
   it('does nothing when no logger is registered', () => {
     expect(() => safeLog(() => undefined, 'warn', 'w', {})).not.toThrow();
+  });
+});
+
+describe('describeThrown', () => {
+  it('never throws, whatever was thrown (audit round 5)', () => {
+    const hostileMessage = new Error('x');
+    Object.defineProperty(hostileMessage, 'message', {
+      get() {
+        throw new Error('getter');
+      },
+    });
+    const cases: [unknown, string][] = [
+      [new Error('boom'), 'boom'],
+      ['plain', 'plain'],
+      [42, '42'],
+      [undefined, 'undefined'],
+      [Object.create(null), 'object'],
+      [hostileMessage, 'object'],
+      [Symbol('s'), 'Symbol(s)'],
+    ];
+    for (const [value, expected] of cases) expect(describeThrown(value)).toBe(expected);
   });
 });

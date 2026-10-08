@@ -196,6 +196,25 @@ describe('createIngressBehavior (M109a §3.7)', () => {
     expect(warnings).toContain('idempotency claim took over a lapsed lease');
   });
 
+  it('a settle rejection with no string form neither throws nor redelivers (audit round 5)', async () => {
+    // String(Object.create(null)) throws. Building the log line's metadata
+    // with it threw outside safeLog, so a swallowed complete failure became a
+    // rejected delivery, i.e. a redelivery of work that already ran.
+    const errors: unknown[] = [];
+    const logger = {
+      level: 'info',
+      error: (m: string, meta: unknown) => void errors.push([m, meta]),
+    } as unknown as ILogger;
+    const base = recordingStore({ outcome: 'claimed', takeover: false });
+    const store: IIdempotencyStore = {
+      ...base.store,
+      complete: () => Promise.reject(Object.create(null)),
+    };
+    const run = behavior(store, { topics: ['t'], key: () => 'k' }, logger);
+    await run.handle(message('t'), () => Promise.resolve());
+    expect(errors).toEqual([['idempotency complete failed', { error: 'object' }]]);
+  });
+
   it('logs a release rejection without replacing the original error', async () => {
     const errors: string[] = [];
     const logger = {
