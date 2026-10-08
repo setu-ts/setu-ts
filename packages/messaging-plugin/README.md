@@ -958,7 +958,11 @@ as optimistic concurrency on `aggregateVersion` does) and, across replicas, prov
 clocks agree. Delivery order is what the broker gives it (see
 [What `orderingKey` promises](#what-orderingkey-promises)). Consumers compare `aggregateVersion`.
 **Never exactly once**: a duplicate carries the same envelope id and deduplication id, which a
-consumer-side inbox absorbs.
+consumer-side inbox absorbs. A duplicate can also arrive OUT OF ORDER. A publish abandoned at
+`publishTimeoutMs`, or in flight while the process is paused, can still reach the broker after a
+later row of the same key. The FIRST delivery of each row keeps write order, because a key's later
+row waits until the earlier one is marked sent, so the late arrival is always a repeat. The sweep
+deadline is a time bound against the lock's TTL, not fencing.
 
 The ordering limit is measured, not theoretical. On real PostgreSQL 16, transaction A wrote its row
 and stayed open while B wrote and committed; the relay published B; then A committed. The relay

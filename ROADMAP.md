@@ -13085,8 +13085,15 @@ publish (#425), and M106 gives a publish an ordering key and a deduplication id.
   lock accessor — so it does not refuse; it DETECTS an overlap (a status write finding the row
   already `sent` by another instance) and degrades health, and the README states the rule.
   `IDistributedLock` itself lives in `scheduler-plugin`, which this package may not import, so this
-  is the route to it. The lease must outlast a batch; a lease that expires mid-batch re-publishes,
-  which the inbox (M108) absorbs. Native `SKIP LOCKED` multi-relay is a later Postgres-only option.
+  is the route to it. The lock has no renewal, so the plan bounds every sweep instead: one
+  `sweepDeadlineMs` on the monotonic clock, kept at least 10 s below the lock's TTL (a rule the
+  README states, since the plugin cannot read the TTL), with every publish and store call bounded
+  inside it, so a relay stops starting rows before its lock can expire. That is a time bound, not
+  fencing: a publish abandoned at its timeout, or in flight while the process is paused, can still
+  reach the broker later. Ordering of FIRST deliveries survives, because a key's later row cannot
+  publish until the earlier one is marked sent, so the late arrival is always a DUPLICATE, which the
+  inbox (M108) absorbs and `aggregateVersion` orders. True fencing needs a conditional status write
+  (M105). Native `SKIP LOCKED` multi-relay is a later Postgres-only option.
 - **Latency.** Optionally publish right after commit, best effort, with the relay sweeping whatever
   that missed. On Cloudflare Workers, where `SchedulerPlugin` refuses to register (M70l) and Cron
   Triggers fire at most once a minute, the immediate publish runs in `waitUntil` and the cron sweep
@@ -13097,9 +13104,12 @@ publish (#425), and M106 gives a publish an ordering key and a deduplication id.
   trace again. **One optional contract widening after all:** a row WITHOUT a valid `traceparent`,
   swept by a `dispatch()` from inside a request, would otherwise parent to that unrelated request,
   so `common` gains `SpanOptions.root?` and `telemetry-plugin` carries it to OTel's own `root`.
-- **Poison rows.** `attempts`, `lastError` and an `availableAt` backoff; a row that fails N times
-  becomes `failed`, stops blocking its aggregate's later rows only if the plan decides it may, and
-  turns health `degraded`.
+- **Poison rows.** `attempts`, `lastError` and an `availableAt` backoff; a row that fails
+  `maxAttempts` times, or cannot be decoded, becomes `failed` and turns health `degraded`
+  (`failed-rows`). The plan decided that a `failed` row keeps BLOCKING its aggregate's later rows,
+  since letting them pass would publish them out of order. Recovery is an operator call,
+  `IOutbox.release(id, 'retry' | 'discard')`: `retry` returns the row to `pending`, and `discard`
+  settles it unpublished. So at-least-once covers every committed row an operator does not discard.
 - **Observability.** Health reports the age of the oldest pending row (degraded above a threshold —
   the M90b backlog pattern); metrics for published, failed, poisoned, and relay lag. A stuck relay
   is otherwise silent.
