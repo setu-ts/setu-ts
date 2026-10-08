@@ -283,6 +283,8 @@ class Application implements IKernelApplication {
    * is for.
    */
   #registrationStarted = false;
+  /** The plugins in registration order, once `start()` has resolved them. */
+  #ordered: readonly IPlugin[] = [];
   #serverHandle: unknown = null;
   #inFlight = 0;
   #stopping = false;
@@ -314,6 +316,7 @@ class Application implements IKernelApplication {
     // threw "Cannot read private member" and every request answered 500.
     // Measured on workerd. Hono binds its `app.fetch` for the same reason.
     this.fetch = this.fetch.bind(this);
+    this.#registry.setMissExplanation((token) => this.#explainMissingCapability(token));
     if (diagnostics === undefined) {
       return;
     }
@@ -454,6 +457,43 @@ class Application implements IKernelApplication {
     return this.#plugins.length !== before;
   }
 
+  /**
+   * Explains a lookup the registry could not satisfy, in the two cases where
+   * the generic advice ("register a plugin that provides it") is wrong:
+   *
+   * - **Before any plugin has registered.** Plugins register their
+   *   capabilities during `start()`, so a lookup at module scope, or anywhere
+   *   before `start()`, finds nothing even when the plugin is listed.
+   * - **During a plugin's `register()`, for a token a later plugin provides.**
+   *   The provider has not run yet; declaring the dependency orders it first.
+   *
+   * Anything else keeps the generic advice: the capability really is absent.
+   *
+   * @param token - The token the lookup missed
+   * @returns The explanation, or `undefined` for the generic advice
+   */
+  #explainMissingCapability(token: string): string | undefined {
+    if (!this.#registrationStarted) {
+      return 'The application has not started: plugins register their capabilities during ' +
+        'start(), so a lookup before then finds nothing. Resolve it inside a route handler or ' +
+        'a lifecycle hook, or after `await app.start()`.';
+    }
+    const current = this.#registeringPlugin;
+    if (current === undefined) {
+      return undefined;
+    }
+    const position = this.#ordered.findIndex((plugin) => plugin.name === current);
+    const provider = this.#ordered
+      .slice(position + 1)
+      .find((plugin) => plugin.provides?.includes(token) === true);
+    if (provider === undefined) {
+      return undefined;
+    }
+    return `Plugin '${provider.name}' provides it, but registers after '${current}'. Add ` +
+      `'${token}' to the dependencies (or optionalDependencies) of '${current}' so it ` +
+      `registers first.`;
+  }
+
   async start(options?: StartOptions): Promise<void> {
     if (this.#started) {
       throw new Error('Application has already been started.');
@@ -510,6 +550,7 @@ class Application implements IKernelApplication {
     let ordered;
     try {
       ordered = resolvePluginOrder(this.#plugins);
+      this.#ordered = ordered;
     } catch (error) {
       if (resolveOperation !== undefined) {
         this.#collector?.observeLifecycleEvent(resolveOperation, 'resolve', null, 'error');
