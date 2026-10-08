@@ -189,8 +189,9 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
   }
 
   /**
-   * How many scopes the store tracks, how many sweep-throttle rows it holds,
-   * and how many keys the most recent scope sweep visited — the two maps the
+   * How many scopes the store tracks, how many sweep-throttle rows and
+   * key-to-scope rows it holds, and how many keys the most recent scope sweep
+   * visited — the two maps the
    * M109a audit found able to grow past the live entries, and the sweep cost
    * it found scanning the whole store.
    *
@@ -201,11 +202,13 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
     readonly scopes: number;
     readonly sweepRows: number;
     readonly lastSweepVisits: number;
+    readonly keyScopes: number;
   } {
     return {
       scopes: this.#keysByScope.size,
       sweepRows: this.#lastScopeSweep.size,
       lastSweepVisits: this.#lastScopeSweepVisits,
+      keyScopes: this.#scopeOfKey.size,
     };
   }
 

@@ -148,11 +148,15 @@ describe('MemoryIdempotencyStore specifics (M109a §3.16)', () => {
     expect(store.trackedScopeCounts().lastSweepVisits).toBe(2);
   });
 
-  it('clears on disconnect', async () => {
-    const store = new MemoryIdempotencyStore();
+  it('clears every map on disconnect (M109a audit round 3, I2)', async () => {
+    const store = new MemoryIdempotencyStore({ maxEntriesPerScope: 1 });
     await store.connect(createClockRuntime());
     await store.claim(request());
+    // At its cap: this claim sweeps the scope, creating its throttle row.
+    await store.claim(request({ key: hex('z') }));
+    expect(store.trackedScopeCounts()).toMatchObject({ scopes: 1, sweepRows: 1, keyScopes: 1 });
     await store.disconnect();
+    expect(store.trackedScopeCounts()).toMatchObject({ scopes: 0, sweepRows: 0, keyScopes: 0 });
     expect((await store.claim(request())).outcome).toBe('claimed');
   });
 });
