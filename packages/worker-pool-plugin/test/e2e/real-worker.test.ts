@@ -13,13 +13,21 @@ import { CAPABILITIES } from '@setu-ts/common';
 
 import { MetricsPlugin } from '@setu-ts/metrics-plugin';
 
-import { WorkerPoolPlugin, WorkerTaskError, WorkerTaskTimeoutError } from '../../src/index.ts';
+import {
+  WorkerPoolPlugin,
+  WorkerPoolService,
+  WorkerTaskError,
+  WorkerTaskTimeoutError,
+} from '../../src/index.ts';
+import { setUnsettledErrorReporter } from '../../src/services/worker-pool-service.ts';
+import { createRuntimeServices } from '@setu-ts/runtime';
 import { WORKER_POOL_METRICS } from '../../src/metrics/metric-names.ts';
 
 const echoTaskUrl = new URL('../fixtures/echo-task.ts', import.meta.url).href;
 const errorTaskUrl = new URL('../fixtures/error-task.ts', import.meta.url).href;
 const noHandlerTaskUrl = new URL('../fixtures/no-handler-task.ts', import.meta.url).href;
 const importThrowsTaskUrl = new URL('../fixtures/import-throws-task.ts', import.meta.url).href;
+const lateThrowTaskUrl = new URL('../fixtures/late-throw-task.ts', import.meta.url).href;
 
 describe('WorkerPoolPlugin — e2e on real worker threads', () => {
   it('completes two modules under one slot and shares SAB writes with the caller', async () => {
@@ -164,6 +172,26 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
       await expect(other).resolves.toEqual({ doubled: 10, from: 'worker' });
     } finally {
       await app.stop();
+    }
+  });
+
+  it('reports a real idle worker that crashes after answering its task', async () => {
+    const reported: string[] = [];
+    const service = new WorkerPoolService({}, createRuntimeServices());
+    setUnsettledErrorReporter(service, (taskModule, error) => {
+      reported.push(`${taskModule === lateThrowTaskUrl}:${error.message}`);
+    });
+    try {
+      await expect(service.run(lateThrowTaskUrl, 7)).resolves.toBe(7);
+      for (let i = 0; i < 50 && reported.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toContain('true:');
+      expect(reported[0]).toContain('fixture-idle-crash');
+      expect(service.stats()[0]).toMatchObject({ workers: 0, failed: 0 });
+    } finally {
+      await service.shutdown();
     }
   });
 

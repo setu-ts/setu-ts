@@ -124,6 +124,12 @@ export class TaskPool {
      * metrics plugin runs exactly the code M45 shipped.
      */
     private readonly collector?: WorkerPoolCollector,
+    /**
+     * Receives a worker-level error that settled no task: an idle worker that
+     * crashed, or one that failed during startup with nothing queued. Such an
+     * error rejects nothing, so without this it would be invisible.
+     */
+    private readonly reportUnsettledError?: (error: Error) => void,
   ) {
     this.budget.register(this);
   }
@@ -442,14 +448,25 @@ export class TaskPool {
       message: error.message,
       ...(error.stack !== undefined ? { stack: error.stack } : {}),
     };
+    let settled = false;
     if (slot.task !== null) {
       const task = slot.task;
       slot.task = null;
       this.rejectTask(task, new WorkerTaskError(this.config.specifier, shape), 'crash');
+      settled = true;
     } else if (!slot.ready) {
       const waiting = this.pending.shift();
       if (waiting !== undefined) {
         this.rejectTask(waiting, new WorkerTaskError(this.config.specifier, shape), 'crash');
+        settled = true;
+      }
+    }
+    if (!settled) {
+      try {
+        this.reportUnsettledError?.(error);
+      } catch {
+        // Reached from a runtime worker callback: a failing reporter must not
+        // turn a contained worker error into an uncaught exception.
       }
     }
     this.pump();

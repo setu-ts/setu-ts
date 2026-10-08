@@ -26,6 +26,24 @@ const DEFAULT_MAX_QUEUE = 1024;
 const DEFAULT_TASK_TIMEOUT_MS = 30_000;
 
 const budgetLimits = new WeakMap<WorkerPoolService, number>();
+const unsettledErrorReporters = new WeakMap<
+  WorkerPoolService,
+  (taskModule: string, error: Error) => void
+>();
+
+/**
+ * Internal: lets the plugin route worker errors that settled no task to its
+ * logger. Deliberately absent from the public barrel.
+ *
+ * @param service - The service whose pools report through `reporter`
+ * @param reporter - Receives the task module and the worker error
+ */
+export function setUnsettledErrorReporter(
+  service: WorkerPoolService,
+  reporter: (taskModule: string, error: Error) => void,
+): void {
+  unsettledErrorReporters.set(service, reporter);
+}
 
 /** Internal health accessor; deliberately absent from the public barrel. */
 export function budgetLimitOf(service: WorkerPoolService): number {
@@ -115,6 +133,7 @@ export class WorkerPoolService implements IWorkerPool {
         this.runtime,
         this.budget,
         this.collector,
+        (error) => unsettledErrorReporters.get(this)?.(taskModule, error),
       );
       this.pools.set(taskModule, pool);
     }

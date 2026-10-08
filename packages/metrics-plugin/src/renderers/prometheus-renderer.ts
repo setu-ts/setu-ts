@@ -12,14 +12,33 @@ import type { MetricSnapshot, MetricValue } from '../interfaces/index.ts';
  * @returns The escaped value
  */
 function escapeLabelValue(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/\n/g, '\\n')
-    .replace(/"/g, '\\"');
+  return replaceUnescapableControls(
+    value
+      .replace(/\\/g, '\\\\')
+      .replace(/\n/g, '\\n')
+      .replace(/"/g, '\\"'),
+  );
 }
 
 /**
- * Escapes `# HELP` text for Prometheus format: backslash and newline only
+ * Replaces control characters the text format has no escape for with U+FFFD.
+ * Format 0.0.4 defines escapes for backslash, double quote and line feed only;
+ * a raw carriage return, NUL or other C0/DEL character in an
+ * application-supplied label value (a worker-pool `task_module` specifier,
+ * for example) can split or corrupt lines in a line-oriented consumer. Called
+ * after line feeds are escaped, so a `\n` survives as its escape.
+ *
+ * @param text - Already-escaped text
+ * @returns The text with every remaining control character replaced
+ */
+function replaceUnescapableControls(text: string): string {
+  // deno-lint-ignore no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f]/g, '\ufffd');
+}
+
+/**
+ * Escapes `# HELP` text for Prometheus format: backslash and newline, plus the
+ * unescapable control characters (see {@linkcode replaceUnescapableControls})
  * (double-quote is NOT escaped in HELP, unlike label values). Prevents a
  * help string containing a newline from splitting the HELP directive.
  *
@@ -27,9 +46,11 @@ function escapeLabelValue(value: string): string {
  * @returns The escaped help text
  */
 function escapeHelp(help: string): string {
-  return help
-    .replace(/\\/g, '\\\\')
-    .replace(/\n/g, '\\n');
+  return replaceUnescapableControls(
+    help
+      .replace(/\\/g, '\\\\')
+      .replace(/\n/g, '\\n'),
+  );
 }
 
 /**

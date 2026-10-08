@@ -15,7 +15,11 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
-import { budgetLimitOf, WorkerPoolService } from '../services/worker-pool-service.ts';
+import {
+  budgetLimitOf,
+  setUnsettledErrorReporter,
+  WorkerPoolService,
+} from '../services/worker-pool-service.ts';
 import { validateSizingOptions } from '../services/sizing.ts';
 import { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -71,6 +75,16 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
         )
         : undefined;
       const service = new WorkerPoolService(options, ctx.runtime, collector);
+      // A worker error that settles no task (an idle worker crashing) rejects
+      // nothing, so it is reported here or nowhere. `ctx.logger` is read at
+      // call time, never captured (the M52b lesson).
+      setUnsettledErrorReporter(service, (taskModule, error) => {
+        ctx.logger?.warn(
+          'worker-pool: a worker failed with no task to settle; it was removed and is replaced ' +
+            'on demand',
+          { taskModule, error: error.message },
+        );
+      });
       ctx.services.register<IWorkerPool>(CAPABILITIES.WORKER_POOL, service);
 
       const host = options?.host ?? ctx.runtime.workers;

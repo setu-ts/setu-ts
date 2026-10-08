@@ -131,6 +131,31 @@ describe('renderPrometheus', () => {
     expect(result.includes('_count')).toEqual(true);
   });
 
+  it('replaces control characters the format cannot escape, in labels and HELP', () => {
+    // An application-supplied label value (a worker-pool task_module specifier)
+    // can carry CR, NUL or other controls; 0.0.4 escapes only \\, " and LF.
+    const snapshot: MetricSnapshot = {
+      name: 'tasks_total',
+      type: 'counter',
+      help: 'help\rwith\u0000controls\nand a line feed',
+      labels: ['task_module'],
+      values: new Map([
+        ['task_module=x', {
+          value: 1,
+          labels: { task_module: 'file:///a\r\n# FAKE 1\u0000\u007f.ts' },
+        }],
+      ]),
+    };
+    const result = renderPrometheus([snapshot]);
+    // No raw control character other than the separating line feeds survives.
+    // deno-lint-ignore no-control-regex
+    expect(/[\u0000-\u0009\u000b-\u001f\u007f]/.test(result)).toBe(false);
+    expect(result).toContain('task_module="file:///a\ufffd\\n# FAKE 1\ufffd\ufffd.ts"');
+    expect(result).toContain('# HELP tasks_total help\ufffdwith\ufffdcontrols\\nand a line feed');
+    // Exactly the three expected lines: HELP, TYPE and the one sample.
+    expect(result.trimEnd().split('\n')).toHaveLength(3);
+  });
+
   it('label escaping handles backslash and newline', () => {
     const snapshot: MetricSnapshot = {
       name: 'test_counter',
