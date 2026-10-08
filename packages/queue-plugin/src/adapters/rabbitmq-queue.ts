@@ -304,6 +304,25 @@ export class RabbitMqQueue implements QueueAdapter {
   }
 
   /**
+   * Why this adapter cannot use a job name, or `null` when it can. The derived
+   * `<prefix>.<name>.ready` / `.delay` queue names (the longest suffixes) must
+   * each fit an AMQP short string. The text never quotes the name, which may
+   * be caller data. `QueueService` calls this at `process()` and
+   * `addRecurring()` so an unusable name fails at registration rather than on
+   * every poll.
+   *
+   * @param name - The job name
+   * @returns The refusal text, or `null`
+   * @internal
+   */
+  jobNameProblem(name: string): string | null {
+    return fitsAmqpShortString(this.#readyQueue(name)) &&
+        fitsAmqpShortString(this.#delayQueue(name))
+      ? null
+      : "RabbitMqQueue cannot use the job name: its queue names exceed AMQP's 255 UTF-8 byte limit";
+  }
+
+  /**
    * Assert the per-name queues (ready, delay, dead) lazily and idempotently.
    */
   async #assertQueues(name: string): Promise<void> {
@@ -311,18 +330,14 @@ export class RabbitMqQueue implements QueueAdapter {
       throw new Error('RabbitMqQueue is not connected');
     }
 
+    // Checked before any channel operation: every path reaches the channel
+    // through here first, and an oversized queue name would leave the
+    // channel's RPC slot waiting forever.
+    const problem = this.jobNameProblem(name);
+    if (problem !== null) throw new RangeError(problem);
     const readyQ = this.#readyQueue(name);
     const delayQ = this.#delayQueue(name);
     const deadQ = this.#deadQueue(name);
-    // Checked before any channel operation: every path reaches the channel
-    // through here first, and an oversized queue name would leave the
-    // channel's RPC slot waiting forever. `.ready` and `.delay` are the
-    // longest suffix. Never quoted — a job name may be caller data.
-    if (!fitsAmqpShortString(readyQ) || !fitsAmqpShortString(delayQ)) {
-      throw new RangeError(
-        "RabbitMqQueue cannot use the job name: its queue names exceed AMQP's 255 UTF-8 byte limit",
-      );
-    }
 
     // Assert all three queues if not already done
     for (const q of [readyQ, delayQ, deadQ]) {

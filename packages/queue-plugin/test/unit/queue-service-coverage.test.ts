@@ -488,9 +488,35 @@ describe('QueueService - coverage', () => {
 
       await ownRuntime.advanceMs(200);
 
-      const entry = reported.find((e) => e.message === 'queue poll failed');
+      // Reported per name, so the names after it still poll (M106 audit R4-1).
+      const entry = reported.find((e) => e.message === 'queue reserve failed');
       expect(entry).toBeDefined();
+      expect(entry!.meta?.name).toBe('anything');
       expect(typeof entry!.meta?.error).toBe('string');
+      await svc.disconnect();
+    });
+
+    it('still reports a poll that fails outside the per-name reserve', async () => {
+      // A reserve that resolves to something not iterable fails in the
+      // dispatch loop, past the per-name catch: the worker loop's own backstop
+      // reports it rather than letting it escape the interval callback.
+      class NonIterableAdapter extends ThrowingAdapter {
+        override reserve<T>(): Promise<never[]> {
+          return Promise.resolve(42 as unknown as T[] as never[]);
+        }
+      }
+      const reported: string[] = [];
+      const ownRuntime = new FakeRuntimeServices();
+      const svc = new QueueService(new NonIterableAdapter(), ownRuntime as unknown as never, {
+        pollIntervalMs: 100,
+        logger: { error: (message) => reported.push(message) },
+      });
+      await svc.connect();
+      svc.process('anything', () => {});
+
+      await ownRuntime.advanceMs(200);
+
+      expect(reported).toContain('queue poll failed');
       await svc.disconnect();
     });
 

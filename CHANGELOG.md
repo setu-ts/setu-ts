@@ -565,8 +565,11 @@ All notable changes to this project are documented here. The format follows
   room for the private queue's uuid suffix) at construction. `@setu-ts/queue-plugin`'s
   `RabbitMqQueue` had the same defect through its derived queue names,
   `<prefix>.<name>.ready|.delay|.dead`: a job name that makes them exceed 255 bytes (240 with the
-  default prefix) is now refused before the channel is touched, and a `prefix` over 247 bytes at
-  construction.
+  default prefix) is now refused before the channel is touched — at registration too, by `process()`
+  and `addRecurring()`, so a declared processor with such a name fails `start()` — and a `prefix`
+  over 247 bytes at construction. `QueueService` also isolates each name in its poll and recurring
+  loops: a reserve or recurring enqueue that fails for one name is reported and skipped, where it
+  used to abort the tick and starve every processor and recurring job registered after it.
 
 - **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
   `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
