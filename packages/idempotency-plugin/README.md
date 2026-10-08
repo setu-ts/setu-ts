@@ -126,6 +126,16 @@ after its attempts, and a broker redelivers per its own policy.
 Tier A on Cloudflare Workers is per isolate — use the Durable Object store there. The ingress entry
 point is not available on Workers in this release.
 
+### Memory store capacity
+
+The memory store caps each scope at `maxEntriesPerScope` (default 1,000) and the whole store at its
+global entry and byte caps. A scope is the tenant and principal a key is derived for. A caller over
+its scope's cap gets `429` while callers in other scopes still claim, but only until the GLOBAL cap
+fills, after which every new claim gets `503`. One principal can occupy several scopes when the
+tenant is chosen by the client (for example a tenant read from a request header), so the per-scope
+cap alone does not stop one caller filling the store. Rate-limit upstream, or resolve the tenant
+from a verified source.
+
 ### Redis durability caveat and version floor
 
 A completed Redis record survives only under `maxmemory-policy noeviction` **and** persistence that
