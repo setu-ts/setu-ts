@@ -344,6 +344,8 @@ its `wrangler.toml`.
 
 ## Next Steps
 
+- [How It Fits Together](./how-it-fits-together.md) - When plugins run, where services live, and
+  which test helper replaces them
 - [Plugin Architecture](./plugin-architecture.md) - How plugins, capabilities, and lifecycle work
 - [Programmatic API](./programmatic-api.md) - Complete API reference
 - [Decorators](./decorators.md) - The optional class-based style, for teams coming from NestJS

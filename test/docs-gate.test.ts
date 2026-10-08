@@ -408,6 +408,7 @@ describe('documentation gate — required guides', () => {
       'README.md',
       'docs/getting-started.md',
       'docs/plugin-architecture.md',
+      'docs/how-it-fits-together.md',
       'docs/plugins.md',
       'docs/cli.md',
       'docs/programmatic-api.md',
