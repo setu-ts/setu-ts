@@ -10,6 +10,22 @@ describe('ServiceRegistry', () => {
     expect(registry.get('test-service')).toBe(service);
   });
 
+  it('uses an installed explanation for a missing token', () => {
+    const registry = new ServiceRegistry();
+    registry.setMissExplanation((token) => token === 'explained' ? 'Because reasons.' : undefined);
+    expect(() => registry.get('explained')).toThrow(
+      "No service registered for capability 'explained'. Because reasons.",
+    );
+    // An explanation answering undefined keeps the generic advice.
+    expect(() => registry.get('other')).toThrow('Register a plugin that provides it');
+  });
+
+  it('keeps the generic advice in a child registry the explanation is not installed on', () => {
+    const parent = new ServiceRegistry();
+    parent.setMissExplanation(() => 'Parent explanation.');
+    expect(() => parent.createChild().get('missing')).toThrow('Register a plugin that provides it');
+  });
+
   it('should throw when getting unregistered token', () => {
     const registry = new ServiceRegistry();
     expect(() => registry.get('missing')).toThrow(
