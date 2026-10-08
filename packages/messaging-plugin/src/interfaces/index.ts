@@ -7,11 +7,16 @@
 import type {
   ConnectionErrorReporter,
   IIngressBehavior,
+  IOutboxStore,
+  IOutboxWriteScope,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RegistryFactory,
   SubscribeOptions,
 } from '@setu-ts/common';
+import type { IntegrationEventDefinition } from '../integration/definition.ts';
+import type { IntegrationEventMetadata } from '../integration/publish.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 
 /**
@@ -943,4 +948,247 @@ export interface EventsMessagingBridgeOptions {
    * @defaultValue Logs via optional logger, then swallows
    */
   errorHandler?: (error: unknown, eventType: string) => void;
+}
+
+// ─── Transactional outbox (M107) ───────────────────────────────────────────────
+
+/**
+ * One outbox store: an {@linkcode IOutboxStore} instance, or a
+ * {@linkcode RegistryFactory} producing one (for example
+ * `createDatabaseOutboxStore()` from `@setu-ts/database-plugin`), resolved in
+ * the plugin's `onInit`.
+ *
+ * @since 0.9.0
+ */
+export type OutboxStoreEntry = IOutboxStore | RegistryFactory<IOutboxStore>;
+
+/**
+ * The outbox relay's schedule, budgets and failure policy (M107 §3.6–§3.8).
+ *
+ * Every numeric option must be a finite integer in its range, and
+ * `publishTimeoutMs + storeTimeoutMs` must not exceed `sweepDeadlineMs`;
+ * a violation is refused at construction, naming the option.
+ *
+ * @since 0.9.0
+ */
+export interface OutboxRelayOptions {
+  /**
+   * Register the relay on `CAPABILITIES.SCHEDULER` at `onInit`. Set `false` on
+   * Cloudflare Workers and call `outbox.sweep()` from a Cron Trigger.
+   * Default `true`.
+   */
+  readonly schedule?: boolean;
+  /** Milliseconds between scheduled sweeps. Default `1000`. */
+  readonly intervalMs?: number;
+  /** Rows read per `scanPending` page. Default `100`. */
+  readonly pageSize?: number;
+  /** Rows examined per sweep, skips included. Default `1000`. */
+  readonly scanLimit?: number;
+  /** Publishes and poison transitions per sweep. Default `100`. */
+  readonly publishLimit?: number;
+  /** Failed keys read at lap start; a full answer caps the lap. Default `1000`. */
+  readonly maxFailedScan?: number;
+  /** Publish attempts before a row becomes `failed`. Default `10`. */
+  readonly maxAttempts?: number;
+  /** First retry delay; doubled per attempt. Default `1000`. */
+  readonly baseBackoffMs?: number;
+  /** Retry delay ceiling. Default `300000`. */
+  readonly maxBackoffMs?: number;
+  /**
+   * One deadline over the whole sweep, measured on the monotonic clock.
+   * Default `15000`. Keep it at most `distributedLock.ttlMs - 10000`.
+   */
+  readonly sweepDeadlineMs?: number;
+  /** Bound on one publish. Default `5000`. */
+  readonly publishTimeoutMs?: number;
+  /** Bound on one store call. Default `5000`. */
+  readonly storeTimeoutMs?: number;
+}
+
+/**
+ * Thresholds for the outbox health indicator (M107 §3.11).
+ *
+ * @since 0.9.0
+ */
+export interface OutboxHealthOptions {
+  /** The oldest pending row's age that degrades health. Default `60000`. */
+  readonly degradedAfterMs?: number;
+  /** How long an observed scheduled-sweep overlap degrades health. Default `600000`. */
+  readonly overlapWindowMs?: number;
+}
+
+/**
+ * Options shared by both store forms of {@linkcode OutboxOptions}.
+ *
+ * @since 0.9.0
+ */
+export interface OutboxCommonOptions {
+  /** Largest serialized envelope `write` accepts, in UTF-8 bytes. Default `262144`. */
+  readonly maxEnvelopeBytes?: number;
+  /**
+   * Receives the promise of a sweep `dispatch()` requests. Default: detached,
+   * with a rejection logged. On Cloudflare Workers pass `waitUntil`.
+   */
+  readonly background?: (promise: Promise<unknown>) => void;
+  /** The relay schedule, budgets and failure policy. */
+  readonly relay?: OutboxRelayOptions;
+  /** Health thresholds. */
+  readonly health?: OutboxHealthOptions;
+  /**
+   * How long `sent` and `discarded` rows are kept. Default 7 days. `0` deletes
+   * a row at mark-sent, which also disables overlap detection.
+   */
+  readonly retainSentMs?: number;
+  /** Rows deleted per status per purge run. Default `100`. */
+  readonly purgeBatch?: number;
+  /** Milliseconds between purge runs. Default `60000`. */
+  readonly purgeIntervalMs?: number;
+}
+
+/**
+ * The outbox option arm: ONE store (column isolation — the tenant, when any,
+ * is recorded in the row), or per-tenant `stores` (database per tenant).
+ * Supplying both is a compile error.
+ *
+ * @since 0.9.0
+ */
+export type OutboxOptions =
+  & OutboxCommonOptions
+  & (
+    | {
+      /** The one store every write and the relay use. */
+      readonly store: OutboxStoreEntry;
+      readonly stores?: never;
+    }
+    | {
+      /** A store per tenant id, selected by the `tenantId` a call names. */
+      readonly stores: Readonly<Record<string, OutboxStoreEntry>>;
+      readonly store?: never;
+    }
+  );
+
+/**
+ * The optional input of {@linkcode IOutbox.write}.
+ *
+ * @since 0.9.0
+ */
+export interface OutboxWriteInput {
+  /** Causal metadata, as for `publishIntegrationEvent`. */
+  readonly metadata?: IntegrationEventMetadata;
+  /**
+   * Publish options, resolved with the same precedence as
+   * `publishIntegrationEvent`: the caller's `orderingKey` beats the
+   * definition's selector, and `deduplicationId` defaults to the envelope id.
+   */
+  readonly options?: PublishOptions;
+  /**
+   * The tenant the row belongs to. Recorded in the row with a single store;
+   * selects the store (and is required) with per-tenant `stores`.
+   */
+  readonly tenantId?: string;
+}
+
+/**
+ * The result of one sweep.
+ *
+ * @since 0.9.0
+ */
+export interface OutboxSweepResult {
+  /** What requested the sweep. */
+  readonly origin: 'scheduled' | 'dispatch';
+  /** Rows examined, skips included. */
+  readonly scanned: number;
+  /** Rows published and marked sent. */
+  readonly published: number;
+  /** Publish failures recorded. */
+  readonly failures: number;
+  /** Rows made `failed` (attempts exhausted, or undecodable). */
+  readonly poisoned: number;
+  /**
+   * Why the sweep ended: every store's lap reached its end (`complete`), a
+   * budget ran out, a store call rejected (`store-failure`), or the outbox is
+   * closing.
+   */
+  readonly endedBy:
+    | 'complete'
+    | 'scan-limit'
+    | 'publish-limit'
+    | 'deadline'
+    | 'store-failure'
+    | 'closing';
+}
+
+/**
+ * The transactional outbox, registered under `CAPABILITIES.OUTBOX`
+ * (`outbox.<name>` for a named messaging instance).
+ *
+ * **The promise.** At-least-once delivery of every committed row; per
+ * ordering key, publish order among committed rows, provided rows of one key
+ * commit in the order they were written and, across replicas, provided the
+ * writers' clocks agree; delivery order as the broker gives it. Consumers
+ * compare `aggregateVersion`. Never exactly once — a re-send carries the same
+ * envelope id as its de-duplication id.
+ *
+ * @since 0.9.0
+ */
+export interface IOutbox {
+  /**
+   * Writes an integration event as an outbox row inside the caller's
+   * transaction, through the unit of work the caller's `transaction(...)`
+   * handed it. Every refusal is a rejected promise, so the business write
+   * rolls back with it.
+   *
+   * **Caller obligation:** the selected store must read the database `scope`
+   * belongs to. A per-tenant store for another tenant, or a store bound to
+   * another `database.<name>`, receives a row its relay never sees.
+   *
+   * @param scope - The caller's unit of work
+   * @param definition - The integration-event contract
+   * @param payload - The event payload
+   * @param input - Metadata, publish options and tenant
+   * @returns The envelope id
+   */
+  write<T>(
+    scope: IOutboxWriteScope,
+    definition: IntegrationEventDefinition<T>,
+    payload: T,
+    input?: OutboxWriteInput,
+  ): Promise<string>;
+
+  /**
+   * Requests a sweep without waiting for it — call it after the transaction
+   * resolves. Coalesced: at most one sweep runs and one follow-up waits. Never
+   * throws; a no-op once the outbox is closing.
+   */
+  dispatch(): void;
+
+  /**
+   * Runs (or joins) a sweep and resolves with its result.
+   *
+   * @returns The sweep result
+   */
+  sweep(): Promise<OutboxSweepResult>;
+
+  /**
+   * Deletes `sent` and `discarded` rows older than `retainSentMs`, at most
+   * `purgeBatch` per status per store.
+   *
+   * @returns The number of rows deleted
+   */
+  purge(): Promise<number>;
+
+  /**
+   * Releases a `failed` row: `retry` returns it to `pending`; `discard`
+   * settles it without publishing. Takes effect for the relay at its next lap.
+   * An operator capability: the application gates the route that calls it.
+   *
+   * @param id - The row (envelope) id
+   * @param action - `retry` or `discard`
+   * @param options - The tenant, required with per-tenant `stores`
+   */
+  release(
+    id: string,
+    action: 'retry' | 'discard',
+    options?: { readonly tenantId?: string },
+  ): Promise<void>;
 }

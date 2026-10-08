@@ -6,10 +6,9 @@
  */
 import type { IMessageBroker, IRuntimeServices, PublishOptions } from '@setu-ts/common';
 
-import { validatePublishOptions } from '../brokers/publish-options.ts';
 import type { IntegrationEventDefinition } from './definition.ts';
 import type { IntegrationEventEnvelope } from './envelope.ts';
-import { createEnvelope } from './envelope.ts';
+import { prepareIntegrationPublish } from './prepare.ts';
 
 /**
  * Optional causal metadata for {@linkcode publishIntegrationEvent}.
@@ -73,24 +72,18 @@ export async function publishIntegrationEvent<T>(
   metadata?: IntegrationEventMetadata,
   options?: PublishOptions,
 ): Promise<void> {
-  // The caller's options are validated HERE, once, and only the copy is read
-  // afterwards (M106 §3.4 copy-once) — this is a public publish entry too.
-  const validated = await validatePublishOptions(options);
-  const envelope = createEnvelope(runtime, definition, payload, metadata);
-
-  // Precedence (M106 §3.7): the caller's key, then the definition's selector,
-  // then none. The selector is not called when the caller supplied a key, so
-  // one that throws cannot reject a publish whose key it would not have
-  // chosen. A selector throw otherwise rejects (this function is async).
-  const orderingKey = validated.orderingKey ?? definition.orderingKey?.(envelope);
-
-  // Validating again HERE is what makes a selector's value subject to §3.4:
-  // the second call reads only the fresh object below, never the caller's.
-  const effective = await validatePublishOptions({
-    ...(orderingKey !== undefined ? { orderingKey } : {}),
-    deduplicationId: validated.deduplicationId ?? envelope.id,
-    headers: validated.headers,
-  });
+  // Envelope and effective options come from the ONE implementation the
+  // outbox `write` shares (M107 §3.5): caller options validated once, then
+  // the caller's key > the definition's selector > none (the selector is not
+  // called when the caller supplied a key), and the caller's
+  // `deduplicationId` or else the envelope id.
+  const { envelope, options: effective } = await prepareIntegrationPublish(
+    runtime,
+    definition,
+    payload,
+    metadata,
+    options,
+  );
 
   await broker.publish(definition.topic, envelope, effective);
 }
