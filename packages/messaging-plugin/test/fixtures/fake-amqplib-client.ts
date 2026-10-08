@@ -50,6 +50,18 @@ export interface FakeAmqpOptions {
 /**
  * Fake AMQP channel for testing.
  */
+
+/**
+ * Faithful to amqplib's codec: a queue, exchange or routing-key argument is an
+ * AMQP short string of at most 255 bytes, and an oversized one throws
+ * synchronously during encoding. (The real channel also leaves its RPC slot
+ * waiting; the broker must check first, which is what the tests pin.)
+ */
+function assertShortStrings(...values: string[]): void {
+  if (values.some((value) => Buffer.byteLength(value) > 255)) {
+    throw new TypeError('a short string exceeds 255 bytes');
+  }
+}
 export class FakeAmqpChannel {
   #options: FakeAmqpOptions;
   #calls: Array<{ method: string; args: unknown[] }>;
@@ -79,6 +91,7 @@ export class FakeAmqpChannel {
   }
 
   assertExchange(exchange: string, type: string, _options?: unknown): Promise<void> {
+    assertShortStrings(exchange);
     this.#record('assertExchange', [exchange, type, _options]);
     // Idempotent - always succeeds
     return Promise.resolve();
@@ -135,11 +148,13 @@ export class FakeAmqpChannel {
   }
 
   assertQueue(queue: string, _options?: unknown): Promise<{ queue: string }> {
+    assertShortStrings(queue);
     this.#record('assertQueue', [queue, _options]);
     return Promise.resolve({ queue });
   }
 
   bindQueue(queue: string, source: string, pattern: string): Promise<void> {
+    assertShortStrings(queue, source, pattern);
     this.#record('bindQueue', [queue, source, pattern]);
     return Promise.resolve();
   }

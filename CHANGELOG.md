@@ -552,6 +552,18 @@ All notable changes to this project are documented here. The format follows
   this before 0.9.0. `RabbitMqBroker` now refuses any of the four fields over 255 bytes before
   publishing, with a `RangeError` naming the field.
 
+- **A name over 255 bytes no longer jams a RabbitMQ channel (`@setu-ts/messaging-plugin`, M106).**
+  AMQP limits the exchange, a queue, the routing key (the topic), the message id and each header
+  name to 255 bytes, and amqplib prepares a publish's confirm callback, or a channel operation's
+  reply slot, before it encodes. An oversized value was rejected, but it left the channel wrong for
+  the rest of its life: after a publish, each later awaited publish resolved only when the one after
+  it was confirmed; after a `subscribe()`, every later channel operation waited forever, so
+  publishes timed out and subscriptions never completed. A payload `messageId` or a topic over 255
+  bytes reached this before 0.9.0. `RabbitMqBroker` now refuses each of these with a `RangeError`
+  naming the field before the channel is touched: the topic, queue, message id and header names on
+  `publish`/`subscribe`, and `exchangeName` (and a `defaultQueue` over 218 bytes, which leaves no
+  room for the private queue's uuid suffix) at construction.
+
 - **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
   `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
   `@cloudflare/workers-types: '^4.20250109.0'`, and `wrangler` moved its `workers-types` peer from

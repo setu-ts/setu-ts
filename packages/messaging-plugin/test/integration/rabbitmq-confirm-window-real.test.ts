@@ -49,4 +49,36 @@ describe('REAL RabbitMqBroker confirm window (guarded)', () => {
       await broker.disconnect();
     }
   });
+
+  it('refuses an oversized subscribe topic without jamming the channel (M106 re-audit O1)', {
+    ignore: url === undefined,
+  }, async () => {
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      url: url!,
+      exchangeName: `m106-subscribe-${crypto.randomUUID()}`,
+    });
+    await broker.connect();
+    try {
+      await expect(broker.subscribe('t'.repeat(256), () => {})).rejects.toThrow(
+        'the topic exceeds',
+      );
+      // Before the fix amqplib had claimed the channel's RPC slot, so every
+      // later channel operation waited forever and publishes timed out.
+      const delivered: unknown[] = [];
+      const subscribing = broker.subscribe('m106.after', (message) => {
+        delivered.push(message);
+      });
+      // Bounded, so a regression fails here instead of hanging the suite.
+      expect(await outcome(subscribing.then(() => {}), 2_000)).toBe('resolved');
+      const subscription = await subscribing;
+      expect(await outcome(broker.publish('m106.after', { n: 1 }), 2_000)).toBe('resolved');
+      for (let i = 0; i < 100 && delivered.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(delivered).toEqual([{ n: 1 }]);
+      await subscription.unsubscribe();
+    } finally {
+      await broker.disconnect();
+    }
+  });
 });

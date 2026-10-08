@@ -153,28 +153,42 @@ export function validateConsumerQueue(
 }
 
 /**
+ * Whether a value fits an AMQP short string: at most 255 UTF-8 bytes.
+ *
+ * Every name the broker sends in a channel operation — exchange, queue,
+ * routing key, message id, header-table key — is one. amqplib prepares the
+ * operation's reply slot (an RPC) or confirm callback (a publish) BEFORE it
+ * encodes, so an oversized value is refused only after the channel is left
+ * waiting for an answer that never comes. Each caller checks first.
+ *
+ * @param value - The name to measure
+ * @returns Whether it can be encoded
+ */
+function fitsAmqpShortString(value: string): boolean {
+  return new TextEncoder().encode(value).length <= 255;
+}
+
+/**
  * Names the first publish field AMQP cannot encode, or `null` when all fit.
  *
- * AMQP writes the exchange, the routing key, `messageId` and every header-table
+ * AMQP writes the routing key, `messageId` and every header-table
  * key as a short string of at most 255 UTF-8 bytes. amqplib's
  * `ConfirmChannel.publish` queues its confirm callback BEFORE encoding, so an
  * encoder throw leaves an orphan in the confirm window and every later confirm
  * on the channel resolves the wrong publish (M106 audit F1). Checking first
  * means `publish` is never called with a frame it cannot write.
  *
- * @param exchange - Exchange name
  * @param routingKey - Routing key (the topic)
  * @param properties - Publish properties
  * @returns A field description, or `null`
  */
 function amqpShortStringProblem(
-  exchange: string,
   routingKey: string,
   properties: Record<string, unknown>,
 ): string | null {
-  const encoder = new TextEncoder();
-  const fits = (value: string): boolean => encoder.encode(value).length <= 255;
-  if (!fits(exchange)) return 'exchange name';
+  // The exchange is not checked here: the constructor refuses an oversized
+  // `exchangeName`, and a disposition publishes to the default exchange `''`.
+  const fits = fitsAmqpShortString;
   if (!fits(routingKey)) return 'routing key (the topic)';
   const messageId = properties.messageId;
   if (typeof messageId === 'string' && !fits(messageId)) return 'message id';
@@ -486,6 +500,17 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     this.#injectedClient = options?.client;
     this.#exchangeName = options?.exchangeName ?? 'messaging';
     this.#defaultQueue = options?.defaultQueue ?? 'messaging-consumers';
+    // Refused here rather than at the first channel operation, which would
+    // leave the channel waiting for a reply forever (see fitsAmqpShortString).
+    if (!fitsAmqpShortString(this.#exchangeName)) {
+      throw new RangeError("RabbitMqBroker: exchangeName exceeds AMQP's 255 UTF-8 byte limit");
+    }
+    // A private queue is named `<defaultQueue>-<uuid>`: 37 more bytes.
+    if (!fitsAmqpShortString(`${this.#defaultQueue}-${'0'.repeat(36)}`)) {
+      throw new RangeError(
+        "RabbitMqBroker: defaultQueue must leave room for a 37-byte suffix within AMQP's 255 UTF-8 bytes",
+      );
+    }
     this.#persistentMessages = options?.persistentMessages ?? true;
     this.#publishTimeoutMs = resolvePublishTimeoutMs(
       options?.publishTimeoutMs,
@@ -771,7 +796,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     if (requireRoute && (!confirmed || !isCloseObservable(channel))) {
       throw new Error('RabbitMQ consumer recovery requires confirms and on/off return listeners');
     }
-    const unencodable = amqpShortStringProblem(exchange, routingKey, properties);
+    const unencodable = amqpShortStringProblem(routingKey, properties);
     if (unencodable !== null) {
       // Never quoted: the refused value may be caller data.
       throw new RangeError(
@@ -844,6 +869,19 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       this.#consumerOptions,
       (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true,
     );
+    // Checked before any channel operation: an oversized name would leave the
+    // channel's RPC slot waiting forever, stalling every later publish and
+    // subscribe on it (M106 re-audit O1). Never quoted — either may be caller data.
+    if (!fitsAmqpShortString(topic)) {
+      throw new RangeError(
+        "RabbitMQ cannot subscribe: the topic exceeds AMQP's 255 UTF-8 byte limit",
+      );
+    }
+    if (options?.queue !== undefined && !fitsAmqpShortString(options.queue)) {
+      throw new RangeError(
+        "RabbitMQ cannot subscribe: the queue name exceeds AMQP's 255 UTF-8 byte limit",
+      );
+    }
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }

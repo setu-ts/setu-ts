@@ -5149,9 +5149,16 @@ interface RabbitMqMessagingOptions extends MessagingCommonOptions {
   url?: string;
   /** Injected AMQP connection. */
   client?: IAmqpConnection;
-  /** Topic exchange name. @defaultValue 'messaging' */
+  /**
+   * Topic exchange name, at most 255 UTF-8 bytes (an AMQP short string; longer
+   * is refused at construction). @defaultValue 'messaging'
+   */
   exchangeName?: string;
-  /** Default consumer group / queue name. */
+  /**
+   * Default consumer group / queue name. A private queue is named
+   * `<defaultQueue>-<uuid>`, so it must be at most 218 UTF-8 bytes; longer is
+   * refused at construction.
+   */
   defaultQueue?: string;
   /**
    * Publish every message persistent (`delivery_mode` 2), so it survives a broker restart.
