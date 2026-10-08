@@ -552,3 +552,11 @@ snapshot; the per-call `timeoutMs` is read once; and refused values are rendered
 escaped. **R4-2:** docs/upgrading.md claimed the warning covered a per-call `timeoutMs: 0`; it now
 says that case is not visible at registration. Note: §12.1's sentence that the task-timeout overflow
 "is not changed here" was superseded by §12.2.
+
+### 12.5 Audit loop closed by the maintainer, 2026-10-09
+
+The maintainer stopped the audit loop after round 4. The round-4 fixes (f72b3213: every sizing and
+timeout option validated and used from one snapshot; refused values rendered bounded and escaped;
+the upgrade-guide warning wording) are **not re-audited**. Each carries a regression test and a
+negative control observed failing, and the full suite, per-file coverage, `check:apps` and the
+publish gates pass on the final commit.
