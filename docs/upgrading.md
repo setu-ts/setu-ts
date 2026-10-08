@@ -12,6 +12,16 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Set `maxWorkers` to size worker pools across task modules
+
+WorkerPoolPlugin now caps the sum of worker slots across modules. The default is the largest of
+available parallelism, defaultPoolSize and the sum of explicitly configured pool sizes. Applications
+with several modules using fallback sizes share that budget; tasks may wait or cause idle workers to
+retire. Set `maxWorkers` for your container's memory budget, or pass `maxWorkers: Infinity` to
+restore the previous unbounded sum. Invalid explicit bounds throw `RangeError` at construction. Task
+timeouts include time waiting for budget. `/health` now reports `budget: { maxWorkers, workers }`
+(`null` for the unbounded limit).
+
 ### Pass `autoRegister: false` to keep a container closed
 
 `DiPlugin()` now defaults `autoRegister` to `true`, so a token the container does not hold resolves

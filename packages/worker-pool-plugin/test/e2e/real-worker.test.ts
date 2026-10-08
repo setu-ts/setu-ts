@@ -21,6 +21,28 @@ const errorTaskUrl = new URL('../fixtures/error-task.ts', import.meta.url).href;
 const noHandlerTaskUrl = new URL('../fixtures/no-handler-task.ts', import.meta.url).href;
 
 describe('WorkerPoolPlugin — e2e on real worker threads', () => {
+  it('completes two modules under one slot and shares SAB writes with the caller', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), WorkerPoolPlugin({ maxWorkers: 1 })],
+    });
+    await app.start();
+    try {
+      const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      const fillTaskUrl = new URL('../fixtures/fill-task.ts', import.meta.url).href;
+      const buf = new SharedArrayBuffer(64);
+      const first = pool.run(echoTaskUrl, { n: 21 });
+      const second = pool.run(fillTaskUrl, { buf });
+      expect(pool.stats().reduce((sum, stats) => sum + stats.workers, 0)).toBe(1);
+      await expect(first).resolves.toEqual({ doubled: 42, from: 'worker' });
+      await expect(second).resolves.toBe(64);
+      expect(new Uint8Array(buf).every((byte) => byte === 42)).toBe(true);
+      const copied = new ArrayBuffer(64);
+      await expect(pool.run(fillTaskUrl, { buf: copied })).resolves.toBe(64);
+      expect(new Uint8Array(copied).every((byte) => byte === 0)).toBe(true);
+    } finally {
+      await app.stop();
+    }
+  });
   it('should run a task on a real thread and return its output', async () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WorkerPoolPlugin()],

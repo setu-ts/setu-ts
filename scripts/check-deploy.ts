@@ -119,6 +119,12 @@ export const EXCLUDED_EXAMPLES: readonly ExcludedExample[] = [
     kind: 'redundant',
     reason: 'Same build shape as minimal; differs only in the plugins it imports.',
   },
+  {
+    app: 'worker-pool',
+    kind: 'redundant',
+    reason:
+      'Same server image shape as minimal; worker behavior is exercised by its real-thread smoke.',
+  },
 ];
 
 /** One entry in the image build matrix. */

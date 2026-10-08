@@ -4266,13 +4266,14 @@ app.router.post('/thumbnail', async (ctx) => {
 
 ### Options
 
-| Option            | Type                              | Default                  | Description                                            |
-| ----------------- | --------------------------------- | ------------------------ | ------------------------------------------------------ |
-| `defaultPoolSize` | `number`                          | `availableParallelism()` | Workers per pool.                                      |
-| `maxQueue`        | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.      |
-| `taskTimeoutMs`   | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies. |
-| `pools`           | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.     |
-| `host`            | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.     |
+| Option            | Type                              | Default                  | Description                                                 |
+| ----------------- | --------------------------------- | ------------------------ | ----------------------------------------------------------- |
+| `maxWorkers`      | `number`                          | See budget rule below    | Total worker slots across all modules; `Infinity` disables. |
+| `defaultPoolSize` | `number`                          | `availableParallelism()` | Workers per pool.                                           |
+| `maxQueue`        | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.           |
+| `taskTimeoutMs`   | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies.      |
+| `pools`           | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.          |
+| `host`            | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.          |
 
 ### Interface Reference
 
@@ -4293,6 +4294,43 @@ app.router.post('/thumbnail', async (ctx) => {
   Carries `taskModule` and `timeoutMs`.
 - `WorkerQueueFullError` — the pool's pending queue is at its bound. Carries `taskModule` and
   `limit`.
+
+### Sizing and shared memory
+
+Each module has its own pool; `size` bounds that pool and `maxWorkers` bounds their sum. The
+service-wide default is `max(availableParallelism(), defaultPoolSize ?? 0, sum(pools[*].size))`.
+Explicit pool sizes therefore fit concurrently; modules using fallback sizes share the budget.
+`maxWorkers: Infinity` restores the previous unbounded sum. Other values must be positive safe
+integers; `NaN`, zero, negative and fractional values throw `RangeError` at plugin or service
+construction, naming the option and refused value.
+
+When the budget is full, a requester evicts another module's ready idle worker; otherwise it waits.
+Freed capacity is reserved for waiting modules, with modules that have queued tasks and no slots
+served first, then FIFO among equals. A busy module hands over a worker after a task settles if
+another module has no slot. Timeouts include time waiting for this budget. Rotation costs a worker
+spawn; size `maxWorkers` at least as large as the number of task modules active concurrently when
+that cost matters. Workers stay resident between bursts; there is no timed idle reaping.
+
+**Containers:** CPU limits lower `availableParallelism()` (measured on Deno and Node with
+`--cpus=2`); pods without CPU limits see all node cores. Set an explicit bound for the pod's memory
+budget. A trivial module measured about 12 MB per worker on Deno, 13.5 MB on Node and 1.5 MB on Bun;
+imports and task data increase that cost. The bound counts pool slots: a retired OS thread may take
+a moment to finish terminating.
+
+**Task granularity:** a measured trivial round trip takes about 7–17 µs. Batch very small work so
+serialization and scheduling do not cost more than the computation.
+
+**SharedArrayBuffer:** structured clone shares it instead of copying it. A buffer nested in the
+input can be written by the worker and read by its caller after the promise settles. A timed-out
+worker killed mid-write can leave partial data; settlement does not imply a successful full write.
+Do not touch the buffer until the promise settles unless coordinating concurrent access with
+Atomics. SAB-backed views are refused by `BodyInit` and some `SubtleCrypto` operations: copy into an
+ordinary ArrayBuffer-backed view first. An ordinary `ArrayBuffer` input is copied, so the caller's
+original stays unchanged.
+
+See [`apps/worker-pool`](apps/worker-pool) for a runnable off-thread, fairness and shared-memory
+smoke check. A synchronous spawn failure rejects the oldest pending task as a crash, clears its
+timer, and holds no worker budget.
 
 ### Notes
 
@@ -4317,7 +4355,9 @@ app.router.post('/thumbnail', async (ctx) => {
   `taskTimeoutMs` resolves to `0` on a runtime that cannot report an exit.
 - **Node `.ts` task modules** need an app-level loader/build, exactly as the frontend build is the
   app's responsibility (AI_GUIDELINES §12.2); the plugin consumes the module specifier as given.
-- Health indicator `worker-pool` reports `{ available, exitDetection, pools }`.
+- Health indicator `worker-pool` reports `{ available, exitDetection, pools, budget }`; `budget` is
+  `{ maxWorkers, workers }`, with the resolved bound (`null` for `Infinity`) and the sum of pool
+  slots.
 - **Metrics (opt-in by capability).** When `CAPABILITIES.METRICS` is registered, the plugin
   publishes six series, all labelled `task_module`: gauges `worker_pool_workers`,
   `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters

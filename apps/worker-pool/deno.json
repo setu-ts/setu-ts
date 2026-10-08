@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts"
+  },
+  "imports": {
+    "@setu-ts/common": "../../packages/common/src/index.ts",
+    "@setu-ts/kernel": "../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "../../packages/runtime/src/index.ts",
+    "@setu-ts/runtime/worker": "../../packages/runtime/src/worker/define-worker-task.ts",
+    "@setu-ts/health-plugin": "../../packages/health-plugin/src/index.ts",
+    "@setu-ts/worker-pool-plugin": "../../packages/worker-pool-plugin/src/index.ts"
+  }
+}

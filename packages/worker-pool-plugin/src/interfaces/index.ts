@@ -31,6 +31,13 @@ export interface TaskPoolOptions {
  */
 export interface WorkerPoolPluginOptions {
   /**
+   * Total live worker slots across all modules. Defaults to the largest of
+   * available parallelism, defaultPoolSize, and the sum of explicit pool sizes.
+   * Infinity disables the cap; otherwise a positive safe integer is required.
+   * @since 0.9.0
+   */
+  readonly maxWorkers?: number;
+  /**
    * Default workers per pool. Defaults to the host's
    * `availableParallelism()`.
    */

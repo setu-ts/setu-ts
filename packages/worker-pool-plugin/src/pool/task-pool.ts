@@ -28,6 +28,7 @@ import {
 } from '../errors.ts';
 import type { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 import type { TaskFailureReason } from '../metrics/metric-names.ts';
+import type { WorkerBudget } from './worker-budget.ts';
 
 /** Configuration resolved by the service before constructing a pool. */
 export interface TaskPoolConfig {
@@ -106,13 +107,48 @@ export class TaskPool {
     private readonly config: TaskPoolConfig,
     private readonly host: IWorkerHost,
     private readonly runtime: IRuntimeServices,
+    private readonly budget: WorkerBudget,
     /**
      * Present only when the application registered `CAPABILITIES.METRICS`.
      * Every call site is optional-chained, so an application without the
      * metrics plugin runs exactly the code M45 shipped.
      */
     private readonly collector?: WorkerPoolCollector,
-  ) {}
+  ) {
+    this.budget.register(this);
+  }
+
+  /** Includes starting slots: a module with a loading worker is not starved. */
+  isStarved(): boolean {
+    return this.pending.length > 0 && this.slots.length === 0;
+  }
+
+  /** Whether another slot could serve queued work under this pool's size. */
+  needsWorker(): boolean {
+    return !this.closed && this.slots.length < this.config.size &&
+      this.pending.length > this.slots.filter((slot) => !slot.ready).length;
+  }
+
+  /** The budget invokes this only from a reserved promise continuation. */
+  resume(): void {
+    this.pump();
+    this.syncMetrics();
+  }
+
+  /** Retires one ready idle slot; safe to call from another pool's pump. */
+  retireIdle(): boolean {
+    const slot = this.slots.find((slot) => slot.ready && slot.task === null);
+    if (slot === undefined) return false;
+    slot.terminating = true;
+    // This pool may already be waiting for an extra worker. Removing its own
+    // request before dropping prevents it becoming the first starved waiter
+    // as a consequence of the hand-over itself.
+    this.budget.cancel(this);
+    this.dropSlot(slot);
+    void slot.handle.terminate();
+    this.syncMetrics();
+    return true;
+  }
 
   /**
    * Queues one task and resolves with its result.
@@ -172,8 +208,10 @@ export class TaskPool {
    */
   async shutdown(): Promise<void> {
     this.closed = true;
+    this.budget.cancel(this);
     const slots = this.slots.splice(0);
     for (const slot of slots) {
+      this.budget.release();
       if (slot.task !== null) {
         this.rejectTask(
           slot.task,
@@ -205,7 +243,7 @@ export class TaskPool {
     }
     for (const slot of this.slots) {
       if (this.pending.length === 0) {
-        return;
+        break;
       }
       // A dispatch that fails to hand the task over (a non-cloneable input)
       // settles that task and leaves the slot free, so the same slot takes the
@@ -229,13 +267,27 @@ export class TaskPool {
       this.config.size - this.slots.length,
     );
     while (deficit > 0) {
-      this.spawnSlot();
+      if (!this.budget.tryAcquire(this)) break;
+      try {
+        this.spawnSlot();
+      } catch (error) {
+        const task = this.pending.shift()!;
+        this.rejectTask(task, error instanceof Error ? error : new Error(String(error)), 'crash');
+        this.budget.cancel(this);
+        break;
+      }
       deficit--;
+    }
+    if (!this.needsWorker()) this.budget.cancel(this);
+    // Rule 1 covers every pump origin, including ready and clone failure.
+    while (this.budget.hasWaiters() && this.retireIdle()) {
+      // Each retirement reserves capacity for the next eligible waiter.
     }
   }
 
   private spawnSlot(): void {
     const handle = this.host.spawn(this.config.specifier);
+    this.budget.acquired(this);
     const slot: WorkerSlot = { handle, ready: false, task: null, terminating: false };
     handle.onMessage((message) => this.onMessage(slot, message));
     handle.onError((error) => this.onWorkerError(slot, error));
@@ -307,6 +359,10 @@ export class TaskPool {
         ),
         'handler',
       );
+    }
+    // Rule 2: a module with no slot gets a turn before this queue reuses it.
+    if (this.pending.length > 0 && this.budget.hasStarvedWaiter()) {
+      this.retireIdle();
     }
     this.pump();
     this.syncMetrics();
@@ -440,8 +496,8 @@ export class TaskPool {
    * Writes the pool-state gauges from the same snapshot `/health` reads, so
    * the two surfaces cannot disagree.
    *
-   * Called from the five origins of state change — `run`, `onMessage`,
-   * `onWorkerError`, `onTimeout` and `shutdown`. Every other mutation
+   * Called from `run`, `onMessage`, `onWorkerError`, `onWorkerExit`,
+   * `onTimeout`, `shutdown`, budget `resume` and `retireIdle`. Every other mutation
    * (`pump`, `dispatch`, `spawnSlot`, `dropSlot`, the settle helpers) is
    * reached only from one of those, so no transition escapes.
    */
@@ -470,6 +526,7 @@ export class TaskPool {
       return false;
     }
     this.slots.splice(index, 1);
+    this.budget.release();
     return true;
   }
 }

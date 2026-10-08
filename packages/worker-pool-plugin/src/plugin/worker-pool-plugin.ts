@@ -15,7 +15,8 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
-import { WorkerPoolService } from '../services/worker-pool-service.ts';
+import { budgetLimitOf, WorkerPoolService } from '../services/worker-pool-service.ts';
+import { validateSizingOptions } from '../services/sizing.ts';
 import { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -38,9 +39,11 @@ const PLUGIN_NAME = 'worker-pool-plugin';
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
+ * @throws {RangeError} When maxWorkers is neither Infinity nor a positive safe integer
  * @since 0.1.0
  */
 export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
+  validateSizingOptions(options);
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
@@ -98,16 +101,23 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
       // saturation is published, never judged).
       ctx.health.register(
         'worker-pool',
-        (): Promise<HealthCheckResult> =>
-          Promise.resolve({
+        (): Promise<HealthCheckResult> => {
+          const pools = service.stats();
+          const limit = budgetLimitOf(service);
+          return Promise.resolve({
             status: available ? 'up' : 'degraded',
             data: {
               available,
               exitDetection,
-              pools: service.stats(),
+              pools,
+              budget: {
+                maxWorkers: limit === Infinity ? null : limit,
+                workers: pools.reduce((sum, pool) => sum + pool.workers, 0),
+              },
               ...(available ? {} : { reason: WORKERS_UNSUPPORTED_REASON }),
             },
-          }),
+          });
+        },
       );
 
       ctx.lifecycle.onClose(async () => {

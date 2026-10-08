@@ -15,6 +15,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';
 import { WorkerExitError } from '../../src/errors.ts';
 import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
@@ -31,6 +32,7 @@ function makeReportingPool(size = 1, maxQueue = 1024): { pool: TaskPool; host: F
     { specifier: SPEC, size, maxQueue, taskTimeoutMs: 0 },
     host,
     createFakeRuntime(new FakeTimers()),
+    new WorkerBudget(Infinity),
   );
   return { pool, host };
 }
@@ -156,6 +158,7 @@ describe('TaskPool — an exit the pool asked for', () => {
       { specifier: SPEC, size: 1, maxQueue: 10, taskTimeoutMs: 50 },
       host,
       createFakeRuntime(timers),
+      new WorkerBudget(Infinity),
     );
 
     const promise = pool.run({ n: 1 });
@@ -176,6 +179,7 @@ describe('TaskPool — a host that cannot report exits (Deno)', () => {
       { specifier: SPEC, size: 1, maxQueue: 10, taskTimeoutMs: 0 },
       host,
       createFakeRuntime(new FakeTimers()),
+      new WorkerBudget(Infinity),
     );
 
     const promise = pool.run({ n: 1 });
@@ -204,6 +208,7 @@ describe('TaskPool — shutdown ordering the exit path depends on', () => {
       { specifier: SPEC, size: 2, maxQueue: 10, taskTimeoutMs: 0 },
       host,
       createFakeRuntime(new FakeTimers()),
+      new WorkerBudget(Infinity),
     );
 
     const first = pool.run({ n: 1 });

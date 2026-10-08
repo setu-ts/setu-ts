@@ -256,6 +256,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Worker pool sizing (M45c, PR pending).** `WorkerPoolPluginOptions.maxWorkers` now bounds the sum
+  of module pools, defaulting to the largest of available parallelism, defaultPoolSize and the sum
+  of explicit pool sizes. Multi-module applications share the cap fairly; pass
+  `maxWorkers: Infinity` to restore the previous unbounded sum. Health reports the budget.
+
 - **A generated full-stack `setu.config.ts` takes an `ssr` parameter, and its `vite.config.ts`
   exports `frameworkPackages` and `workspaceLibraries` (`@setu-ts/cli`, PR #426).** `dev.ts` passes
   the development SSR runtime as `createApp`'s third argument, which replaces `assetsDir`; omitted,
@@ -484,6 +489,10 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **Worker spawn failures (M45c, PR pending).** A synchronous `host.spawn` throw now rejects the
+  oldest queued task as a crash, clears its timeout and holds no budget, instead of leaving a ghost
+  task queued after its caller rejected. Hand-over continuations cannot leak the spawn error.
 
 - **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).** The
   error said "Register a plugin that provides it, or check the token spelling" for every miss, which

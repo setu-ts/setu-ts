@@ -15,12 +15,21 @@ import type {
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import { WorkerPoolUnavailableError } from '../errors.ts';
 import { TaskPool } from '../pool/task-pool.ts';
+import { WorkerBudget } from '../pool/worker-budget.ts';
+import { resolveMaxWorkers, validateSizingOptions } from './sizing.ts';
 import type { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 
 /** Default pending-queue bound per pool. */
 const DEFAULT_MAX_QUEUE = 1024;
 /** Default task timeout in milliseconds (`0` disables). */
 const DEFAULT_TASK_TIMEOUT_MS = 30_000;
+
+const budgetLimits = new WeakMap<WorkerPoolService, number>();
+
+/** Internal health accessor; deliberately absent from the public barrel. */
+export function budgetLimitOf(service: WorkerPoolService): number {
+  return budgetLimits.get(service)!;
+}
 
 /**
  * The worker pool service registered under `CAPABILITIES.WORKER_POOL`.
@@ -30,12 +39,16 @@ const DEFAULT_TASK_TIMEOUT_MS = 30_000;
  * Workers), the service still constructs — `run()` throws
  * {@linkcode WorkerPoolUnavailableError}, `stats()` returns `[]`, and
  * `shutdown()` resolves — so one codebase stays deployable everywhere.
+ * Construction refuses an invalid `maxWorkers` with `RangeError`, just as
+ * the plugin factory does.
  *
  * @since 0.1.0
  */
 export class WorkerPoolService implements IWorkerPool {
   private readonly host: IWorkerHost | undefined;
   private readonly pools = new Map<string, TaskPool>();
+  private readonly budget: WorkerBudget;
+  private closed = false;
 
   constructor(
     private readonly options: WorkerPoolPluginOptions | undefined,
@@ -46,7 +59,11 @@ export class WorkerPoolService implements IWorkerPool {
      */
     private readonly collector?: WorkerPoolCollector,
   ) {
+    validateSizingOptions(options);
     this.host = options?.host ?? runtime.workers;
+    const limit = resolveMaxWorkers(options, this.host?.availableParallelism() ?? 0);
+    this.budget = new WorkerBudget(limit);
+    budgetLimits.set(this, limit);
   }
 
   /**
@@ -64,6 +81,10 @@ export class WorkerPoolService implements IWorkerPool {
     input: TInput,
     options?: WorkerRunOptions,
   ): Promise<TOutput> {
+    if (this.closed) {
+      this.collector?.taskRejected(taskModule, 'pool_closed');
+      return Promise.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));
+    }
     const host = this.host;
     if (host === undefined) {
       // No pool exists to report through, so the rejection is recorded here.
@@ -78,6 +99,7 @@ export class WorkerPoolService implements IWorkerPool {
         this.resolveConfig(taskModule, host),
         host,
         this.runtime,
+        this.budget,
         this.collector,
       );
       this.pools.set(taskModule, pool);
@@ -101,6 +123,8 @@ export class WorkerPoolService implements IWorkerPool {
    * Safe to call more than once.
    */
   async shutdown(): Promise<void> {
+    this.closed = true;
+    this.budget.close();
     await Promise.all([...this.pools.values()].map((pool) => pool.shutdown()));
   }
 

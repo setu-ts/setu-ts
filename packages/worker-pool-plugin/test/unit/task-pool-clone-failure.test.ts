@@ -13,6 +13,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';
 import { WorkerPoolCollector } from '../../src/metrics/worker-pool-collector.ts';
 import {
@@ -46,6 +47,7 @@ function makePool(size: number): {
     { specifier: SPEC, size, maxQueue: 1024, taskTimeoutMs: 0 },
     host,
     createFakeRuntime(timers),
+    new WorkerBudget(Infinity),
     new WorkerPoolCollector(metrics, throwOnReport),
   );
   return { pool, host, metrics };
@@ -138,6 +140,7 @@ describe('TaskPool — a non-cloneable input (X8-2)', () => {
       { specifier: SPEC, size: 1, maxQueue: 1024, taskTimeoutMs: 0 },
       host,
       createFakeRuntime(new FakeTimers()),
+      new WorkerBudget(Infinity),
       new WorkerPoolCollector(new RecordingMetrics(), throwOnReport),
     );
 

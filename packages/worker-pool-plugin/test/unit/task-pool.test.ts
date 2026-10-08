@@ -6,6 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';
 import type { TaskPoolConfig } from '../../src/pool/task-pool.ts';
 import {
@@ -36,6 +37,7 @@ function makePool(config?: Partial<TaskPoolConfig>, parallelism = 2): {
     },
     host,
     runtime,
+    new WorkerBudget(Infinity),
   );
   return { pool, host, timers };
 }
