@@ -94,4 +94,38 @@ describe('idempotentIngress on a real queue (M109a §3.7)', () => {
       await app.stop();
     }
   });
+
+  it('releases a FAILED attempt, so the retried job runs (M109a §3.7, §3.13)', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        IdempotencyPlugin(),
+        QueuePlugin({
+          adapter: 'memory',
+          pollIntervalMs: POLL_MS,
+          defaultMaxAttempts: 2,
+          behaviors: [
+            idempotentIngress({ jobNames: ['email.send'], key: (ctx) => ctx.headers?.['x-order'] }),
+          ],
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
+      let attempts = 0;
+      queue.process('email.send', () => {
+        attempts++;
+        if (attempts === 1) throw new Error('the first attempt fails');
+      });
+      await queue.add('email.send', { to: 'a@example.com' }, { headers: { 'x-order': 'retry-1' } });
+
+      // A failed handler releases the claim, so the retry is NOT refused
+      // in-progress: the second attempt runs after the queue's own backoff.
+      await until(() => attempts >= 2, 'the retried attempt to run');
+      expect(attempts).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
 });

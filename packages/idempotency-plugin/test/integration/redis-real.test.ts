@@ -8,10 +8,13 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IIdempotencyStore } from '@setu-ts/common';
+import type { IIdempotencyStore, IPluginContext, MiddlewareFunction } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { runIdempotencyStoreConformance } from '../fixtures/idempotency-store-conformance.ts';
 import { resolveStore } from '../../src/stores/resolve-store.ts';
 import { createClockRuntime } from '../fixtures/clock-runtime.ts';
+import { IdempotencyPlugin, idempotent } from '../../src/index.ts';
 
 const REDIS_URL = Deno.env.get('REDIS_URL');
 const ignore = REDIS_URL === undefined;
@@ -190,6 +193,74 @@ describe('Redis store on real Redis (M109a §3.5)', { ignore }, () => {
     // The stale holder's complete is lost.
     expect(await store.complete(key, 'a', 'r', 60_000)).toBe('lost');
     await store.disconnect?.();
+  });
+});
+
+/** Identity middleware: the principal and the tenant come from headers. */
+const identity: MiddlewareFunction = async (ctx, next) => {
+  const user = ctx.request.headers.get('x-user');
+  if (user !== null) ctx.request.user = { id: user };
+  const tenant = ctx.request.headers.get('x-tenant');
+  if (tenant !== null) ctx.request.tenant = { id: tenant };
+  await next();
+};
+
+/**
+ * Cross-principal isolation THROUGH THE REDIS ARM — §10 obligation 1 says
+ * "on every store", and the memory store's unit case cannot prove the derived
+ * key survives the Redis store. Real Redis, a real kernel, unique namespace.
+ */
+describe('cross-principal isolation on real Redis (M109a §10 D1)', { ignore }, () => {
+  it('executes once for each principal and each tenant sharing one key', async () => {
+    const counts = { pay: 0 };
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        IdempotencyPlugin({
+          store: { type: 'redis', namespace: nextNamespace(), url: REDIS_URL as string },
+        }),
+        {
+          name: 'redis-isolation-routes',
+          version: '1.0.0',
+          register(ctx: IPluginContext): void {
+            ctx.middleware.add(identity);
+            ctx.router.post('/payments', {
+              middleware: [idempotent()],
+              handler: (c) => {
+                counts.pay++;
+                return c.response.status(201).json({ id: `pay-${counts.pay}` });
+              },
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+    try {
+      const run = (user: string, tenant?: string) =>
+        app.fetch(
+          new Request('http://localhost/payments', {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': 'k-shared',
+              'x-user': user,
+              ...(tenant === undefined ? {} : { 'x-tenant': tenant }),
+            },
+            body: '{"amount":1}',
+          }),
+        );
+      expect((await run('alice')).status).toBe(201);
+      expect((await run('bob')).status).toBe(201);
+      expect((await run('alice', 'acme')).status).toBe(201);
+      expect(counts.pay).toBe(3);
+      // The first principal's OWN record still replays: isolation, not a hole.
+      const replay = await run('alice');
+      expect(replay.status).toBe(201);
+      expect(replay.headers.get('Idempotent-Replayed')).toBe('true');
+      expect(counts.pay).toBe(3);
+    } finally {
+      await app.stop();
+    }
   });
 });
 
