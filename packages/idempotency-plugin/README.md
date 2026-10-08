@@ -213,5 +213,8 @@ package implements.
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#idempotencyplugin-setu-tsidempotency-plugin)
-carries the full `@setu-ts/idempotency-plugin` surface and its exact contracts.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#idempotencyplugin-setu-tsidempotency-plugin).
