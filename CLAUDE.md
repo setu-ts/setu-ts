@@ -2693,12 +2693,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 45c** (`packages/worker-pool-plugin` — service-wide worker pool sizing) — complete (PR
   pending). `maxWorkers` bounds the sum of lazy module pools, with reserved asynchronous hand-over,
   idle eviction and priority for modules without a slot. Both construction paths validate the bound;
-  health reports it. Synchronous spawn failures settle their oldest task without a ghost queue
-  entry, and shutdown refuses new work before closing the budget. The `apps/worker-pool` smoke
-  proves event-loop progress, fairness under one slot, shared-buffer writes and health data. All ten
-  negative controls failed and were reverted; full tests and coverage passed, with every measured
-  plugin source file above 90% on branch, function and line. Sizing and migration docs ship with the
-  archived plan at `plans/archive/milestone-45c-worker-pool-sizing.md`.
+  health reports it. Synchronous spawn failures settle their oldest task without a ghost queue entry
+  and continue scheduling the remaining queue, and shutdown refuses new work before closing the
+  budget. The `apps/worker-pool` smoke proves event-loop progress, fairness under one slot,
+  shared-buffer writes and health data. All ten negative controls failed and were reverted; full
+  tests and coverage passed, with every measured plugin source file above 90% on branch, function
+  and line. Sizing and migration docs ship with the archived plan at
+  `plans/archive/milestone-45c-worker-pool-sizing.md`.
 
 - **Milestone 70c** (`messaging-plugin` + `realtime-backplane-plugin` + `storage-plugin` +
   `mail-plugin` + `queue-plugin` + `service-discovery-plugin` + `grpc-plugin` — health signals that

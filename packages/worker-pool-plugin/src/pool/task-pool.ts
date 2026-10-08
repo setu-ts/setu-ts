@@ -261,12 +261,7 @@ export class TaskPool {
     }
     // Spawn at most one worker per waiting task not already covered by a
     // worker that is still starting up.
-    const starting = this.slots.filter((slot) => !slot.ready).length;
-    let deficit = Math.min(
-      this.pending.length - starting,
-      this.config.size - this.slots.length,
-    );
-    while (deficit > 0) {
+    while (this.needsWorker()) {
       if (!this.budget.tryAcquire(this)) break;
       try {
         this.spawnSlot();
@@ -274,9 +269,9 @@ export class TaskPool {
         const task = this.pending.shift()!;
         this.rejectTask(task, error instanceof Error ? error : new Error(String(error)), 'crash');
         this.budget.cancel(this);
-        break;
+        // Each failed attempt consumes a task, so retries are bounded by the
+        // queue. Recheck demand rather than stranding the rest without a wake-up.
       }
-      deficit--;
     }
     if (!this.needsWorker()) this.budget.cancel(this);
     // Rule 1 covers every pump origin, including ready and clone failure.

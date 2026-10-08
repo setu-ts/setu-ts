@@ -4330,7 +4330,8 @@ original stays unchanged.
 
 See [`apps/worker-pool`](apps/worker-pool) for a runnable off-thread, fairness and shared-memory
 smoke check. A synchronous spawn failure rejects the oldest pending task as a crash, clears its
-timer, and holds no worker budget.
+timer, and holds no worker budget. The pool continues scheduling the remaining queue; repeated spawn
+failures settle one task per attempt rather than leaving queued tasks stranded.
 
 ### Notes
 

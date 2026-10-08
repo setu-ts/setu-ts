@@ -492,7 +492,8 @@ All notable changes to this project are documented here. The format follows
 
 - **Worker spawn failures (M45c, PR pending).** A synchronous `host.spawn` throw now rejects the
   oldest queued task as a crash, clears its timeout and holds no budget, instead of leaving a ghost
-  task queued after its caller rejected. Hand-over continuations cannot leak the spawn error.
+  task queued after its caller rejected. Remaining queued tasks continue scheduling after a failed
+  spawn, including from a budget hand-over. Hand-over continuations cannot leak the spawn error.
 
 - **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).** The
   error said "Register a plugin that provides it, or check the token spelling" for every miss, which

@@ -254,6 +254,107 @@ describe('TaskPool shared budget', () => {
     await good.shutdown();
   });
 
+  it('continues queued work after a transient hand-over spawn failure without another run', async () => {
+    const { make, a, host, timers } = setup();
+    const error = new Error('transient spawn failure');
+    let attempts = 0;
+    const recovering = make('recovering', 1, {
+      spawn: (specifier) => {
+        if (++attempts === 1) throw error;
+        return host.spawn(specifier);
+      },
+      availableParallelism: () => 1,
+    });
+    const active = a.run('active');
+    host.handles[0].emitReady();
+    const failed = recovering.run('first');
+    const assertion = expect(failed).rejects.toBe(error);
+    const second = recovering.run('second');
+    const third = recovering.run('third');
+    host.handles[0].replyOk('active');
+    await assertion;
+    expect(attempts).toBe(2);
+    expect(recovering.stats()).toMatchObject({ workers: 1, queued: 2, failed: 1 });
+    host.handles[1].emitReady();
+    host.handles[1].replyOk('second');
+    host.handles[1].replyOk('third');
+    await expect(second).resolves.toBe('second');
+    await expect(third).resolves.toBe('third');
+    await active;
+    expect(host.handles[1].requests.map((request) => request.input)).toEqual(['second', 'third']);
+    expect(recovering.stats()).toMatchObject({ completed: 2, queued: 0, failed: 1 });
+    expect(timers.armed).toBe(0);
+    await a.shutdown();
+    await recovering.shutdown();
+  });
+
+  it('settles a backlog on repeated spawn failure without leaking timers or budget', async () => {
+    const { make, a, host, timers, budget } = setup();
+    const errors = [new URIError('first'), new URIError('second'), new URIError('third')];
+    let attempts = 0;
+    const failing = make('bad', 1, {
+      spawn: () => {
+        throw errors[attempts++];
+      },
+      availableParallelism: () => 1,
+    });
+    const active = a.run('active');
+    host.handles[0].emitReady();
+    const failed = [0, 1, 2].map((input) => failing.run(input, 10));
+    const assertions = failed.map((task, index) => expect(task).rejects.toBe(errors[index]));
+    host.handles[0].replyOk('active');
+    await assertions[0];
+    expect(attempts).toBe(3);
+    await Promise.all(assertions);
+    expect(failing.stats()).toMatchObject({ workers: 0, queued: 0, failed: 3 });
+    expect(timers.armed).toBe(0);
+    expect(budget.hasWaiters()).toBe(false);
+    timers.fire();
+    expect(failing.stats().failed).toBe(3);
+    const good = make('good');
+    const next = good.run('next');
+    expect(host.spawnedSpecifiers).toEqual(['a', 'good']);
+    host.handles[1].emitReady();
+    host.handles[1].replyOk('next');
+    await Promise.all([active, next]);
+    await a.shutdown();
+    await failing.shutdown();
+    await good.shutdown();
+  });
+
+  it('returns a failed spawn reservation to the next waiter before retrying its backlog', async () => {
+    const { make, a, host } = setup();
+    let attempts = 0;
+    const recovering = make('recovering', 1, {
+      spawn: (specifier) => {
+        if (++attempts === 1) throw new Error('transient spawn failure');
+        return host.spawn(specifier);
+      },
+      availableParallelism: () => 1,
+    });
+    const other = make('other', 1);
+    const active = a.run('active');
+    host.handles[0].emitReady();
+    const failed = recovering.run('first');
+    const assertion = expect(failed).rejects.toThrow('transient spawn failure');
+    const remaining = recovering.run('remaining');
+    const waiting = other.run('waiting');
+    host.handles[0].replyOk('active');
+    await assertion;
+    expect(host.spawnedSpecifiers).toEqual(['a', 'other']);
+    expect(attempts).toBe(1);
+    host.handles[1].emitReady();
+    host.handles[1].replyOk('waiting');
+    await waiting;
+    expect(host.spawnedSpecifiers).toEqual(['a', 'other', 'recovering']);
+    host.handles[2].emitReady();
+    host.handles[2].replyOk('remaining');
+    await Promise.all([active, remaining]);
+    await a.shutdown();
+    await other.shutdown();
+    await recovering.shutdown();
+  });
+
   it('handles a spawn throw in a hand-over continuation without an unhandled rejection', async () => {
     const { make, a, host, timers, budget } = setup();
     const failing = make('bad', 1, {
