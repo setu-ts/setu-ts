@@ -232,9 +232,10 @@ Deno does not write the CLI's dependency graph into the project's lockfile.
 
 The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 51 workspace members are published on JSR: the core (`common`, `kernel`, `runtime`,
-`exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, and the
-`cli`.
+All 51 workspace members are published on JSR as one release train: the core (`common`, `kernel`,
+`runtime`, `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`
+and the `cli` — except a member added since the last release (`idempotency-plugin` today), which the
+next release publishes.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
@@ -374,7 +375,7 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 setu-ts/
-├── packages/              # 51 workspace members, all published on JSR
+├── packages/              # 51 workspace members, published on JSR
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)
