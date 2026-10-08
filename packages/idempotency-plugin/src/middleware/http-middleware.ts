@@ -12,6 +12,7 @@ import { deriveHash } from '../core/hash.ts';
 import { parseKeyValue } from '../core/key.ts';
 import { requestFingerprint } from '../core/fingerprint.ts';
 import type { ResolvedRouteOptions } from '../core/options.ts';
+import type { RecordOmissionReason } from '../core/record.ts';
 import {
   decodeHttpRecord,
   encodeHttpRecord,
@@ -71,7 +72,12 @@ export function createHttpMiddleware(
   deps: ServiceDeps,
   resolved: ResolvedRouteOptions,
 ): MiddlewareFunction {
-  const warned = new Set<string>();
+  // Keyed by the omission REASON, a fixed vocabulary, never by namespace: the
+  // default namespace carries the request path, so a set keyed by it grew one
+  // entry per distinct path an authenticated caller sent and logged on every
+  // request (M109a audit F1). This middleware serves one route, so one warning
+  // per reason is one warning per route and reason.
+  const warned = new Set<RecordOmissionReason>();
 
   const release = async (key: string, token: string, namespace: string): Promise<void> => {
     try {
@@ -236,10 +242,10 @@ export function createHttpMiddleware(
           return;
         }
         const encoded = encodeHttpRecord(snapshot, resolved, deps.store.maxRecordBytes);
-        if (encoded.omitted !== undefined && !warned.has(namespace)) {
+        if (encoded.omitted !== undefined && !warned.has(encoded.omitted)) {
           const warning = OMISSION_WARNINGS[encoded.omitted];
           if (warning !== undefined) {
-            warned.add(namespace);
+            warned.add(encoded.omitted);
             deps.logger()?.warn(warning, { namespace });
           }
         }

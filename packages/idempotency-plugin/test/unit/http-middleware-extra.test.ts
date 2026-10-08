@@ -47,12 +47,13 @@ function makeCtx(options: {
   headers?: Headers;
   snapshot?: ResponseSnapshot;
   user?: { id: string };
+  path?: string;
 }) {
   const captured = { status: 0, json: undefined as unknown };
   const request = {
     method: 'POST',
-    path: '/orders',
-    url: 'https://x/orders',
+    path: options.path ?? '/orders',
+    url: `https://x${options.path ?? '/orders'}`,
     headers: options.headers ?? new Headers({ 'Idempotency-Key': 'k' }),
     user: options.user ?? { id: 'u1' },
     json: options.json ?? (() => Promise.resolve({})),
@@ -140,6 +141,39 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
     await mw(second.ctx, () => Promise.resolve());
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('streaming');
+  });
+
+  it('warns once per reason however many distinct paths take it (M109a audit F1)', async () => {
+    // The default namespace carries the request path. Keyed by it, every
+    // distinct path a caller sent was retained for the process's life and
+    // logged again, so the de-duplication protected nothing.
+    const { logger, warnings } = captureLogger();
+    const { store } = recordingStore({ outcome: 'claimed', takeover: false });
+    const streaming = () =>
+      ({
+        streaming: true,
+        status: 200,
+        headers: new Headers(),
+        body: new ReadableStream<Uint8Array>(),
+      }) as ResponseSnapshot;
+    const oversize: ResponseSnapshot = {
+      streaming: false,
+      status: 200,
+      headers: new Headers(),
+      body: 'x',
+    };
+    const mw = middleware(store, { maxResponseBytes: 0 }, logger);
+    for (let n = 0; n < 200; n++) {
+      await mw(
+        makeCtx({ snapshot: streaming(), path: `/orders/${n}` }).ctx,
+        () => Promise.resolve(),
+      );
+      await mw(makeCtx({ snapshot: oversize, path: `/orders/${n}` }).ctx, () => Promise.resolve());
+    }
+    // One warning per omission reason, not one per path.
+    expect(warnings).toHaveLength(2);
+    expect(warnings.filter((w) => w.includes('streaming'))).toHaveLength(1);
+    expect(warnings.filter((w) => w.includes('exceeds maxResponseBytes'))).toHaveLength(1);
   });
 
   it('warns for an oversize body and a redaction miss', async () => {
