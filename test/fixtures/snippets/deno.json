@@ -36,6 +36,7 @@
     "@setu-ts/static-plugin": "../../../packages/static-plugin/src/index.ts",
     "@setu-ts/validation-plugin": "../../../packages/validation-plugin/src/index.ts",
     "@setu-ts/websocket-plugin": "../../../packages/websocket-plugin/src/index.ts",
+    "@setu-ts/scheduler-plugin": "../../../packages/scheduler-plugin/src/index.ts",
     "@setu-ts/rest-starter": "../../../packages/starters/rest-starter/src/index.ts",
     "@setu-ts/microservice-starter": "../../../packages/starters/microservice-starter/src/index.ts",
     "@setu-ts/full-stack-starter": "../../../packages/starters/full-stack-starter/src/index.ts",

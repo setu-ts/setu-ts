@@ -875,6 +875,468 @@ events.clear(); // after the application's own confirmed dispatch policy
 Publishing this way says nothing about any consumer finishing: as [Publish timing](#publish-timing)
 documents, a transport accepting a publish resolves on dispatch hand-off, not on handler completion.
 
+## Transactional outbox
+
+A service that changes its own data and announces the change must do both or neither. The outbox
+writes an integration event as a ROW in the same database transaction as the business change,
+through your own unit of work, and a relay publishes the persisted rows afterwards. If the
+transaction rolls back, no row exists and nothing is ever published; if it commits, the event is
+published even when the process dies before the relay runs.
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import {
+  createDatabaseOutboxStore,
+  DatabasePlugin,
+  type IDatabaseService,
+} from '@setu-ts/database-plugin';
+import { defineIntegrationEvent, type IOutbox, MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.placed',
+  version: 1,
+  topic: 'orders.placed.v1',
+  parse: (value) => value as { orderId: string },
+  // Rows of one ordering key are relayed in write order (see "The promise").
+  orderingKey: (envelope) => envelope.data.orderId,
+});
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SchedulerPlugin(), // runs the relay every `relay.intervalMs`
+    DatabasePlugin({ type: 'memory' }),
+    MessagingPlugin({ outbox: { store: createDatabaseOutboxStore() } }),
+  ],
+});
+await app.start();
+
+const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+
+await db.transaction(async (uow) => {
+  await uow.getRepository('Order').create({ id: 'o-1', total: 42 });
+  // The SAME unit of work: the row commits or rolls back with the order.
+  await outbox.write(uow, orderPlaced, { orderId: 'o-1' }, {
+    metadata: { aggregateId: 'o-1', aggregateVersion: 1 },
+  });
+});
+// Optional: request a sweep now instead of waiting for the next interval.
+outbox.dispatch();
+```
+
+`MessagingPlugin({ outbox })` registers an `IOutbox` under `CAPABILITIES.OUTBOX` (`outbox.<name>`
+for a named instance) and an `outbox` health indicator. At `onInit` it resolves the store, runs its
+`verify()` (a backend that cannot serve an outbox fails `start()` by name), and schedules the relay
+(`outbox-relay`) and the retention purge (`outbox-purge`) on `CAPABILITIES.SCHEDULER`. With the
+default `relay.schedule: true` and no scheduler registered, `start()` rejects
+`OutboxRelayUnscheduledError`.
+
+| Member                                      | What it does                                                                                                                                                      |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `write(scope, definition, payload, input?)` | Builds the envelope (id, ordering key and deduplication id fixed NOW) and appends the row through `scope`. Resolves the envelope id; every refusal is a rejection |
+| `dispatch()`                                | Requests a sweep without waiting: coalesced (one running, one follow-up), never throws, a no-op once closing                                                      |
+| `sweep()`                                   | Runs or joins a sweep and resolves its `OutboxSweepResult`                                                                                                        |
+| `purge()`                                   | Deletes settled rows older than `retainSentMs`                                                                                                                    |
+| `release(id, action, { tenantId? })`        | Returns a `failed` row to `pending` (`'retry'`) or settles it unpublished (`'discard'`)                                                                           |
+
+`write` uses ONE implementation of the publish precedence with `publishIntegrationEvent`: the
+caller's `orderingKey` beats the definition's selector, and `deduplicationId` defaults to the
+envelope id, so every re-send of a row carries the same deduplication id. An envelope larger than
+`maxEnvelopeBytes` (default 262 144 UTF-8 bytes) is refused with `OutboxEnvelopeTooLargeError`
+INSIDE the transaction, so the business write rolls back with it rather than committing a row that
+could never be sent. A `write` before `onInit` completes rejects `OutboxNotReadyError`.
+
+### The promise
+
+At-least-once delivery of every committed row. Per ordering key, publish order among COMMITTED rows,
+provided rows of one key commit in the order they were written (serialize writes to one aggregate,
+as optimistic concurrency on `aggregateVersion` does) and, across replicas, provided the writers'
+clocks agree. Delivery order is what the broker gives it (see
+[What `orderingKey` promises](#what-orderingkey-promises)). Consumers compare `aggregateVersion`.
+**Never exactly once**: a duplicate carries the same envelope id and deduplication id, which a
+consumer-side inbox absorbs.
+
+The ordering limit is measured, not theoretical. On real PostgreSQL 16, transaction A wrote its row
+and stayed open while B wrote and committed; the relay published B; then A committed. The relay
+published A on its next tick — a watermark relay (`id > lastSeen` or `createdAt > lastSeen`) would
+never have published A at all, which is why the relay reads the PENDING set rather than a watermark
+— but B, written second, was published first, because it committed first. A relay can order only the
+rows it can see. Clock skew is the cross-replica version of the same limit: a row's position is
+taken from its writer's clock, clamped per process, so two writers whose clocks disagree interleave
+by clock rather than by real time.
+
+| Crash or fault                                      | Outcome                                                                                             |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| before commit                                       | nothing written, nothing published                                                                  |
+| after commit, before any sweep                      | the next sweep (any process) publishes it                                                           |
+| the process stops mid-batch                         | marked rows stay sent; the published-but-unmarked row is published AGAIN; the rest follow in order  |
+| after publish, before the status write              | published again by the next lap, with the same envelope id                                          |
+| the status write rejects after a successful publish | the key is blocked and the sweep ends; the next lap republishes that row before any later row of it |
+| the failure write rejects                           | no attempt recorded; the row is retried once at the next lap                                        |
+| a publish times out and the broker accepts it late  | recorded as a failure and retried after backoff — the broker holds two copies with one dedup id     |
+| the application stops mid-sweep                     | the shutdown drain awaits the sweep; a failure after shutdown began records no attempt              |
+| during purge                                        | rows deleted so far stay deleted; the rest are purged at the next interval                          |
+
+The mid-batch and after-publish rows are driven against real PostgreSQL with real RabbitMQ 4 and
+real Redis Streams in `test/integration/outbox-real.test.ts`.
+
+### Backends
+
+Use `createDatabaseOutboxStore()` from `@setu-ts/database-plugin` (any `IOutboxStore` works — see
+[A custom store](#a-custom-store)). Its `verify()` refuses a backend that cannot serve the relay at
+startup with `OutboxStoreUnavailableError`, naming the reason:
+
+| Backend  | Requirement                                                                                                         | Driven in this repository against            |
+| -------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| memory   | none — single process only                                                                                          | the unit suite                               |
+| Drizzle  | the outbox table exists and is registered in `drizzleTables`                                                        | real PostgreSQL 16                           |
+| Prisma   | the table exists and the model is in the generated client                                                           | not driven (unverified)                      |
+| D1       | the table exists                                                                                                    | real SQLite (`D1Adapter` over `node:sqlite`) |
+| MongoDB  | a replica set; a standalone server is refused (`'mongodb-replica-set'`)                                             | real MongoDB 8 replica set, and a standalone |
+| DynamoDB | a GSI `{ partitionKey: 'status', sortKey: 'position' }` with projection `ALL`; refused without (`'dynamodb-index'`) | DynamoDB Local                               |
+| Cosmos   | the outbox entity maps to the business container, and its partition-key path is a column the row carries            | the local Cosmos emulator (not in CI)        |
+| Bigtable | refused (`'bigtable'`): no secondary index — use a change-data-capture relay                                        | the Bigtable emulator                        |
+
+On DynamoDB the relay's `position > after` page runs as a KEY condition on that GSI
+(`status = :pending AND position > :after`, with `kind` as a filter), recorded against DynamoDB
+Local, so paging never rescans. A transaction there is one `TransactWriteItems`, at most 100 writes
+INCLUDING outbox rows.
+
+**The discriminator.** Every row carries `kind: 'setu-outbox'`; every read, count, transition and
+purge requires it, and a lookup by id treats a row of another `kind` as missing. An outbox sharing a
+table, collection or container with business documents — Cosmos queries a container as a whole —
+never reads, counts, transitions or deletes a business document that happens to carry
+`status: 'pending'` or `'sent'`. Driven on the Cosmos emulator with business documents carrying
+both.
+
+### Provisioning
+
+No portable migration exists (`DatabaseService.migrate()` always rejects), so create the table
+yourself. PostgreSQL (the exact file the real suite applies):
+
+```sql
+CREATE TABLE setu_outbox (
+  id           text    PRIMARY KEY,
+  kind         text    NOT NULL,
+  topic        text    NOT NULL,
+  envelope     text    NOT NULL,
+  options      text    NOT NULL,
+  ordering_key text,
+  tenant_id    text,
+  traceparent  text,
+  position     text    NOT NULL,
+  created_at   bigint  NOT NULL,
+  status       text    NOT NULL,
+  attempts     integer NOT NULL,
+  available_at bigint  NOT NULL,
+  last_error   text,
+  settled_at   bigint,
+  sent_by      text
+);
+CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
+CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settled_at);
+```
+
+SQLite and Cloudflare D1, where `D1Adapter` uses the field names as column names (the file the D1
+test applies):
+
+```sql
+CREATE TABLE setu_outbox (
+  id          TEXT    PRIMARY KEY,
+  kind        TEXT    NOT NULL,
+  topic       TEXT    NOT NULL,
+  envelope    TEXT    NOT NULL,
+  options     TEXT    NOT NULL,
+  orderingKey TEXT,
+  tenantId    TEXT,
+  traceparent TEXT,
+  position    TEXT    NOT NULL,
+  createdAt   INTEGER NOT NULL,
+  status      TEXT    NOT NULL,
+  attempts    INTEGER NOT NULL,
+  availableAt INTEGER NOT NULL,
+  lastError   TEXT,
+  settledAt   INTEGER,
+  sentBy      TEXT
+);
+CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
+CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settledAt);
+```
+
+MySQL takes the PostgreSQL columns with `VARCHAR(64)` for `id`, `kind`, `status` and `position` (an
+index needs a bounded key) and `TEXT` elsewhere; this repository has no MySQL backend, so that form
+is unverified. Keep `position` in a binary or `C` collation-equivalent ordering: it is fixed width
+with no separators, so a collation that ignores punctuation cannot reorder it.
+
+The mappings for the other adapters:
+
+```typescript
+import { bigint, integer, pgTable, text } from 'npm:drizzle-orm@^0.45.2/pg-core';
+import { CosmosAdapter, DynamoAdapter, MongoAdapter } from '@setu-ts/database-plugin';
+
+// Drizzle: register this table as `drizzleTables: { Outbox: outbox }`.
+export const outbox = pgTable('setu_outbox', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(),
+  topic: text('topic').notNull(),
+  envelope: text('envelope').notNull(),
+  options: text('options').notNull(),
+  orderingKey: text('ordering_key'),
+  tenantId: text('tenant_id'),
+  traceparent: text('traceparent'),
+  position: text('position').notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull(),
+  availableAt: bigint('available_at', { mode: 'number' }).notNull(),
+  lastError: text('last_error'),
+  settledAt: bigint('settled_at', { mode: 'number' }),
+  sentBy: text('sent_by'),
+});
+
+// MongoDB (a replica set): the envelope id is the `_id`, stored as a string.
+export const mongo = new MongoAdapter({
+  url: 'mongodb://127.0.0.1:27017/?replicaSet=rs0',
+  database: 'shop',
+  collections: { Outbox: { collection: 'outbox', idType: 'raw' } },
+});
+
+// DynamoDB: a table keyed by `id`, and the GSI the relay pages through.
+export const dynamo = new DynamoAdapter({
+  region: 'eu-west-1',
+  entities: {
+    Outbox: {
+      table: 'outbox',
+      partitionKey: 'id',
+      indexes: { 'by-status-position': { partitionKey: 'status', sortKey: 'position' } },
+    },
+  },
+});
+
+// Cosmos: the outbox shares the business CONTAINER and partition-key path, so
+// one batch carries the business write and the row. Write with `tenantId`.
+export const cosmos = new CosmosAdapter({
+  endpoint: 'https://shop.documents.azure.com:443/',
+  key: '…',
+  database: 'shop',
+  containers: {
+    Order: { container: 'orders', partitionKey: 'tenantId' },
+    Outbox: { container: 'orders', partitionKey: 'tenantId' },
+  },
+});
+```
+
+MongoDB indexes, for the relay and the purge:
+
+```js
+db.outbox.createIndex({ kind: 1, status: 1, position: 1 });
+db.outbox.createIndex({ kind: 1, status: 1, settledAt: 1 });
+```
+
+The DynamoDB table needs `id` as its hash key and the GSI `by-status-position` (hash `status`, range
+`position`, both `S`) with `"Projection": { "ProjectionType": "ALL" }` — a narrower projection is
+not detected by `verify()`. A Prisma model maps the PostgreSQL columns with `@map`
+(`orderingKey String?
+@map("ordering_key")`, `createdAt BigInt @map("created_at")`, …) and
+`@@map("setu_outbox")`; the Prisma path is not driven in this repository.
+
+### The relay
+
+The relay walks the pending set in LAPS, keyset-paged on `position`, examining rows one at a time. A
+failed row, a row in retry backoff, or a row whose status write failed BLOCKS its ordering key for
+the rest of the lap, so a later row of the same key is never published first; an unkeyed row is
+never blocked. Two budgets per sweep keep a stuck key from starving others: `scanLimit` (rows
+examined, default 1000) and `publishLimit` (publishes, default 100); the lap carries across sweeps,
+so the scan moves past a blocked key's rows and reaches an unblocked key behind them.
+
+A publish failure is retried with backoff (`baseBackoffMs` doubled per attempt up to
+`maxBackoffMs`); after `maxAttempts` (default 10) the row becomes `failed`. A row that cannot be
+decoded — its envelope is not JSON, too large or carries another id; its options fail validation or
+disagree with its `orderingKey` column; or its topic is empty, over 255 bytes or carries a control
+character — is `failed` at once with `lastError: 'invalid-row'`. Either way it blocks its key until
+an operator calls `release`.
+
+**`release` carries no built-in authorization.** It is an operator capability: gate the route that
+calls it. `'retry'` returns the row to `pending` with zero attempts; `'discard'` settles it without
+publishing (and the purge deletes it later). A release takes effect at the relay's next lap.
+
+**One deadline per sweep.** `relay.sweepDeadlineMs` (default 15 000), on the monotonic clock, bounds
+everything a sweep does; each call inside it is bounded by `publishTimeoutMs` and `storeTimeoutMs`
+(default 5 000 each), and a row starts only while both still fit.
+`publishTimeoutMs + storeTimeoutMs > sweepDeadlineMs` is refused at construction. The scheduler's
+handler mutex has no renewal, so **keep `sweepDeadlineMs ≤ distributedLock.ttlMs − 10 000`**
+(defaults: 15 000 against 30 000). Raising `sweepDeadlineMs` requires raising
+`SchedulerPlugin({ distributedLock: { ttlMs } })` with it; the plugin cannot read the lock's TTL, so
+this rule is yours to keep.
+
+**One relay per cluster needs a SHARED scheduler lock.** The default `MemoryLock` is process-local,
+so with several replicas configure `SchedulerPlugin({ distributedLock: { … } })`. The plugin cannot
+tell which lock is in use; it DETECTS an overlap instead — a status write finding the row already
+`sent` by another instance — and reports `scheduled-overlap` in health. Two limits on that signal:
+with `retainSentMs: 0` a sent row is deleted at once and an overlap reads as a missing row, so
+detection is off; and on DynamoDB a GSI read is eventually consistent, so a replica can read a row
+another just sent as still pending, publish it again (a duplicate, inside the promise) and report a
+false overlap (documented from AWS's consistency model, not reproduced here). Overlaps involving a
+`dispatch()` sweep are expected and only counted.
+
+On shutdown the relay drains in an `onShutdown` hook, before any `onClose` hook closes the broker or
+the database: the jobs are removed, `dispatch()` becomes a no-op, and the in-flight sweep finishes
+within its deadline. A failure caused by the application stopping is never counted against
+`maxAttempts`.
+
+### Tenancy
+
+**Column isolation:** one `store`; `write(…, { tenantId })` records the tenant in the row, blocking
+keys include it (one tenant's poisoned row never blocks another tenant's key of the same value), and
+the relay sweeps every tenant together. **Database per tenant:** `stores: { [tenantId]: entry }`
+(typically `createDatabaseOutboxStore({ database: '<name>' })`); `write` and `release` select the
+store by `tenantId` and reject `OutboxUnknownTenantError` for an absent or unknown one. `store` and
+`stores` together are a compile error.
+
+**The store must read the database your unit of work writes to — a caller obligation the outbox
+cannot check**, because a unit of work carries no database identity. A per-tenant store for ANOTHER
+tenant, or a `createDatabaseOutboxStore({ database })` naming a different connection than the
+transaction's, puts the row in the transaction's database where the selected store's relay never
+looks: it is relayed under the wrong tenant if that database has its own relay, and never if it does
+not. The tenant is never a published header: an event that needs its tenant carries it in the
+payload.
+
+### Retention
+
+`purge()` runs on its own interval, `purgeIntervalMs` (default 60 000), never per sweep, and deletes
+`sent` and `discarded` rows whose `settledAt` is older than `retainSentMs` (default 7 days), at most
+`purgeBatch` (default 100) per status per run. Settled rows hold event payloads, which may be
+personal data — set `retainSentMs` to what your retention policy allows. `retainSentMs: 0` deletes a
+row at mark-sent (and disables overlap detection). `failed` rows are never purged: they block their
+key until released. On DynamoDB the purge is a `status`-partition query with `settledAt` as a
+filter, which READS (and bills for) every settled item it passes over; `purgeIntervalMs` bounds how
+often.
+
+### Trust
+
+**Protect the outbox table like the broker credentials.** The relay publishes whatever a row says:
+its topic, envelope and options. Rows are re-validated on every read — size, id, options, ordering
+key and topic format — and a row failing any check is `invalid-row`, never published; but a VALID
+row edited to name another topic is published there. Anyone with write access to the table can
+therefore publish under this service's broker identity, which is a stronger capability than the
+broker's own trust boundary assumes.
+
+### Health and metrics
+
+The `outbox` indicator reads the store's counts through a cached, bounded probe (5 s TTL, 2 s
+bound): `down` when the store does not answer, otherwise `degraded` with `data.reasons` from a fixed
+vocabulary, else `up`. `data` carries counts, ages in ms and the last local sweep's counts — never a
+tenant id, ordering key, topic or error text.
+
+| Reason                | Source                                                                               | Scope                    |
+| --------------------- | ------------------------------------------------------------------------------------ | ------------------------ |
+| `oldest-pending-age`  | the oldest pending row is older than `health.degradedAfterMs` (default 60 s)         | cluster-wide (the store) |
+| `failed-rows`         | the failed count is above zero                                                       | cluster-wide             |
+| `failed-scan-cap`     | the failed count reaches `relay.maxFailedScan`, so a lap's blocked set is incomplete | cluster-wide             |
+| `blocked-key-cap`     | this instance's lap overflowed its 10 000-key blocked set                            | this instance            |
+| `store-write-failing` | this instance's last sweep ended on a rejected store call                            | this instance            |
+| `scheduled-overlap`   | this instance saw two scheduled sweeps overlap inside `health.overlapWindowMs`       | this instance            |
+
+A replica that never wins the scheduler's slot never sweeps, so it reports none of the per-instance
+reasons. With `CAPABILITIES.METRICS` registered the outbox adds counters `outbox_published_total`,
+`outbox_publish_failures_total`, `outbox_poisoned_total` (labelled `topic`, capped at 100 distinct
+values then `other`) and `outbox_overlaps_total` (`origin`), and gauges `outbox_pending_rows` and
+`outbox_oldest_pending_seconds`, each labelled `outbox` with the instance's token. **The two gauges
+are written only when the health indicator reads the store** — they are as fresh as the last
+`/health` poll, and stale if nothing polls it.
+
+### Trace continuity
+
+`write` stores the active `traceparent`; the relay publishes each row inside an
+`outbox relay
+<topic>` span whose parent is that stored context, so request → relay → publish →
+receive is one trace even though the sweep runs later, from a clean context. A row with no valid
+`traceparent` — written outside a span, or edited — gets a ROOT relay span (`SpanOptions.root`),
+never the span of whatever request happened to dispatch the sweep. Both are driven against the real
+OpenTelemetry SDK in `test/integration/outbox-trace-real.test.ts`. The relay span is active only
+when a context manager is registered (`TelemetryPlugin`'s `contextPropagation`, on by default);
+without one the producer span is a root. A custom broker without the framework-header channel —
+`WorkersBroker` today — drops the producer's `traceparent`, so the consumer cannot continue the
+trace.
+
+### Cloudflare Workers
+
+Workers has no scheduler (`SchedulerPlugin` refuses to start there): set
+`relay: { schedule: false
+}`, hand `waitUntil` to `background` so a `dispatch()`ed sweep survives
+the response, and drive the relay and the purge from Cron Triggers. The outbox table is a D1 table
+through `D1Adapter`:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import {
+  createScheduledHandler,
+  D1Adapter,
+  type ID1Database,
+  type IScheduledController,
+  WorkersCron,
+} from '@setu-ts/cloudflare-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IOutbox } from '@setu-ts/messaging-plugin';
+
+// From `cloudflare:workers` in a real Worker.
+declare const env: { readonly DB: ID1Database };
+declare function waitUntil(promise: Promise<unknown>): void;
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DatabasePlugin({
+      type: 'custom',
+      adapter: new D1Adapter(env.DB, { tables: { Outbox: { table: 'setu_outbox' } } }),
+    }),
+    MessagingPlugin({
+      outbox: {
+        store: createDatabaseOutboxStore(),
+        relay: { schedule: false },
+        background: waitUntil,
+      },
+    }),
+  ],
+});
+await app.start();
+const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+
+const cron = new WorkersCron()
+  .on('* * * * *', async () => {
+    await outbox.sweep();
+  })
+  .on('0 * * * *', async () => {
+    await outbox.purge();
+  });
+
+export function scheduled(controller: IScheduledController): Promise<void> {
+  return createScheduledHandler(cron)(controller);
+}
+```
+
+Cron Triggers fire at most once a minute, so call `outbox.dispatch()` after each transaction for
+latency and keep the cron for reliability. This composition is driven at unit level (the shipped
+`D1Adapter` over real SQLite, `WorkersCron` and `createScheduledHandler`) in
+`test/integration/outbox-workers.test.ts`; it has NOT been driven on real workerd.
+
+### A custom store
+
+Any `IOutboxStore` from `@setu-ts/common` can back the outbox — an instance or a `RegistryFactory`.
+It must keep the bridge's contract: `append` writes inside the caller's scope; `scanPending` returns
+`pending` rows of its own kind in `position` order, strictly after the cursor, without filtering on
+`availableAt`; every transition reads the row and writes ONLY from the expected status, answering
+`missing` or the status it found otherwise; `purge` deletes only settled rows older than the cutoff;
+`verify` rejects when the backend cannot serve the relay; and every method rejects rather than
+throwing synchronously.
+
 ## Bridging in-process events
 
 `EventsMessagingBridge` forwards selected events from

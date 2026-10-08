@@ -138,17 +138,27 @@ integration event as a row in the SAME transaction as the business change, throu
 work, and a relay publishes the rows afterwards.
 
 ```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
 
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
+    // The relay is a scheduled job: without a scheduler (or `relay: { schedule:
+    // false }` and your own trigger) `start()` rejects OutboxRelayUnscheduledError.
+    SchedulerPlugin(),
     DatabasePlugin({ type: 'memory' }),
     MessagingPlugin({ outbox: { store: createDatabaseOutboxStore() } }),
   ],
 });
+await app.start();
 ```
+
+The write, the relay, its promise and the per-backend provisioning are documented in the
+[messaging-plugin README](https://github.com/setu-ts/setu-ts/tree/main/packages/messaging-plugin#transactional-outbox).
 
 The factory resolves `CAPABILITIES.DATABASE` in `onInit`, so the two plugins may be registered in
 either order. Options: `entity` (default `'Outbox'`) and `database`, which selects a named

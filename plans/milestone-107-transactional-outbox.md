@@ -836,6 +836,27 @@ the local PostgreSQL backend runs on, while local 5432 is occupied by an unrelat
 database. One port in CI and locally means the guarded suites run identically in both.
 `test/apps-gate.test.ts` pins the 5433 form.
 
+**Deviations recorded at implementation (stage 5, the real-backend suites and the docs).**
+
+- **One DDL fixture per schema, in `database-plugin`.** The PostgreSQL DDL is
+  `packages/database-plugin/test/fixtures/outbox-postgres.sql` (not under `messaging-plugin`, as
+  §3.14 says), with the Drizzle table over it in `outbox-postgres.ts` beside it, shared by both
+  packages' real suites so the table has one definition. A SQLite/D1 fixture, `outbox-sqlite.sql`,
+  joins it: the Workers test applies it and the README embeds it. `readme-ddl.test.ts` asserts both
+  READMEs embed the files verbatim.
+- **The Workers hybrid is driven at unit level, not on real workerd.** `apps/cloudflare` carries no
+  D1 binding, so `outbox-workers.test.ts` drives the shipped `D1Adapter` over real SQLite (the
+  `cloudflare-plugin` `SqliteD1` double), `WorkersCron` and `createScheduledHandler` with no
+  scheduler and a `waitUntil`-shaped `background`. The `apps/cloudflare` smoke row of the table
+  above is NOT delivered and stays unverified (§12).
+- **The standalone-MongoDB refusal is not repeated** in `outbox-backends-real.test.ts`:
+  `database-plugin`'s `outbox-store-real.test.ts` drives it on `MONGODB_URI`, which CI points at a
+  standalone server.
+- **The §3.13 crash rows driven on real backends** are the mid-batch stop and the publish-then-crash
+  duplicate (one case: the dying process's second status write never returns) and the rollback, on
+  PostgreSQL with both RabbitMQ 4 and Redis Streams; the remaining rows are unit-level
+  (`test/unit/outbox/outbox-crash.test.ts`, `relay-store-failure.test.ts`, `relay-budget.test.ts`).
+
 | Test file                                                                  | src covered                                          | Key assertions                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/common/test/unit/outbox-contract.test.ts`                        | `services/outbox.ts`, token                          | `IUnitOfWork` assigns to `IOutboxWriteScope` (static); token passes `createCapabilityToken`                                                                                                                                                                                                                                                                                          |
@@ -1101,3 +1122,30 @@ Each is an obligation for implementation, measured before the code relies on it.
 - **The shutdown order.** `onShutdown` before `onClose` is read from `application.ts:900-912` and
   `lifecycle-manager.ts:195-225`; the plugin test is what proves the drain finishes before the
   broker closes.
+
+**Resolved at implementation (stage 5).**
+
+- **DynamoDB GSI selection and `position > after` as a key condition — verified on DynamoDB Local.**
+  A recording client over the real SDK showed every relay page as a `Query` on the GSI with
+  `KeyConditionExpression` `status = :pending` (first page) and
+  `status = :pending AND position >
+  :after` (every later page), `kind` as the `FilterExpression`,
+  and no `Scan`; seven rows over four pages of two were published in order. Without the GSI,
+  `start()` refuses with `dynamodb-index`. GSI read consistency and the false-overlap scenario
+  remain unverified.
+- **Cosmos with the outbox in the business container — verified on the local emulator** (not CI):
+  the business write and the row commit in one batch, and business documents carrying
+  `status:
+  'pending'` and `'sent'` are not counted, transitioned or purged.
+- **The read-only probe transaction (§3.4 step 2) commits cleanly** on Drizzle/PostgreSQL, a MongoDB
+  replica set, DynamoDB Local, the Cosmos emulator and D1 (`D1Adapter` over real SQLite). Prisma is
+  not driven.
+- **`SpanOptions.root` on the real SDK — verified.** A traceless row and a row whose stored
+  `traceparent` was edited to an all-zero value, dispatched from inside a real request, each produce
+  a parentless relay span in its own trace; dropping `root` (in `TelemetryService.withSpan`, or
+  through a service that strips it) parents the row to the request.
+- **The Bigtable refusal — verified on the emulator**: `start()` rejects with reason `bigtable`
+  before any table is provisioned (the relay query is refused by the scan planner).
+- **Still unverified:** the CI replica-set step on a GitHub runner, the Workers hybrid on real
+  workerd, Prisma, MySQL DDL, a non-`C` PostgreSQL collation, and the sweep-deadline margin under a
+  loaded Redis lock.

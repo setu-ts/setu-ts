@@ -69,6 +69,56 @@ All notable changes to this project are documented here. The format follows
   the least recently used one with nothing in flight. The docs state the guarantee honestly:
   `orderingKey` decides placement, not the order handlers finish in.
 
+- **Transactional outbox (M107, `@setu-ts/messaging-plugin`).** `MessagingPlugin({ outbox })` writes
+  an integration event as a row in the SAME database transaction as the business change —
+  `IOutbox.write(uow, definition, payload, input?)` through the caller's own unit of work, with the
+  envelope, its ordering key and its deduplication id fixed at write time through one implementation
+  shared with `publishIntegrationEvent` — and relays committed rows afterwards: at least once, per
+  ordering key in write order among committed rows, and never exactly once. The relay is a scheduled
+  job (`outbox-relay`) that reads the PENDING set in keyset-paged laps rather than a watermark (a
+  row that commits behind the relay is still published — measured on real PostgreSQL), blocks a key
+  behind a failed or backed-off row, bounds each sweep with one deadline, drains on shutdown before
+  any close hook, purges settled rows on its own interval (`outbox-purge`, `retainSentMs`),
+  re-parents each publish to the trace that wrote the row, and reports an `outbox` health indicator
+  and optional metrics. `IOutbox` (`write`, `dispatch`, `sweep`, `purge`, `release`) is registered
+  under `CAPABILITIES.OUTBOX`; the options are `OutboxOptions` (`OutboxCommonOptions` plus exactly
+  one of `store` and `stores`, with `OutboxStoreEntry`), `OutboxRelayOptions` and
+  `OutboxHealthOptions`; `write` takes `OutboxWriteInput` and `sweep` resolves `OutboxSweepResult`.
+  Refusals are `OutboxEnvelopeTooLargeError` (inside the transaction, so the business write rolls
+  back), `OutboxRelayUnscheduledError` (a scheduled relay with no `CAPABILITIES.SCHEDULER`),
+  `OutboxUnknownTenantError`, `OutboxRowStateError` (`release` of a row that is not `failed`) and
+  `OutboxNotReadyError`. On Cloudflare Workers the relay runs from a Cron Trigger with
+  `relay: { schedule: false }` and `background: waitUntil`. Driven against real PostgreSQL with real
+  RabbitMQ 4 and Redis Streams (including a process dying between a publish and its status write), a
+  MongoDB replica set, DynamoDB Local, the Bigtable emulator, the Cosmos emulator, and the real
+  OpenTelemetry SDK; the Workers composition is driven at unit level, not on real workerd.
+
+- **The outbox store port in `@setu-ts/common` (M107).** `IOutboxStore` — `append`, `scanPending`,
+  `failedKeys`, `markSent`, `markFailure`, `release`, `stats`, `purge` and `verify`, every method
+  rejecting rather than throwing — with `IOutboxWriteScope` (the one-method slice of a unit of work
+  the write needs, satisfied by `database-plugin`'s `IUnitOfWork`), the row shape `OutboxRecord` and
+  `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, the `'setu-outbox'`
+  discriminator `OUTBOX_RECORD_KIND`, and the token `CAPABILITIES.OUTBOX` (`'outbox'`,
+  `outbox.<name>` for a named messaging instance). It is in `common` so a database package can
+  implement it without importing the messaging plugin.
+
+- **`createDatabaseOutboxStore` in `@setu-ts/database-plugin` (M107).** The shipped `IOutboxStore`
+  over `IDatabaseService`, as a `RegistryFactory` (`DatabaseOutboxStoreOptions`: `entity`, default
+  `'Outbox'`, and `database` for a named connection). Every row carries `kind: 'setu-outbox'` and
+  every read requires it, so an outbox sharing a table or Cosmos container with business documents
+  never touches them; transitions write only from the expected status. Its `verify()` refuses a
+  backend that cannot serve the relay with `OutboxStoreUnavailableError`, naming the reason:
+  Bigtable, a DynamoDB entity without the `{ partitionKey: 'status', sortKey: 'position' }` GSI, a
+  standalone MongoDB, or a missing or unreadable table. The DDL for PostgreSQL and SQLite/D1 is in
+  the messaging-plugin README.
+
+- **`SpanOptions.root` in `@setu-ts/common` (M107).** An optional `root: true` starts a parentless
+  span, ignoring both `parentContext` and the active span; `@setu-ts/telemetry-plugin` carries it to
+  OpenTelemetry's own `SpanOptions.root`. The outbox relay uses it for a row with no valid stored
+  `traceparent`, so a sweep dispatched from inside a request no longer attributes that row to the
+  request. An `ITelemetryService` implementation that ignores it starts the span under the active
+  span.
+
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
   error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s
@@ -491,6 +541,15 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **Two JSDoc corrections (M107).** `ITelemetryService.withSpan` in `@setu-ts/common` named a
+  `parentSpan` option; the option is `parentContext`. `MongoAdapter.beginTransaction` in
+  `@setu-ts/database-plugin` said a standalone server fails there; measured against a standalone
+  `mongo:8`, the real driver's `startTransaction()` resolves and the refusal surfaces at the FIRST
+  operation inside the transaction as the driver's own `MongoServerError` (`code: 20`,
+  `IllegalOperation`), unwrapped — `MongoTransactionUnavailableError` therefore never fires on the
+  real driver (a behaviour fix left for a `fix/…` branch). The outbox's startup check detects that
+  code itself.
 
 - **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).** The
   error said "Register a plugin that provides it, or check the token spelling" for every miss, which

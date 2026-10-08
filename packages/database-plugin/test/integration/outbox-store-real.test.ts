@@ -16,53 +16,20 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { drizzle } from 'npm:drizzle-orm@0.45.2/node-postgres';
-import { bigint, integer, pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
-import { Pool } from 'npm:pg@^8.0.0';
 import { OUTBOX_RECORD_KIND } from '@setu-ts/common';
-import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
-import {
-  createDrizzleDatabase,
-  DatabaseService,
-  OutboxStoreUnavailableError,
-} from '../../src/index.ts';
+import { DatabaseService, OutboxStoreUnavailableError } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';
 import { DatabaseOutboxStore } from '../../src/outbox/database-outbox-store.ts';
 import { describeOutboxStoreContract } from '../fixtures/outbox-store-contract.ts';
 import type { OutboxStoreUnderTest } from '../fixtures/outbox-store-contract.ts';
 import { record } from '../fixtures/outbox-store.ts';
+import { postgresOutboxSchema } from '../fixtures/outbox-postgres.ts';
 
 const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
 const skipPostgres = postgresUrl === undefined;
 const mongoUrl = Deno.env.get('MONGODB_URI');
 const skipMongo = mongoUrl === undefined;
-
-/** The Drizzle table over the committed DDL fixture's columns. */
-const outbox = pgTable('setu_outbox', {
-  id: text('id').primaryKey(),
-  kind: text('kind').notNull(),
-  topic: text('topic').notNull(),
-  envelope: text('envelope').notNull(),
-  options: text('options').notNull(),
-  orderingKey: text('ordering_key'),
-  tenantId: text('tenant_id'),
-  traceparent: text('traceparent'),
-  position: text('position').notNull(),
-  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
-  status: text('status').notNull(),
-  attempts: integer('attempts').notNull(),
-  availableAt: bigint('available_at', { mode: 'number' }).notNull(),
-  lastError: text('last_error'),
-  settledAt: bigint('settled_at', { mode: 'number' }),
-  sentBy: text('sent_by'),
-});
-
-/** A business table sharing the outbox's transaction. */
-const orders = pgTable('orders', {
-  id: text('id').primaryKey(),
-  total: integer('total').notNull(),
-});
 
 /** A Drizzle-backed service over a fresh schema, with or without the outbox table. */
 interface PostgresHarness {
@@ -72,33 +39,15 @@ interface PostgresHarness {
 
 /** Creates a throwaway schema, optionally applies the DDL fixture, and connects. */
 async function postgres(withTable: boolean): Promise<PostgresHarness> {
-  const schema = `m107_outbox_${crypto.randomUUID().replaceAll('-', '')}`;
-  const admin = new Pool({ connectionString: postgresUrl!, max: 1 });
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  await admin.end();
-  const pool = new Pool({
-    connectionString: postgresUrl!,
-    max: 4,
-    options: `-c search_path=${schema}`,
-  });
-  if (withTable) {
-    await pool.query(
-      await Deno.readTextFile(new URL('../fixtures/outbox-postgres.sql', import.meta.url)),
-    );
-    await pool.query('CREATE TABLE orders (id text PRIMARY KEY, total integer NOT NULL)');
-  }
-  const adapter = new DrizzleAdapter({
-    drizzleInstance: createDrizzleDatabase(drizzle(pool), (db, work) => db.transaction(work)),
-    drizzleTables: { Outbox: outbox, Order: orders },
-  });
-  await adapter.connect();
+  const harness = await postgresOutboxSchema(postgresUrl!, withTable);
+  await harness.adapter.connect();
+  const adapter = harness.adapter;
   const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'drizzle');
   return {
     service,
     dispose: async () => {
       await adapter.disconnect();
-      await pool.query(`DROP SCHEMA ${schema} CASCADE`);
-      await pool.end();
+      await harness.dispose();
     },
   };
 }

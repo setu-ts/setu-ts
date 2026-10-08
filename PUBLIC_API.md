@@ -6208,7 +6208,42 @@ value out of range, `NaN` or a fraction throws a `RangeError` naming the option,
   `outbox_oldest_pending_seconds` (`outbox`), written from each fresh store read the health
   indicator makes. `topic` comes only from a decoded row and is capped at 100 distinct values per
   instance, then `other`; an undecodable poisoned row is labelled `invalid-row`. Every write is
-  guarded — a failing metrics backend never reaches the relay.
+  guarded — a failing metrics backend never reaches the relay. The two gauges are written ONLY when
+  the health indicator reads the store, so they are as fresh as the last `/health` poll.
+- **Ordering limits.** The relay reads the PENDING set, never a watermark: a row whose transaction
+  commits after a later row of its key was published is still published (measured on real
+  PostgreSQL), but after that later row — order holds only among rows of one key that commit in
+  write order. `position` is taken from each writer's clock, clamped per process only, so across
+  replicas order also assumes the writers' clocks agree.
+- **Overlap detection.** The plugin cannot read which lock the scheduler uses. A status write that
+  finds its row already `sent` by ANOTHER instance is an overlap; two scheduled sweeps overlapping
+  degrade health (`scheduled-overlap`), one involving a `dispatch()` sweep is only counted.
+  `retainSentMs: 0` deletes a row at mark-sent and so disables detection; on DynamoDB a stale GSI
+  read can report a false overlap (from AWS's consistency model, not reproduced).
+- **Retention.** `purge()` deletes `sent` and `discarded` rows whose `settledAt` is older than
+  `retainSentMs` (default 7 days), at most `purgeBatch` per status per store; `failed` rows are
+  never purged. `retainSentMs: 0` deletes at mark-sent.
+- **`release` has no built-in authorization.** It is an operator capability; the application gates
+  the route that calls it. It takes effect at the relay's next lap.
+- **Tenancy.** `write(…, { tenantId })` records the tenant (column isolation, one `store`) or
+  selects the store (`stores`, database per tenant). The selected store must read the database the
+  caller's unit of work writes to — a caller obligation nothing can check, because a unit of work
+  carries no database identity; a mismatched row is relayed under the wrong tenant, or never. The
+  tenant is never a published header.
+- **Trust.** A row is re-validated on every read (size, id, options, ordering-key agreement, topic
+  format) and a failing row is `failed` with `lastError: 'invalid-row'`, never published; but a
+  VALID row's topic is published as stored. Protect the outbox table like the broker credentials.
+- **Trace.** `write` stores the active `traceparent`; each row is published inside an
+  `outbox relay <topic>` span parented to it, so request → relay → publish → receive is one trace. A
+  row without a valid `traceparent` gets `SpanOptions.root`, never the span of the request that
+  dispatched the sweep. A custom broker without the framework-header channel (`WorkersBroker`) drops
+  the producer's `traceparent`.
+- **Cloudflare Workers.** `relay: { schedule: false }`, `background: waitUntil`, and Cron Triggers
+  on `WorkersCron` calling `outbox.sweep()` and `outbox.purge()`, with the outbox in a D1 table
+  through `D1Adapter`. Driven at unit level (`D1Adapter` over real SQLite); not on real workerd.
+- **Backends.** The per-backend requirements are under
+  [Transactional outbox store](#transactional-outbox-store-m107) in the database plugin; the
+  messaging plugin README carries the DDL (PostgreSQL, SQLite/D1) and the adapter mappings.
 
 ## Queue (`@setu-ts/queue-plugin`)
 
