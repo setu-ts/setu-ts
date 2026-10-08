@@ -8,6 +8,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { spy } from '@std/testing/mock';
 import type { OutboxRecord } from '@setu-ts/common';
 import {
   MAX_PUBLISH_HEADER_NAME_BYTES,
@@ -173,17 +174,30 @@ describe('decodeOutboxRecord', () => {
   });
 
   it('refuses options over the stored bound before parsing them', () => {
-    // Not JSON at all: refused by LENGTH, so the parse is never paid.
-    const options = '['.repeat(MAX_STORED_OPTIONS_LENGTH + 1);
-    expect(decodeOutboxRecord({ ...valid, options }, 1024)).toEqual({
-      ok: false,
-      cause: 'options-too-large',
-    });
-    // One code unit shorter is parsed, and refused for what it is.
-    expect(decodeOutboxRecord({ ...valid, options: options.slice(1) }, 1024)).toEqual({
-      ok: false,
-      cause: 'options-invalid',
-    });
+    // VALID options padded with JSON whitespace: a parse would accept them and
+    // the row would decode. Only a length check that runs BEFORE the parse
+    // refuses them, so this fails if the check moves after it (audit L1).
+    const padded = (length: number): string => {
+      const head = '{"orderingKey":"k","deduplicationId":"e-1"';
+      return head + ' '.repeat(length - head.length - 1) + '}';
+    };
+    const over = padded(MAX_STORED_OPTIONS_LENGTH + 1);
+    expect(JSON.parse(over)).toEqual({ orderingKey: 'k', deduplicationId: 'e-1' });
+    // The cost the bound exists to avoid is the parse, so the test watches it:
+    // the cause alone is the same wherever the check sits.
+    const parse = spy(JSON, 'parse');
+    let result: ReturnType<typeof decodeOutboxRecord>;
+    try {
+      result = decodeOutboxRecord({ ...valid, options: over }, 1024);
+    } finally {
+      parse.restore();
+    }
+    expect(result).toEqual({ ok: false, cause: 'options-too-large' });
+    expect(parse.calls.filter((call) => call.args[0] === over)).toEqual([]);
+    // At the bound the same text is parsed and decodes: the bound is exact.
+    const at = padded(MAX_STORED_OPTIONS_LENGTH);
+    expect(at.length).toBe(MAX_STORED_OPTIONS_LENGTH);
+    expect(decodeOutboxRecord({ ...valid, options: at }, 1024).ok).toBe(true);
   });
 
   it('accepts a 255-byte topic', () => {
