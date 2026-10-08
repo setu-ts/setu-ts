@@ -36,8 +36,18 @@ function recordingStore(inner: IIdempotencyStore) {
   return { store, claims };
 }
 
-/** Lets a pending microtask chain settle. */
-const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Polls until `predicate` holds, or fails the test rather than hanging. The
+ * behaviour chain hashes through `crypto.subtle`, which can outlast a single
+ * macrotask on a loaded machine.
+ */
+async function until(predicate: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
 
 describe('crash redelivery (M109a §3.7)', () => {
   it('refuses inside the lease, takes over after it, and loses the crashed complete', async () => {
@@ -69,7 +79,7 @@ describe('crash redelivery (M109a §3.7)', () => {
     // Holder A claims, then crashes before its side effect: `next` never settles.
     const holderA = behavior.handle(envelope, () => new Promise<void>(() => {}));
     void holderA;
-    await flush();
+    await until(() => claims.length === 1, 'holder A to reach the store');
     expect(claims).toHaveLength(1);
     const tokenA = claims[0].token;
 

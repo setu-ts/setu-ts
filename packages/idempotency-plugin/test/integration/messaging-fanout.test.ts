@@ -15,8 +15,25 @@ import { IdempotencyPlugin, idempotentIngress } from '../../src/index.ts';
 
 const TOPIC = 'order.placed.v1';
 
-/** Lets the in-memory broker finish dispatching to its subscribers. */
-const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Polls until `predicate` holds, or fails the test rather than hanging. The
+ * in-memory broker dispatches through an asynchronous behaviour chain that
+ * involves `crypto.subtle`, so a single macrotask is not enough on a loaded
+ * machine — a fixed `setTimeout(0)` flaked under the full suite.
+ */
+async function until(predicate: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/**
+ * Waits for dispatches that must NOT happen — the case a positive `until`
+ * cannot express: a bounded quiet period long enough for the chain to run.
+ */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 25));
 
 /** Builds an app with the behaviour on the listed topic plus three subscribers. */
 async function buildApp() {
@@ -51,11 +68,14 @@ describe('idempotentIngress fan-out on a real kernel (M109a §3.7, §3.19)', () 
     const { app, broker, counts } = await buildApp();
     try {
       await broker.publish(TOPIC, { n: 1 }, { deduplicationId: 'evt-1' });
-      await flush();
+      await until(
+        () => counts.billing === 1 && counts.shipping === 1 && counts.plain === 1,
+        'the first delivery to the three listed subscribers',
+      );
       expect(counts).toMatchObject({ billing: 1, shipping: 1, plain: 1 });
 
       await broker.publish(TOPIC, { n: 1 }, { deduplicationId: 'evt-1' });
-      await flush();
+      await settle();
       expect(counts).toMatchObject({ billing: 1, shipping: 1, plain: 1 });
     } finally {
       await app.stop();
@@ -67,7 +87,7 @@ describe('idempotentIngress fan-out on a real kernel (M109a §3.7, §3.19)', () 
     try {
       await broker.publish('backplane', { frame: 1 });
       await broker.publish('backplane', { frame: 2 });
-      await flush();
+      await until(() => counts.backplane === 2, 'both unlisted-topic deliveries');
       expect(counts.backplane).toBe(2);
     } finally {
       await app.stop();
@@ -80,7 +100,7 @@ describe('idempotentIngress fan-out on a real kernel (M109a §3.7, §3.19)', () 
       // `publish` without a deduplication id surfaces the refusal on the
       // broker's own failure path; the handler must not run.
       await broker.publish(TOPIC, { n: 9 }).catch(() => {});
-      await flush();
+      await settle();
       expect(counts).toMatchObject({ billing: 0, shipping: 0, plain: 0 });
     } finally {
       await app.stop();
