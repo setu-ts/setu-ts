@@ -336,3 +336,28 @@ describe('createHttpMiddleware — failure classification (M109a §3.8)', () => 
     expect(warnings).toContain('idempotency claim took over a lapsed lease');
   });
 });
+
+describe('createHttpMiddleware — the principal and tenant scope the derived key (M109a §3.11, §10 D1)', () => {
+  /**
+   * The security obligation the plan's negative control 1 names: dropping the
+   * principal (or the tenant) from the key segments makes one caller's stored
+   * response reachable by another. Asserted on the key the store is asked about,
+   * because that is the whole isolation on a single-process memory store.
+   */
+  it('derives a distinct store key for two principals and for two tenants', async () => {
+    const alice = recordingStore({ outcome: 'claimed', takeover: false });
+    const bob = recordingStore({ outcome: 'claimed', takeover: false });
+    const aliceOtherTenant = recordingStore({ outcome: 'claimed', takeover: false });
+
+    await middleware(alice.store)(makeCtx({ user: { id: 'alice' } }).ctx, ok);
+    await middleware(bob.store)(makeCtx({ user: { id: 'bob' } }).ctx, ok);
+    await middleware(aliceOtherTenant.store)(
+      makeCtx({ user: { id: 'alice' }, tenant: { id: 'acme' } }).ctx,
+      ok,
+    );
+
+    const keyOf = (calls: { claim: unknown[] }): string => (calls.claim[0] as { key: string }).key;
+    expect(keyOf(alice.calls)).not.toBe(keyOf(bob.calls));
+    expect(keyOf(alice.calls)).not.toBe(keyOf(aliceOtherTenant.calls));
+  });
+});
