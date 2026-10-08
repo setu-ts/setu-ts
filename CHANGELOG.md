@@ -524,6 +524,15 @@ All notable changes to this project are documented here. The format follows
   not threads: on Deno a timed-out CPU-bound task keeps running, and can keep writing to a
   `SharedArrayBuffer`, after its promise rejects.
 
+- **Idle worker crashes are reported (M45c, #433).** A worker error that settles no task (an idle
+  worker crashing, or a startup crash with nothing queued) is now logged by the worker-pool plugin
+  as a warning naming the task module; before, it rejected nothing and was visible nowhere.
+
+- **Prometheus label values cannot split exposition lines (metrics-plugin, M45c, #433).** Control
+  characters the 0.0.4 text format cannot escape (carriage return, NUL, the rest of C0 and DEL) are
+  replaced with U+FFFD in label values and HELP text. A worker-pool `task_module` label carrying a
+  raw CR or NUL passed straight through before.
+
 - **A Deno task module that throws at import no longer kills the host process (runtime, M45c,
   #433).** The web-worker host now cancels the worker `error` event after reporting it to the pool.
   Without that, Deno re-raised it in the parent as `Unhandled error in child worker` and the

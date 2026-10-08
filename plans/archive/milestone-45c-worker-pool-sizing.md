@@ -560,3 +560,11 @@ timeout option validated and used from one snapshot; refused values rendered bou
 the upgrade-guide warning wording) are **not re-audited**. Each carries a regression test and a
 negative control observed failing, and the full suite, per-file coverage, `check:apps` and the
 publish gates pass on the final commit.
+
+### 12.6 Pre-existing gaps folded in after the PR opened, 2026-10-09
+
+At the maintainer's direction two pre-existing items the audits observed are fixed in this PR: OBS-2
+(a raw CR/NUL in a `task_module` label reached the Prometheus output; the metrics renderer now
+replaces control characters the format cannot escape with U+FFFD) and the round-3 observation that
+an idle worker's error is reported nowhere (the pool now logs any worker error that settles no task
+through the plugin logger). Both carry tests and observed negative controls; neither is re-audited.

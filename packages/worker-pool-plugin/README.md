@@ -202,7 +202,9 @@ A worker that does not signal ready within `startupTimeoutMs` (default 10 s, app
 that module rejects with `WorkerTaskError` (`remoteName: 'WorkerStartupTimeout'`). When a queued
 task expires while another module has work and no worker, the expiring module yields a starting
 worker to it, so a module that never becomes ready cannot starve the others under steady demand.
-Callbacks from removed slots are ignored. Termination throws/rejections are contained; shutdown
+Callbacks from removed slots are ignored. A worker error that settles no task (an idle worker
+crashing, or a startup crash with nothing queued) is logged as a warning with its `taskModule`,
+since it rejects nothing a caller could see. Termination throws/rejections are contained; shutdown
 waits at most 1,000 ms per termination, including already-retired slots. This bounds waiting, not
 physical thread exit: a failing host can leave a worker alive. Module metadata remains retained for
 the service lifetime. `NaN` or `Infinity` legacy default/pool sizes contribute zero to the derived

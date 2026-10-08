@@ -5,6 +5,11 @@ serves the scrape endpoint at `/metrics`.
 
 Zero dependencies — the Prometheus text-format 0.0.4 renderer is implemented in this package.
 
+Label values are escaped per text format 0.0.4 (backslash, double quote, line feed). Any other
+control character (carriage return, NUL, the rest of C0 and DEL) has no escape in that format and is
+replaced with U+FFFD in label values and HELP text, so an application-supplied value cannot split an
+exposition line.
+
 ## Installation
 
 ```typescript
