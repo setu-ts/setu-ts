@@ -458,7 +458,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR pending).**
+- **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).**
   The error said "Register a plugin that provides it, or check the token spelling" for every miss,
   which is wrong in the two commonest cases. Before `start()`, the plugin is listed but has not run,
   so the error now says the application has not started and to resolve the service in a handler, in
