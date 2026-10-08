@@ -48,7 +48,16 @@ export function IdempotencyPlugin(options?: IdempotencyPluginOptions): IPlugin {
         logger,
       });
       const store = await resolveStore(options?.store, reporter, logger);
-      await store.connect(ctx.runtime);
+      try {
+        await store.connect(ctx.runtime);
+      } catch (error) {
+        // No close hook exists yet, so a store that built its own client
+        // (an unreachable Redis, a failed `CONFIG` probe) would otherwise keep
+        // reconnecting after `register()` failed. The connect error is the one
+        // the caller needs; a disconnect failure on top of it is dropped.
+        await store.disconnect?.().catch(() => {});
+        throw error;
+      }
       state = 'connected';
       // Registered immediately after connect, so a store whose indicator
       // registration throws still gets its `disconnect`.

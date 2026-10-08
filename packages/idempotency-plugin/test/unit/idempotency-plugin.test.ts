@@ -97,6 +97,40 @@ describe('IdempotencyPlugin (M109a §3.14)', () => {
     expect(disconnected).toBe(true);
   });
 
+  it('disconnects the store when connect fails, and surfaces the connect error', async () => {
+    let disconnects = 0;
+    const store = {
+      name: 'custom',
+      connect: () => Promise.reject(new Error('connect refused')),
+      disconnect: () => {
+        disconnects += 1;
+        return Promise.reject(new Error('quit failed'));
+      },
+      claim: () => Promise.resolve({ outcome: 'claimed' as const, takeover: false }),
+      complete: () => Promise.resolve('settled' as const),
+      release: () => Promise.resolve('lost' as const),
+    };
+    const { ctx, registered, indicators } = fakeContext();
+    await expect(IdempotencyPlugin({ store: { type: 'custom', store } }).register(ctx)).rejects
+      .toThrow('connect refused');
+    expect(disconnects).toBe(1);
+    expect(registered.has(CAPABILITIES.IDEMPOTENCY)).toBe(false);
+    expect(indicators.has('idempotency')).toBe(false);
+  });
+
+  it('propagates a connect failure from a store with no disconnect', async () => {
+    const store = {
+      name: 'custom',
+      connect: () => Promise.reject(new Error('connect refused')),
+      claim: () => Promise.resolve({ outcome: 'claimed' as const, takeover: false }),
+      complete: () => Promise.resolve('settled' as const),
+      release: () => Promise.resolve('lost' as const),
+    };
+    const { ctx } = fakeContext();
+    await expect(IdempotencyPlugin({ store: { type: 'custom', store } }).register(ctx)).rejects
+      .toThrow('connect refused');
+  });
+
   it('registers a service that builds a middleware and a behavior', async () => {
     const { ctx, registered } = fakeContext();
     await IdempotencyPlugin().register(ctx);
