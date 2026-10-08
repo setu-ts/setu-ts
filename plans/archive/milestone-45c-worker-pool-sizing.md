@@ -526,3 +526,16 @@ positive integer no greater than 2 147 483 647. Construction throws `RangeError`
 per-call value rejects that `run()` before admission and is not counted as a pool rejection. This
 refuses previously accepted values (`NaN`, negatives, fractions, overflow), recorded as breaking in
 CHANGELOG and docs/upgrading.md.
+
+### 12.3 Maintainer decision — finding 1, never-settling half (accepted), 2026-10-09
+
+**Accepted by the maintainer.** Under a finite `maxWorkers`, a task the application allowed to run
+indefinitely (`taskTimeoutMs: 0`, or a per-call `timeoutMs: 0`) keeps its worker slot until it
+settles or the process restarts, and once every slot is held that way other task modules wait. The
+bound is kept rather than exceeded, because `maxWorkers` exists to bound memory and exceeding it
+would break that guarantee in exactly the misbehaving case. Mitigations in place: `register()` warns
+when `taskTimeoutMs` is `0` under a finite `maxWorkers`; the README, PUBLIC_API and
+docs/upgrading.md state the risk, including that a per-call `timeoutMs: 0` gets no warning; the
+remedies are a task timeout, or `maxWorkers: Infinity` to opt out of the bound. Refusing untimed
+tasks under a finite bound was rejected because it breaks valid single-module configurations. This
+item is a recorded decision, not an open finding, and the PR body restates it.
