@@ -13144,11 +13144,17 @@ hand-rolls the same check, usually against the wrong key.
   and stable through the outbox, which is why it is the key.
 - **Handler-level, in the consumer's transaction.** `IngressContext` is readonly with no state bag,
   and handlers take `(message, metadata)`, so an ingress behaviour cannot hand a transaction to the
-  handler. The API is on `onIntegrationEvent`, for example
-  `onIntegrationEvent(definition, { inbox: { consumer: 'payroll' } }, async (event, uow) => …)`: the
-  inbox record is inserted through the same `IUnitOfWork` as the handler's writes, a
-  `DuplicateKeyError` (#420) means "already handled" and the delivery is acknowledged without
-  running the handler, and a handler failure rolls back both.
+  handler. The API is on `onIntegrationEvent`, whose released shape is
+  `(definition, handler, options?)` with the handler called as `(payload, envelope, metadata)`. The
+  inbox arrives through the options argument, e.g.
+  `onIntegrationEvent(definition, handler, { inbox: { consumer: 'payroll' } })`. The inbox record is
+  inserted through the same `IUnitOfWork` as the handler's writes, a `DuplicateKeyError` (#420)
+  means "already handled" and the delivery is acknowledged without running the handler, and a
+  handler failure rolls back both. The released handler receives no transaction, so the handler must
+  be given the `IUnitOfWork` somehow, and the plan decides how. Two options: an additive fourth
+  handler argument, used only with `inbox`, which keeps every existing handler assignable; or a
+  separate `IntegrationEventInboxHandler` type selected by the `inbox` option. Either way, an
+  existing call must not change meaning, so the plan states the choice and its compatibility (§9.2).
 - **Effects outside the database are a stated choice, not a guarantee.** Sending an email or calling
   a provider cannot join the transaction; the README names the three options — record before (at
   most once), record after (at least once), or forward a derived key the provider de-duplicates
