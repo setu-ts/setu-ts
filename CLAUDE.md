@@ -2697,7 +2697,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and continue scheduling the remaining queue, and shutdown refuses new work before closing the
   budget. Security follow-up reclaims excess startup slots, contains termination failures with a
   one-second cleanup deadline, ignores stale callbacks and isolates NaN legacy sizing contributions.
-  The example now binds loopback with scoped permissions. The `apps/worker-pool` smoke proves
+  The example now binds loopback with scoped permissions. A second independent audit failed the
+  branch on five findings; the fix adds `startupTimeoutMs` (a never-ready worker no longer holds a
+  shared slot, even with task timeouts off), yields a starting worker to a starved module, charges a
+  slot only after listeners attach, documents that the bound counts slots rather than threads on
+  Deno, and stops a Deno task module that throws at import from killing the host process
+  (pre-existing, folded in at the maintainer's direction). The `apps/worker-pool` smoke proves
   event-loop progress, fairness under one slot, shared-buffer writes and health data. All ten
   negative controls failed and were reverted; full tests and coverage passed, with every measured
   plugin source file above 90% on branch, function and line. Sizing and migration docs ship with the

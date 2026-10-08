@@ -486,3 +486,24 @@ Regressions cover starting-slot recovery/partial demand, both termination failur
 bounded shutdown including retired slots, duplicate/late callbacks, both sizing entry points,
 real-worker recovery and scoped example execution. All original obligations remain required for a
 fresh committed-tree re-audit; no finding is accepted or deferred.
+
+## 12. Second audit round — findings and fixes, 2026-10-09
+
+A fresh auditor (independent context, `.verify/milestone-45c-security-audit.md`) audited 90827f35
+and returned **failed** with five findings. The maintainer directed: fix all, and fold the
+pre-existing OBS-1 into this milestone.
+
+| Finding                                                                                         | Resolution                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 High — with `taskTimeoutMs: 0`, one never-ready worker or one never-settling task held a slot | Never-ready half: new `startupTimeoutMs` (default 10 000, not disableable), armed at spawn, cleared on ready/removal; expiry fails the oldest task and returns the slot. Never-settling half: a trade-off (cap vs progress); `register()` warns and docs state it. |
+| 2 Medium — steady demand on a never-ready module starved others                                 | Expiring queued task yields one starting worker when another module is starved, after leaving the waiter queue (as `retireIdle` does) so the yielded slot cannot be taken back.                                                                                    |
+| 3 Medium — SAB guidance wrong on Deno                                                           | Docs: settlement does not mean the worker stopped writing; do not reuse a buffer after a rejection.                                                                                                                                                                |
+| 4 Low — "a retired thread may take a moment"                                                    | Docs: the bound counts slots, not threads or memory; on Deno a timed-out CPU-bound task keeps running.                                                                                                                                                             |
+| 5 Low — listener registration throw leaked a slot                                               | Slot charged only after listeners attach; the unwired handle is terminated.                                                                                                                                                                                        |
+| OBS-1 (pre-existing, runtime) — import-time throw killed the Deno host                          | `createWebWorkerHost` calls `preventDefault()` on the worker error event after reporting it.                                                                                                                                                                       |
+| OBS-3/4/6                                                                                       | Options read once into a validated snapshot; refusals render with `String()` so a Symbol gets the documented `RangeError`; non-finite legacy sizes contribute 0.                                                                                                   |
+
+Not changed: OBS-2 (metrics label characters, metrics-plugin, pre-existing) and OBS-5 (per-module
+metadata retained for the service lifetime, already documented). The finding-1 never-settling half
+is a maintainer decision to record in the PR: the bound is kept, so untimed tasks can hold every
+slot. A fresh re-audit of the fix commit is required before merge.

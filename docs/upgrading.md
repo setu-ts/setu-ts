@@ -22,13 +22,23 @@ restore the previous unbounded sum. Invalid explicit bounds throw `RangeError` a
 timeouts include time waiting for budget. `/health` now reports `budget: { maxWorkers, workers }`
 (`null` for the unbounded limit).
 
-Pending-task expiry reclaims excess starting slots, so a module that never signals ready cannot keep
-another module budget-blocked after its queued deadlines expire. Callbacks from removed slots are
-ignored. Termination throws/rejections are contained; shutdown waits at most 1,000 ms per
-termination, including already-retired slots. This bounds waiting, not physical thread exit: a
-failing host can leave a worker alive. Module metadata remains retained for the service lifetime.
-NaN legacy default/pool sizes contribute zero to the derived budget; their per-pool behavior remains
-unchanged, while independently valid configured modules remain usable.
+A worker that does not signal ready within `startupTimeoutMs` (default 10 s, applied even with
+`taskTimeoutMs: 0`) is terminated, its slot returns to the budget, and the oldest waiting task for
+that module rejects with `WorkerTaskError` (`remoteName: 'WorkerStartupTimeout'`). When a queued
+task expires while another module has work and no worker, the expiring module yields a starting
+worker to it, so a module that never becomes ready cannot starve the others under steady demand.
+Callbacks from removed slots are ignored. Termination throws/rejections are contained; shutdown
+waits at most 1,000 ms per termination, including already-retired slots. This bounds waiting, not
+physical thread exit: a failing host can leave a worker alive. Module metadata remains retained for
+the service lifetime. `NaN` or `Infinity` legacy default/pool sizes contribute zero to the derived
+budget; their per-pool behavior remains unchanged, while independently valid configured modules
+remain usable.
+
+With `taskTimeoutMs: 0` under a finite `maxWorkers`, a task that never settles holds its slot until
+restart and can starve other modules; keep a task timeout on modules that share the budget, or pass
+`maxWorkers: Infinity`. `register()` logs a warning for that configuration. On Deno a timed-out
+CPU-bound task keeps running after its slot is released, and may keep writing to a
+`SharedArrayBuffer` after its promise rejected: do not reuse such a buffer.
 
 The worker-pool example starts on 127.0.0.1 with scoped Deno permissions. Remote health exposure
 requires an explicit application deployment decision.

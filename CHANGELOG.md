@@ -502,6 +502,26 @@ All notable changes to this project are documented here. The format follows
   task queued after its caller rejected. Remaining queued tasks continue scheduling after a failed
   spawn, including from a budget hand-over. Hand-over continuations cannot leak the spawn error.
 
+- **Worker slots held by workers that never start (M45c, PR pending).** A spawned worker that does
+  not signal ready within the new `WorkerPoolPluginOptions.startupTimeoutMs` (default 10 000 ms,
+  applied even with `taskTimeoutMs: 0`, and not disableable) is terminated, its slot returns to the
+  shared budget, and the oldest waiting task for that module rejects with `WorkerTaskError`
+  (`remoteName: 'WorkerStartupTimeout'`). Before this, one call to a module that never became ready
+  held a shared slot until restart with task timeouts off, and under steady demand starved every
+  other module even with them on; a queued task expiring now also yields a starting worker to a
+  module with no worker. A worker whose listeners fail to attach is no longer charged a slot.
+  `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers`, because a task that
+  never settles keeps its slot. Options are read once, a Symbol `maxWorkers` is refused with the
+  documented `RangeError`, and an `Infinity` legacy pool size no longer makes the derived default
+  unbounded. The sizing documentation now states that the bound counts slots, not threads: on Deno a
+  timed-out CPU-bound task keeps running, and can keep writing to a `SharedArrayBuffer`, after its
+  promise rejects.
+
+- **A Deno task module that throws at import no longer kills the host process (runtime, M45c, PR
+  pending).** The web-worker host now cancels the worker `error` event after reporting it to the
+  pool. Without that, Deno re-raised it in the parent as `Unhandled error in child worker` and the
+  application exited.
+
 - **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).** The
   error said "Register a plugin that provides it, or check the token spelling" for every miss, which
   is wrong in the two commonest cases. Before `start()`, the plugin is listed but has not run, so

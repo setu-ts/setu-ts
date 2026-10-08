@@ -85,14 +85,15 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
 
 ## Options
 
-| Option            | Type                              | Default                  | Description                                                      |
-| ----------------- | --------------------------------- | ------------------------ | ---------------------------------------------------------------- |
-| `maxWorkers`      | `number`                          | See sizing below         | Total live worker slots across all modules; `Infinity` disables. |
-| `defaultPoolSize` | `number`                          | `availableParallelism()` | Workers per pool.                                                |
-| `maxQueue`        | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                |
-| `taskTimeoutMs`   | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies.           |
-| `pools`           | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.               |
-| `host`            | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.               |
+| Option             | Type                              | Default                  | Description                                                        |
+| ------------------ | --------------------------------- | ------------------------ | ------------------------------------------------------------------ |
+| `maxWorkers`       | `number`                          | See sizing below         | Total live worker slots across all modules; `Infinity` disables.   |
+| `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready; cannot be disabled. |
+| `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                  |
+| `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                  |
+| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies.             |
+| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                 |
+| `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                 |
 
 ## Semantics
 
@@ -150,35 +151,54 @@ another module has no slot. Timeouts include time waiting for this budget. Rotat
 spawn; size `maxWorkers` at least as large as the number of task modules active concurrently when
 that cost matters. Workers stay resident between bursts; there is no timed idle reaping.
 
+**Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, a task that never settles keeps its
+worker. Once every slot is held that way, other task modules wait (until their own timeouts, or
+forever if theirs are disabled too) until the process restarts. The pool does not reclaim a running
+task the application allowed to run indefinitely; `register()` warns when `taskTimeoutMs` is `0`
+under a finite `maxWorkers`. Keep a timeout on modules that share the budget, or opt out of the
+bound with `maxWorkers: Infinity`.
+
 **Containers:** CPU limits lower `availableParallelism()` (measured on Deno and Node with
 `--cpus=2`); pods without CPU limits see all node cores. Set an explicit bound for the pod's memory
 budget. A trivial module measured about 12 MB per worker on Deno, 13.5 MB on Node and 1.5 MB on Bun;
-imports and task data increase that cost. The bound counts pool slots: a retired OS thread may take
-a moment to finish terminating.
+imports and task data increase that cost. **The bound counts pool slots, not threads or memory.** A
+worker the pool terminates (on a timeout, a startup deadline or a hand-over) leaves the budget at
+once, but on Deno `Worker.terminate()` does not stop a thread that never yields: a timed-out
+CPU-bound task keeps its thread, memory and CPU until its code returns. Measured on Deno with
+`maxWorkers: 1`: five timed-out busy-loop tasks left 0 slots and four extra threads at about 500%
+CPU. Node and Bun were not measured. Treat a task timeout as a correctness bound rather than a
+resource bound for CPU-bound code that can loop, and have long tasks check a deadline and return.
 
 **Task granularity:** a measured trivial round trip takes about 7–17 µs. Batch very small work so
 serialization and scheduling do not cost more than the computation.
 
 **SharedArrayBuffer:** structured clone shares it instead of copying it. A buffer nested in the
-input can be written by the worker and read by its caller after the promise settles. A timed-out
-worker killed mid-write can leave partial data; settlement does not imply a successful full write.
-Do not touch the buffer until the promise settles unless coordinating concurrent access with
-Atomics. SAB-backed views are refused by `BodyInit` and some `SubtleCrypto` operations: copy into an
-ordinary ArrayBuffer-backed view first. An ordinary `ArrayBuffer` input is copied, so the caller's
-original stays unchanged.
+input can be written by the worker and read by its caller after the promise settles. A task's
+settlement does not mean its worker has stopped using the buffer: on Deno a task that times out
+keeps running, and keeps writing, after its promise has rejected (measured: 50 of 200 bytes written
+at the rejection, all 200 a second later). After a successful result the worker is done with the
+buffer. After a rejection, a timeout especially, treat the buffer as still shared and do not reuse
+it. While a task runs, do not touch the buffer unless coordinating access with Atomics. SAB-backed
+views are refused by `BodyInit` and some `SubtleCrypto` operations: copy into an ordinary
+ArrayBuffer-backed view first. An ordinary `ArrayBuffer` input is copied, so the caller's original
+stays unchanged.
 
 See [`apps/worker-pool`](../../apps/worker-pool) for a runnable off-thread, fairness and
 shared-memory smoke check. A synchronous spawn failure rejects the oldest pending task as a crash,
 clears its timer, and holds no worker budget. The pool continues scheduling the remaining queue;
 repeated spawn failures settle one task per attempt rather than leaving queued tasks stranded.
 
-Pending-task expiry reclaims excess starting slots, so a module that never signals ready cannot keep
-another module budget-blocked after its queued deadlines expire. Callbacks from removed slots are
-ignored. Termination throws/rejections are contained; shutdown waits at most 1,000 ms per
-termination, including already-retired slots. This bounds waiting, not physical thread exit: a
-failing host can leave a worker alive. Module metadata remains retained for the service lifetime.
-NaN legacy default/pool sizes contribute zero to the derived budget; their per-pool behavior remains
-unchanged, while independently valid configured modules remain usable.
+A worker that does not signal ready within `startupTimeoutMs` (default 10 s, applied even with
+`taskTimeoutMs: 0`) is terminated, its slot returns to the budget, and the oldest waiting task for
+that module rejects with `WorkerTaskError` (`remoteName: 'WorkerStartupTimeout'`). When a queued
+task expires while another module has work and no worker, the expiring module yields a starting
+worker to it, so a module that never becomes ready cannot starve the others under steady demand.
+Callbacks from removed slots are ignored. Termination throws/rejections are contained; shutdown
+waits at most 1,000 ms per termination, including already-retired slots. This bounds waiting, not
+physical thread exit: a failing host can leave a worker alive. Module metadata remains retained for
+the service lifetime. `NaN` or `Infinity` legacy default/pool sizes contribute zero to the derived
+budget; their per-pool behavior remains unchanged, while independently valid configured modules
+remain usable.
 
 ## Errors
 
@@ -194,7 +214,8 @@ Registers a `worker-pool` health indicator reporting `{ available, exitDetection
 where `pools` is one `{ taskModule, workers, busy, queued, completed, failed }` snapshot per pool.
 
 `budget` is `{ maxWorkers, workers }`: the resolved bound (`null` for `Infinity`) and the sum of all
-pools' worker slots. It counts slots; a terminated OS thread may take a moment to exit.
+pools' worker slots. It counts slots, not threads: on Deno a timed-out CPU-bound worker can keep
+running after its slot is released (see Sizing).
 
 The status derives from `available`:
 
