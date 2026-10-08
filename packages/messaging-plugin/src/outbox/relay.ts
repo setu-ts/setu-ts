@@ -138,6 +138,13 @@ export interface RelayContext {
  */
 export interface LapHolder {
   lap: OutboxLap | undefined;
+  /**
+   * Whether the most recently COMPLETED lap overflowed its blocked set. A lap
+   * that overflows usually ends in the same sweep that overflowed it, which
+   * clears {@linkcode lap} before any health read; this keeps the signal until
+   * a later lap completes without overflowing.
+   */
+  lastLapOverflowed: boolean;
 }
 
 /** An expired relay or purge call: a failure, after which the sweep (or purge) ends. */
@@ -440,6 +447,7 @@ export async function sweepStore(
     }
     if (page.length < limit) {
       // Every pending row has been examined: the next sweep starts a new lap.
+      holder.lastLapOverflowed = lap.blockedOverflow;
       holder.lap = undefined;
       return 'lap-complete';
     }

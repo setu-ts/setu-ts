@@ -63,7 +63,7 @@ export interface OutboxServiceDeps {
  * @internal
  */
 export interface OutboxInstanceSignals {
-  /** The current lap of some store overflowed the blocked-set cap. */
+  /** The current or last completed lap of some store overflowed the blocked-set cap. */
   readonly blockedKeyCap: boolean;
   /** The most recent sweep ended on a rejected or expired store call. */
   readonly storeWriteFailing: boolean;
@@ -168,7 +168,7 @@ export class OutboxService implements IOutbox {
     const at = this.#lastScheduledOverlapAt;
     let blockedKeyCap = false;
     for (const holder of this.#laps.values()) {
-      if (holder.lap?.blockedOverflow === true) blockedKeyCap = true;
+      if (holder.lap?.blockedOverflow === true || holder.lastLapOverflowed) blockedKeyCap = true;
     }
     return {
       blockedKeyCap,
@@ -362,7 +362,7 @@ export class OutboxService implements IOutbox {
       const store = stores[(start + index) % stores.length]!;
       let holder = this.#laps.get(store);
       if (holder === undefined) {
-        holder = { lap: undefined };
+        holder = { lap: undefined, lastLapOverflowed: false };
         this.#laps.set(store, holder);
       }
       const end = await sweepStore(ctx, store, holder);

@@ -131,7 +131,7 @@ describe('relay paging', () => {
     await writeMany(h, 'A', 1, 1);
     await writeMany(h, undefined, 2, 1);
     await writeMany(h, 'A', 3, 1);
-    const holder: LapHolder = { lap: undefined };
+    const holder: LapHolder = { lap: undefined, lastLapOverflowed: false };
     const options = { relay: { maxFailedScan: 1, scanLimit: 2 } };
     expect(await directSweep(h, options, holder)).toBe('scan-limit');
     expect(holder.lap!.capReached).toBe(true);
@@ -169,7 +169,16 @@ describe('relay paging', () => {
     const result = await h.sweep();
     expect(result.endedBy).toBe('complete');
     expect(h.broker.sequence()).toEqual([2]);
-    // The lap ended (short page), so its overflow is no longer current.
+    // The overflowing lap ended in the same sweep (short page). The signal must
+    // survive that, or an exhausted blocked set stalls every keyed row while
+    // health reads `up` (M107 audit F1).
+    expect(h.service.instanceSignals().blockedKeyCap).toBe(true);
+    // A second overflowing lap keeps it; a lap that completes clean clears it.
+    await h.sweep();
+    expect(h.service.instanceSignals().blockedKeyCap).toBe(true);
+    for (let n = 0; n < 10_001; n++) await repo.delete(`failed-${n}`);
+    expect((await h.sweep()).endedBy).toBe('complete');
+    expect(h.broker.sequence()).toEqual([2, 1]);
     expect(h.service.instanceSignals().blockedKeyCap).toBe(false);
   });
 

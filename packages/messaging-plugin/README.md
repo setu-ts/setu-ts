@@ -1237,7 +1237,7 @@ tenant id, ordering key, topic or error text.
 | `oldest-pending-age`  | the oldest pending row is older than `health.degradedAfterMs` (default 60 s)         | cluster-wide (the store) |
 | `failed-rows`         | the failed count is above zero                                                       | cluster-wide             |
 | `failed-scan-cap`     | the failed count reaches `relay.maxFailedScan`, so a lap's blocked set is incomplete | cluster-wide             |
-| `blocked-key-cap`     | this instance's lap overflowed its 10 000-key blocked set                            | this instance            |
+| `blocked-key-cap`     | this instance's current or last completed lap overflowed its 10 000-key blocked set  | this instance            |
 | `store-write-failing` | this instance's last sweep ended on a rejected store call                            | this instance            |
 | `scheduled-overlap`   | this instance saw two scheduled sweeps overlap inside `health.overlapWindowMs`       | this instance            |
 
