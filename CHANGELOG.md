@@ -14,6 +14,12 @@ All notable changes to this project are documented here. The format follows
   or the DI container (and how `DiPlugin`'s `autoRegister` fallback links them), and whether a test
   should use `overrideCapability`, `overrideProvider` or `without`. Every example compiles under the
   guide fence gate.
+- **`@Idempotent()` makes a decorated route idempotent (`@setu-ts/decorator-plugin`, M109a).** The
+  decorator plugin gains `Idempotent`, which records a route's idempotency options and appends the
+  provider's middleware LAST — after guards, declarative authorization, the middleware band and the
+  validation band — so an invalid or unkeyed request never consumes a key. A safe-method route
+  (`GET`/`HEAD`/`OPTIONS`) or a missing `CAPABILITIES.IDEMPOTENCY` provider fails `register()`.
+
 - **Idempotency contracts in `@setu-ts/common` (M109a).** `CAPABILITIES.IDEMPOTENCY`
   (`'idempotency'`) names the provider of the idempotency service. The package gains the store port
   `IIdempotencyStore` and its `IdempotencyClaimRequest`, `IdempotencyClaimResult` and

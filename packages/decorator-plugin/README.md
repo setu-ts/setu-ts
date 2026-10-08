@@ -298,6 +298,7 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `getParameterResolver`       | function  |
 | `Header`                     | function  |
 | `HttpCode`                   | function  |
+| `Idempotent`                 | function  |
 | `Inject`                     | function  |
 | `Injectable`                 | function  |
 | `Module`                     | function  |
