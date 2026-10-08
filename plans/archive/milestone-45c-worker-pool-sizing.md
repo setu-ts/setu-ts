@@ -332,3 +332,134 @@ deno task release:verify <version>
 - A metric for budget evictions or waiters — the existing `worker_pool_queued_tasks` gauge already
   shows work waiting; no owning milestone.
 - Multi-module workers and an `IWorkerHandle.postMessage` transfer list — no owning milestone.
+
+## 10. Design security review — completed 2026-10-08; implementation audit pending
+
+This is a **post-implementation design review**, requested by the maintainer after implementation,
+verification, code review and the spawn-backlog correction. It reviews the contract and intended
+security properties against source revision `4f2e137ecacc6ea1ab184595ffa9256312ef2838`. It does not
+claim that a pre-implementation security review occurred or that the implementation has passed a
+security audit. Reviewer: the implementing Codex session, acting as design reviewer. The later
+implementation auditor must be a fresh context that did not implement or fix M45c.
+
+The maintainer subsequently instructed: **wait for an explicit go before running the audit**.
+Writing this review and validating its Markdown are authorized; starting an auditor, executing audit
+probes or negative controls is pending that go. This addition preserves §§0–9 as the original design
+record and adds the requested security review rather than rewriting the earlier decisions.
+
+### 10.1 Reviewed flows and trust boundaries
+
+| Flow                                 | Reviewed path and boundary                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 — configuration                   | Application-owned options, possibly parsed from environment variables, enter `WorkerPoolPlugin` and the directly constructible service. Both validate maxWorkers before a budget is created. The injected host is privileged application code, not a request-controlled transport.                                                                                   |
+| F2 — admission and execution         | An application selects an owned task-module specifier and calls IWorkerPool.run with structured-clonable input. TaskPool checks its pending-queue bound, arms the enqueue-time timeout and asks the service budget for capacity before spawning. The module, its imports and its handler are application code; worker threads are not a sandbox for hostile code.    |
+| F3 — budget hand-over                | A ready idle slot can be retired for another module. Removal releases capacity, which is reserved for an eligible waiter and consumed only through a deferred continuation. Concurrent module traffic competes for application-wide resources; one module must not permanently monopolize recoverable capacity.                                                      |
+| F4 — worker messages and failure     | The runtime normalizes worker messages, errors and optional exits. The pool checks protocol/correlation data, settles tasks and re-pumps. A slow, failing or non-responsive dependency can delay startup, execution or termination. Resource recovery must be tested at each phase, not inferred from task rejection alone.                                          |
+| F5 — observability                   | Pool snapshots feed gauges and the health indicator. The added budget consists only of a numeric/null limit and aggregate slot count. Existing snapshots include application module specifiers and counts; publishing health/metrics is an application deployment decision. Task payloads, results, shared bytes and credentials must not be added to observability. |
+| F6 — shared memory                   | Structured clone copies ordinary ArrayBuffers but shares SharedArrayBuffers with the trusted worker. Shared memory is an intentional read/write authority grant; it is neither tenant isolation nor automatic synchronization. Worker cancellation can leave partial writes.                                                                                         |
+| F7 — shutdown and example deployment | Service shutdown closes admission and the budget before pools release slots, then awaits worker termination. The new example starts a health endpoint and runs local worker smoke tasks. Its listener exposure and Deno permissions are separately reviewable deployment surfaces.                                                                                   |
+
+Remote clients can influence task input only through routes the consuming application exposes; M45c
+adds no task-execution HTTP route. Authentication, authorization, task-module allowlisting and
+per-principal admission belong before an application's call to run. This is a boundary requirement,
+not evidence that every consuming application satisfies it. The audit must also exercise misuse of
+the public service with many specifiers and identify what the framework itself bounds.
+
+### 10.2 Assets, attackers and dependencies
+
+| Asset                                          | Threat actor / failure source                                                                                                        | Required protection                                                                                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Event-loop availability and worker capacity    | A caller flooding admitted tasks; a task monopolizing CPU; a worker/dependency that crashes, never becomes ready, or never completes | Enforce configured admission and slot limits; preserve progress for legitimate queued modules; recover capacity on relevant failure paths.                                 |
+| Queue memory, timers, waiters and reservations | Repeated refusals, expirations, clone failures, synchronous spawn throws and churn over distinct module keys                         | Refusals must not consume capacity; cancellation must remove stale demand; metadata growth must be measured and attributed separately from live slots.                     |
+| Results and shared-buffer contents             | Malformed/non-cloneable input; wrong, duplicate or late worker replies; a task killed mid-write                                      | Correlate replies, settle once, avoid claiming full writes after cancellation, and require caller synchronization for concurrent access.                                   |
+| Application secrets and topology               | Sensitive input/results/errors; health or metric readers; hostile module-name characters                                             | The new budget must contain only its specified scalars. Identify existing module/error disclosure separately; do not silently turn a task payload into log or health data. |
+| Service lifecycle and separation               | A concurrent run during stop; an unavailable host; a slow termination; traffic in a second application                               | Fail closed after shutdown/when unavailable, prevent new spawns during shutdown, and keep separate services' budgets independent.                                          |
+| Host files, environment and network            | Over-privileged example execution or an audit driver importing unsafe code                                                           | Audit with a cleared environment and narrowly justified grants; assess the example's blanket grants and listener binding rather than assuming they are production-safe.    |
+
+Application code, worker modules and custom host implementations are trusted for execution
+authority. Their **failure behavior is not assumed healthy**: synchronous throws, missing readiness,
+late callbacks and hung termination are audit inputs. A malicious application owner already has
+process authority, so this review does not invent protection against arbitrary code installed by
+that owner. No new authentication, credential, cryptography or tenancy mechanism is introduced.
+
+### 10.3 Budgets and explicit contract choices
+
+- The configured bound is on **managed worker slots per service**, not a hard RSS, physical-thread,
+  CPU-time, queue-byte or module-cardinality limit. A retiring OS thread can outlive its removed
+  slot briefly; the audit must measure/describe this distinction instead of claiming a process
+  memory guarantee.
+- The default slot limit remains the maximum of host parallelism, defaultPoolSize and the sum of
+  explicitly listed pool sizes. A finite explicit maxWorkers must be a positive safe integer.
+  **Infinity is an intentional application-owner opt-out**, required by §3.1 and the maintainer's
+  original milestone instruction; it is not an accidentally accepted invalid bound.
+- Invalid maxWorkers must be refused at both construction entry points, before spawning. The
+  original contract deliberately names the rejected configuration value in RangeError (§3.2). That
+  trusted configuration diagnostic is an explicit exception to the audit checklist's generic
+  no-value-echo recommendation; it does not authorize echoing task data or environment secrets.
+- Existing default maxQueue is 1024 pending tasks **per module** and default taskTimeoutMs is 30,000
+  ms measured from enqueue. Zero deliberately disables the task timer. Pre-existing size, queue and
+  timeout validation remains outside M45c (§9); the audit must identify interactions with the new
+  budget, rather than treating every invalid legacy value as a newly added validation bug.
+- No startup-specific deadline, termination deadline or global module-metadata budget has been
+  approved. These omissions are review leads below, not accepted findings or permission to invent a
+  new public option. Finite task timeouts must be tested for actual capacity recovery, not just
+  promise settlement.
+- Audit-only workloads should use a small slot cap, finite timers and bounded local payloads. A
+  driver watchdog bounds the probe itself; it is not evidence of a product timeout. Cache imports
+  first, clear the environment and use read access scoped to the audited worktree, loopback-only
+  network if needed, and the package test baseline `sys: hostname, cpus`. Do not run with `-A`. Any
+  additional grant needs a source-backed reason and must be recorded by the auditor.
+
+### 10.4 Design threats, resolutions and unresolved review leads
+
+| ID | Threat / design observation                                                                                                                              | Resolution or required audit decision                                                                                                                                                                                                                                                    |
+| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1 | Invalid environment-derived maxWorkers can disable an intended cap; validation can diverge between entry points.                                         | One validator at factory and constructor; require O1 including invalid numeric strings. Infinity/value echo retain the explicit contract choices in §10.3.                                                                                                                               |
+| D2 | A releasing pool can steal its own freed capacity or leave another module permanently starved.                                                           | Reserved deferred wakeups, starved-first/FIFO selection, idle eviction and both hand-over rules; require O2–O3 and fresh-process negative controls.                                                                                                                                      |
+| D3 | Refusals or failures can leak slots, stale waiters or timers, or produce unhandled callback errors.                                                      | Owned-slot release, reservation cancellation and bounded spawn-failure queue progress; require O4–O5, including the fix at 4f2e137e.                                                                                                                                                     |
+| D4 | A task timeout settles a queued task without necessarily proving a non-ready slot is reclaimed; termination returns a Promise with no declared deadline. | **Unresolved lifecycle review lead.** O5 must drive hung startup and hung/throwing termination and compare legitimate recovery. Any permanent application-wide capacity loss or unbounded shutdown must be reported, with scope/attacker evidence; it is not waived by this review.      |
+| D5 | The service map and new budget registry can grow with module-specifier cardinality even while maxWorkers holds.                                          | **Unresolved resource-scope review lead.** O7 must drive 1,000 keys and distinguish live-slot bounds, retained metadata and pre-existing versus new growth. Application module allowlisting is required at any external execution boundary; no framework-wide metadata bound is claimed. |
+| D6 | Health/metrics can leak task data or misreport the effective bound; module names can contain hostile wire/log characters.                                | New budget limited to maxWorkers/workers; require O6 with data/error/name canaries and raw captured outputs. Existing disclosure and new example exposure must be separately attributed.                                                                                                 |
+| D7 | Shared buffers allow concurrent mutation, partial writes and inappropriate use as ordinary BodyInit/crypto input.                                        | Document explicit shared authority, Atomics/copy requirements and partial-write behavior; require O8 with caller readback and an ordinary-buffer control. No automatic synchronization or worker privilege isolation is claimed.                                                         |
+| D8 | The new example uses `deno run -A` and starts via the runtime's default listener binding.                                                                | **Unresolved deployment review lead.** O9 must inspect effective permissions/binding and assess against audit class 15. The current example is not accepted as a hardened production deployment by this review.                                                                          |
+
+This table records design decisions and investigation leads, **not dispositions accepting
+implementation findings**. No Critical, High, Medium or Low audit finding has been accepted or
+deferred by the maintainer. An actual finding must be recorded independently and routed to a fix or
+an explicit disposition under the audit procedure.
+
+### 10.5 Implementation audit obligations
+
+Every obligation requires a negative half and a positive control through the same public path, plain
+top-level-await drivers, exact assertions, pasted source/raw stdout and explicit runtime and
+permission limits. Existing unit tests and verification logs are context, not substitute audit
+evidence. The independent audit must sweep all fifteen recurring classes, marking each applicable or
+N/A with a source-backed reason, and observe a fresh-process failure after reverting every new
+control it relies on. Restore all mutations and finish on the exact clean commit.
+
+| ID | Obligation and required comparison                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| O1 | Drive maxWorkers NaN, Infinity, -Infinity, zero, negative, fraction, unsafe integer, numeric string and omission at BOTH construction paths. Invalid values must fail before workers spawn; valid finite/default values must run real work and the intentional Infinity opt-out must remain observable. Include global-size and explicit-size-sum defaults and source-appropriate hostile configuration records.                                                                                                                        |
+| O2 | Flood multiple modules under a small finite cap and assert the sum of managed slots never exceeds it, including starting slots. Legitimate work must complete; Infinity/default-size controls must show that the driver actually observes spawning. Assess asynchronous termination overlap without equating slots to RSS.                                                                                                                                                                                                              |
+| O3 | Prove idle eviction, starvation avoidance, FIFO among equal waiters, reserved asynchronous hand-over and return of unused reservations. A waiting legitimate module must run before a sustained competing queue drains; clone failure and late readiness must not strand an idle slot.                                                                                                                                                                                                                                                  |
+| O4 | Drive more than K refusals/failures at cap K, then run legitimate work. Cover queue-full, clone failure, timeout while budget-blocked, crash/exit and synchronous spawn throws from hand-over with multiple pending tasks. Assert task counts, timer cleanup, usable budget and no process-level uncaught exception/rejection.                                                                                                                                                                                                          |
+| O5 | Exercise executing tasks that never settle, modules that never signal ready, synchronous dependency throws, delayed/never-resolving/throwing terminate, duplicate or late callbacks, and run racing shutdown. With finite timers, compare task rejection AND ability of another valid module to progress. After stop, unseen-module calls must reject without creating a pool/timer; shutdown must not spawn another worker. Keep a completing/terminating dependency as the positive control and report unsupported recovery honestly. |
+| O6 | Plant separate canaries in task input, success output, handler error/cause, module name/path and captured logging/metrics. Check raw health, metrics and log outputs for unauthorized disclosure, including CR/LF/NUL module names. New budget must remain exactly its stated scalars and match the slot sum; valid task results must still reach their intended caller. Distinguish explicitly supplied module metadata and pre-existing error contracts from newly added disclosure.                                                  |
+| O7 | Drive 1,000 distinct specifiers and inventory retained pools, registered pools, waiters, reservations and live slots. Establish which structures are bounded, where an external caller's module selection is constrained, and whether the new registry worsens persistent growth. Show a legitimate module still works afterward; do not treat a one-slot snapshot as proof of bounded total memory.                                                                                                                                    |
+| O8 | A real worker writes a SharedArrayBuffer and the caller reads back the expected pattern; an ordinary ArrayBuffer remains unchanged. Exercise cancellation during writes and confirm that partial data is treated as failure, not successful completion. Check that task bytes do not enter new health data and that separate services have separate slot budgets; do not assert tenant isolation for intentionally shared memory.                                                                                                       |
+| O9 | Inspect/run only local example surfaces with controlled environment and scoped audit grants. Determine actual listener address and permissions, verify ordinary health traffic does not provide task-module execution, and assess blanket grants/default binding against class 15. A valid local health request and sandboxed worker operation are the positive controls; any missing grant/unsupported isolation is evidence, not grounds to silently widen permissions.                                                               |
+
+### 10.6 Audit hand-off and sign-off
+
+Implementation: Codex `/root`, commits through `4f2e137e`. Design review: the same session, with no
+audit independence claim. Code verification and follow-up review evidence:
+`.tmp/m45c-fix/verification.md`; prior finding/report: `.tmp/m45c-review/` (superseded for the fixed
+implementation). These are ignored scratch artifacts, not additional committed plan files.
+
+**Design review completed; implementation audit not started.** The next phase needs the maintainer's
+explicit go, then a fresh auditor under `.roo/skills/security-audit/SKILL.md`. Hand off only the
+milestone, branch/worktree, exact resulting commit, this plan path/§10, evidence paths, and the fact
+that no audit dispositions exist. Scratch drivers and the report must stay under the worktree's
+`.tmp/`, following AGENTS.md's scratch-location rule. The report must include the PR audit record,
+all O1–O9 evidence, all fifteen classes, negative-control failures and open findings. Do not push or
+open a PR; do not fix findings within the audit pass.
