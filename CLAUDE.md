@@ -5835,7 +5835,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   M106 limits — are refused before the parse. Round 3 found L1 (Low): the test for that order fed an
   unparseable string, so it passed with the check moved after the parse; it now spies on
   `JSON.parse`. Round 4 passed on `f31148bf`. Not verified: workerd, Prisma, MySQL DDL, a non-`C`
-  PostgreSQL collation — complete (PR pending).
+  PostgreSQL collation — complete (PR #431).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
