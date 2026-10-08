@@ -451,7 +451,10 @@ error[private-type-ref]: public type references private type
       // precedent), and two pre-existing missing-description diagnostics were
       // paid down on files the milestone already touched. Lowered rather than
       // widened, which is the whole point of a ratchet.
-      expect(DOC_LINT_BASELINE).toBe(496);
+      // M109a added `@setu-ts/idempotency-plugin`: four unavoidable
+      // `private-type-ref` diagnostics naming `@setu-ts/common` types the
+      // plugin's own barrel does not re-export, exactly as every plugin's does.
+      expect(DOC_LINT_BASELINE).toBe(500);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
       // the drift this pair exists to make impossible.
@@ -551,18 +554,19 @@ error[private-type-ref]: public type references private type
       );
     });
 
-    it('has the expected authoritative count of 51 targets', async () => {
+    it('has the expected authoritative count of 54 targets', async () => {
       const fs = {
         readTextFile: async (path: string) => await Deno.readTextFile(path),
         readDir: (path: string) => Deno.readDir(path),
         stat: (path: string) => Deno.stat(path),
       };
       const result = await collectApiEntrypoints(fs);
-      // 50 published packages, runtime has 2 exports (./src/index.ts + ./worker),
-      // cli has 2 exports (./src/index.ts + ./main), localization-plugin has 2
-      // (./src/index.ts + ./format, M103), rest have 1 each
-      // = 50 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 53
-      expect(result.targets).toHaveLength(53);
+      // 51 published packages (M109a added idempotency-plugin), runtime has 2
+      // exports (./src/index.ts + ./worker), cli has 2 exports (./src/index.ts +
+      // ./main), localization-plugin has 2 (./src/index.ts + ./format, M103),
+      // rest have 1 each
+      // = 51 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 54
+      expect(result.targets).toHaveLength(54);
     });
 
     it('maps each target to its correct package name', async () => {

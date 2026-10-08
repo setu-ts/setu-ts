@@ -36,11 +36,10 @@ const app = createApplication({
   plugins: [RuntimePlugin(), IdempotencyPlugin({ store: { type: 'memory' } })],
 });
 
-app.router.post(
-  '/payments',
-  { middleware: [idempotent()] },
-  (ctx) => ctx.response.status(201).json({ id: 'pay-1' }),
-);
+app.router.post('/payments', {
+  middleware: [idempotent()],
+  handler: (ctx) => ctx.response.status(201).json({ id: 'pay-1' }),
+});
 
 await app.start({ port: 3000 });
 ```
@@ -167,11 +166,16 @@ low-entropy body (a short code, a PIN) can be confirmed by brute force from it.
 ## Forwarding a key to a provider
 
 ```typescript
-import { derivedIdempotencyKey } from '@setu-ts/idempotency-plugin';
+import { derivedIdempotencyKey, idempotent } from '@setu-ts/idempotency-plugin';
 
-app.router.post('/charges', { middleware: [idempotent()] }, (ctx) => {
-  const key = derivedIdempotencyKey(ctx); // stable per principal + namespace + client key
-  return ctx.response.json(await stripe.charge({ idempotencyKey: key }));
+app.router.post('/charges', {
+  middleware: [idempotent()],
+  handler: (ctx) => {
+    // `key` is stable per principal + namespace + client key; forward it to a
+    // provider that de-duplicates.
+    const key = derivedIdempotencyKey(ctx) ?? '';
+    return ctx.response.status(201).json({ forwardedKey: key });
+  },
 });
 ```
 

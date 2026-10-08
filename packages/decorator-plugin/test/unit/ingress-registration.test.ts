@@ -137,6 +137,7 @@ describe('non-HTTP ingress registration', () => {
       CAPABILITIES.VALIDATION,
       CAPABILITIES.AUTHORIZATION,
       CAPABILITIES.VIEW,
+      CAPABILITIES.IDEMPOTENCY,
     ]);
     await plugin.register(ctx);
     expect(lifecycleHooks.some((hook) => hook.phase === 'onInit')).toBe(false);

@@ -74,6 +74,7 @@ const EXPECTED_VALUES = [
   'Module',
   'Optional',
   'HttpCode',
+  'Idempotent',
   'Permissions',
   'Public',
   'Redirect',
