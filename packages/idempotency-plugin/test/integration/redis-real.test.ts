@@ -99,7 +99,8 @@ describe('Redis store on real Redis (M109a §3.5)', { ignore }, () => {
   });
 
   it('sets a PTTL close to ttlMs', async () => {
-    const store = await makeStore();
+    const namespace = nextNamespace();
+    const store = await makeStore(namespace);
     const key = 'k'.repeat(64);
     await store.claim({
       key,
@@ -114,9 +115,12 @@ describe('Redis store on real Redis (M109a §3.5)', { ignore }, () => {
     const RedisCtor = await loadIoredis();
     const client = new RedisCtor(REDIS_URL as string, { lazyConnect: true });
     await client.connect();
-    const pttl = await client.call('PTTL', `${'setu:idempotency:'}${'shop'}:${key}`);
+    const pttl = await client.call('PTTL', `setu:idempotency:${namespace}:${key}`);
     expect(typeof pttl).toBe('number');
+    // Bounded on BOTH sides: the record the previous test claims carries a
+    // 60 s TTL, so a lower bound alone would pass against the wrong key.
     expect(pttl as number).toBeGreaterThan(25_000);
+    expect(pttl as number).toBeLessThanOrEqual(30_000);
     await client.quit();
     await store.disconnect?.();
   });
