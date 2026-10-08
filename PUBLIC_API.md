@@ -4272,7 +4272,7 @@ app.router.post('/thumbnail', async (ctx) => {
 | `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready; cannot be disabled; at most 2147483647. |
 | `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                      |
 | `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                      |
-| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies.                                 |
+| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables; at most 2147483647. Timed-out worker dies.             |
 | `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                     |
 | `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                     |
 
@@ -4311,6 +4311,12 @@ served first, then FIFO among equals. A busy module hands over a worker after a 
 another module has no slot. Timeouts include time waiting for this budget. Rotation costs a worker
 spawn; size `maxWorkers` at least as large as the number of task modules active concurrently when
 that cost matters. Workers stay resident between bursts; there is no timed idle reaping.
+
+**Timeouts are validated.** `taskTimeoutMs` (plugin-wide and per pool) and a per-call `timeoutMs`
+must be `0` (disabled) or a positive integer no greater than 2 147 483 647, the largest delay a
+runtime timer honours. Anything else throws `RangeError` at construction, or rejects that `run()`
+call before admission: `NaN` and negative values used to disable the timeout silently, and larger
+values overflowed the timer and timed every task out after about 1 ms.
 
 **Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, or a per-call `run()` option of
 `timeoutMs: 0`, a task that never settles keeps its worker. Once every slot is held that way, other

@@ -41,6 +41,12 @@ logs a warning for that configuration. On Deno a timed-out CPU-bound task keeps 
 slot is released, and may keep writing to a `SharedArrayBuffer` after its promise rejected: do not
 reuse such a buffer.
 
+`taskTimeoutMs` (plugin-wide and per pool) and the per-call `timeoutMs` are now validated: each must
+be `0` or a positive integer no greater than 2147483647. `NaN` (what `Number()` returns for an unset
+environment variable), negative, fractional and larger values used to be accepted and either
+disabled the timeout or fired it after about 1 ms; they now throw `RangeError` at construction, or
+reject that `run()` call. Parse configuration explicitly and pass `0` if you mean "no timeout".
+
 The worker-pool example starts on 127.0.0.1 with scoped Deno permissions. Remote health exposure
 requires an explicit application deployment decision.
 

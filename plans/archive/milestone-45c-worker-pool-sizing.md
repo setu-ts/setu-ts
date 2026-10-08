@@ -517,3 +517,12 @@ delay a runtime timer honours (a larger value fired at about 1 ms and killed eve
 the warning text and docs now cover a per-call `timeoutMs: 0`, which holds a slot the same way and
 cannot be seen at registration. `taskTimeoutMs` and per-call `timeoutMs` overflow identically; that
 predates M45c and is not changed here.
+
+### 12.2 Task-timeout overflow folded in, 2026-10-09
+
+At the maintainer's direction the pre-existing overflow R3-1 noted for `taskTimeoutMs` is fixed here
+too: `taskTimeoutMs` (plugin-wide and per pool) and the per-call `timeoutMs` must be `0` or a
+positive integer no greater than 2 147 483 647. Construction throws `RangeError`; an invalid
+per-call value rejects that `run()` before admission and is not counted as a pool rejection. This
+refuses previously accepted values (`NaN`, negatives, fractions, overflow), recorded as breaking in
+CHANGELOG and docs/upgrading.md.
