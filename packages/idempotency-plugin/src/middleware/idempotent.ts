@@ -15,6 +15,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import { IDEMPOTENCY_DERIVED_KEY_STATE_KEY } from '../constants.ts';
 import { validateRouteOptionShape } from '../core/options.ts';
 import { IdempotencyConfigurationError } from '../errors.ts';
+import { safeLog } from '../core/safe-log.ts';
 
 /**
  * Returns the derived store key the middleware recorded for this request, when
@@ -66,10 +67,18 @@ export function idempotent(options?: IdempotentRouteOptions): MiddlewareFunction
       } catch (error) {
         if (error instanceof IdempotencyConfigurationError) {
           cache.set(service, error);
-          const logger = ctx.services.has(CAPABILITIES.LOGGER)
-            ? ctx.services.get<ILogger>(CAPABILITIES.LOGGER)
-            : undefined;
-          logger?.error('idempotent(): middleware configuration failed', { error: error.message });
+          // Through safeLog, so a throwing logger can neither replace the
+          // configuration error nor turn this rejection into a synchronous
+          // throw (M109a audit round 4).
+          safeLog(
+            () =>
+              ctx.services.has(CAPABILITIES.LOGGER)
+                ? ctx.services.get<ILogger>(CAPABILITIES.LOGGER)
+                : undefined,
+            'error',
+            'idempotent(): middleware configuration failed',
+            { error: error.message },
+          );
         }
         return Promise.reject(error);
       }

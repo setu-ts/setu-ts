@@ -89,6 +89,30 @@ describe('idempotent (M109a §3.9)', () => {
     expect(messages).toHaveLength(1);
   });
 
+  it('rejects with the configuration error even when the logger throws (audit round 4)', () => {
+    // A direct logger call here replaced the configuration error with the
+    // logger's, and turned the promised rejection into a synchronous throw.
+    const throwing = {
+      level: 'info',
+      error: () => {
+        throw new Error('log transport down');
+      },
+    } as unknown as ILogger;
+    const error = new IdempotencyConfigurationError('ttlMs', 'ttlMs must be at least leaseMs');
+    const service: IIdempotencyService = {
+      middleware: () => {
+        throw error;
+      },
+      behavior: () => ({ handle: (_ctx, next) => next() }),
+    };
+    const middleware = idempotent({ leaseMs: 10_000, ttlMs: 1_000 });
+    let result: unknown;
+    expect(() => {
+      result = middleware(context(service, throwing), () => Promise.resolve());
+    }).not.toThrow();
+    return expect(result).rejects.toBe(error);
+  });
+
   it('keeps a separate cache per call, so two routes see their own options', async () => {
     let calls = 0;
     const service = serviceReturning(noop, () => void calls++);
