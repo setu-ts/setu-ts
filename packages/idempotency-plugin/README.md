@@ -60,6 +60,9 @@ The middleware runs these steps in this order:
    function.
 3. **Missing key with `required: false`** passes through, before any principal check.
 4. **Principal** — `principal: 'required'` (the default) answers `401` when no principal is present.
+   With `principal: 'optional'`, every anonymous request shares one scope, so an anonymous caller
+   who sends another anonymous caller's key is served that caller's stored response. Pair it with
+   `response: 'status'` unless the response is safe to show any anonymous caller.
 5. **Missing key with `required: true`** answers `400`; an invalid key answers `400`.
 6. **Fingerprint** — by default a SHA-256 over the method, path, raw query, content-type and body
    bytes.

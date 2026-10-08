@@ -856,9 +856,11 @@ export interface DurableObjectIdempotencyStoreOptions {
 ### 3.16 Memory store (tier A)
 
 - **Decision:** internal `MemoryIdempotencyStore` (`name = 'memory'`, no namespace — process-local):
-  - `Map<string, Entry>` plus `Map<string, number>` live-entry count per `scope`; clock
-    `runtime.hrtime()` from `connect`. Every method does ALL reads and writes synchronously and
-    returns `Promise.resolve(...)` — no `await` inside (that is the atomicity).
+  - `Map<string, Entry>` plus a per-`scope` key index (`Map<string, Set<string>>`; a scope's count
+    is its set's size, and a scope sweep visits only its own keys — audit F2 replaced the original
+    live-entry count map, whose sweep scanned the whole store); clock `runtime.hrtime()` from
+    `connect`. Every method does ALL reads and writes synchronously and returns
+    `Promise.resolve(...)` — no `await` inside (that is the atomicity).
   - Insert path (claim of an absent key): if `scopeCount >= maxEntriesPerScope` → sweep that scope's
     expired entries (bounded by the throttle below), still at cap →
     `{ outcome: 'capacity-exceeded' }`. If `size >= maxEntries` or `bytes >= maxBytes` → sweep (at
@@ -867,7 +869,8 @@ export interface DurableObjectIdempotencyStoreOptions {
     ingress).
   - Accounting `bytes += key.length + fingerprint.length + (record?.length ?? 0)` (string lengths,
     documented approximate); counts and bytes decrement on delete and on lazy expiry.
-  - `disconnect` clears both maps.
+  - `disconnect` clears every map: the entries, the scope index, the key-to-scope map and the sweep
+    throttle rows (audit round 2, N3).
 - **Why:** an evicted completed record would silently allow a duplicate; refusing is fail-closed.
   The per-scope cap stops one principal (or one consumer) filling the shared cap (§10 D21); 429
   tells the caller it is their own load.

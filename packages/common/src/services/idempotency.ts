@@ -158,7 +158,13 @@ export interface IdempotentRouteOptions {
   readonly key?: IdempotencyKeySource;
   /** Default `true`: a request without a key answers 400. `false`: it passes through, unclaimed. */
   readonly required?: boolean;
-  /** Default `'required'`: no principal → 401. `'optional'`: anonymous requests share one scope. */
+  /**
+   * Default `'required'`: no principal → 401. `'optional'`: every anonymous
+   * request shares ONE scope, so an anonymous caller who sends another
+   * anonymous caller's key is served that caller's stored response. Pair
+   * `'optional'` with `response: 'status'` unless the response is safe to show
+   * any anonymous caller.
+   */
   readonly principal?: 'required' | 'optional';
   /** Default `` `${method} ${path}` `` of the request. 1–256 characters, none below U+0020. */
   readonly namespace?: string;
