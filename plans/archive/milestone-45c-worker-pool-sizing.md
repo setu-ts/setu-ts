@@ -1,7 +1,8 @@
 # Milestone 45c — Worker Pool Sizing (`@setu-ts/worker-pool-plugin`)
 
-> **Status:** Planning. Branch: `feat/m45c-worker-pool-sizing`. `develop` and `main` are protected —
-> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Implemented and verified (PR pending). Branch: `feat/m45c-worker-pool-sizing`.
+> `develop` and `main` are protected — all work (implementation + fixes) stays on this one branch
+> until it merges via a single PR.
 
 ## 0. Objective & scope
 

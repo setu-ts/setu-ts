@@ -4624,7 +4624,7 @@ omitted on Deno, whose web `Worker` emits nothing at all when a worker ends itse
 
 ---
 
-## Milestone 45c: Worker Pool Sizing — a Global Worker Budget and a Runnable Example
+## Milestone 45c: Worker Pool Sizing — a Global Worker Budget and a Runnable Example ✅ COMPLETE
 
 **Objective:** Bound the total number of worker threads an application can hold, across every task
 module, and give the worker pool its first runnable example. Every worker is a full JavaScript
@@ -4684,15 +4684,15 @@ input is written by the worker and read back by the caller without a copy.
 
 ### Doc Deliverables (to ship in this milestone's PR)
 
-- [ ] **PUBLIC_API.md** — `maxWorkers` in the Worker pool options table; the budget in the health
+- [x] **PUBLIC_API.md** — `maxWorkers` in the Worker pool options table; the budget in the health
       payload; the `SharedArrayBuffer` notes.
-- [ ] **README** — `packages/worker-pool-plugin/README.md`: sizing in containers, measured
+- [x] **README** — `packages/worker-pool-plugin/README.md`: sizing in containers, measured
       per-worker memory, `SharedArrayBuffer` usage and its caveats, task granularity.
-- [ ] **apps/README.md** and **docs/examples.md** — the new example.
-- [ ] **CHANGELOG.md** and **docs/upgrading.md** — the behaviour change for applications with
+- [x] **apps/README.md** and **docs/examples.md** — the new example.
+- [x] **CHANGELOG.md** and **docs/upgrading.md** — the behaviour change for applications with
       several task modules, and how `maxWorkers: Infinity` restores the old behaviour.
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `45c`.
-- [ ] **CLAUDE.md** — Current status `45c` entry.
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `45c`.
+- [x] **CLAUDE.md** — Current status `45c` entry.
 
 ---
 
@@ -13214,7 +13214,7 @@ patch by construction and gains nothing new here.
 | 44        | ✅     | react-router-plugin                                                                                                                                                                                                                           |
 | 45        | ✅     | worker-pool-plugin                                                                                                                                                                                                                            |
 | 45b       | ✅     | worker-pool-plugin (metrics)                                                                                                                                                                                                                  |
-| 45c       | ⬜     | worker-pool-plugin (sizing)                                                                                                                                                                                                                   |
+| 45c       | ✅     | worker-pool-plugin (sizing)                                                                                                                                                                                                                   |
 | 46        | ✅     | websocket-plugin                                                                                                                                                                                                                              |
 | 47        | ✅     | alpha-3 limitations                                                                                                                                                                                                                           |
 | 48        | ✅     | session-plugin                                                                                                                                                                                                                                |

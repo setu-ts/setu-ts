@@ -4339,12 +4339,13 @@ timer, and holds no worker budget.
   threads: the plugin still registers, but `run()` rejects with `WorkerPoolUnavailableError` and the
   health indicator reports `available: false`. One codebase deploys everywhere.
 - **Error vs crash.** A thrown handler is a healthy worker reporting failure (`WorkerTaskError`, the
-  worker is retained). A worker-level crash drops the worker and re-dispatches its queued work to
-  survivors. A timeout terminates and replaces the worker (in-flight JS cannot be cancelled).
+  worker remains eligible for reuse or budget hand-over). A worker-level crash drops the worker and
+  re-dispatches its queued work to survivors. A timeout terminates and replaces the worker
+  (in-flight JS cannot be cancelled).
 - **Structured clone only.** `input`/`output` must be structured-clonable — no functions or class
   instances. A clone failure surfaces as a rejected `run()` on both dispatch paths (immediately, and
-  when the task is dispatched later from the queue); the worker is retained and the pool keeps
-  serving.
+  when the task is dispatched later from the queue); the worker remains usable, and the pool keeps
+  serving under the shared budget.
 - **A worker that ends its own thread** settles its in-flight task with `WorkerExitError` and frees
   the slot, independently of the task timeout — where the runtime reports the exit. It does on Node
   (`node:worker_threads` `'exit'`) and on Bun (its non-standard `'close'`); it does **not** on Deno,

@@ -100,8 +100,9 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
   up to the pool size and shared `maxWorkers` cap; an idle worker is reused before a new one spawns;
   pending tasks wait in a bounded FIFO queue.
 - **Handler error vs worker crash.** A thrown handler is a healthy worker reporting failure: the
-  task rejects with `WorkerTaskError` and the worker is retained. A worker-level crash rejects its
-  in-flight task, drops the worker, and re-dispatches its queued work to survivors.
+  task rejects with `WorkerTaskError` and the worker remains eligible for reuse or budget hand-over.
+  A worker-level crash rejects its in-flight task, drops the worker, and re-dispatches its queued
+  work to survivors.
 - **Timeout.** A task exceeding its timeout rejects with `WorkerTaskTimeoutError`; the worker is
   terminated and replaced (in-flight JavaScript cannot be cancelled).
 - **A worker that ends its own thread** — `process.exit()` inside the handler — settles its
