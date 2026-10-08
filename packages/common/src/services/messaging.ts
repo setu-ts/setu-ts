@@ -119,9 +119,10 @@ export const RESERVED_HEADER_PREFIXES: readonly string[] = Object.freeze([
 
 /**
  * Reports why a value is not a valid caller header NAME, or `null` when it is
- * valid. The character rule is 1-256 bytes, every character in `0x21-0x7E`
- * except `:` — exactly what nats.js accepts, the strictest of the seven
- * transports.
+ * valid. The rule is 1-{@linkcode MAX_PUBLISH_HEADER_NAME_BYTES} (255) bytes,
+ * every character in `0x21-0x7E` except `:` — the characters nats.js accepts
+ * and the length an AMQP header-table key can carry, so a name passes on every
+ * broker or on none.
  *
  * Shared, like {@linkcode publishIdProblem}, because the publish-side validator
  * and the Cloudflare envelope reader both enforce it and neither may import the

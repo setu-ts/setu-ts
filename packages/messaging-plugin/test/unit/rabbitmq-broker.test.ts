@@ -68,7 +68,7 @@ describe('RabbitMqBroker', () => {
         { label: 'routing key (the topic)', act: (b) => b.publish('t'.repeat(256), 1) },
         { label: 'message id', act: (b) => b.publish('t', { messageId: 'm'.repeat(256) }) },
         {
-          label: 'a header name',
+          label: 'header name',
           act: (b) => b.publishWithHeaders('t', 1, { ['h'.repeat(256)]: 'v' }),
         },
       ];

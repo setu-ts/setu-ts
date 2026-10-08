@@ -181,7 +181,7 @@ function amqpShortStringProblem(
   const headers = properties.headers;
   if (typeof headers === 'object' && headers !== null) {
     for (const name of Object.keys(headers)) {
-      if (!fits(name)) return 'a header name';
+      if (!fits(name)) return 'header name';
     }
   }
   return null;
