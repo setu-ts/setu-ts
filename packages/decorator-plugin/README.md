@@ -235,6 +235,9 @@ schema and a description the declaration does not carry.
   marking)
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
+- **Idempotency** — `@Idempotent(options?)`, appended LAST in a route's middleware (after guards,
+  declarative authorization and validation), so a refused or invalid request consumes no key; it
+  requires a `CAPABILITIES.IDEMPOTENCY` provider — see `@setu-ts/idempotency-plugin`
 - **Views** — `@Render(Component)` (renders through a `CAPABILITIES.VIEW` provider — see
   `@setu-ts/view-plugin`)
 - **Response shaping** — `@HttpCode`, `@ResponseHeader`, `@Redirect`

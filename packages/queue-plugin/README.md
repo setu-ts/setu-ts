@@ -182,6 +182,18 @@ order; a short circuit acknowledges the job, while a throw follows the existing 
 `onFailed`, and dead-letter path. With no behaviours, the processor receives the original job
 directly and no chain is allocated.
 
+A behaviour also sees `IngressContext.consumer`, which the queue service sets to `job.name` — the
+dispatch identity a behaviour keys per-consumer state on (an idempotency record, for example). It is
+always present for a delivered job.
+
+**Retry span vs an ingress lease.** A behaviour that claims a job for the duration of its work — the
+[`idempotentIngress()`](https://github.com/setu-ts/setu-ts/tree/main/packages/idempotency-plugin)
+behaviour is the one shipped — refuses a redelivery inside the claim's lease as `in-progress`, and
+every refusal consumes an attempt. With the default 3 attempts and the 2 s / 4 s backoff the retry
+span is 6 s, shorter than the default 30 s ingress lease, so a crashed holder's job is dead-lettered
+rather than retried. For a job name you make idempotent, keep the queue's retry span ABOVE the
+lease: with the default backoff that means `defaultMaxAttempts ≥ 6`.
+
 ## Queue observations (M98f)
 
 `diagnostics` exposes actual attempts and supported depths as minimized observations through the

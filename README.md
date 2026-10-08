@@ -161,15 +161,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Operations
 
-| Feature       | Status | Package             | Description                                                  |
-| ------------- | ------ | ------------------- | ------------------------------------------------------------ |
-| Health checks | ✅     | `health-plugin`     | `/health`, `/live`, `/ready` with pluggable indicators       |
-| Metrics       | ✅     | `metrics-plugin`    | Prometheus counters, gauges, histograms, summaries           |
-| Telemetry     | ✅     | `telemetry-plugin`  | OpenTelemetry tracing, W3C propagation, auto-instrumentation |
-| OpenAPI       | ✅     | `openapi-plugin`    | OpenAPI 3.1 from routes, Zod transform, Swagger UI           |
-| Audit logging | ✅     | `audit-plugin`      | Immutable trail over memory, log, database, or file          |
-| Resilience    | ✅     | `resilience-plugin` | Circuit breaker, retry, timeout, bulkhead                    |
-| Secrets       | ✅     | `secrets-plugin`    | Env, AWS KMS, GCP Secret Manager, Azure Key Vault, Vault     |
+| Feature       | Status | Package              | Description                                                                                |
+| ------------- | ------ | -------------------- | ------------------------------------------------------------------------------------------ |
+| Health checks | ✅     | `health-plugin`      | `/health`, `/live`, `/ready` with pluggable indicators                                     |
+| Metrics       | ✅     | `metrics-plugin`     | Prometheus counters, gauges, histograms, summaries                                         |
+| Telemetry     | ✅     | `telemetry-plugin`   | OpenTelemetry tracing, W3C propagation, auto-instrumentation                               |
+| OpenAPI       | ✅     | `openapi-plugin`     | OpenAPI 3.1 from routes, Zod transform, Swagger UI                                         |
+| Audit logging | ✅     | `audit-plugin`       | Immutable trail over memory, log, database, or file                                        |
+| Resilience    | ✅     | `resilience-plugin`  | Circuit breaker, retry, timeout, bulkhead                                                  |
+| Idempotency   | ✅     | `idempotency-plugin` | One effect per key for a repeated request, message or job (memory, Redis, Durable Objects) |
+| Secrets       | ✅     | `secrets-plugin`     | Env, AWS KMS, GCP Secret Manager, Azure Key Vault, Vault                                   |
 
 ### Delivery and ergonomics
 
@@ -231,7 +232,7 @@ Deno does not write the CLI's dependency graph into the project's lockfile.
 
 The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 49 workspace members are published on JSR, in `v0.8.0`: the core (`common`, `kernel`, `runtime`,
+All 51 workspace members are published on JSR: the core (`common`, `kernel`, `runtime`,
 `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, and the
 `cli`.
 
@@ -373,13 +374,13 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 setu-ts/
-├── packages/              # 49 workspace members, all published on JSR
+├── packages/              # 51 workspace members, all published on JSR
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)
 │   ├── exceptions/        # Exception factories and error-handler middleware
 │   ├── testing/           # Test utilities
-│   ├── *-plugin/          # 33 capability plugins
+│   ├── *-plugin/          # 41 capability plugins
 │   ├── cli/               # CLI tool — `setu`, project scaffolding and code generation
 │   ├── sdk/               # Client SDK — HTTP client, interceptors, resilience, OpenAPI codegen
 │   └── starters/          # Plugin bundles — REST, microservice, full-stack starters (M36)

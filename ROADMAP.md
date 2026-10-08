@@ -13232,9 +13232,12 @@ discards failed messages has nothing to de-duplicate.
 
 ## Milestone 109: Idempotency
 
-**Package(s):** a new `packages/idempotency-plugin`; `packages/common` (the store port and a
-capability token, because `cloudflare-plugin` would implement Durable Object and D1 stores and §2.2
-forbids it importing this plugin); `packages/sdk`; `packages/cloudflare-plugin`.
+**Package(s):** 109a: a new `packages/idempotency-plugin`; `packages/common` (the store port, the
+service contract and a capability token, because §2.2 forbids a plugin importing a plugin);
+`packages/decorator-plugin` (`@Idempotent`); `packages/cloudflare-plugin` (the Durable Object
+store); `packages/messaging-plugin` and `packages/queue-plugin` (the `IngressContext.consumer`
+dispatch identity); `packages/cli` (the health-indicator claim table). 109b: `packages/sdk` (the
+`idempotencyKey` request option) and tier C.
 
 **Objective:** one configurable mechanism that makes a repeated request, message, job or outbound
 call do its work once, reachable from HTTP routes, ingress, plain code and the SDK.
@@ -13249,43 +13252,53 @@ key to a provider that de-duplicates.
 **Scope.**
 
 - **One core state machine.** `claim(key, fingerprint, lease)` → `claimed` with a fencing token,
-  then `complete(token, record)` or `release(token)`. A claim answers claimed, completed (with the
-  stored record), in progress, fingerprint mismatch, or lease expired. The lease must exceed the
-  longest the work can take, or a retry claims mid-work.
+  then `complete(token, record)` or `release(token)`. A claim answers claimed (with `takeover: true`
+  when it displaces a LAPSED lease, so a lapsed lease is taken over INSIDE the claim, never surfaced
+  as its own outcome), completed (with the stored record), in-progress, fingerprint-mismatch, or
+  capacity-exceeded (tier A only). The lease must exceed the longest the work can take, or a retry
+  claims mid-work.
 - **Four entry points.**
   - HTTP: a route-level `idempotent(options)` middleware and an `@Idempotent()` decorator, appended
     after authentication, authorization and route validation (the M89a precedent) so that a refused
     or invalid request consumes no key. **No global switch.**
-  - Ingress: an ingress behaviour for queue jobs and messages.
+  - Ingress: an ingress behaviour for queue jobs and messages, acting ONLY on an explicit
+    `topics`/`jobNames` allow-list so unrelated and internal traffic (the realtime backplane) is
+    untouched; its key includes the consumer identity, so two subscribers on one topic each run once
+    (C9, §3.7, §3.19).
   - Code: `within(uow, key, fn)`, for the transactional tier.
   - SDK: an `idempotencyKey` request option, generated once per logical call and reused on every
     attempt, which is also what makes a POST or PATCH retryable (the SDK retries only
     GET/HEAD/OPTIONS/PUT/DELETE today).
-- **Configurable, with safe defaults:** key source (header, body field, message id, job id) with a
-  bounded length and character set; scope of tenant + principal + route or topic — principal scope
-  is a SECURITY requirement, since without it one user replays another's stored response; the
-  fingerprint (method, path and raw body by default) with a mismatch answering `422`; a concurrent
-  duplicate answering `409`; failure classification (a recorded caller error replays, a server error
-  releases the key, a failed message or job always releases); replay rules (non-streaming responses
-  only, `Set-Cookie`, request ids and `RateLimit-*` stripped, `Idempotent-Replayed: true` added, a
-  body size cap); and a TTL.
-- **Three store tiers.** A: memory, single process. B: Redis `SET NX PX` or a Cloudflare Durable
-  Object — across replicas, but not atomic with the business write. C: a record written inside the
-  business transaction — the work happens once — which cannot be plain middleware, so it is
-  `within()` only, built on the same transaction seam as M108's inbox. Tier C per backend: SQL,
-  MongoDB and DynamoDB yes; D1 for database-only effects; Cosmos only within one partition; Bigtable
-  no.
+- **Configurable, with safe defaults:** key source (header, body field, a message's
+  `x-setu-deduplication-id` header, a job id) with a bounded length and character set; scope of
+  tenant + principal + route or topic — principal scope is a SECURITY requirement, since without it
+  one user replays another's stored response; the fingerprint (method, path, raw query and raw body
+  by default) with a mismatch answering `422`; a concurrent duplicate answering `409`; a missing key
+  on a `required` route answering `400`; failure classification (a RETURNED `4xx` is recorded, a
+  returned 5xx/408/425/429 or any THROWN error releases the key, a failed message or job always
+  releases); replay rules (an ALLOW list of headers plus a fixed DENY list — `Set-Cookie`,
+  `Content-Language`, request ids, `RateLimit-*`, `Retry-After`, `Date` — never stored or replayed,
+  `Idempotent-Replayed: true` added, a body size cap); and a TTL.
+- **Three store tiers.** A: memory, single process. B: Redis via THREE Lua scripts (a bare
+  `SET NX PX` cannot detect a lapsed lease, compare a fingerprint or fence a settle; the scripts
+  read the server clock with `TIME`) or a Cloudflare Durable Object — across replicas, but not
+  atomic with the business write. C: a record written inside the business transaction — the work
+  happens once — which cannot be plain middleware, so it is `within()` only, built on the same
+  transaction seam as M108's inbox. Tier C per backend: SQL, MongoDB and DynamoDB yes; D1 for
+  database-only effects; Cosmos only within one partition; Bigtable no.
 - **Not this mechanism:** business uniqueness ("one payroll run per company and period") is a unique
   constraint, and a scheduled tick is already de-duplicated by M70l's slot locks. The README says
   so.
 
-**Known contract gap.** `ICacheStore` has no atomic set-if-absent, so tier B cannot be built on the
-cache capability without a race; the plan decides whether the store port owns its own Redis client
-or the cache contract gains an optional atomic member.
+**Known contract gap — resolved in 109a.** `ICacheStore` has no atomic member, so the Redis tier-B
+store lives in `idempotency-plugin` and owns its own inject-or-lazy ioredis client; the cache
+contract is NOT widened.
 
-**Suggested split.** 109a: the core, tiers A and B, and the HTTP and ingress entry points — needs
-nothing from M107/M108 and can start in parallel. 109b: tier C `within()` (after M108, sharing its
-seam) and the SDK option.
+**Split.** 109a (`feat/m109a-idempotency-core`): the core, tiers A and B (memory, Redis, and a
+Cloudflare Durable Object), the HTTP entry points (`idempotent()` and `@Idempotent()`) and the
+ingress entry point (`idempotentIngress()`), with `derivedIdempotencyKey()` exposing the key for
+forwarding — the plan's §3.1–§3.20. A D1 store is not built (D1 is the Workers tier C, 109b). 109b:
+tier C `within()` (after M108, sharing its seam) and the SDK `idempotencyKey` option.
 
 **Security and privacy, for the plan's design review:** cross-user replay (principal scope); store
 growth as a denial-of-service (rate limiting runs earlier, TTL, key and body caps); stored responses
@@ -13543,3 +13556,4 @@ patch by construction and gains nothing new here.
 | 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
 | 108       | ⬜     | messaging-plugin — consumer inbox keyed by (consumer group, envelope id), in the handler's transaction                                                                                                                                        |
 | 109       | ⬜     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
+| 109a      | ⬜     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |
