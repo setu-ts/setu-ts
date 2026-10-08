@@ -9,7 +9,17 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { edit, outboxHarness, row, rows, WALL_START } from '../../fixtures/outbox.ts';
+import { resolveOutboxOptions } from '../../../src/outbox/options.ts';
+import { OutboxService } from '../../../src/outbox/outbox-service.ts';
+import {
+  edit,
+  flush,
+  memoryOutbox,
+  outboxHarness,
+  row,
+  rows,
+  WALL_START,
+} from '../../fixtures/outbox.ts';
 
 describe('outbox retention', () => {
   it('purges settled sent and discarded rows older than retainSentMs, never failed or pending', async () => {
@@ -58,5 +68,59 @@ describe('outbox retention', () => {
       throw new Error('store down');
     };
     await expect(h.service.purge()).rejects.toThrow('store down');
+  });
+
+  it('a hung store ends the purge at sweepDeadlineMs, one deadline over every store', async () => {
+    // The scheduled purge holds the scheduler's handler mutex exactly as a
+    // sweep does, so it is bounded by the same deadline. Proven still pending
+    // before the clock reaches it, so the bound is what ends it.
+    const h = await outboxHarness({
+      options: {
+        retainSentMs: 0,
+        relay: { sweepDeadlineMs: 300, publishTimeoutMs: 100, storeTimeoutMs: 100 },
+      },
+    });
+    h.store.faults.purge = () => new Promise<void>(() => {});
+    let settled = false;
+    const purge = h.service.purge();
+    purge.then(() => (settled = true), () => (settled = true));
+    await flush();
+    expect(h.store.count('purge')).toBe(1);
+    await h.clock.advance(299);
+    expect(settled).toBe(false);
+    await h.clock.advance(1);
+    await expect(purge).rejects.toThrow('outbox: purge did not settle within its bound');
+    expect(h.clock.timerCount()).toBe(0);
+  });
+
+  it("the purge deadline spans every store: time spent on one shrinks the next one's bound", async () => {
+    const first = await outboxHarness({
+      options: { relay: { sweepDeadlineMs: 300, publishTimeoutMs: 100, storeTimeoutMs: 100 } },
+    });
+    const second = await memoryOutbox();
+    const service = new OutboxService({
+      runtime: first.clock.runtime,
+      broker: first.broker,
+      options: resolveOutboxOptions({
+        relay: { sweepDeadlineMs: 300, publishTimeoutMs: 100, storeTimeoutMs: 100 },
+        stores: { a: first.store, b: second.store },
+      }),
+    });
+    service.activate({
+      kind: 'per-tenant',
+      stores: new Map([['a', first.store], ['b', second.store]]),
+    });
+    // The first store spends 200 ms of the 300 ms budget before answering.
+    first.store.faults.purge = () => first.clock.step(200);
+    second.store.faults.purge = () => new Promise<void>(() => {});
+    let settled = false;
+    const purge = service.purge();
+    purge.then(() => (settled = true), () => (settled = true));
+    await flush();
+    expect(second.store.count('purge')).toBe(1);
+    await first.clock.advance(99);
+    expect(settled).toBe(false);
+    await first.clock.advance(1);
+    await expect(purge).rejects.toThrow('outbox: purge did not settle within its bound');
   });
 });

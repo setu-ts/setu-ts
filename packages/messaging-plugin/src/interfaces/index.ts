@@ -320,6 +320,25 @@ export interface MessagingCommonOptions {
    * @since 0.4.0
    */
   readonly chainReadyTimeoutMs?: number;
+  /**
+   * The transactional outbox (M107). When set, the plugin registers an
+   * {@linkcode IOutbox} under `CAPABILITIES.OUTBOX` (`outbox.<name>` for a
+   * named instance) and an `outbox` health indicator. At `onInit` it resolves
+   * the store(s), runs each store's `verify()` — a refusal fails `start()` —
+   * and, unless `relay.schedule` is `false`, schedules the relay
+   * (`outbox-relay[.<name>]`, every `relay.intervalMs`) and the purge
+   * (`outbox-purge[.<name>]`, every `purgeIntervalMs`) on
+   * `CAPABILITIES.SCHEDULER`; with no scheduler registered `start()` rejects
+   * `OutboxRelayUnscheduledError`. On shutdown the relay is drained in an
+   * `onShutdown` hook, before any close hook — the broker's included.
+   *
+   * Every numeric option is validated when `MessagingPlugin(...)` is called.
+   * Absent, nothing changes: no capability, hook, indicator or ordering edge
+   * is added.
+   *
+   * @since 0.9.0
+   */
+  readonly outbox?: OutboxOptions;
 }
 
 /**
@@ -1171,7 +1190,9 @@ export interface IOutbox {
 
   /**
    * Deletes `sent` and `discarded` rows older than `retainSentMs`, at most
-   * `purgeBatch` per status per store.
+   * `purgeBatch` per status per store. One deadline, `relay.sweepDeadlineMs`,
+   * bounds the whole run across every store; a store call still running at
+   * the deadline rejects the purge, and rows already deleted stay deleted.
    *
    * @returns The number of rows deleted
    */

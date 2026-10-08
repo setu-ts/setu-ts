@@ -2,8 +2,11 @@ import type {
   HealthIndicatorFn,
   IIngressBehavior,
   IMessageBroker,
+  IMetricsService,
+  IOutboxStore,
   IPlugin,
   IPluginContext,
+  IScheduler,
   ITelemetryService,
   RegistryFactory,
 } from '@setu-ts/common';
@@ -32,13 +35,22 @@ import { asBrokerAdapter } from '../brokers/custom-adapter.ts';
 import { TracedBroker } from '../tracing/traced-broker.ts';
 import { PipelinedBroker } from '../pipeline/pipelined-broker.ts';
 import { JsonSerializer } from '../serializers/json-serializer.ts';
+import { OutboxRelayUnscheduledError } from '../outbox/errors.ts';
+import { OutboxCollector } from '../outbox/outbox-collector.ts';
+import { createOutboxHealthIndicator } from '../outbox/outbox-health.ts';
+import type { ActiveOutboxStores } from '../outbox/outbox-service.ts';
+import { OutboxService } from '../outbox/outbox-service.ts';
+import type { ResolvedOutboxOptions } from '../outbox/options.ts';
+import { resolveOutboxOptions } from '../outbox/options.ts';
 import type {
   IKafkaFactory,
   INatsConnection,
+  IOutbox,
   IRedisStreamsClient,
   KafkaOptions,
   MessagingPluginOptions,
   NatsOptions,
+  OutboxStoreEntry,
   RabbitMqMessagingOptions,
   RabbitMqOptions,
   RedisStreamsOptions,
@@ -166,6 +178,19 @@ export function MessagingPlugin(
 
   const pluginName = createPluginName(instanceName);
 
+  // M107: the outbox arm is validated HERE, at plugin construction, like every
+  // other bound (the M90a rule). Absent, nothing below changes: no capability,
+  // no lifecycle hook, no indicator and no ordering edge is added.
+  const outboxOptions = options.outbox === undefined
+    ? undefined
+    : resolveOutboxOptions(options.outbox);
+  const outboxToken = instanceName
+    ? createCapabilityToken(`outbox.${instanceName}`)
+    : CAPABILITIES.OUTBOX;
+  const outboxJobSuffix = instanceName ? `.${instanceName}` : '';
+  const relayJobName = `outbox-relay${outboxJobSuffix}`;
+  const purgeJobName = `outbox-purge${outboxJobSuffix}`;
+
   // The registration arms are split ONCE, here at plugin construction, so
   // `register` and the `onInit` hook each read a single list (the M70d arm
   // pattern, M86 §3.5). Instance entries keep their pre-arm `register()`
@@ -230,8 +255,14 @@ export function MessagingPlugin(
   return {
     name: pluginName,
     version: denoJson.version,
-    provides: [token],
-    optionalDependencies: ['logger', CAPABILITIES.TELEMETRY],
+    provides: outboxOptions === undefined ? [token] : [token, outboxToken],
+    // The scheduler and metrics edges exist only with an outbox: they order
+    // SchedulerPlugin and MetricsPlugin before this one so the relay can be
+    // scheduled and its instruments created. Without an outbox the ordering
+    // is exactly the pre-M107 one.
+    optionalDependencies: outboxOptions === undefined
+      ? ['logger', CAPABILITIES.TELEMETRY]
+      : ['logger', CAPABILITIES.TELEMETRY, CAPABILITIES.SCHEDULER, CAPABILITIES.METRICS],
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
@@ -424,6 +455,21 @@ export function MessagingPlugin(
         throw new Error(`Unknown broker type: ${brokerType}`);
       }
 
+      // M107 §3.8: the outbox drain is registered BEFORE the broker's close
+      // hook. On a normal stop it runs in `onShutdown`, which the kernel runs
+      // before ANY close hook; on a failed start only close hooks run, and
+      // close hooks run in registration order — so registering here, ahead of
+      // the broker's, keeps the drain ahead of the broker disconnect on that
+      // path too. Both hooks share one memoized drain.
+      let outboxRuntime: OutboxRuntime | undefined;
+      const outboxDrain = outboxOptions === undefined
+        ? undefined
+        : createOutboxDrain(ctx, () => outboxRuntime);
+      if (outboxDrain !== undefined) {
+        ctx.lifecycle.onShutdown(outboxDrain);
+        ctx.lifecycle.onClose(outboxDrain);
+      }
+
       // Connect the broker (async for Redis)
       await broker.connect();
 
@@ -471,6 +517,19 @@ export function MessagingPlugin(
 
       // Register the broker as IMessageBroker
       ctx.services.register<IMessageBroker>(token, broker);
+
+      // M107: the outbox publishes through the COMPOSED broker, so a relayed
+      // row gets the same tracing and broker behaviour as a direct publish.
+      if (outboxOptions !== undefined) {
+        outboxRuntime = registerOutbox(ctx, {
+          options: outboxOptions,
+          broker,
+          outboxToken,
+          relayJobName,
+          purgeJobName,
+          ...(telemetry !== undefined ? { telemetry } : {}),
+        });
+      }
 
       // Declared subscription INSTANCES register now, exactly as an
       // imperative `broker.subscribe()` call made before this arm existed
@@ -602,4 +661,178 @@ async function subscribeDefinition(
   definition: SubscriptionDefinition,
 ): Promise<void> {
   await broker.subscribe(definition.topic, definition.handler, definition.options);
+}
+
+/**
+ * The outbox's live state inside one plugin instance: the service, and the
+ * scheduler jobs it registered (removed by the drain).
+ */
+interface OutboxRuntime {
+  readonly service: OutboxService;
+  /** Jobs scheduled at `onInit`, with the scheduler they were scheduled on. */
+  scheduled: { readonly scheduler: IScheduler; readonly jobs: string[] } | undefined;
+}
+
+/** What {@linkcode registerOutbox} needs from the plugin. */
+interface OutboxRegistration {
+  readonly options: ResolvedOutboxOptions;
+  /** The composed broker the relay publishes through. */
+  readonly broker: IMessageBroker;
+  /** `outbox` or `outbox.<name>`: the capability and the indicator name. */
+  readonly outboxToken: string;
+  readonly relayJobName: string;
+  readonly purgeJobName: string;
+  readonly telemetry?: ITelemetryService;
+}
+
+/**
+ * Builds the outbox at `register()` and wires its `onInit` (M107 §3.4, §3.8,
+ * §3.11, §3.14): registers the `IOutbox`, the `outbox` health indicator and —
+ * when `CAPABILITIES.METRICS` is registered — the collector; at `onInit`
+ * resolves every store, runs each `verify()` (a refusal fails `start()`),
+ * activates the outbox and schedules the relay and purge jobs.
+ *
+ * @param ctx - The plugin context
+ * @param registration - Options, composed broker, token and job names
+ * @returns The live outbox state the drain reads
+ */
+function registerOutbox(ctx: IPluginContext, registration: OutboxRegistration): OutboxRuntime {
+  const { options, broker, outboxToken, relayJobName, purgeJobName, telemetry } = registration;
+  const collector = ctx.services.has(CAPABILITIES.METRICS)
+    ? new OutboxCollector(
+      ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
+      outboxToken,
+      // Read through `ctx` at CALL time (the M52b lesson).
+      (error: Error): void => {
+        ctx.logger?.warn('outbox metrics write failed', { error: error.message });
+      },
+    )
+    : undefined;
+  const service = new OutboxService({
+    runtime: ctx.runtime,
+    broker,
+    options,
+    logger: () => ctx.logger,
+    ...(telemetry !== undefined ? { telemetry } : {}),
+    ...(collector !== undefined ? { observer: collector } : {}),
+  });
+  ctx.services.register<IOutbox>(outboxToken, service);
+  // A second derived indicator name in this package: `test/plugin-claims-gate.test.ts`
+  // lists the expression `outboxToken` beside `token`.
+  ctx.health.register(
+    outboxToken,
+    createOutboxHealthIndicator({
+      runtime: ctx.runtime,
+      source: service,
+      options,
+      ...(collector !== undefined ? { collector } : {}),
+    }),
+  );
+
+  const runtime: OutboxRuntime = { service, scheduled: undefined };
+
+  ctx.lifecycle.onInit(async () => {
+    // Checked first, before any store I/O: a relay that can never run is a
+    // configuration error, refused by name.
+    let scheduler: IScheduler | undefined;
+    if (options.schedule) {
+      if (!ctx.services.has(CAPABILITIES.SCHEDULER)) throw new OutboxRelayUnscheduledError();
+      scheduler = ctx.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
+    }
+    const active = resolveOutboxStores(ctx, options);
+    const stores = active.kind === 'single' ? [active.store] : [...active.stores.values()];
+    for (const store of stores) {
+      // A refusal (`OutboxStoreUnavailableError` from the database bridge)
+      // propagates and fails `start()` by name.
+      await store.verify();
+    }
+    service.activate(active);
+    if (scheduler === undefined) return;
+    // The drain must remove whatever was scheduled, even when the second
+    // `every` rejects after the first succeeded.
+    const scheduled = { scheduler, jobs: [] as string[] };
+    runtime.scheduled = scheduled;
+    await scheduler.every(relayJobName, options.intervalMs, async () => {
+      await service.sweep();
+    });
+    scheduled.jobs.push(relayJobName);
+    await scheduler.every(purgeJobName, options.purgeIntervalMs, async () => {
+      await service.purge();
+    });
+    scheduled.jobs.push(purgeJobName);
+  });
+  return runtime;
+}
+
+/**
+ * Resolves the configured store entries: an instance is used as is; a
+ * {@linkcode RegistryFactory} is resolved against the registry, a throwing one
+ * rejecting `start()` with a label naming the option (never a tenant id).
+ *
+ * @param ctx - The plugin context
+ * @param options - The resolved outbox options
+ * @returns The active stores
+ */
+function resolveOutboxStores(
+  ctx: IPluginContext,
+  options: ResolvedOutboxOptions,
+): ActiveOutboxStores {
+  const resolve = (entry: OutboxStoreEntry, label: string): IOutboxStore =>
+    typeof entry === 'function' ? resolveRegistryEntry(entry, ctx.services, label) : entry;
+  const configured = options.stores;
+  if (configured.kind === 'single') {
+    return {
+      kind: 'single',
+      store: resolve(configured.entry, 'MessagingPlugin({ outbox: { store } })'),
+    };
+  }
+  const stores = new Map<string, IOutboxStore>();
+  let index = 0;
+  for (const [tenantId, entry] of configured.entries) {
+    stores.set(tenantId, resolve(entry, `MessagingPlugin({ outbox: { stores } })[${index}]`));
+    index++;
+  }
+  return { kind: 'per-tenant', stores };
+}
+
+/**
+ * Builds the outbox drain (M107 §3.8), shared by the `onShutdown` and
+ * `onClose` hooks and memoized, so the second call awaits the first.
+ *
+ * It sets the outbox closing FIRST — synchronously, so `dispatch()` is a
+ * no-op and a scheduled fire that lands meanwhile sweeps nothing — then
+ * removes the relay and purge jobs, then awaits the in-flight sweep. A job
+ * the scheduler refuses to remove is reported, not rethrown: the outbox is
+ * already closing, so a stray fire does no work, and a failed removal must
+ * not keep the in-flight sweep from being awaited.
+ *
+ * @param ctx - The plugin context (the logger is read at call time)
+ * @param current - The live outbox state, absent before `register()` built it
+ * @returns The drain
+ */
+function createOutboxDrain(
+  ctx: IPluginContext,
+  current: () => OutboxRuntime | undefined,
+): () => Promise<void> {
+  let drained: Promise<void> | undefined;
+  return () =>
+    drained ??= (async () => {
+      const outbox = current();
+      if (outbox === undefined) return;
+      const closed = outbox.service.close();
+      const scheduled = outbox.scheduled;
+      if (scheduled !== undefined) {
+        for (const job of scheduled.jobs.splice(0)) {
+          try {
+            await scheduled.scheduler.remove(job);
+          } catch (error) {
+            ctx.logger?.warn('outbox: could not remove a scheduled job while draining', {
+              job,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+      await closed;
+    })();
 }

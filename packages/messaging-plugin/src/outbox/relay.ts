@@ -140,7 +140,7 @@ export interface LapHolder {
   lap: OutboxLap | undefined;
 }
 
-/** An expired relay call: a failure, after which the sweep ends. */
+/** An expired relay or purge call: a failure, after which the sweep (or purge) ends. */
 class RelayCallTimeoutError extends Error {
   constructor(what: string) {
     super(`outbox: ${what} did not settle within its bound`);
@@ -149,22 +149,42 @@ class RelayCallTimeoutError extends Error {
 }
 
 /**
- * Runs one relay call under `min(perCall, remaining)`, so no call outlives the
- * sweep deadline.
+ * Runs one call under `min(perCall, remaining)`, so no call outlives the
+ * deadline `budget` was started with. The ONE implementation of that rule:
+ * the sweep's calls and the purge job's calls both go through it.
+ *
+ * @internal
+ * @param runtime - Supplies the timer the bound runs on
+ * @param budget - The deadline the call must not outlive
+ * @param perCallMs - The call's own bound
+ * @param what - Names the call in the expiry error
+ * @param run - The call
+ * @returns The call's value, or a rejection with its error or the expiry
  */
+export function boundedCall<T>(
+  runtime: IRuntimeServices,
+  budget: SweepBudget,
+  perCallMs: number,
+  what: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const remaining = Math.ceil(budget.remaining());
+  if (remaining <= 0) return Promise.reject(new RelayCallTimeoutError(what));
+  return withDeadline(() => run(), {
+    timeoutMs: Math.min(perCallMs, remaining),
+    onTimeout: () => new RelayCallTimeoutError(what),
+    timing: resolveProbeTiming(runtime),
+  });
+}
+
+/** {@linkcode boundedCall} on a sweep's own runtime and budget. */
 function bounded<T>(
   ctx: RelayContext,
   perCallMs: number,
   what: string,
   run: () => Promise<T>,
 ): Promise<T> {
-  const remaining = Math.ceil(ctx.budget.remaining());
-  if (remaining <= 0) return Promise.reject(new RelayCallTimeoutError(what));
-  return withDeadline(() => run(), {
-    timeoutMs: Math.min(perCallMs, remaining),
-    onTimeout: () => new RelayCallTimeoutError(what),
-    timing: resolveProbeTiming(ctx.runtime),
-  });
+  return boundedCall(ctx.runtime, ctx.budget, perCallMs, what, run);
 }
 
 /** The budget that stops the sweep before its next row or page, if any. */

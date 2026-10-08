@@ -5737,6 +5737,25 @@ export type {
   ServiceBusOptions,
 } from '@setu-ts/messaging-plugin';
 
+// Transactional outbox (M107)
+export {
+  OutboxEnvelopeTooLargeError,
+  OutboxNotReadyError,
+  OutboxRelayUnscheduledError,
+  OutboxRowStateError,
+  OutboxUnknownTenantError,
+} from '@setu-ts/messaging-plugin';
+export type {
+  IOutbox,
+  OutboxCommonOptions,
+  OutboxHealthOptions,
+  OutboxOptions,
+  OutboxRelayOptions,
+  OutboxStoreEntry,
+  OutboxSweepResult,
+  OutboxWriteInput,
+} from '@setu-ts/messaging-plugin';
+
 // Re-exported types from @setu-ts/common
 export type {
   IMessageBroker,
@@ -6097,6 +6116,99 @@ Mapping a local domain event (M93a's `createDomainEvents()`) onto a published in
 application policy, written out explicitly — `event.type` is deliberately not the integration
 `type`, and `event.occurredOn` (when the fact happened) is deliberately not the envelope's
 `occurredAt` (when it was published).
+
+### Transactional outbox (M107)
+
+`MessagingPlugin({ outbox })` writes an integration event as a row in the SAME database transaction
+as the business change, through the caller's own unit of work, and relays committed rows to the
+broker afterwards. The store is reached through the `IOutboxStore` port in `@setu-ts/common` —
+normally `createDatabaseOutboxStore()` from `@setu-ts/database-plugin` — never by resolving
+`CAPABILITIES.DATABASE`.
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import type { IOutbox } from '@setu-ts/messaging-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+
+app.register(SchedulerPlugin());
+app.register(DatabasePlugin({ type: 'memory' }));
+app.register(MessagingPlugin({ outbox: { store: createDatabaseOutboxStore() } }));
+await app.start();
+
+const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+await db.transaction(async (uow) => {
+  await uow.getRepository('Order').create(order);
+  await outbox.write(uow, orderPlaced, { orderId: order.id });
+});
+outbox.dispatch(); // optional: sweep now rather than at the next tick
+```
+
+**The promise.** At-least-once delivery of every committed row; per ordering key, publish order
+among committed rows, provided rows of one key commit in the order they were written and, across
+replicas, provided the writers' clocks agree; delivery order as the broker gives it. Consumers
+compare `aggregateVersion`. Never exactly once — a re-send carries the same envelope id as its
+de-duplication id.
+
+| Export                        | Kind      | Notes                                                                                                                                         |
+| ----------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IOutbox`                     | interface | `write(scope, definition, payload, input?)` → envelope id; `dispatch()` (never throws); `sweep()`; `purge()`; `release(id, action, options?)` |
+| `OutboxOptions`               | type      | `OutboxCommonOptions` plus exactly one of `store` (one store) and `stores` (per tenant id); supplying both is a compile error                 |
+| `OutboxCommonOptions`         | interface | `maxEnvelopeBytes`, `background`, `relay`, `health`, `retainSentMs`, `purgeBatch`, `purgeIntervalMs`                                          |
+| `OutboxRelayOptions`          | interface | `schedule`, `intervalMs`, `pageSize`, `scanLimit`, `publishLimit`, `maxFailedScan`, `maxAttempts`, backoff bounds, the sweep deadline         |
+| `OutboxHealthOptions`         | interface | `degradedAfterMs` (default 60 000), `overlapWindowMs` (default 600 000)                                                                       |
+| `OutboxStoreEntry`            | type      | an `IOutboxStore` or a `RegistryFactory<IOutboxStore>`, resolved in `onInit`                                                                  |
+| `OutboxWriteInput`            | interface | `metadata?`, `options?` (`PublishOptions`, the `publishIntegrationEvent` precedence), `tenantId?`                                             |
+| `OutboxSweepResult`           | interface | `origin`, `scanned`, `published`, `failures`, `poisoned`, `endedBy`                                                                           |
+| `OutboxEnvelopeTooLargeError` | class     | `write` — the serialized envelope exceeds `maxEnvelopeBytes` (`bytes`, `limit`); the caller's transaction rolls back                          |
+| `OutboxRelayUnscheduledError` | class     | `start()` — the relay is scheduled (the default) but no `CAPABILITIES.SCHEDULER` is registered                                                |
+| `OutboxUnknownTenantError`    | class     | `write` / `release` with per-tenant `stores` naming no tenant, or one with no store; the tenant id is never quoted                            |
+| `OutboxRowStateError`         | class     | `release` — `outcome: 'missing'` or `'not-failed'` (with the row's `status`)                                                                  |
+| `OutboxNotReadyError`         | class     | any call before `onInit` resolved and verified the store                                                                                      |
+
+**Wiring.** With `outbox` set the plugin also provides `CAPABILITIES.OUTBOX` (`outbox.<name>` for a
+named instance), declares `CAPABILITIES.SCHEDULER` and `CAPABILITIES.METRICS` as optional
+dependencies (ordering only), and registers an `outbox` (`outbox.<name>`) health indicator. Without
+it, nothing changes. Every numeric option is validated when `MessagingPlugin(...)` is called; a
+value out of range, `NaN` or a fraction throws a `RangeError` naming the option, and
+`relay.publishTimeoutMs + relay.storeTimeoutMs > relay.sweepDeadlineMs` is refused.
+
+- **`onInit`.** With `relay.schedule` (default `true`) and no scheduler registered, `start()`
+  rejects `OutboxRelayUnscheduledError` before any store I/O. Otherwise each store entry is
+  resolved, each store's `verify()` runs — a refusal (`OutboxStoreUnavailableError` from the bridge)
+  fails `start()` — the outbox is activated, and two jobs are scheduled with `IScheduler.every`:
+  `outbox-relay[.<name>]` every `relay.intervalMs` (default 1000) and `outbox-purge[.<name>]` every
+  `purgeIntervalMs` (default 60 000). With `relay: { schedule: false }` nothing is scheduled; call
+  `sweep()` and `purge()` yourself (on Cloudflare Workers, from a Cron Trigger).
+- **One deadline.** `relay.sweepDeadlineMs` (default 15 000, monotonic clock) bounds a whole sweep,
+  and — because the purge job holds the scheduler's handler mutex exactly as a sweep does — a whole
+  `purge()` run across every store too: a store call still running at the deadline rejects the
+  purge, and rows already deleted stay deleted. Keep `sweepDeadlineMs` at most
+  `distributedLock.ttlMs − 10 000`.
+- **Shutdown.** The relay drains in an `onShutdown` hook, which the kernel runs before ANY close
+  hook — the broker's and the database's included: the outbox becomes closing (`dispatch()` is a
+  no-op and a failure writes no attempt), both jobs are removed, and the in-flight sweep is awaited.
+  An `onClose` hook repeats the same drain idempotently, because a failed `start()` runs close hooks
+  only; it is registered ahead of the broker's own close hook, so the drain precedes the disconnect
+  on that path too.
+- **Health.** `down` with `ready: false` before the store is verified and once closing; `down` with
+  `reachable: false` when `stats()` does not answer (cached 5 s, bounded 2 s); `degraded` with
+  `data.reasons` from a fixed vocabulary — cluster-wide, from the store: `oldest-pending-age` (past
+  `health.degradedAfterMs`), `failed-rows`, `failed-scan-cap` (a store's failed count reaches
+  `relay.maxFailedScan`); per instance, from this relay: `blocked-key-cap`, `store-write-failing`,
+  `scheduled-overlap` (a replica that never sweeps reports none of these). `data` carries counts,
+  ages in ms and the last local sweep's counts — never a tenant id, ordering key, topic or error
+  text.
+- **Metrics.** With `CAPABILITIES.METRICS` registered: counters `outbox_published_total`,
+  `outbox_publish_failures_total`, `outbox_poisoned_total` (labels `outbox`, `topic`) and
+  `outbox_overlaps_total` (`outbox`, `origin`); gauges `outbox_pending_rows` and
+  `outbox_oldest_pending_seconds` (`outbox`), written from each fresh store read the health
+  indicator makes. `topic` comes only from a decoded row and is capped at 100 distinct values per
+  instance, then `other`; an undecodable poisoned row is labelled `invalid-row`. Every write is
+  guarded — a failing metrics backend never reaches the relay.
 
 ## Queue (`@setu-ts/queue-plugin`)
 

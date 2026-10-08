@@ -21,6 +21,8 @@ export class OutboxEnvelopeTooLargeError extends Error {
   readonly limit: number;
 
   /**
+   * Builds the refusal from the measured size and the configured limit.
+   *
    * @param bytes - The serialized envelope's UTF-8 byte length
    * @param limit - The configured `maxEnvelopeBytes`
    */
@@ -82,6 +84,8 @@ export class OutboxRowStateError extends Error {
   declare readonly status?: 'pending' | 'sent' | 'discarded';
 
   /**
+   * Builds the refusal from the store's transition outcome.
+   *
    * @param outcome - `missing` or `not-failed`
    * @param status - The row's actual status, for `not-failed`
    */

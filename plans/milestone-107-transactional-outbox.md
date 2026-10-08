@@ -827,6 +827,15 @@ emulator); a CLI `--allow-net` replaces the block (M53), so the grants live here
 `packages/database-plugin/deno.json` is unchanged (its `:5433` grant serves its own local-only
 cells; the bridge's real-backend tests run from `messaging-plugin`, where the composition is).
 
+**Deviation recorded at implementation (PostgreSQL port 5433, not 5432).** The service, the URL and
+the grant above use host port **5433**, not 5432: the workflows map `127.0.0.1:5433:5432`,
+`OUTBOX_POSTGRES_URL` is `postgres://postgres:postgres@127.0.0.1:5433/postgres`, and
+`messaging-plugin` grants `127.0.0.1:5433` instead of `127.0.0.1:5432`. Reason: 5433 is the port
+`database-plugin`'s real tests already grant (`packages/database-plugin/deno.json:20`) and the port
+the local PostgreSQL backend runs on, while local 5432 is occupied by an unrelated application's
+database. One port in CI and locally means the guarded suites run identically in both.
+`test/apps-gate.test.ts` pins the 5433 form.
+
 | Test file                                                                  | src covered                                          | Key assertions                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/common/test/unit/outbox-contract.test.ts`                        | `services/outbox.ts`, token                          | `IUnitOfWork` assigns to `IOutboxWriteScope` (static); token passes `createCapabilityToken`                                                                                                                                                                                                                                                                                          |

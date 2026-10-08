@@ -45,7 +45,7 @@ export const PLUGIN_HEALTH_INDICATORS: ReadonlyMap<string, readonly string[]> = 
   ['grpc-plugin', ['grpc']],
   ['localization-plugin', ['localization']],
   ['mail-plugin', ['mail']],
-  ['messaging-plugin', ['messaging']],
+  ['messaging-plugin', ['messaging', 'outbox']],
   ['multi-tenancy-plugin', ['multi-tenancy']],
   ['notification-plugin', ['notification']],
   ['queue-plugin', ['queue']],

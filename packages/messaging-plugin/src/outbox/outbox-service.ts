@@ -28,7 +28,7 @@ import type { ResolvedOutboxOptions } from './options.ts';
 import { PositionClock } from './position.ts';
 import { encodeOutboxRecord } from './record-codec.ts';
 import type { LapHolder, OutboxRelayObserver } from './relay.ts';
-import { SweepBudget, sweepStore } from './relay.ts';
+import { boundedCall, SweepBudget, sweepStore } from './relay.ts';
 
 /**
  * The stores the plugin resolved and verified at `onInit`.
@@ -149,6 +149,17 @@ export class OutboxService implements IOutbox {
   }
 
   /**
+   * Every active store, in a stable order, or `undefined` before
+   * {@linkcode activate} — what the health indicator reads.
+   *
+   * @returns The stores, or `undefined`
+   */
+  activeStores(): readonly IOutboxStore[] | undefined {
+    const stores = this.#stores;
+    return stores === undefined ? undefined : this.#list(stores);
+  }
+
+  /**
    * This instance's per-instance health signals.
    *
    * @returns The signals
@@ -239,15 +250,33 @@ export class OutboxService implements IOutbox {
     return this.#inflight ?? this.#start('scheduled');
   }
 
-  /** @inheritdoc */
+  /**
+   * Deletes settled rows older than `retainSentMs` from every store.
+   *
+   * One deadline, `sweepDeadlineMs` on the monotonic clock, bounds the whole
+   * run — every store's queries and deletes together — because the scheduled
+   * purge job holds the scheduler's handler mutex exactly as a sweep does, and
+   * an unbounded purge against a hung store could outlive the mutex's `ttlMs`.
+   * A store call still running at the deadline rejects the purge; rows already
+   * deleted stay deleted and the rest are purged at the next interval.
+   *
+   * @returns The number of rows deleted
+   */
   async purge(): Promise<number> {
     const stores = this.#stores;
     if (stores === undefined) throw new OutboxNotReadyError();
     const { runtime, options } = this.#deps;
     const before = runtime.now() - options.retainSentMs;
+    const budget = new SweepBudget(runtime, options.sweepDeadlineMs);
     let deleted = 0;
     for (const store of this.#list(stores)) {
-      deleted += await store.purge(before, options.purgeBatch);
+      deleted += await boundedCall(
+        runtime,
+        budget,
+        options.sweepDeadlineMs,
+        'purge',
+        () => store.purge(before, options.purgeBatch),
+      );
     }
     return deleted;
   }

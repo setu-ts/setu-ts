@@ -965,6 +965,11 @@ publish — an operator who needs the signal can publish synthetically.
 | `MessagingNotSupportedError`            | class     |
 | `NatsBroker`                            | class     |
 | `NatsConsumerNameCollisionError`        | class     |
+| `OutboxEnvelopeTooLargeError`           | class     |
+| `OutboxNotReadyError`                   | class     |
+| `OutboxRelayUnscheduledError`           | class     |
+| `OutboxRowStateError`                   | class     |
+| `OutboxUnknownTenantError`              | class     |
 | `PubSubSubscriptionBoundElsewhereError` | class     |
 | `RabbitMqBroker`                        | class     |
 | `RedisStreamsBroker`                    | class     |
@@ -981,6 +986,7 @@ publish — an operator who needs the signal can publish synthetically.
 | `IntegrationEventDefinition`            | interface |
 | `IntegrationEventEnvelope`              | interface |
 | `IntegrationEventMetadata`              | interface |
+| `IOutbox`                               | interface |
 | `IPubSubSubscription`                   | interface |
 | `IPubSubTransport`                      | interface |
 | `ISerializer`                           | interface |
@@ -997,6 +1003,11 @@ publish — an operator who needs the signal can publish synthetically.
 | `MessagingCommonOptions`                | interface |
 | `NatsMessagingOptions`                  | interface |
 | `NatsOptions`                           | interface |
+| `OutboxCommonOptions`                   | interface |
+| `OutboxHealthOptions`                   | interface |
+| `OutboxRelayOptions`                    | interface |
+| `OutboxSweepResult`                     | interface |
+| `OutboxWriteInput`                      | interface |
 | `PubSubOptions`                         | interface |
 | `PubSubSdkModule`                       | interface |
 | `RabbitMqMessagingOptions`              | interface |
@@ -1014,6 +1025,8 @@ publish — an operator who needs the signal can publish synthetically.
 | `MessageHandler`                        | type      |
 | `MessagingBrokerType`                   | type      |
 | `MessagingPluginOptions`                | type      |
+| `OutboxOptions`                         | type      |
+| `OutboxStoreEntry`                      | type      |
 | `PubSubMessagingOptions`                | type      |
 | `RequestHandler`                        | type      |
 | `ServiceBusMessagingOptions`            | type      |
