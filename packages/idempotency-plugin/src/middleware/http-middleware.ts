@@ -12,7 +12,6 @@ import { deriveHash } from '../core/hash.ts';
 import { parseKeyValue } from '../core/key.ts';
 import { requestFingerprint } from '../core/fingerprint.ts';
 import type { ResolvedRouteOptions } from '../core/options.ts';
-import type { RecordOmissionReason } from '../core/record.ts';
 import {
   decodeHttpRecord,
   encodeHttpRecord,
@@ -23,6 +22,17 @@ import type { ServiceDeps } from '../service/idempotency-service.ts';
 
 /** The warn message shared by every lease-lapse settle. */
 const LEASE_LAPSED = 'idempotency lease lapsed before completion; the work may have run twice';
+
+/**
+ * The most distinct (reason, namespace) pairs one middleware instance warns
+ * about. It bounds the memory a caller sending distinct paths can pin (M109a
+ * audit F1) while still warning per route when one instance serves several.
+ */
+const OMISSION_WARNING_LIMIT = 256;
+
+/** Logged once, when {@linkcode OMISSION_WARNING_LIMIT} is reached. */
+const OMISSION_WARNINGS_SUPPRESSED =
+  'idempotency: further recorded-without-body warnings from this middleware are suppressed';
 
 /** Why a recorded response dropped its body/headers, and the warn to emit. */
 const OMISSION_WARNINGS: Readonly<Record<string, string>> = {
@@ -72,12 +82,16 @@ export function createHttpMiddleware(
   deps: ServiceDeps,
   resolved: ResolvedRouteOptions,
 ): MiddlewareFunction {
-  // Keyed by the omission REASON, a fixed vocabulary, never by namespace: the
-  // default namespace carries the request path, so a set keyed by it grew one
-  // entry per distinct path an authenticated caller sent and logged on every
-  // request (M109a audit F1). This middleware serves one route, so one warning
-  // per reason is one warning per route and reason.
-  const warned = new Set<RecordOmissionReason>();
+  // One warning per (reason, namespace), capped. The default namespace carries
+  // the request path, so an uncapped set grew one entry per distinct path an
+  // authenticated caller sent (M109a audit F1). Keying by the reason alone
+  // fixed that but silenced every route after the first when one
+  // `idempotent()` instance is shared across routes (round 2, N1). So the
+  // namespace stays in the key, and the set stops at
+  // OMISSION_WARNING_LIMIT entries, after which one line says further
+  // warnings are suppressed.
+  const warned = new Set<string>();
+  let suppressedNoticeLogged = false;
 
   const release = async (key: string, token: string, namespace: string): Promise<void> => {
     try {
@@ -242,11 +256,19 @@ export function createHttpMiddleware(
           return;
         }
         const encoded = encodeHttpRecord(snapshot, resolved, deps.store.maxRecordBytes);
-        if (encoded.omitted !== undefined && !warned.has(encoded.omitted)) {
+        if (encoded.omitted !== undefined) {
           const warning = OMISSION_WARNINGS[encoded.omitted];
-          if (warning !== undefined) {
-            warned.add(encoded.omitted);
-            deps.logger()?.warn(warning, { namespace });
+          const seen = `${encoded.omitted}\n${namespace}`;
+          if (warning !== undefined && !warned.has(seen)) {
+            if (warned.size < OMISSION_WARNING_LIMIT) {
+              warned.add(seen);
+              deps.logger()?.warn(warning, { namespace });
+            } else if (!suppressedNoticeLogged) {
+              suppressedNoticeLogged = true;
+              deps.logger()?.warn(OMISSION_WARNINGS_SUPPRESSED, {
+                limit: OMISSION_WARNING_LIMIT,
+              });
+            }
           }
         }
         await complete(key, token, encoded.record, namespace);

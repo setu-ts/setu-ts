@@ -82,6 +82,16 @@ function makeCtx(options: {
   return { ctx, captured };
 }
 
+/** A fresh streaming snapshot (a body stream can be read only once). */
+function streaming(): ResponseSnapshot {
+  return {
+    streaming: true,
+    status: 200,
+    headers: new Headers(),
+    body: new ReadableStream<Uint8Array>(),
+  } as ResponseSnapshot;
+}
+
 /** Builds the middleware under test. */
 function middleware(store: IIdempotencyStore, options: IdempotentRouteOptions, logger?: ILogger) {
   const defaults = resolveDefaults(undefined);
@@ -143,37 +153,36 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
     expect(warnings[0]).toContain('streaming');
   });
 
-  it('warns once per reason however many distinct paths take it (M109a audit F1)', async () => {
-    // The default namespace carries the request path. Keyed by it, every
-    // distinct path a caller sent was retained for the process's life and
-    // logged again, so the de-duplication protected nothing.
+  it('bounds the warnings a caller can cause with distinct paths (M109a audit F1)', async () => {
+    // The default namespace carries the request path. An uncapped set kept
+    // every distinct path for the life of the process and warned for each.
     const { logger, warnings } = captureLogger();
     const { store } = recordingStore({ outcome: 'claimed', takeover: false });
-    const streaming = () =>
-      ({
-        streaming: true,
-        status: 200,
-        headers: new Headers(),
-        body: new ReadableStream<Uint8Array>(),
-      }) as ResponseSnapshot;
-    const oversize: ResponseSnapshot = {
-      streaming: false,
-      status: 200,
-      headers: new Headers(),
-      body: 'x',
-    };
-    const mw = middleware(store, { maxResponseBytes: 0 }, logger);
-    for (let n = 0; n < 200; n++) {
+    const mw = middleware(store, {}, logger);
+    for (let n = 0; n < 1_000; n++) {
       await mw(
         makeCtx({ snapshot: streaming(), path: `/orders/${n}` }).ctx,
         () => Promise.resolve(),
       );
-      await mw(makeCtx({ snapshot: oversize, path: `/orders/${n}` }).ctx, () => Promise.resolve());
     }
-    // One warning per omission reason, not one per path.
+    // 256 distinct (reason, namespace) pairs, then ONE suppression line.
+    expect(warnings).toHaveLength(257);
+    expect(warnings.filter((w) => w.includes('suppressed'))).toHaveLength(1);
+    expect(warnings.at(-1)).toContain('suppressed');
+  });
+
+  it('warns once per route when one instance serves several routes (round 2, N1)', async () => {
+    // Keyed by reason alone, a shared instance warned for the first route only.
+    const { logger, warnings } = captureLogger();
+    const { store } = recordingStore({ outcome: 'claimed', takeover: false });
+    const mw = middleware(store, {}, logger);
+    for (let n = 0; n < 3; n++) {
+      for (const path of ['/items', '/other']) {
+        await mw(makeCtx({ snapshot: streaming(), path }).ctx, () => Promise.resolve());
+      }
+    }
     expect(warnings).toHaveLength(2);
-    expect(warnings.filter((w) => w.includes('streaming'))).toHaveLength(1);
-    expect(warnings.filter((w) => w.includes('exceeds maxResponseBytes'))).toHaveLength(1);
+    expect(warnings.every((w) => w.includes('streaming'))).toBe(true);
   });
 
   it('warns for an oversize body and a redaction miss', async () => {
