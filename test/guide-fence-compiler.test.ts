@@ -94,6 +94,16 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 0,
   },
+  'docs/how-it-fits-together.md': {
+    // Startup order, the registry-versus-container split and the test
+    // overrides, each with a compiling example.
+    total: 4,
+    ts: 4,
+    compile: 4,
+    external: 0,
+    pseudocode: 0,
+    skipped: 0,
+  },
   'docs/examples.md': {
     // Rewritten after the examples cold read: the per-app "Key code" blocks
     // described apps that no longer existed (routes, plugins, ports), so each
@@ -210,9 +220,10 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // the examples cold read: ten invented "Key code" blocks became shell
   // commands and source links (-10 compiling, +14 skipped). 274 after the
   // custom-plugins cold read: a nested README fence stopped leaking out (-1).
-  total: 274,
-  ts: 212,
-  compile: 179,
+  // 278 once docs/how-it-fits-together.md joins the corpus (+4, all compiling).
+  total: 278,
+  ts: 216,
+  compile: 183,
   external: 33,
   pseudocode: 0,
   skipped: 62,

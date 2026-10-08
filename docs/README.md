@@ -12,6 +12,11 @@ building production-ready applications with our plugin-first, runtime-independen
 
 ## Core Concepts
 
+- [How It Fits Together](./how-it-fits-together.md)
+  - When plugins register and when a lookup misses
+  - Service registry versus DI container
+  - Which test helper replaces which service
+
 - [Plugin Architecture](./plugin-architecture.md)
   - Understanding the plugin contract
   - Capability tokens and service registration
