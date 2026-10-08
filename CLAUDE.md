@@ -5808,7 +5808,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
     `RabbitMqQueue` (both jammed their channel until restart) — folded in at the maintainer's
     direction — and then that the queue refusal starved every later processor, now refused at
     registration with per-name isolation in both loops. Round 5 passed with nothing open — complete
-    (PR pending).
+    (PR #427).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 

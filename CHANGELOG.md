@@ -35,8 +35,8 @@ All notable changes to this project are documented here. The format follows
   a container, or a provider registered too early fails `start()` instead of testing the real class.
   A child scope from `createScope()` keeps the double even when it registers the token itself.
 
-- **Publish options (M106).** `IMessageBroker.publish` takes an optional third argument, typed
-  `PublishOptions` — `orderingKey`, `deduplicationId` and `headers` — carried as `x-setu-*`
+- **Publish options (M106, PR #427).** `IMessageBroker.publish` takes an optional third argument,
+  typed `PublishOptions` — `orderingKey`, `deduplicationId` and `headers` — carried as `x-setu-*`
   transport headers (`ORDERING_KEY_HEADER` / `DEDUPLICATION_ID_HEADER`) beside each broker's native
   primitive (Kafka message `key`, Pub/Sub `orderingKey`, NATS `Nats-Msg-Id`, Service Bus and
   RabbitMQ `messageId`), so the options are observable through `MessageMetadata.headers` on all
@@ -543,18 +543,18 @@ All notable changes to this project are documented here. The format follows
   generic like `Body`, so `Query<z.infer<typeof schema>>()` declares the shape `@ValidateQuery`
   wrote instead of a cast. `apps/static-site` takes its port as the first argument (default `8000`).
 
-- **A name over 255 bytes no longer jams a RabbitMQ channel (`@setu-ts/messaging-plugin`, M106).**
-  AMQP limits the exchange, a queue, the routing key (the topic), the message id and each header
-  name to 255 bytes, and amqplib prepares a publish's confirm callback, or a channel operation's
-  reply slot, before it encodes. An oversized value was rejected, but it left the channel wrong for
-  the rest of its life: after a publish, each later awaited publish resolved only when the one after
-  it was confirmed; after a `subscribe()`, every later channel operation waited forever, so
-  publishes timed out and subscriptions never completed. A payload `messageId` or a topic over 255
-  bytes reached this before 0.9.0. `RabbitMqBroker` now refuses each of these with a `RangeError`
-  naming the field before the channel is touched: the topic, queue, message id and header names on
-  `publish`/`subscribe`, and `exchangeName` (and a `defaultQueue` over 218 bytes, which leaves no
-  room for the private queue's uuid suffix) at construction. `@setu-ts/queue-plugin`'s
-  `RabbitMqQueue` had the same defect through its derived queue names,
+- **A name over 255 bytes no longer jams a RabbitMQ channel (`@setu-ts/messaging-plugin`, M106, PR
+  #427).** AMQP limits the exchange, a queue, the routing key (the topic), the message id and each
+  header name to 255 bytes, and amqplib prepares a publish's confirm callback, or a channel
+  operation's reply slot, before it encodes. An oversized value was rejected, but it left the
+  channel wrong for the rest of its life: after a publish, each later awaited publish resolved only
+  when the one after it was confirmed; after a `subscribe()`, every later channel operation waited
+  forever, so publishes timed out and subscriptions never completed. A payload `messageId` or a
+  topic over 255 bytes reached this before 0.9.0. `RabbitMqBroker` now refuses each of these with a
+  `RangeError` naming the field before the channel is touched: the topic, queue, message id and
+  header names on `publish`/`subscribe`, and `exchangeName` (and a `defaultQueue` over 218 bytes,
+  which leaves no room for the private queue's uuid suffix) at construction.
+  `@setu-ts/queue-plugin`'s `RabbitMqQueue` had the same defect through its derived queue names,
   `<prefix>.<name>.ready|.delay|.dead`: a job name that makes them exceed 255 bytes (240 with the
   default prefix) is now refused before the channel is touched — at registration too, by `process()`
   and `addRecurring()`, so a declared processor with such a name fails `start()` — and a `prefix`
