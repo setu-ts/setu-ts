@@ -17,6 +17,7 @@ import { parseKeyValue } from '../core/key.ts';
 import type { ResolvedIngressOptions } from '../core/options.ts';
 import { IdempotencyRefusedError } from '../errors.ts';
 import type { ServiceDeps } from '../service/idempotency-service.ts';
+import { safeLog } from '../core/safe-log.ts';
 
 /** The queue job id, when the payload carries a string `id`. */
 function jobId(payload: unknown): string | undefined {
@@ -87,7 +88,9 @@ export function createIngressBehavior(
   const releaseSafe = async (key: string, token: string, ctx: IngressContext): Promise<void> => {
     try {
       if (await deps.store.release(key, token) === 'lost') {
-        deps.logger()?.warn(
+        safeLog(
+          deps.logger,
+          'warn',
           'idempotency lease lapsed before completion; the work may have run twice',
           {
             kind: ctx.kind,
@@ -96,13 +99,15 @@ export function createIngressBehavior(
         );
       }
     } catch (error) {
-      deps.logger()?.error('idempotency release failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency release failed', { error: String(error) });
     }
   };
   const completeSafe = async (key: string, token: string, ctx: IngressContext): Promise<void> => {
     try {
       if (await deps.store.complete(key, token, '', resolved.ttlMs) === 'lost') {
-        deps.logger()?.warn(
+        safeLog(
+          deps.logger,
+          'warn',
           'idempotency lease lapsed before completion; the work may have run twice',
           {
             kind: ctx.kind,
@@ -111,7 +116,7 @@ export function createIngressBehavior(
         );
       }
     } catch (error) {
-      deps.logger()?.error('idempotency complete failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency complete failed', { error: String(error) });
     }
   };
 
@@ -227,7 +232,7 @@ export function createIngressBehavior(
           );
         case 'claimed': {
           if (claim.takeover) {
-            deps.logger()?.warn('idempotency claim took over a lapsed lease', {
+            safeLog(deps.logger, 'warn', 'idempotency claim took over a lapsed lease', {
               kind: ctx.kind,
               name: ctx.name,
             });

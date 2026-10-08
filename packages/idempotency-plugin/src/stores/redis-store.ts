@@ -19,6 +19,7 @@ import type {
 } from '@setu-ts/common';
 import type { IBuiltRedisIdempotencyClient, IRedisIdempotencyClient } from '../interfaces/index.ts';
 import { CLAIM_SCRIPT, COMPLETE_SCRIPT, RELEASE_SCRIPT } from './redis-scripts.ts';
+import { safeLog } from '../core/safe-log.ts';
 
 /**
  * Parses a CLAIM `EVAL` reply.
@@ -179,7 +180,9 @@ export class RedisIdempotencyStore implements IIdempotencyStore {
     if (!Array.isArray(reply) || reply.length < 2) return;
     const policy = reply[1];
     if (typeof policy !== 'string' || policy === 'noeviction') return;
-    this.#logger()?.warn(
+    safeLog(
+      this.#logger,
+      'warn',
       `redis idempotency store: maxmemory-policy is ${policy}; completed records can be evicted, which allows a duplicate`,
       { policy },
     );

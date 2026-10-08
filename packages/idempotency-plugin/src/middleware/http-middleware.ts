@@ -19,6 +19,7 @@ import {
   replay,
 } from '../core/record.ts';
 import type { ServiceDeps } from '../service/idempotency-service.ts';
+import { safeLog } from '../core/safe-log.ts';
 
 /** The warn message shared by every lease-lapse settle. */
 const LEASE_LAPSED = 'idempotency lease lapsed before completion; the work may have run twice';
@@ -96,10 +97,10 @@ export function createHttpMiddleware(
   const release = async (key: string, token: string, namespace: string): Promise<void> => {
     try {
       if (await deps.store.release(key, token) === 'lost') {
-        deps.logger()?.warn(LEASE_LAPSED, { namespace });
+        safeLog(deps.logger, 'warn', LEASE_LAPSED, { namespace });
       }
     } catch (error) {
-      deps.logger()?.error('idempotency release failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency release failed', { error: String(error) });
     }
   };
   const complete = async (
@@ -110,10 +111,10 @@ export function createHttpMiddleware(
   ): Promise<void> => {
     try {
       if (await deps.store.complete(key, token, record, resolved.ttlMs) === 'lost') {
-        deps.logger()?.warn(LEASE_LAPSED, { namespace });
+        safeLog(deps.logger, 'warn', LEASE_LAPSED, { namespace });
       }
     } catch (error) {
-      deps.logger()?.error('idempotency complete failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency complete failed', { error: String(error) });
     }
   };
 
@@ -193,7 +194,7 @@ export function createHttpMiddleware(
         ttlMs: resolved.ttlMs,
       });
     } catch (error) {
-      deps.logger()?.error('idempotency claim failed', { error: String(error) });
+      safeLog(deps.logger, 'error', 'idempotency claim failed', { error: String(error) });
       respondWithError(ctx, {
         status: 503,
         title: 'Service Unavailable',
@@ -228,7 +229,7 @@ export function createHttpMiddleware(
       case 'completed': {
         const decoded = decodeHttpRecord(claim.record, resolved);
         if (decoded instanceof IdempotencyRecordError) {
-          deps.logger()?.error('idempotency record rejected', { error: decoded.message });
+          safeLog(deps.logger, 'error', 'idempotency record rejected', { error: decoded.message });
           respondWithError(ctx, {
             status: 503,
             title: 'Service Unavailable',
@@ -240,7 +241,7 @@ export function createHttpMiddleware(
       }
       case 'claimed': {
         if (claim.takeover) {
-          deps.logger()?.warn('idempotency claim took over a lapsed lease', { namespace });
+          safeLog(deps.logger, 'warn', 'idempotency claim took over a lapsed lease', { namespace });
         }
         ctx.state.set(IDEMPOTENCY_DERIVED_KEY_STATE_KEY, key);
         try {
@@ -262,10 +263,10 @@ export function createHttpMiddleware(
           if (warning !== undefined && !warned.has(seen)) {
             if (warned.size < OMISSION_WARNING_LIMIT) {
               warned.add(seen);
-              deps.logger()?.warn(warning, { namespace });
+              safeLog(deps.logger, 'warn', warning, { namespace });
             } else if (!suppressedNoticeLogged) {
               suppressedNoticeLogged = true;
-              deps.logger()?.warn(OMISSION_WARNINGS_SUPPRESSED, {
+              safeLog(deps.logger, 'warn', OMISSION_WARNINGS_SUPPRESSED, {
                 limit: OMISSION_WARNING_LIMIT,
               });
             }

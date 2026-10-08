@@ -185,6 +185,42 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
     expect(warnings.every((w) => w.includes('streaming'))).toBe(true);
   });
 
+  it('a throwing logger never changes the outcome (M109a audit round 3, O1)', async () => {
+    // A broken log transport used to throw out of the warn between next() and
+    // complete(): the handler had run, the client got a 500, and the key
+    // stayed claimed until the lease lapsed.
+    const throwing = {
+      level: 'info',
+      warn: () => {
+        throw new Error('log transport down');
+      },
+      error: () => {
+        throw new Error('log transport down');
+      },
+    } as unknown as ILogger;
+    // The omission-warning path: the handler's response is recorded.
+    const { store, calls } = recordingStore({ outcome: 'claimed', takeover: false });
+    let ran = 0;
+    await middleware(store, {}, throwing)(makeCtx({ snapshot: streaming() }).ctx, () => {
+      ran += 1;
+      return Promise.resolve();
+    });
+    expect(ran).toBe(1);
+    expect(calls.complete).toHaveLength(1);
+    expect(calls.release).toHaveLength(0);
+    // The takeover-warning path: the handler still runs and the record settles.
+    const takeover = recordingStore({ outcome: 'claimed', takeover: true });
+    await middleware(takeover.store, {}, throwing)(makeCtx({}).ctx, () => Promise.resolve());
+    expect(takeover.calls.complete).toHaveLength(1);
+    // A handler failure is rethrown as ITSELF, not as the logger's error.
+    const failing = recordingStore({ outcome: 'claimed', takeover: false }, 'lost');
+    const original = new Error('handler failed');
+    await expect(
+      middleware(failing.store, {}, throwing)(makeCtx({}).ctx, () => Promise.reject(original)),
+    ).rejects.toBe(original);
+    expect(failing.calls.release).toHaveLength(1);
+  });
+
   it('warns for an oversize body and a redaction miss', async () => {
     const { logger, warnings } = captureLogger();
     const { store } = recordingStore({ outcome: 'claimed', takeover: false });
