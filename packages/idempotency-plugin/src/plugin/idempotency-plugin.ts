@@ -44,7 +44,8 @@ export function IdempotencyPlugin(options?: IdempotencyPluginOptions): IPlugin {
       // read at call time, so one registered later is still honoured (§3.5).
       const reporter = createConnectionErrorReporter({
         source: 'idempotency-plugin: redis store',
-        logger: () => ctx.logger,
+        // The SAME call-time thunk the store already logs through.
+        logger,
       });
       const store = await resolveStore(options?.store, reporter, logger);
       await store.connect(ctx.runtime);
