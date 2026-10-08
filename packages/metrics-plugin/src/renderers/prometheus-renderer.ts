@@ -30,10 +30,15 @@ function escapeLabelValue(value: string): string {
  * survives as its escape.
  *
  * The encoding uses U+FFFD as an escape marker: a control character becomes
- * U+FFFD followed by its two lowercase hex digits, and a literal U+FFFD becomes
- * two of them. Unlike a plain replacement it is injective, so two distinct
+ * U+FFFD followed by its two lowercase hex digits, a lone UTF-16 surrogate
+ * becomes U+FFFD, `u` and its four hex digits, and a literal U+FFFD becomes two
+ * markers. The three forms are told apart by the character after the marker (a
+ * hex digit, `u`, or the marker), so the encoding is injective and two distinct
  * label values can never render as the same sample line, which the format
- * requires to be unique. Text containing neither is returned unchanged.
+ * requires to be unique. Lone surrogates must be encoded too, because UTF-8
+ * encoding would otherwise turn each one into a literal U+FFFD and collide with
+ * the marker. Valid surrogate pairs and text containing none of these are
+ * returned unchanged.
  *
  * @param text - Already-escaped text
  * @returns The text with every remaining control character encoded
@@ -41,11 +46,12 @@ function escapeLabelValue(value: string): string {
 function replaceUnescapableControls(text: string): string {
   return text.replace(
     // deno-lint-ignore no-control-regex
-    /[\u0000-\u001f\u007f\ufffd]/g,
-    (char) =>
-      char === '\ufffd'
-        ? '\ufffd\ufffd'
-        : `\ufffd${char.charCodeAt(0).toString(16).padStart(2, '0')}`,
+    /[\u0000-\u001f\u007f�]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+    (char) => {
+      if (char === '�') return '��';
+      const code = char.charCodeAt(0);
+      return code >= 0xd800 ? `�u${code.toString(16)}` : `�${code.toString(16).padStart(2, '0')}`;
+    },
   );
 }
 
