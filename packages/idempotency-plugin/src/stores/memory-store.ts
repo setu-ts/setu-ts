@@ -59,6 +59,13 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
   #bytes = 0;
   #now: () => number = () => 0;
   #lastSweep = Number.NEGATIVE_INFINITY;
+  /**
+   * The `hrtime()` at which each scope last swept, so a scope sitting at its
+   * cap rescans at most once per {@linkcode SWEEP_THROTTLE_MS} (plan §3.16).
+   * Bounded by the entry cap: only a scope that ever reached its cap gets a
+   * row here.
+   */
+  readonly #lastScopeSweep = new Map<string, number>();
 
   /**
    * @param options - The capacity bounds
@@ -155,6 +162,7 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
   disconnect(): Promise<void> {
     this.#entries.clear();
     this.#scopeCounts.clear();
+    this.#lastScopeSweep.clear();
     this.#bytes = 0;
     return Promise.resolve();
   }
@@ -203,8 +211,19 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
     }
   }
 
-  /** Removes every expired entry in one scope. */
+  /**
+   * Removes every expired entry in one scope, at most once per throttle window.
+   *
+   * This scan is O(total entries), so without a throttle one caller flooding at
+   * its per-scope cap would block the event loop on EVERY refused claim — the
+   * refusal is supposed to leave other callers unaffected (§10 D21). The window
+   * is kept PER SCOPE: one scope's refusals must not suppress the sweep another
+   * scope is waiting on.
+   */
   #sweepScope(scope: string, now: number): void {
+    const last = this.#lastScopeSweep.get(scope);
+    if (last !== undefined && now - last < SWEEP_THROTTLE_MS) return;
+    this.#lastScopeSweep.set(scope, now);
     for (const [key, entry] of this.#entries) {
       if (this.#scopeOfKey.get(key) === scope && entry.expiresAt <= now) {
         this.#remove(key, now);
