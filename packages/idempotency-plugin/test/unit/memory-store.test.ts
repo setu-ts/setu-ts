@@ -85,27 +85,49 @@ describe('MemoryIdempotencyStore specifics (M109a §3.16)', () => {
 
   it('throttles the per-scope sweep, so a refused at-cap claim does not rescan', async () => {
     const clock = createClockRuntime();
-    const store = new MemoryIdempotencyStore({ maxEntriesPerScope: 1, maxEntries: 10 });
+    const store = new MemoryIdempotencyStore({ maxEntriesPerScope: 2, maxEntries: 10 });
     await store.connect(clock);
     await store.claim(request({ key: hex('1'), scope: 's1', ttlMs: 100 }));
+    await store.claim(request({ key: hex('2'), scope: 's1', ttlMs: 60_000 }));
     clock.advance(150);
-    // The first at-cap claim sweeps s1; its entry has expired, so it fits and
-    // the sweep records t=150 for s1.
-    expect((await store.claim(request({ key: hex('2'), scope: 's1', ttlMs: 100 }))).outcome)
-      .toBe('claimed');
-    // s1 is at its cap again, with an expired entry, but its sweep ran 150 ms
-    // ago: the throttle refuses instead of rescanning the whole map. Without
-    // the throttle the entry would be freed and this would claim.
-    clock.advance(150);
+    // The first at-cap claim sweeps s1 and frees the expired key 1; key 2 is
+    // live, so s1 keeps its keys AND its sweep row (t=150).
     expect((await store.claim(request({ key: hex('3'), scope: 's1', ttlMs: 100 }))).outcome)
+      .toBe('claimed');
+    // s1 is at its cap again with an expired key 3, but its sweep ran 150 ms
+    // ago: the throttle refuses rather than rescanning.
+    clock.advance(150);
+    expect((await store.claim(request({ key: hex('4'), scope: 's1', ttlMs: 100 }))).outcome)
       .toBe('capacity-exceeded');
     // Another scope has its OWN window, so s1 does not hold it back.
-    expect((await store.claim(request({ key: hex('4'), scope: 's2', ttlMs: 100 }))).outcome)
+    expect((await store.claim(request({ key: hex('5'), scope: 's2', ttlMs: 100 }))).outcome)
       .toBe('claimed');
-    // Past the window, s1 sweeps again and the expired entry is reclaimed.
+    // Past the window, s1 sweeps again and the expired key is reclaimed.
     clock.advance(1_000);
-    expect((await store.claim(request({ key: hex('5'), scope: 's1', ttlMs: 100 }))).outcome)
+    expect((await store.claim(request({ key: hex('6'), scope: 's1', ttlMs: 100 }))).outcome)
       .toBe('claimed');
+  });
+
+  it("drops a scope and its sweep row with the scope's last entry (M109a audit)", async () => {
+    // Before the fix, a throttle row outlived its scope, so a caller cycling
+    // identities grew the map by one row per scope that ever reached its cap.
+    const clock = createClockRuntime();
+    const store = new MemoryIdempotencyStore({ maxEntriesPerScope: 1, maxEntries: 1_000 });
+    await store.connect(clock);
+    for (let n = 0; n < 50; n++) {
+      await store.claim(request({ key: hex(`a${n}`), scope: `s${n}`, ttlMs: 100 }));
+      // At its cap: this claim sweeps the scope, creating its throttle row.
+      await store.claim(request({ key: hex(`b${n}`), scope: `s${n}`, ttlMs: 100 }));
+    }
+    expect(store.trackedScopeCounts()).toEqual({ scopes: 50, sweepRows: 50 });
+    // Past both the keys' TTL and the throttle window.
+    clock.advance(1_100);
+    // Each scope's next at-cap claim sweeps out its expired key, emptying the
+    // scope, so the row goes with it; the new key then starts the scope again.
+    for (let n = 0; n < 50; n++) {
+      await store.claim(request({ key: hex(`c${n}`), scope: `s${n}`, ttlMs: 100 }));
+    }
+    expect(store.trackedScopeCounts()).toEqual({ scopes: 50, sweepRows: 0 });
   });
 
   it('clears on disconnect', async () => {

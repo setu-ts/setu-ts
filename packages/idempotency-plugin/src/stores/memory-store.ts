@@ -52,7 +52,13 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
   readonly name = 'memory';
 
   readonly #entries = new Map<string, Entry>();
-  readonly #scopeCounts = new Map<string, number>();
+  /**
+   * The keys each scope holds. A scope's count is its set's size, and its
+   * sweep iterates only this set, so a sweep costs at most
+   * `maxEntriesPerScope` rather than the whole store (M109a audit F2). A scope
+   * is deleted with its last key, so this map is bounded by the live entries.
+   */
+  readonly #keysByScope = new Map<string, Set<string>>();
   readonly #maxEntries: number;
   readonly #maxEntriesPerScope: number;
   readonly #maxBytes: number;
@@ -62,8 +68,9 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
   /**
    * The `hrtime()` at which each scope last swept, so a scope sitting at its
    * cap rescans at most once per {@linkcode SWEEP_THROTTLE_MS} (plan §3.16).
-   * Bounded by the entry cap: only a scope that ever reached its cap gets a
-   * row here.
+   * A row is deleted with its scope's last entry, so this map is bounded by
+   * the live entries, not by every scope that ever reached its cap (M109a
+   * audit observation).
    */
   readonly #lastScopeSweep = new Map<string, number>();
 
@@ -102,10 +109,10 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
       return Promise.resolve({ outcome: 'claimed', takeover: true });
     }
 
-    const scopeCount = this.#scopeCounts.get(request.scope) ?? 0;
+    const scopeCount = this.#keysByScope.get(request.scope)?.size ?? 0;
     if (scopeCount >= this.#maxEntriesPerScope) {
       this.#sweepScope(request.scope, now);
-      if ((this.#scopeCounts.get(request.scope) ?? 0) >= this.#maxEntriesPerScope) {
+      if ((this.#keysByScope.get(request.scope)?.size ?? 0) >= this.#maxEntriesPerScope) {
         return Promise.resolve({ outcome: 'capacity-exceeded' });
       }
     }
@@ -161,7 +168,7 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
   /** @inheritdoc */
   disconnect(): Promise<void> {
     this.#entries.clear();
-    this.#scopeCounts.clear();
+    this.#keysByScope.clear();
     this.#lastScopeSweep.clear();
     this.#bytes = 0;
     return Promise.resolve();
@@ -178,6 +185,18 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
     return entry;
   }
 
+  /**
+   * How many scopes the store tracks and how many sweep-throttle rows it
+   * holds — the two maps the M109a audit found able to grow past the live
+   * entries.
+   *
+   * @internal Test seam: this class is not a barrel export.
+   * @returns The two map sizes
+   */
+  trackedScopeCounts(): { readonly scopes: number; readonly sweepRows: number } {
+    return { scopes: this.#keysByScope.size, sweepRows: this.#lastScopeSweep.size };
+  }
+
   /** Inserts or replaces an in-progress entry, updating accounting. */
   #insert(key: string, request: IdempotencyClaimRequest, replace: boolean): void {
     if (replace) this.#remove(key, this.#now());
@@ -191,7 +210,9 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
       record: undefined,
     });
     const scopeKey = request.scope;
-    this.#scopeCounts.set(scopeKey, (this.#scopeCounts.get(scopeKey) ?? 0) + 1);
+    const keys = this.#keysByScope.get(scopeKey);
+    if (keys === undefined) this.#keysByScope.set(scopeKey, new Set([key]));
+    else keys.add(key);
     this.#scopeOfKey.set(key, scopeKey);
   }
 
@@ -205,29 +226,32 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
     const scopeKey = this.#scopeOfKey.get(key);
     this.#scopeOfKey.delete(key);
     if (scopeKey !== undefined) {
-      const next = (this.#scopeCounts.get(scopeKey) ?? 0) - 1;
-      if (next <= 0) this.#scopeCounts.delete(scopeKey);
-      else this.#scopeCounts.set(scopeKey, next);
+      const keys = this.#keysByScope.get(scopeKey);
+      keys?.delete(key);
+      if (keys === undefined || keys.size === 0) {
+        this.#keysByScope.delete(scopeKey);
+        this.#lastScopeSweep.delete(scopeKey);
+      }
     }
   }
 
   /**
    * Removes every expired entry in one scope, at most once per throttle window.
    *
-   * This scan is O(total entries), so without a throttle one caller flooding at
-   * its per-scope cap would block the event loop on EVERY refused claim — the
-   * refusal is supposed to leave other callers unaffected (§10 D21). The window
-   * is kept PER SCOPE: one scope's refusals must not suppress the sweep another
-   * scope is waiting on.
+   * It visits only that scope's own keys, at most `maxEntriesPerScope`. It was
+   * once a scan of the whole store, so every scope at its cap cost a full scan
+   * per window (M109a audit F2). The throttle still applies, per scope: one
+   * scope's refusals must not suppress the sweep another scope is waiting on.
    */
   #sweepScope(scope: string, now: number): void {
     const last = this.#lastScopeSweep.get(scope);
     if (last !== undefined && now - last < SWEEP_THROTTLE_MS) return;
     this.#lastScopeSweep.set(scope, now);
-    for (const [key, entry] of this.#entries) {
-      if (this.#scopeOfKey.get(key) === scope && entry.expiresAt <= now) {
-        this.#remove(key, now);
-      }
+    const keys = this.#keysByScope.get(scope);
+    if (keys === undefined) return;
+    for (const key of [...keys]) {
+      const entry = this.#entries.get(key);
+      if (entry !== undefined && entry.expiresAt <= now) this.#remove(key, now);
     }
   }
 
