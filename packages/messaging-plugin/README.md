@@ -1144,8 +1144,7 @@ db.outbox.createIndex({ kind: 1, status: 1, settledAt: 1 });
 The DynamoDB table needs `id` as its hash key and the GSI `by-status-position` (hash `status`, range
 `position`, both `S`) with `"Projection": { "ProjectionType": "ALL" }` — a narrower projection is
 not detected by `verify()`. A Prisma model maps the PostgreSQL columns with `@map`
-(`orderingKey String?
-@map("ordering_key")`, `createdAt BigInt @map("created_at")`, …) and
+(`orderingKey String? @map("ordering_key")`, `createdAt BigInt @map("created_at")`, …) and
 `@@map("setu_outbox")`; the Prisma path is not driven in this repository.
 
 ### The relay
@@ -1265,8 +1264,7 @@ are written only when the health indicator reads the store** — they are as fre
 ### Trace continuity
 
 `write` stores the active `traceparent`; the relay publishes each row inside an
-`outbox relay
-<topic>` span whose parent is that stored context, so request → relay → publish →
+`outbox relay <topic>` span whose parent is that stored context, so request → relay → publish →
 receive is one trace even though the sweep runs later, from a clean context. A row with no valid
 `traceparent` — written outside a span, or edited — gets a ROOT relay span (`SpanOptions.root`),
 never the span of whatever request happened to dispatch the sweep. Both are driven against the real
@@ -1279,8 +1277,7 @@ trace.
 ### Cloudflare Workers
 
 Workers has no scheduler (`SchedulerPlugin` refuses to start there): set
-`relay: { schedule: false
-}`, hand `waitUntil` to `background` so a `dispatch()`ed sweep survives
+`relay: { schedule: false }`, hand `waitUntil` to `background` so a `dispatch()`ed sweep survives
 the response, and drive the relay and the purge from Cron Triggers. The outbox table is a D1 table
 through `D1Adapter`:
 

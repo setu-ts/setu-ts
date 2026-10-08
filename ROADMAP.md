@@ -13151,17 +13151,21 @@ where "all pending rows in order" is expensive or impossible. The consumer side 
 
 **Deliverables**
 
-- [ ] The atomic-write API, implemented per backend or refused by name
-- [ ] A pending-set relay as a scheduled job, with the watermark trap as a committed negative
+- [x] The atomic-write API, implemented per backend or refused by name
+- [x] A pending-set relay as a scheduled job, with the watermark trap as a committed negative
       control (two transactions committing out of id order — both rows are published)
-- [ ] Crash-injection tests at each point of the crash table: before commit (nothing published),
+- [x] Crash-injection tests at each point of the crash table: before commit (nothing published),
       after commit (published by the relay), after publish before mark-sent (published twice, by
       design)
-- [ ] Trace re-parenting proven with the real OTel SDK (one trace, request to consumer)
-- [ ] Poison handling, health and metrics; real-broker runs on RabbitMQ and Redis (the fakes hid
+- [x] Trace re-parenting proven with the real OTel SDK (one trace, request to consumer)
+- [x] Poison handling, health and metrics; real-broker runs on RabbitMQ and Redis (the fakes hid
       both redelivery defects)
-- [ ] The Workers hybrid driven on real workerd
-- [ ] README, PUBLIC_API.md, a design security review in the plan, and a committed-tree audit
+- [ ] The Workers hybrid driven on real workerd — **not done.** Covered in process instead:
+      `outbox-workers.test.ts` drives the real `D1Adapter` over a real SQLite engine (the one D1
+      runs) through `WorkersCron` (covering `dispatch()` through `waitUntil`, the Cron Trigger sweep
+      and purge); `apps/cloudflare` has no D1 binding to drive it against, so a workerd run is left
+      for a follow-up that adds one
+- [x] README, PUBLIC_API.md, a design security review in the plan, and a committed-tree audit
 
 ---
 

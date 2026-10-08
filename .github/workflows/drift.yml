@@ -230,7 +230,7 @@ jobs:
           docker logs keycloak
           exit 1
 
-      # The four backends that cannot be `services:` containers, because each
+      # The backends that cannot be `services:` containers, because each
       # needs a command or an argument and `options` reaches `docker create`
       # BEFORE the image while the command comes after it. ci.yml carries the
       # reasoning per backend; these are byte-identical to its steps, which the
@@ -305,6 +305,7 @@ jobs:
       # port, so both run side by side. Readiness means a PRIMARY exists, not an
       # open port: transactions are refused until the member is elected.
       - name: Start a MongoDB replica set (outbox suites)
+        continue-on-error: true
         run: |
           docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8 \
             --replSet rs0 --port 27018 --bind_ip_all
