@@ -46,11 +46,13 @@ function escapeLabelValue(value: string): string {
 function replaceUnescapableControls(text: string): string {
   return text.replace(
     // deno-lint-ignore no-control-regex
-    /[\u0000-\u001f\u007f�]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+    /[\u0000-\u001f\u007f\ufffd]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
     (char) => {
-      if (char === '�') return '��';
+      if (char === '\ufffd') return '\ufffd\ufffd';
       const code = char.charCodeAt(0);
-      return code >= 0xd800 ? `�u${code.toString(16)}` : `�${code.toString(16).padStart(2, '0')}`;
+      return code >= 0xd800
+        ? `\ufffdu${code.toString(16)}`
+        : `\ufffd${code.toString(16).padStart(2, '0')}`;
     },
   );
 }

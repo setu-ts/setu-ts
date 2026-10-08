@@ -182,7 +182,7 @@ describe('renderPrometheus', () => {
   it('encodes lone surrogates so values stay distinct after UTF-8 encoding', () => {
     // UTF-8 turns a lone surrogate into U+FFFD, so unencoded it would collide
     // with the marker: 'a\uD800' + '00' would reach the wire as the encoding of 'a\0'.
-    const values = ['a\u0000', 'a\ud80000', 'a\udc00', 'a\ud800', 'a�ud800', 'a😀'];
+    const values = ['a\u0000', 'a\ud80000', 'a\udc00', 'a\ud800', 'a\ufffdud800', 'a\ud83d\ude00'];
     const snapshot: MetricSnapshot = {
       name: 'tasks_total',
       type: 'counter',
@@ -201,8 +201,8 @@ describe('renderPrometheus', () => {
     expect(samples).toHaveLength(values.length);
     expect(new Set(samples).size).toBe(values.length);
     expect(wire).toBe(text);
-    expect(samples).toContain('tasks_total{task_module="a�ud80000"}');
-    expect(samples).toContain('tasks_total{task_module="a😀"}');
+    expect(samples).toContain('tasks_total{task_module="a\ufffdud80000"}');
+    expect(samples).toContain('tasks_total{task_module="a\ud83d\ude00"}');
   });
 
   it('label escaping handles backslash and newline', () => {
