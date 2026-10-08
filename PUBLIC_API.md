@@ -4333,6 +4333,14 @@ smoke check. A synchronous spawn failure rejects the oldest pending task as a cr
 timer, and holds no worker budget. The pool continues scheduling the remaining queue; repeated spawn
 failures settle one task per attempt rather than leaving queued tasks stranded.
 
+Pending-task expiry reclaims excess starting slots, so a module that never signals ready cannot keep
+another module budget-blocked after its queued deadlines expire. Callbacks from removed slots are
+ignored. Termination throws/rejections are contained; shutdown waits at most 1,000 ms per
+termination, including already-retired slots. This bounds waiting, not physical thread exit: a
+failing host can leave a worker alive. Module metadata remains retained for the service lifetime.
+NaN legacy default/pool sizes contribute zero to the derived budget; their per-pool behavior remains
+unchanged, while independently valid configured modules remain usable.
+
 ### Notes
 
 - **Runtime support.** Threads come from `IRuntimeServices.workers`, implemented on Node

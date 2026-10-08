@@ -463,3 +463,26 @@ that no audit dispositions exist. Scratch drivers and the report must stay under
 `.tmp/`, following AGENTS.md's scratch-location rule. The report must include the PR audit record,
 all O1–O9 evidence, all fifteen classes, negative-control failures and open findings. Do not push or
 open a PR; do not fix findings within the audit pass.
+
+## 11. Security fix design — 2026-10-08
+
+The independent audit of b7574595 found S45C-1–7; the maintainer requested **Fix all**. This
+follow-up preserves the original design and review as history. The implementation will:
+
+- Reclaim excess non-ready slots when pending task timeouts reduce their demand. Keep enough
+  starting slots for remaining tasks; ignore callbacks from removed or terminating slots.
+- Contain synchronous and asynchronous termination failures. Wait at most 1,000 ms per termination,
+  using the common deadline helper with runtime timers, including already-retired slots at shutdown.
+  This bounds waiting, not physical worker exit; a failed host can still retain an OS thread.
+- Honor slot ownership before handling worker errors, preventing stale callbacks from rejecting
+  unrelated pending tasks.
+- Pin the example entry point to 127.0.0.1 and replace blanket start/smoke permissions with their
+  required read/environment/sys grants plus loopback network only for start.
+- Treat NaN legacy size contributions as zero when deriving the default service budget. Preserve
+  legacy per-pool sizing behavior and explicit maxWorkers validation; valid configured pools remain
+  usable despite an invalid fallback size.
+
+Regressions cover starting-slot recovery/partial demand, both termination failure channels and
+bounded shutdown including retired slots, duplicate/late callbacks, both sizing entry points,
+real-worker recovery and scoped example execution. All original obligations remain required for a
+fresh committed-tree re-audit; no finding is accepted or deferred.

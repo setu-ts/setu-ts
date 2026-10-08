@@ -103,7 +103,7 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
 
   it('should time out (not hang) a real module that never registers a handler', async () => {
     const app = createApplication({
-      plugins: [RuntimePlugin(), WorkerPoolPlugin({ taskTimeoutMs: 300 })],
+      plugins: [RuntimePlugin(), WorkerPoolPlugin({ taskTimeoutMs: 300, maxWorkers: 1 })],
     });
     await app.start();
     try {
@@ -111,6 +111,11 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
       const stuck = pool.run(noHandlerTaskUrl, { n: 1 });
       await expect(stuck).rejects.toBeInstanceOf(WorkerTaskTimeoutError);
       await expect(stuck).rejects.toMatchObject({ timeoutMs: 300 });
+      expect(pool.stats()[0]).toMatchObject({ workers: 0, queued: 0 });
+      await expect(pool.run(echoTaskUrl, { n: 21 }, { timeoutMs: 2000 })).resolves.toEqual({
+        doubled: 42,
+        from: 'worker',
+      });
     } finally {
       await app.stop();
     }

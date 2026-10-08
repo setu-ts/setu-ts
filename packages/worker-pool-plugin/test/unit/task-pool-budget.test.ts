@@ -371,9 +371,10 @@ describe('TaskPool shared budget', () => {
     await assertion;
     await first;
     expect(failing.stats()).toMatchObject({ queued: 0, failed: 1 });
-    expect(timers.armed).toBe(0);
     expect(budget.hasWaiters()).toBe(false);
     await a.shutdown();
     await failing.shutdown();
+    // Shutdown also awaits the bounded termination of the retired owner.
+    expect(timers.armed).toBe(0);
   });
 });

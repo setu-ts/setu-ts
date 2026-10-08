@@ -490,6 +490,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Worker lifecycle and example hardening (M45c, PR pending).** Expired pending tasks reclaim
+  excess starting slots; stale startup callbacks cannot reject unrelated work. Termination throws
+  and rejections are contained, and shutdown bounds its wait to one second per termination,
+  including retired workers. NaN legacy sizes no longer poison the default shared budget for valid
+  modules. The example binds loopback and uses scoped Deno permissions. The budget limits managed
+  slots, not physical worker exit when a host fails to terminate.
+
 - **Worker spawn failures (M45c, PR pending).** A synchronous `host.spawn` throw now rejects the
   oldest queued task as a crash, clears its timeout and holds no budget, instead of leaving a ghost
   task queued after its caller rejected. Remaining queued tasks continue scheduling after a failed

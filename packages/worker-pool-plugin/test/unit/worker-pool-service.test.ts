@@ -59,13 +59,21 @@ describe('WorkerPoolService — global sizing', () => {
     // Termination may wait for an OS thread: exercise an asynchronous close
     // barrier while the sibling is still open, not only immediately resolved fakes.
     const original = host.handles[0].terminate.bind(host.handles[0]);
+    let refused = false;
+    let spawnedDuringClose: readonly string[] = [];
     host.handles[0].terminate = async () => {
       await Promise.resolve();
-      await expect(service.run('new-module', 3, { timeoutMs: 0 })).rejects.toThrow('shut down');
-      expect(host.spawnedSpecifiers).toEqual([SPEC_A]);
+      refused = await service.run('new-module', 3, { timeoutMs: 0 }).then(
+        () => false,
+        (error: Error) => error.message.includes('shut down'),
+      );
+      spawnedDuringClose = [...host.spawnedSpecifiers];
       await original();
     };
     await service.shutdown();
+    // Assert outside the termination dependency: its failures are contained.
+    expect(refused).toBe(true);
+    expect(spawnedDuringClose).toEqual([SPEC_A]);
     await Promise.all([first, second]);
     expect(service.stats().every((pool) => pool.workers === 0 && pool.queued === 0)).toBe(true);
     await service.shutdown();

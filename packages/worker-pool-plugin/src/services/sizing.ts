@@ -21,7 +21,12 @@ export function resolveMaxWorkers(
 ): number {
   return options?.maxWorkers ?? Math.max(
     parallelism,
-    options?.defaultPoolSize ?? 0,
-    Object.values(options?.pools ?? {}).reduce((sum, pool) => sum + (pool.size ?? 0), 0),
+    budgetSize(options?.defaultPoolSize),
+    Object.values(options?.pools ?? {}).reduce((sum, pool) => sum + budgetSize(pool.size), 0),
   );
+}
+
+/** Invalid legacy fallback sizes must not poison other modules' shared bound. */
+function budgetSize(size: number | undefined): number {
+  return Number.isNaN(size) ? 0 : size ?? 0;
 }

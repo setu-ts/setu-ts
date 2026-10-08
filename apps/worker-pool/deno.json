@@ -1,7 +1,7 @@
 {
   "tasks": {
-    "start": "deno run -A main.ts",
-    "smoke": "deno run -A smoke.ts"
+    "start": "deno run --allow-read=../../packages,src,tasks,main.ts,deno.json --allow-env --allow-sys=hostname,cpus --allow-net=127.0.0.1 main.ts",
+    "smoke": "deno run --allow-read=../../packages,src,tasks,smoke.ts,deno.json --allow-env --allow-sys=hostname,cpus smoke.ts"
   },
   "imports": {
     "@setu-ts/common": "../../packages/common/src/index.ts",

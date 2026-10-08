@@ -397,6 +397,11 @@ skip fails the job unless the app is in the `ALLOW_SKIP` list; see
 
 ### worker-pool
 
-Run `deno task smoke` in `apps/worker-pool`. The app shares one worker between CPU-bound spins and
-buffer fills, proves main-thread timers keep running, and reads the budget through `/health`. Read:
-[`src/app.ts`](../apps/worker-pool/src/app.ts), [`smoke.ts`](../apps/worker-pool/smoke.ts).
+Run `deno task smoke` in `apps/worker-pool`. Run `deno task start` for a loopback-only health
+listener at `http://127.0.0.1:3000/health` (PORT overrides the port). Tasks grant read access to the
+example sources/framework packages, sys hostname/cpus, and environment access required by
+RuntimePlugin (which snapshots the environment). Only start grants loopback network access; neither
+task grants writes, subprocess execution, external network, or blanket permissions. The app shares
+one worker between CPU-bound spins and buffer fills, proves main-thread timers keep running, and
+reads the budget through `/health`. Read: [`src/app.ts`](../apps/worker-pool/src/app.ts),
+[`smoke.ts`](../apps/worker-pool/smoke.ts).

@@ -18,7 +18,7 @@ import type {
   WorkerErrorShape,
   WorkerTaskRequest,
 } from '@setu-ts/common';
-import { isWorkerReadySignal, isWorkerTaskReply } from '@setu-ts/common';
+import { isWorkerReadySignal, isWorkerTaskReply, withDeadline } from '@setu-ts/common';
 import {
   WorkerExitError,
   WorkerPoolUnavailableError,
@@ -98,6 +98,7 @@ interface WorkerSlot {
 export class TaskPool {
   private readonly slots: WorkerSlot[] = [];
   private readonly pending: Task[] = [];
+  private readonly terminations = new Set<Promise<void>>();
   private nextTaskId = 0;
   private completedCount = 0;
   private failedCount = 0;
@@ -145,7 +146,7 @@ export class TaskPool {
     // as a consequence of the hand-over itself.
     this.budget.cancel(this);
     this.dropSlot(slot);
-    void slot.handle.terminate();
+    this.terminateSlot(slot);
     this.syncMetrics();
     return true;
   }
@@ -233,7 +234,8 @@ export class TaskPool {
     for (const slot of slots) {
       slot.terminating = true;
     }
-    await Promise.all(slots.map((slot) => slot.handle.terminate()));
+    for (const slot of slots) this.terminateSlot(slot);
+    await Promise.all(this.terminations);
   }
 
   /** Dispatches pending tasks to idle workers, spawning up to `size`. */
@@ -329,6 +331,7 @@ export class TaskPool {
   }
 
   private onMessage(slot: WorkerSlot, message: unknown): void {
+    if (slot.terminating || !this.slots.includes(slot)) return;
     if (isWorkerReadySignal(message)) {
       slot.ready = true;
       this.pump();
@@ -370,7 +373,7 @@ export class TaskPool {
    * error immediately instead of triggering an unbounded respawn loop.
    */
   private onWorkerError(slot: WorkerSlot, error: Error): void {
-    this.dropSlot(slot);
+    if (slot.terminating || !this.dropSlot(slot)) return;
     const shape: WorkerErrorShape = {
       name: error.name,
       message: error.message,
@@ -439,13 +442,22 @@ export class TaskPool {
     const pendingIndex = this.pending.indexOf(task);
     if (pendingIndex !== -1) {
       this.pending.splice(pendingIndex, 1);
+      // Starting workers serve pending demand, not a dispatched task. Reclaim
+      // excess startup capacity so a module that never signals ready cannot
+      // retain the shared budget after its queued deadlines expire.
+      const starting = this.slots.filter((slot) => !slot.ready);
+      for (const slot of starting.slice(this.pending.length)) {
+        slot.terminating = true;
+        this.dropSlot(slot);
+        this.terminateSlot(slot);
+      }
     } else {
       const slot = this.slots.find((candidate) => candidate.task === task);
       if (slot !== undefined) {
         slot.task = null;
         this.dropSlot(slot);
         slot.terminating = true;
-        void slot.handle.terminate();
+        this.terminateSlot(slot);
       }
     }
     this.rejectTask(
@@ -505,6 +517,29 @@ export class TaskPool {
       this.runtime.clearTimeout(task.timer);
       task.timer = null;
     }
+  }
+
+  /** Contains host failures and bounds cleanup waits, including retired slots. */
+  private terminateSlot(slot: WorkerSlot): void {
+    let call: Promise<void>;
+    try {
+      call = slot.handle.terminate();
+    } catch {
+      // Cleanup failure must not escape a runtime callback or fail new work.
+      return;
+    }
+    const termination = withDeadline(() => call, {
+      timeoutMs: 1_000,
+      onTimeout: () => new Error('Worker termination did not settle within 1000ms'),
+      timing: {
+        setTimer: (fn, ms) => this.runtime.setTimeout(fn, ms),
+        clearTimer: (handle) => this.runtime.clearTimeout(handle),
+      },
+    }).catch(() => undefined);
+    this.terminations.add(termination);
+    void termination.then(() => {
+      this.terminations.delete(termination);
+    });
   }
 
   /**
