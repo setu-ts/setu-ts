@@ -588,8 +588,9 @@ All notable changes to this project are documented here. The format follows
 
 - **Prometheus label values cannot split exposition lines (metrics-plugin, M45c, #433).** Control
   characters the 0.0.4 text format cannot escape (carriage return, NUL, the rest of C0 and DEL) are
-  replaced with U+FFFD in label values and HELP text. A worker-pool `task_module` label carrying a
-  raw CR or NUL passed straight through before.
+  encoded in label values and HELP text as U+FFFD plus two hex digits, with a literal U+FFFD
+  doubled, so distinct values never collapse into one sample line. A worker-pool `task_module` label
+  carrying a raw CR or NUL passed straight through before.
 
 - **A Deno task module that throws at import no longer kills the host process (runtime, M45c,
   #433).** The web-worker host now cancels the worker `error` event after reporting it to the pool.

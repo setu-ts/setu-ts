@@ -85,15 +85,15 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
 
 ## Options
 
-| Option             | Type                              | Default                  | Description                                                                            |
-| ------------------ | --------------------------------- | ------------------------ | -------------------------------------------------------------------------------------- |
-| `maxWorkers`       | `number`                          | See sizing below         | Total live worker slots across all modules; `Infinity` disables.                       |
-| `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready; cannot be disabled; at most 2147483647. |
-| `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                      |
-| `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                      |
-| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables; at most 2147483647. Timed-out worker dies.             |
-| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                     |
-| `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                     |
+| Option             | Type                              | Default                  | Description                                                                                                                                               |
+| ------------------ | --------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxWorkers`       | `number`                          | See sizing below         | Total live worker slots across all modules; `Infinity` disables.                                                                                          |
+| `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready: a positive integer from 1 through 2147483647. `0` cannot disable it; an invalid value throws `RangeError`. |
+| `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                                                                                         |
+| `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                                                                                         |
+| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables; at most 2147483647. Timed-out worker dies.                                                                                |
+| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                                                                                        |
+| `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                                                                                        |
 
 ## Semantics
 

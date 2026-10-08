@@ -21,19 +21,32 @@ function escapeLabelValue(value: string): string {
 }
 
 /**
- * Replaces control characters the text format has no escape for with U+FFFD.
- * Format 0.0.4 defines escapes for backslash, double quote and line feed only;
- * a raw carriage return, NUL or other C0/DEL character in an
- * application-supplied label value (a worker-pool `task_module` specifier,
- * for example) can split or corrupt lines in a line-oriented consumer. Called
- * after line feeds are escaped, so a `\n` survives as its escape.
+ * Encodes the control characters the text format has no escape for. Format
+ * 0.0.4 defines escapes for backslash, double quote and line feed only, and a
+ * parser rejects any other backslash sequence, so a raw carriage return, NUL or
+ * other C0/DEL character in an application-supplied label value (a worker-pool
+ * `task_module` specifier, for example) can split or corrupt lines in a
+ * line-oriented consumer. Called after line feeds are escaped, so a `\n`
+ * survives as its escape.
+ *
+ * The encoding uses U+FFFD as an escape marker: a control character becomes
+ * U+FFFD followed by its two lowercase hex digits, and a literal U+FFFD becomes
+ * two of them. Unlike a plain replacement it is injective, so two distinct
+ * label values can never render as the same sample line, which the format
+ * requires to be unique. Text containing neither is returned unchanged.
  *
  * @param text - Already-escaped text
- * @returns The text with every remaining control character replaced
+ * @returns The text with every remaining control character encoded
  */
 function replaceUnescapableControls(text: string): string {
-  // deno-lint-ignore no-control-regex
-  return text.replace(/[\u0000-\u001f\u007f]/g, '\ufffd');
+  return text.replace(
+    // deno-lint-ignore no-control-regex
+    /[\u0000-\u001f\u007f\ufffd]/g,
+    (char) =>
+      char === '\ufffd'
+        ? '\ufffd\ufffd'
+        : `\ufffd${char.charCodeAt(0).toString(16).padStart(2, '0')}`,
+  );
 }
 
 /**

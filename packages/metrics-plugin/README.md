@@ -7,8 +7,9 @@ Zero dependencies — the Prometheus text-format 0.0.4 renderer is implemented i
 
 Label values are escaped per text format 0.0.4 (backslash, double quote, line feed). Any other
 control character (carriage return, NUL, the rest of C0 and DEL) has no escape in that format and is
-replaced with U+FFFD in label values and HELP text, so an application-supplied value cannot split an
-exposition line.
+encoded in label values and HELP text as U+FFFD followed by its two hex digits (a literal U+FFFD
+becomes two of them), so an application-supplied value cannot split an exposition line and two
+distinct values never render as the same sample line.
 
 ## Installation
 

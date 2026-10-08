@@ -4308,18 +4308,24 @@ app.router.post('/thumbnail', async (ctx) => {
 
 ### Options
 
-| Option             | Type                              | Default                  | Description                                                                            |
-| ------------------ | --------------------------------- | ------------------------ | -------------------------------------------------------------------------------------- |
-| `maxWorkers`       | `number`                          | See budget rule below    | Total worker slots across all modules; `Infinity` disables.                            |
-| `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready; cannot be disabled; at most 2147483647. |
-| `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                      |
-| `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                      |
-| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables; at most 2147483647. Timed-out worker dies.             |
-| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                     |
-| `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                     |
+| Option             | Type                              | Default                  | Description                                                                                                                                               |
+| ------------------ | --------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxWorkers`       | `number`                          | See budget rule below    | Total worker slots across all modules; `Infinity` disables.                                                                                               |
+| `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready: a positive integer from 1 through 2147483647. `0` cannot disable it; an invalid value throws `RangeError`. |
+| `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                                                                                         |
+| `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                                                                                         |
+| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables; at most 2147483647. Timed-out worker dies.                                                                                |
+| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                                                                                        |
+| `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                                                                                        |
 
 ### Interface Reference
 
+- `WorkerPoolService` — the `IWorkerPool` implementation the plugin registers under
+  `CAPABILITIES.WORKER_POOL`; exported for direct construction in tests. Its constructor refuses an
+  invalid `maxWorkers`, `startupTimeoutMs` or task timeout with `RangeError`, as the plugin factory
+  does.
+- `TaskPoolOptions` / `WorkerPoolPluginOptions` — the per-module overrides and plugin options in the
+  table above.
 - `IWorkerPool.run<TInput, TOutput>(taskModule, input, options?): Promise<TOutput>` — run a task,
   creating the pool for `taskModule` lazily on first use.
 - `IWorkerPool.stats(): readonly TaskPoolStats[]` — one snapshot per pool
@@ -4335,6 +4341,9 @@ app.router.post('/thumbnail', async (ctx) => {
   `remoteName`, and `remoteStack`.
 - `WorkerTaskTimeoutError` — the task exceeded its timeout; the worker was terminated and replaced.
   Carries `taskModule` and `timeoutMs`.
+- `WorkerExitError` — the worker thread ended while its task was in flight, on a runtime that
+  reports worker exits (Node, Bun; Deno reports none). Carries `taskModule` and the exit `code`
+  (`null` when the runtime reports none).
 - `WorkerQueueFullError` — the pool's pending queue is at its bound. Carries `taskModule` and
   `limit`.
 
