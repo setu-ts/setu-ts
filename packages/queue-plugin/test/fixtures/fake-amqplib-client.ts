@@ -107,6 +107,11 @@ export class FakeAmqpQueueChannel implements IAmqpQueueChannel {
   }
 
   assertQueue(queue: string, options?: unknown): Promise<{ queue: string }> {
+    // Faithful to amqplib's codec: a queue name is an AMQP short string of at
+    // most 255 bytes, and an oversized one throws synchronously on encode.
+    if (Buffer.byteLength(queue) > 255) {
+      throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+    }
     this.#record('assertQueue', [queue, options]);
     // Initialize buffer if not exists
     if (!this.#readyBuffers.has(queue)) {

@@ -231,7 +231,12 @@ export interface QueuePluginOptions {
   defaultMaxAttempts?: number;
   /** Poll interval for worker loop (default 1000ms). */
   pollIntervalMs?: number;
-  /** Queue name prefix for RabbitMQ adapter (default 'he.queue'). */
+  /**
+   * Queue name prefix for RabbitMQ adapter (default 'he.queue'). Queue names are
+   * `<prefix>.<name>.ready|.delay|.dead`, each at most 255 UTF-8 bytes; a prefix
+   * over 247 bytes is refused at construction, and a job name that does not fit
+   * is refused before the channel is touched.
+   */
   prefix?: string;
   /**
    * Publish every job persistent (`delivery_mode` 2) — adapter `'rabbitmq'`

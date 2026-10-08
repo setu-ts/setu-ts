@@ -21,8 +21,13 @@ per-aggregate ordering key and a stable deduplication ID to hand the broker.
   - Option forwarding through `TracedBroker` and `PipelinedBroker`.
   - Validation, rejected by name, including the header names a broker or its server acts on (§3.4),
     and a design security review (§10).
-  - `enableMessageOrdering` on both Pub/Sub arms (`PubSubMessagingOptionsInjected`,
-    `PubSubMessagingOptionsProduction`) for subscriptions the transport creates.
+  - `enableMessageOrdering` on the Pub/Sub production arm (`PubSubMessagingOptionsProduction`) for
+    subscriptions the broker creates. (Corrected by code review: the injected arm cannot honour it,
+    so there it is typed `never` and refused.)
+  - Added after the security audit, at the maintainer's direction (§10 rows A6, A7): refusing
+    RabbitMQ names over AMQP's 255-byte short-string limit before amqplib touches the channel, in
+    `RabbitMqBroker.subscribe` and the constructor, and in `queue-plugin`'s `RabbitMqQueue` — both
+    pre-existing defects of the class the audit's F1 found on the publish path.
   - `publishIntegrationEvent` passing the envelope ID as the deduplication ID, and accepting caller
     options.
   - An opt-in `orderingKey` selector on `defineIntegrationEvent`, so an event type can say which
@@ -491,6 +496,8 @@ each, on the publish path only. No added round trip. The delivery path is unchan
 | A4  | Audit (Low): `adaptPubSubModule` kept one `Topic` handle per topic name ever published, unbounded                                                                                                                                                                                                                                                                | Fixed: bounded LRU of 1024 that evicts only handles with nothing in flight, so ordering cannot be overtaken                                                                                                                                                  |
 | A5  | Re-audit (Low): the `publishHeaderNameProblem` JSDoc still said 1–256 bytes after the bound became 255                                                                                                                                                                                                                                                           | Fixed: the JSDoc names `MAX_PUBLISH_HEADER_NAME_BYTES` (255); the RabbitMQ refusal reads "the header name"                                                                                                                                                   |
 | A6  | Re-audit observation O1, folded in at the maintainer's direction: `subscribe()` with a topic over 255 bytes made amqplib claim the channel's RPC reply slot before encoding `bindQueue`, so every later channel operation waited forever (pre-existing; outside the publish path)                                                                                | Fixed: `subscribe()` refuses a topic or queue over 255 bytes before any channel operation, and the constructor refuses an oversized `exchangeName` or `defaultQueue`; a real-RabbitMQ test pins it, bounded so a regression fails in 2 s rather than hanging |
+| A7  | Re-audit observation O4, folded in at the maintainer's direction: `queue-plugin`'s `RabbitMqQueue` derives `<prefix>.<name>.ready/.delay/.dead`, so a job name over ~240 bytes jammed its channel's RPC slot the same way (pre-existing; outside the publish path)                                                                                               | Fixed: `#assertQueues`, which every channel path goes through first, refuses names that do not fit, and the constructor refuses a `prefix` over 247 bytes; a real-RabbitMQ test pins it, bounded at 2 s                                                      |
+| A8  | Re-audit observation O5: the reworked consumer-retry test no longer reached `describeLogText`'s 8192-character truncation, now unreachable from its broker caller                                                                                                                                                                                                | Fixed: the helper's truncation is tested directly                                                                                                                                                                                                            |
 
 **Obligations the implementation audit must meet.**
 

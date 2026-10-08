@@ -562,7 +562,11 @@ All notable changes to this project are documented here. The format follows
   bytes reached this before 0.9.0. `RabbitMqBroker` now refuses each of these with a `RangeError`
   naming the field before the channel is touched: the topic, queue, message id and header names on
   `publish`/`subscribe`, and `exchangeName` (and a `defaultQueue` over 218 bytes, which leaves no
-  room for the private queue's uuid suffix) at construction.
+  room for the private queue's uuid suffix) at construction. `@setu-ts/queue-plugin`'s
+  `RabbitMqQueue` had the same defect through its derived queue names,
+  `<prefix>.<name>.ready|.delay|.dead`: a job name that makes them exceed 255 bytes (240 with the
+  default prefix) is now refused before the channel is touched, and a `prefix` over 247 bytes at
+  construction.
 
 - **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
   `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside

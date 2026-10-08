@@ -189,6 +189,21 @@ function publishConfirmed(
 }
 
 /**
+ * Whether a value fits an AMQP short string: at most 255 UTF-8 bytes.
+ *
+ * Queue names are short strings, and amqplib claims the channel's RPC reply
+ * slot BEFORE it encodes a declaration — so an oversized name is refused only
+ * after the channel is left waiting for an answer that never comes, and every
+ * later operation on it queues behind that (M106 audit O4). Callers check first.
+ *
+ * @param value - The name to measure
+ * @returns Whether it can be encoded
+ */
+function fitsAmqpShortString(value: string): boolean {
+  return new TextEncoder().encode(value).length <= 255;
+}
+
+/**
  * RabbitMQ queue adapter implementation.
  *
  * Uses AMQP 0-9-1 via amqplib. Implements the claim-based reserve
@@ -250,6 +265,13 @@ export class RabbitMqQueue implements QueueAdapter {
     this.#url = options?.url ?? 'amqp://localhost:5672';
     this.#injectedClient = options?.client;
     this.#prefix = options?.prefix ?? 'he.queue';
+    // Refused here rather than at the first queue declaration, which would
+    // leave the channel waiting for a reply forever (see fitsAmqpShortString).
+    if (!fitsAmqpShortString(`${this.#prefix}.x.ready`)) {
+      throw new RangeError(
+        "RabbitMqQueue: prefix leaves no room for a job name within AMQP's 255 UTF-8 bytes",
+      );
+    }
     this.#persistentMessages = options?.persistentMessages ?? true;
     this.#publishTimeoutMs = resolvePublishTimeoutMs(
       options?.publishTimeoutMs,
@@ -292,6 +314,15 @@ export class RabbitMqQueue implements QueueAdapter {
     const readyQ = this.#readyQueue(name);
     const delayQ = this.#delayQueue(name);
     const deadQ = this.#deadQueue(name);
+    // Checked before any channel operation: every path reaches the channel
+    // through here first, and an oversized queue name would leave the
+    // channel's RPC slot waiting forever. `.ready` and `.delay` are the
+    // longest suffix. Never quoted — a job name may be caller data.
+    if (!fitsAmqpShortString(readyQ) || !fitsAmqpShortString(delayQ)) {
+      throw new RangeError(
+        "RabbitMqQueue cannot use the job name: its queue names exceed AMQP's 255 UTF-8 byte limit",
+      );
+    }
 
     // Assert all three queues if not already done
     for (const q of [readyQ, delayQ, deadQ]) {

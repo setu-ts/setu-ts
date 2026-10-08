@@ -59,6 +59,12 @@ pending; a rejection is not proof the job was dropped. `persistentMessages: fals
 transient publishes. An injected `client` without `createConfirmChannel()` keeps a plain channel and
 the adapter logs one warning saying its publishes are unconfirmed.
 
+A queue name is an AMQP short string of at most 255 UTF-8 bytes, so `<prefix>.<name>.delay` must
+fit: with the default prefix a job name may be at most 240 bytes. A longer name is refused with a
+`RangeError` before the channel is touched, and a `prefix` over 247 bytes is refused at
+construction. Before 0.9.0 an oversized name reached amqplib, which had already claimed the
+channel's reply slot, so every later queue declaration on the channel waited forever.
+
 ### SQS Adapter
 
 ```typescript
