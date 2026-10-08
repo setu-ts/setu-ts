@@ -5789,6 +5789,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the full-stack starter leaves `SchedulerPlugin` out on Workers, where every full-stack application
   failed to start. Every newcomer guide was cold-read and its examples run or checked against source
   — complete (PR #426).
+- **Milestone 106** (`packages/common` + `packages/messaging-plugin` + `packages/cloudflare-plugin`
+  - `packages/queue-plugin` — publish options): `IMessageBroker.publish` takes an optional
+    `PublishOptions` (`orderingKey`, `deduplicationId`, `headers`), mapped to each broker's native
+    primitive (Kafka key, Pub/Sub `orderingKey`, NATS `Nats-Msg-Id`, Service Bus and RabbitMQ
+    `messageId`) and always carried as `x-setu-*` headers, on all seven brokers and `WorkersBroker`.
+    One `parsePublishOptions` in `common` reads the caller's object once into a frozen copy and
+    refuses, by name and without echoing the value, reserved header names (case-insensitive), bad
+    ids, and anything over the portable bounds; `publishIntegrationEvent` defaults the
+    de-duplication id to the envelope id and takes an opt-in ordering selector. Verification found
+    the Workers broker dropping a `__proto__` header on every runtime but Deno, and the record rules
+    duplicated with drift; the code review found eleven more, including `enableMessageOrdering`
+    silently ignored beside an injected Pub/Sub client. The security audit ran five fresh-context
+    rounds. Round 1 found a High: a 256-byte header name passed validation, and amqplib queues a
+    confirm callback before encoding, so one such publish misattributed every later confirm on the
+    channel; the name bound is now 255 everywhere and `RabbitMqBroker` refuses unencodable fields
+    first. The re-audit found the same class, pre-existing, in `subscribe()` and in queue-plugin's
+    `RabbitMqQueue` (both jammed their channel until restart) — folded in at the maintainer's
+    direction — and then that the queue refusal starved every later processor, now refused at
+    registration with per-name isolation in both loops. Round 5 passed with nothing open — complete
+    (PR #427).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 

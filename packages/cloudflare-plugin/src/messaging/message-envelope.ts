@@ -18,6 +18,15 @@
  * @since 0.2.0
  */
 
+import {
+  DEDUPLICATION_ID_HEADER,
+  isValidPublishId,
+  MAX_PUBLISH_HEADERS,
+  ORDERING_KEY_HEADER,
+  publishHeaderNameProblem,
+  publishHeaderValueProblem,
+} from '@setu-ts/common';
+
 /** Current envelope version. A body carrying anything else is not ours. */
 const ENVELOPE_VERSION = 1;
 
@@ -33,6 +42,15 @@ export interface PublishEnvelope {
   readonly id: string;
   /** The caller's payload. */
   readonly payload: unknown;
+  /** The publisher's ordering key, when one was supplied (M106). */
+  readonly orderingKey?: string;
+  /** The publisher's de-duplication id, when one was supplied (M106). */
+  readonly deduplicationId?: string;
+  /**
+   * The publisher's own headers (M106). A Cloudflare queue has no transport
+   * header channel, so they ride the envelope and are surfaced on delivery.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /** An RPC request awaiting a correlated reply. */
@@ -97,6 +115,8 @@ function hasEnvelopeHead(value: object): boolean {
  * @param topic - The caller's topic
  * @param id - Message id, from `IRuntimeServices.uuid()`
  * @param payload - The caller's payload
+ * @param fields - Optional validated ordering key, de-duplication id and
+ *   caller headers (M106)
  * @returns The envelope to hand to the producer binding
  * @example
  * ```typescript
@@ -108,8 +128,70 @@ export function encodePublishEnvelope(
   topic: string,
   id: string,
   payload: unknown,
+  fields?: {
+    orderingKey?: string;
+    deduplicationId?: string;
+    headers?: Readonly<Record<string, string>>;
+  },
 ): PublishEnvelope {
-  return { v: ENVELOPE_VERSION, kind: 'msg', topic, id, payload };
+  return {
+    v: ENVELOPE_VERSION,
+    kind: 'msg',
+    topic,
+    id,
+    payload,
+    ...(fields?.orderingKey !== undefined ? { orderingKey: fields.orderingKey } : {}),
+    ...(fields?.deduplicationId !== undefined ? { deduplicationId: fields.deduplicationId } : {}),
+    ...(fields?.headers !== undefined ? { headers: fields.headers } : {}),
+  };
+}
+
+/**
+ * Surfaces a delivered envelope's ordering and de-duplication fields as the
+ * transport headers a handler reads (M106 §3.3).
+ *
+ * A field that is not a string satisfying the shared id rule, a header entry
+ * failing the shared name or value rule, and every caller header when the
+ * record holds more than `MAX_PUBLISH_HEADERS` entries are **dropped**, never
+ * surfaced: the envelope is a JSON body a foreign producer may have written,
+ * and this broker never re-runs the publish-side validator (§3.4).
+ *
+ * @param envelope - The decoded envelope
+ * @returns The headers to attach to `MessageMetadata`
+ * @since 0.9.0
+ */
+export function envelopeHeaders(envelope: QueueEnvelope): Record<string, string> {
+  if (envelope.kind !== 'msg') return {};
+  const entries: [string, string][] = [];
+
+  // The caller's own headers first, so the framework's two id headers below
+  // always win. A caller cannot name those anyway: `x-setu-*` is reserved, so
+  // such an entry is dropped here by the same rule the publish side refuses.
+  const carried: unknown = envelope.headers;
+  if (typeof carried === 'object' && carried !== null && !Array.isArray(carried)) {
+    // A record over the publish-side count bound was not written by this
+    // broker's publish, so every caller header is dropped rather than a prefix
+    // surfaced — the same "fails the shared rules, is dropped" disposition as a
+    // bad single entry.
+    const carriedEntries = Object.entries(carried as Record<string, unknown>);
+    if (carriedEntries.length > MAX_PUBLISH_HEADERS) carriedEntries.length = 0;
+    for (const [name, value] of carriedEntries) {
+      if (publishHeaderNameProblem(name) !== null) continue;
+      if (publishHeaderValueProblem(value) !== null) continue;
+      entries.push([name, value as string]);
+    }
+  }
+
+  if (isValidPublishId(envelope.orderingKey)) {
+    entries.push([ORDERING_KEY_HEADER, envelope.orderingKey]);
+  }
+  if (isValidPublishId(envelope.deduplicationId)) {
+    entries.push([DEDUPLICATION_ID_HEADER, envelope.deduplicationId]);
+  }
+  // `Object.fromEntries`, never assignment: workerd keeps the
+  // `Object.prototype.__proto__` setter, which would swallow a `__proto__`
+  // header. A later entry for the same name wins, as assignment did.
+  return Object.fromEntries(entries);
 }
 
 /**

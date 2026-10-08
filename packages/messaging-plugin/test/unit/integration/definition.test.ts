@@ -46,6 +46,31 @@ describe('defineIntegrationEvent', () => {
     expect(definition.parse).toBe(parseOrderPlaced);
   });
 
+  it('exposes an orderingKey selector unchanged when supplied (M106 §3.7)', () => {
+    const selector = (envelope: { aggregateId?: string }): string | undefined =>
+      envelope.aggregateId;
+    const definition: IntegrationEventDefinition<OrderPlaced> = defineIntegrationEvent({
+      ...VALID,
+      orderingKey: selector,
+    });
+    expect(definition.orderingKey).toBe(selector);
+  });
+
+  it('omits orderingKey entirely when no selector is supplied', () => {
+    const definition: IntegrationEventDefinition<OrderPlaced> = defineIntegrationEvent(VALID);
+    expect('orderingKey' in definition).toBe(false);
+  });
+
+  it('refuses a non-function orderingKey, naming the field (M106 §3.7)', () => {
+    const withBadKey = () =>
+      defineIntegrationEvent<OrderPlaced>({
+        ...VALID,
+        orderingKey: 'aggregateId' as unknown as () => string,
+      });
+    expect(withBadKey).toThrow(TypeError);
+    expect(withBadKey).toThrow(/"orderingKey"/);
+  });
+
   it('refuses an empty type, naming the field', () => {
     expect(() => defineIntegrationEvent({ ...VALID, type: '' })).toThrow(TypeError);
     expect(() => defineIntegrationEvent({ ...VALID, type: '' })).toThrow(/"type"/);

@@ -2,6 +2,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -10,6 +11,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { normalizeTransportHeaders } from './header-normalize.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
@@ -555,8 +557,8 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -564,10 +566,13 @@ export class KafkaBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#producer) {
       throw new Error('KafkaBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
 
     const realProducer = this.#producer as unknown as {
@@ -578,7 +583,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
       topic,
       messages: [{
         value: serialized,
-        headers,
+        // Kafka's native mapping: the message key decides the partition, so the
+        // same ordering key reaches one partition and stays in publish order.
+        ...(validated.orderingKey !== undefined ? { key: validated.orderingKey } : {}),
+        headers: wireHeaders,
       }],
     });
   }

@@ -42,13 +42,23 @@ const TOPIC_A = `orders-a-${runId}`;
 const TOPIC_B = `orders-b-${runId}`;
 /** M101b: a topic whose default subscription name is pre-claimed by another topic. */
 const TOPIC_TAKEN = `orders-taken-${runId}`;
-const ALL_TOPICS = [TOPIC, REPLY_TOPIC, RPC_CHANNEL, TOPIC_A, TOPIC_B, TOPIC_TAKEN];
+/** M106 §3.5: one orderingKey published ten times, delivered in order. */
+const ORDERING_TOPIC = `orders-ordered-${runId}`;
+const ALL_TOPICS = [
+  TOPIC,
+  REPLY_TOPIC,
+  RPC_CHANNEL,
+  TOPIC_A,
+  TOPIC_B,
+  TOPIC_TAKEN,
+  ORDERING_TOPIC,
+];
 /**
  * The per-topic default subscriptions this suite causes (M101b). Pub/Sub keeps
  * a subscription after its topic is deleted, so they are removed explicitly —
  * otherwise a long-lived emulator accumulates them across runs.
  */
-const DEFAULT_SUBSCRIPTIONS = [TOPIC_A, TOPIC_B, RPC_CHANNEL, TOPIC_TAKEN]
+const DEFAULT_SUBSCRIPTIONS = [TOPIC_A, TOPIC_B, RPC_CHANNEL, TOPIC_TAKEN, ORDERING_TOPIC]
   .map((topic) => `messaging-consumers.${topic}`);
 
 /** Waits until `predicate` holds or the budget elapses. */
@@ -314,5 +324,39 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { ignore: !emulatorHost }, 
     await app.stop();
 
     expect(got).toEqual([{ id: 9 }]);
+  });
+
+  it('delivers ten messages with one orderingKey in publish order (M106 §3.5)', async () => {
+    // `enableMessageOrdering` is what makes the broker create THIS transport's
+    // subscriptions ordered; ordering is fixed at subscription creation, which
+    // is why the option is read there and not per publish.
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MessagingPlugin({
+          broker: 'pubsub',
+          projectId,
+          replyTopic: REPLY_TOPIC,
+          enableMessageOrdering: true,
+        }),
+      ],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+
+    const received: number[] = [];
+    // No `queue`: the DEFAULT subscription (`messaging-consumers.<topic>`) is the
+    // one the broker creates, so it is the one whose ordering is under test.
+    await broker.subscribe<{ n: number }>(ORDERING_TOPIC, (message) => {
+      received.push(message.n);
+    });
+
+    for (let n = 0; n < 10; n++) {
+      await broker.publish(ORDERING_TOPIC, { n }, { orderingKey: 'agg-1' });
+    }
+    await until(() => received.length >= 10, 20000);
+    await app.stop();
+
+    expect(received).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 });

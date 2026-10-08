@@ -24,6 +24,7 @@ import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import type { IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
 import type { IServiceBusTransport } from '../../src/brokers/service-bus-broker.ts';
 import type { MessageBrokerAdapter } from '../../src/brokers/message-broker.ts';
+import { PipelinedBroker } from '../../src/pipeline/pipelined-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeRedisStreamsClient } from '../fixtures/fake-ioredis-client.ts';
@@ -56,6 +57,8 @@ interface BrokerCase {
     broker: MessageBrokerAdapter;
     /** The header names/values the transport actually received. */
     sentHeaders: () => Readonly<Record<string, string>>;
+    /** The broker's NATIVE mapping for the options, where it has one (M106 §3.3). */
+    sentNative?: () => Readonly<Record<string, unknown>>;
   }>;
   /** A broker that will deliver one message carrying the seeded delivery. */
   readonly deliverer: (delivery: Delivery | undefined) => Promise<MessageBrokerAdapter>;
@@ -134,6 +137,11 @@ const CASES: readonly BrokerCase[] = [
           const props = (call?.args?.[3] ?? {}) as { headers?: Record<string, string> };
           return props.headers ?? {};
         },
+        sentNative: () => {
+          const call = channelRef?.calls.find((c) => c.method === 'publish');
+          const props = (call?.args?.[3] ?? {}) as { messageId?: string };
+          return { messageId: props.messageId };
+        },
       };
     },
     deliverer: async (delivery) => {
@@ -203,6 +211,11 @@ const CASES: readonly BrokerCase[] = [
             | undefined;
           return options?.messages?.[0]?.headers ?? {};
         },
+        sentNative: () => {
+          const call = factory.producer().calls.find((c) => c.method === 'send');
+          const options = call?.args?.[0] as { messages?: Array<{ key?: string }> } | undefined;
+          return { key: options?.messages?.[0]?.key };
+        },
       };
     },
     deliverer: async (delivery) => {
@@ -226,9 +239,11 @@ const CASES: readonly BrokerCase[] = [
     name: 'pubsub',
     publisher: async () => {
       let sent: Readonly<Record<string, string>> = {};
+      let native: Readonly<Record<string, unknown>> = {};
       const transport: IPubSubTransport = {
-        publish: (_topic, _bytes, attributes) => {
+        publish: (_topic, _bytes, attributes, orderingKey) => {
           sent = attributes ?? {};
+          native = orderingKey === undefined ? {} : { orderingKey };
           return Promise.resolve();
         },
         open: () => Promise.resolve({ close: () => Promise.resolve() }),
@@ -241,7 +256,7 @@ const CASES: readonly BrokerCase[] = [
         client: transport,
       });
       await broker.connect();
-      return { broker, sentHeaders: () => sent };
+      return { broker, sentHeaders: () => sent, sentNative: () => native };
     },
     deliverer: async (delivery) => {
       const transport: IPubSubTransport = {
@@ -273,9 +288,11 @@ const CASES: readonly BrokerCase[] = [
     name: 'service-bus',
     publisher: async () => {
       let sent: Readonly<Record<string, string>> = {};
+      let native: Readonly<Record<string, unknown>> = {};
       const transport: IServiceBusTransport = {
-        send: (_topic, _body, applicationProperties) => {
+        send: (_topic, _body, applicationProperties, messageId) => {
           sent = applicationProperties ?? {};
+          native = messageId === undefined ? {} : { messageId };
           return Promise.resolve();
         },
         open: () => Promise.resolve({ close: () => Promise.resolve() }),
@@ -288,7 +305,7 @@ const CASES: readonly BrokerCase[] = [
         client: transport,
       });
       await broker.connect();
-      return { broker, sentHeaders: () => sent };
+      return { broker, sentHeaders: () => sent, sentNative: () => native };
     },
     deliverer: async (delivery) => {
       const transport: IServiceBusTransport = {
@@ -326,6 +343,26 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   }
   throw new Error(`timed out waiting for ${label}`);
 }
+
+/**
+ * The NATIVE mapping each broker writes for the options, per §3.3. Every broker
+ * also carries both options as `x-setu-*` headers, so a cell here only names the
+ * extra primitive.
+ */
+const NATIVE: Readonly<
+  Record<
+    string,
+    (native: Readonly<Record<string, unknown>>, headers: Readonly<Record<string, string>>) => void
+  >
+> = {
+  memory: () => {},
+  'redis-streams': () => {},
+  nats: (_native, headers) => expect(headers['Nats-Msg-Id']).toBe('dedup-1'),
+  rabbitmq: (native) => expect(native.messageId).toBe('dedup-1'),
+  kafka: (native) => expect(native.key).toBe('agg-1'),
+  pubsub: (native) => expect(native.orderingKey).toBe('agg-1'),
+  'service-bus': (native) => expect(native.messageId).toBe('dedup-1'),
+};
 
 describe('broker header conformance', () => {
   it('covers every first-party broker, so none can be missed', () => {
@@ -421,6 +458,38 @@ describe('broker header conformance', () => {
         }
         await broker.disconnect();
       });
+
+      it('carries both options as headers and writes the native mapping (M106 §3.3)', async () => {
+        const { broker, sentHeaders, sentNative } = await testCase.publisher();
+
+        await broker.publish(TOPIC, { id: 1 }, {
+          orderingKey: 'agg-1',
+          deduplicationId: 'dedup-1',
+          headers: { 'x-app': 'v' },
+        });
+
+        await waitFor(
+          () => sentHeaders()['x-setu-ordering-key'] === 'agg-1',
+          `${testCase.name} options header`,
+        );
+        const headers = sentHeaders();
+        expect(headers['x-setu-ordering-key']).toBe('agg-1');
+        expect(headers['x-setu-deduplication-id']).toBe('dedup-1');
+        expect(headers['x-app']).toBe('v');
+        NATIVE[testCase.name](sentNative?.() ?? {}, headers);
+        await broker.disconnect();
+      });
+
+      it('rejects a reserved header name before the transport is called (M106 §3.4)', async () => {
+        const { broker, sentHeaders } = await testCase.publisher();
+
+        await expect(broker.publish(TOPIC, { id: 1 }, { headers: { cc: 'x' } })).rejects.toThrow(
+          RangeError,
+        );
+        // Nothing reached the transport: the wire is untouched.
+        expect(sentHeaders()).toEqual({});
+        await broker.disconnect();
+      });
     });
   }
 
@@ -451,5 +520,49 @@ describe('broker header conformance', () => {
     };
     expect(pubsub.open).toBeDefined();
     expect(serviceBus.open).toBeDefined();
+  });
+
+  describe('PipelinedBroker forwards and validates the options (M106 §3.6)', () => {
+    it('forwards the options so they reach the wire through the decorator', async () => {
+      const inner = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+      await inner.connect();
+      const pipelined = new PipelinedBroker(inner, []);
+      const seen: Readonly<Record<string, string>>[] = [];
+      await pipelined.subscribe(TOPIC, (_m, metadata) => {
+        seen.push(metadata.headers ?? {});
+      });
+
+      await pipelined.publish(TOPIC, { id: 1 }, {
+        orderingKey: 'agg-1',
+        deduplicationId: 'dedup-1',
+      });
+
+      await waitFor(() => seen.length > 0, 'pipelined delivery');
+      expect(seen[0]?.['x-setu-ordering-key']).toBe('agg-1');
+      expect(seen[0]?.['x-setu-deduplication-id']).toBe('dedup-1');
+      await inner.disconnect();
+    });
+
+    it('rejects a reserved name and delivers nothing for it', async () => {
+      const inner = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+      await inner.connect();
+      const pipelined = new PipelinedBroker(inner, []);
+      // PipelinedBroker forwards unread; the inner broker's own validation is
+      // what refuses, so the observable claim is that nothing is delivered.
+      const delivered: unknown[] = [];
+      await inner.subscribe(TOPIC, (message) => {
+        delivered.push(message);
+      });
+
+      await expect(pipelined.publish(TOPIC, { id: 1 }, { headers: { cc: 'x' } })).rejects.toThrow(
+        RangeError,
+      );
+      expect(delivered).toEqual([]);
+      // A valid publish through the same path does deliver, so the empty list
+      // above is the refusal and not a subscription that never received.
+      await pipelined.publish(TOPIC, { id: 2 });
+      expect(delivered).toEqual([{ id: 2 }]);
+      await inner.disconnect();
+    });
   });
 });

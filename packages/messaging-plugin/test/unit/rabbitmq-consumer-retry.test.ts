@@ -56,7 +56,9 @@ describe('RabbitMQ consumer retry', () => {
     });
   }
 
-  it('bounds the complete dead-letter diagnostic including a long topic', async () => {
+  // The topic sits at AMQP's 255-byte limit (a longer one is refused at
+  // subscribe, M106 re-audit O1), so the error text is what needs bounding.
+  it('bounds the dead-letter diagnostic for a long topic and a long error', async () => {
     const logs: string[] = [];
     const client = new FakeAmqpConnection();
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
@@ -66,14 +68,16 @@ describe('RabbitMQ consumer retry', () => {
     });
     await broker.connect();
     try {
-      await broker.subscribe('topic-🙂'.repeat(2000), () => {
-        throw Error('temporary');
+      await broker.subscribe('topic-🙂'.repeat(25), () => {
+        throw Error('temporary 🙂'.repeat(2000));
       }, { queue: 'q' });
       const channel = await client.createChannel();
       await channel.deliver('1');
       expect(logs).toHaveLength(1);
       expect([...logs[0]!].length).toBeLessThanOrEqual(8192);
-      expect(logs[0]).toMatch(/… \[truncated\]$/u);
+      expect(logs[0]).toContain('topic-🙂'.repeat(25));
+      // The 2000-fold error is cut to its 1 KiB bound, never logged whole.
+      expect(logs[0]!.split('temporary').length - 1).toBeLessThan(2000);
       expect(channel.calls.filter((call) => call.method === 'ack')).toHaveLength(1);
     } finally {
       await broker.disconnect();

@@ -155,6 +155,25 @@ describe('NatsBroker', () => {
     await broker.disconnect();
   });
 
+  it('still applies a de-duplication id natively when no MsgHdrs factory exists', async () => {
+    // nats.js builds the `Nats-Msg-Id` header itself from the `msgID` option,
+    // so the server de-duplicates even though caller headers cannot ride.
+    const fakeConnection = new FakeNatsConnection();
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: fakeConnection,
+      logger: { error: () => {} },
+    });
+    await broker.connect();
+
+    await broker.publish('orders', { id: 1 }, { deduplicationId: 'order-1' });
+    await broker.publish('orders', { id: 2 });
+
+    const publishes = fakeConnection.jetstream().calls.filter((c) => c.method === 'publish');
+    expect(publishes[0]?.args[2]).toEqual({ msgID: 'order-1' });
+    expect(publishes[1]?.args[2]).toBeUndefined();
+    await broker.disconnect();
+  });
+
   it('stays silent when no headers were supplied, since nothing is lost', async () => {
     const errors: string[] = [];
     const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
@@ -189,6 +208,53 @@ describe('NatsBroker', () => {
     });
     expect(headers).toEqual({ traceparent: '00-parent' });
     await broker.disconnect();
+  });
+
+  it('keeps a delivered __proto__ header as an own key where the setter exists', async () => {
+    // Deno deletes `Object.prototype.__proto__`; Node and Bun keep it, and an
+    // assignment-built record silently drops the key there (M106 §10).
+    const previous = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__');
+    Object.defineProperty(Object.prototype, '__proto__', {
+      configurable: true,
+      get(this: object): object | null {
+        return Object.getPrototypeOf(this);
+      },
+      set(this: object, value: unknown): void {
+        if (typeof value === 'object') Object.setPrototypeOf(this, value);
+      },
+    });
+    try {
+      // Vacuity guard: under the accessor, assigning a string to `__proto__`
+      // is a no-op (the setter ignores non-objects), so the key is dropped.
+      // `Reflect.set` performs that ordinary assignment, setter included.
+      const assigned: Record<string, string> = {};
+      Reflect.set(assigned, '__proto__', 'v');
+      expect(Object.keys(assigned)).toEqual([]);
+
+      const values = new Map([['__proto__', 'proto-value'], ['x-a', '1']]);
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: new FakeNatsConnection({
+          seededMessages: [{
+            subject: 'orders',
+            data: '{"id":"1"}',
+            seq: 1,
+            timestampNanos: 1735689600000000000,
+            headers: { keys: () => values.keys(), get: (key) => values.get(key) },
+          }],
+        }),
+      });
+      await broker.connect();
+      let headers: Readonly<Record<string, string>> | undefined;
+      await broker.subscribeWithHeaders('orders', (_message, metadata) => {
+        headers = metadata.headers;
+      });
+      await broker.disconnect();
+      expect(Object.keys(headers ?? {})).toEqual(['__proto__', 'x-a']);
+      expect(Object.getPrototypeOf(headers)).toBe(Object.prototype);
+    } finally {
+      if (previous) Object.defineProperty(Object.prototype, '__proto__', previous);
+      else delete (Object.prototype as { __proto__?: unknown }).__proto__;
+    }
   });
 
   it('subscribe creates durable consumer', async () => {

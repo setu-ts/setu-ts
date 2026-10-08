@@ -21,6 +21,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -141,16 +142,17 @@ export class PipelinedBroker implements MessageBrokerAdapter {
   }
 
   /** Publishes through the underlying broker — publishing is not ingress work. */
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.#broker.publish(topic, message);
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.#broker.publish(topic, message, options);
   }
 
   publishWithHeaders<T>(
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
-    return this.#broker.publishWithHeaders(topic, message, headers);
+    return this.#broker.publishWithHeaders(topic, message, headers, options);
   }
 
   subscribe<T>(

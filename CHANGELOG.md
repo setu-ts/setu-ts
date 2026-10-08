@@ -35,6 +35,33 @@ All notable changes to this project are documented here. The format follows
   a container, or a provider registered too early fails `start()` instead of testing the real class.
   A child scope from `createScope()` keeps the double even when it registers the token itself.
 
+- **Publish options (M106, PR #427).** `IMessageBroker.publish` takes an optional third argument,
+  typed `PublishOptions` — `orderingKey`, `deduplicationId` and `headers` — carried as `x-setu-*`
+  transport headers (`ORDERING_KEY_HEADER` / `DEDUPLICATION_ID_HEADER`) beside each broker's native
+  primitive (Kafka message `key`, Pub/Sub `orderingKey`, NATS `Nats-Msg-Id`, Service Bus and
+  RabbitMQ `messageId`), so the options are observable through `MessageMetadata.headers` on all
+  seven brokers and on `WorkersBroker` — the one exception is a `NatsBroker` with an injected
+  connection and no `headersFactory`, which drops caller headers and the ordering key (reported
+  once) while still applying the de-duplication id as nats.js's native `msgID`.
+  `enableMessageOrdering` creates the Pub/Sub broker's own subscriptions with ordering; it is
+  accepted only where the broker loads the SDK, and refused beside an injected `client`. The Pub/Sub
+  SDK facade's topic handle gains an optional `resumePublishing`, so a hand-built module double
+  still type-checks. `publishIntegrationEvent` takes `PublishOptions` as an optional sixth argument
+  and passes the envelope id as the default de-duplication id, and `defineIntegrationEvent` takes an
+  opt-in `orderingKey` selector, called only when the caller supplied no key. Invalid options are
+  refused by name, case-insensitively covering the header names a broker or its server acts on, and
+  a refusal never echoes the refused value. `common` gains the shared rule set — `publishIdProblem`
+  / `isValidPublishId` with `MAX_PUBLISH_ID_BYTES` for the ids, and `publishHeaderNameProblem` /
+  `publishHeaderValueProblem` with `MAX_PUBLISH_HEADERS`, `MAX_PUBLISH_HEADER_NAME_BYTES`,
+  `MAX_PUBLISH_HEADER_VALUE_BYTES`, `RESERVED_HEADER_NAMES` and `RESERVED_HEADER_PREFIXES` for the
+  headers, and `parsePublishOptions` (returning `ParsedPublishOptions`) — the one copy-once parse of
+  a whole options object — so the seven brokers, `WorkersBroker` and the envelope reader enforce one
+  copy of every rule. `WorkersBroker` carries the caller's `headers` on the envelope beside the two
+  ids. Header names are bounded at 255 bytes, the AMQP limit, so a name is accepted on every broker
+  or refused on all of them. The Pub/Sub adapter keeps at most 1024 idle `Topic` handles, evicting
+  the least recently used one with nothing in flight. The docs state the guarantee honestly:
+  `orderingKey` decides placement, not the order handlers finish in.
+
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
   error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s
@@ -524,6 +551,25 @@ All notable changes to this project are documented here. The format follows
   tested `=== null` for a missing header must test `=== undefined`. The whole-query source is now
   generic like `Body`, so `Query<z.infer<typeof schema>>()` declares the shape `@ValidateQuery`
   wrote instead of a cast. `apps/static-site` takes its port as the first argument (default `8000`).
+
+- **A name over 255 bytes no longer jams a RabbitMQ channel (`@setu-ts/messaging-plugin`, M106, PR
+  #427).** AMQP limits the exchange, a queue, the routing key (the topic), the message id and each
+  header name to 255 bytes, and amqplib prepares a publish's confirm callback, or a channel
+  operation's reply slot, before it encodes. An oversized value was rejected, but it left the
+  channel wrong for the rest of its life: after a publish, each later awaited publish resolved only
+  when the one after it was confirmed; after a `subscribe()`, every later channel operation waited
+  forever, so publishes timed out and subscriptions never completed. A payload `messageId` or a
+  topic over 255 bytes reached this before 0.9.0. `RabbitMqBroker` now refuses each of these with a
+  `RangeError` naming the field before the channel is touched: the topic, queue, message id and
+  header names on `publish`/`subscribe`, and `exchangeName` (and a `defaultQueue` over 218 bytes,
+  which leaves no room for the private queue's uuid suffix) at construction.
+  `@setu-ts/queue-plugin`'s `RabbitMqQueue` had the same defect through its derived queue names,
+  `<prefix>.<name>.ready|.delay|.dead`: a job name that makes them exceed 255 bytes (240 with the
+  default prefix) is now refused before the channel is touched — at registration too, by `process()`
+  and `addRecurring()`, so a declared processor with such a name fails `start()` — and a `prefix`
+  over 247 bytes at construction. `QueueService` also isolates each name in its poll and recurring
+  loops: a reserve or recurring enqueue that fails for one name is reported and skipped, where it
+  used to abort the tick and starve every processor and recurring job registered after it.
 
 - **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
   `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside

@@ -2,6 +2,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -13,6 +14,7 @@ import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError, describeLogText } from './describe-error.ts';
 import { IntegrationEventRejectedError } from '../errors.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
@@ -148,6 +150,55 @@ export function validateConsumerQueue(
   if (new TextEncoder().encode(longest).length > 255) {
     throw new RangeError('RabbitMQ consumer group and helper queue names must fit 255 UTF-8 bytes');
   }
+}
+
+/**
+ * Whether a value fits an AMQP short string: at most 255 UTF-8 bytes.
+ *
+ * Every name the broker sends in a channel operation — exchange, queue,
+ * routing key, message id, header-table key — is one. amqplib prepares the
+ * operation's reply slot (an RPC) or confirm callback (a publish) BEFORE it
+ * encodes, so an oversized value is refused only after the channel is left
+ * waiting for an answer that never comes. Each caller checks first.
+ *
+ * @param value - The name to measure
+ * @returns Whether it can be encoded
+ */
+function fitsAmqpShortString(value: string): boolean {
+  return new TextEncoder().encode(value).length <= 255;
+}
+
+/**
+ * Names the first publish field AMQP cannot encode, or `null` when all fit.
+ *
+ * AMQP writes the routing key, `messageId` and every header-table
+ * key as a short string of at most 255 UTF-8 bytes. amqplib's
+ * `ConfirmChannel.publish` queues its confirm callback BEFORE encoding, so an
+ * encoder throw leaves an orphan in the confirm window and every later confirm
+ * on the channel resolves the wrong publish (M106 audit F1). Checking first
+ * means `publish` is never called with a frame it cannot write.
+ *
+ * @param routingKey - Routing key (the topic)
+ * @param properties - Publish properties
+ * @returns A field description, or `null`
+ */
+function amqpShortStringProblem(
+  routingKey: string,
+  properties: Record<string, unknown>,
+): string | null {
+  // The exchange is not checked here: the constructor refuses an oversized
+  // `exchangeName`, and a disposition publishes to the default exchange `''`.
+  const fits = fitsAmqpShortString;
+  if (!fits(routingKey)) return 'routing key (the topic)';
+  const messageId = properties.messageId;
+  if (typeof messageId === 'string' && !fits(messageId)) return 'message id';
+  const headers = properties.headers;
+  if (typeof headers === 'object' && headers !== null) {
+    for (const name of Object.keys(headers)) {
+      if (!fits(name)) return 'header name';
+    }
+  }
+  return null;
 }
 
 /** Framework-owned identifier for correlating concurrent mandatory publish returns. */
@@ -449,6 +500,17 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     this.#injectedClient = options?.client;
     this.#exchangeName = options?.exchangeName ?? 'messaging';
     this.#defaultQueue = options?.defaultQueue ?? 'messaging-consumers';
+    // Refused here rather than at the first channel operation, which would
+    // leave the channel waiting for a reply forever (see fitsAmqpShortString).
+    if (!fitsAmqpShortString(this.#exchangeName)) {
+      throw new RangeError("RabbitMqBroker: exchangeName exceeds AMQP's 255 UTF-8 byte limit");
+    }
+    // A private queue is named `<defaultQueue>-<uuid>`: 37 more bytes.
+    if (!fitsAmqpShortString(`${this.#defaultQueue}-${'0'.repeat(36)}`)) {
+      throw new RangeError(
+        "RabbitMqBroker: defaultQueue must leave room for a 37-byte suffix within AMQP's 255 UTF-8 bytes",
+      );
+    }
     this.#persistentMessages = options?.persistentMessages ?? true;
     this.#publishTimeoutMs = resolvePublishTimeoutMs(
       options?.publishTimeoutMs,
@@ -666,8 +728,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -675,10 +737,13 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     const realChannel = this.#channel as unknown as PublishingChannel & {
       assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
@@ -686,12 +751,14 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
 
     // Build properties
     const properties: Record<string, unknown> = {};
-    properties.messageId = this.#runtime.uuid();
-    properties.headers = headers;
+    // RabbitMQ's native mapping: `deduplicationId` replaces the random uuid, so
+    // a consumer's `MessageMetadata.messageId` is the producer's stable id.
+    properties.messageId = validated.deduplicationId ?? this.#runtime.uuid();
+    properties.headers = wireHeaders;
     if (typeof message === 'object' && message !== null) {
       // Try to extract existing messageId/timestamp/headers if present
       const msg = message as Record<string, unknown>;
-      if (typeof msg.messageId === 'string') {
+      if (validated.deduplicationId === undefined && typeof msg.messageId === 'string') {
         properties.messageId = msg.messageId;
       }
     }
@@ -728,6 +795,13 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     // may not: a positive confirm also arrives for an unroutable publish.
     if (requireRoute && (!confirmed || !isCloseObservable(channel))) {
       throw new Error('RabbitMQ consumer recovery requires confirms and on/off return listeners');
+    }
+    const unencodable = amqpShortStringProblem(routingKey, properties);
+    if (unencodable !== null) {
+      // Never quoted: the refused value may be caller data.
+      throw new RangeError(
+        `RabbitMQ cannot publish: the ${unencodable} exceeds AMQP's 255 UTF-8 byte limit`,
+      );
     }
     const dispositionId = requireRoute ? this.#runtime.uuid() : undefined;
     const outgoing = dispositionId === undefined ? properties : {
@@ -795,6 +869,19 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       this.#consumerOptions,
       (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true,
     );
+    // Checked before any channel operation: an oversized name would leave the
+    // channel's RPC slot waiting forever, stalling every later publish and
+    // subscribe on it (M106 re-audit O1). Never quoted — either may be caller data.
+    if (!fitsAmqpShortString(topic)) {
+      throw new RangeError(
+        "RabbitMQ cannot subscribe: the topic exceeds AMQP's 255 UTF-8 byte limit",
+      );
+    }
+    if (options?.queue !== undefined && !fitsAmqpShortString(options.queue)) {
+      throw new RangeError(
+        "RabbitMQ cannot subscribe: the queue name exceeds AMQP's 255 UTF-8 byte limit",
+      );
+    }
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }

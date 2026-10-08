@@ -19,6 +19,7 @@ import {
   type ISubscription,
   type MessageHandler,
   type MessageMetadata,
+  type PublishOptions,
   type RequestHandler,
   type RequestOptions,
   type SubscribeOptions,
@@ -28,6 +29,7 @@ import type { ServiceBusRetryOptions } from '../interfaces/index.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { describeError } from './describe-error.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
@@ -106,7 +108,9 @@ export interface ServiceBusSdkModule {
     options?: { retryOptions?: Omit<ServiceBusRetryOptions, 'mode'> & { mode?: number } },
   ) => {
     createSender(queueOrTopicName: string): {
-      sendMessages(messages: { body: unknown }): Promise<void>;
+      sendMessages(
+        messages: { body: unknown; applicationProperties?: unknown; messageId?: string },
+      ): Promise<void>;
       close(): Promise<void>;
     };
     createReceiver(queueName: string, options?: unknown): IServiceBusReceiver;
@@ -135,11 +139,17 @@ export interface ServiceBusSdkModule {
  * Domain port for Azure Service Bus operations.
  */
 export interface IServiceBusTransport {
-  /** Send a body to a topic. */
+  /**
+   * Send a body to a topic.
+   *
+   * @param messageId - Native Service Bus message id (M106 §3.3): a repeated id
+   *   is de-duplicated only on an entity configured with duplicate detection
+   */
   send(
     topic: string,
     body: string,
     applicationProperties?: Readonly<Record<string, string>>,
+    messageId?: string,
   ): Promise<void>;
   /**
    * Open a receiver on a topic subscription.
@@ -464,13 +474,18 @@ export function adaptServiceBusModule(
       topic: string,
       body: string,
       applicationProperties?: Readonly<Record<string, string>>,
+      messageId?: string,
     ): Promise<void> => {
       let sender = senders.get(topic);
       if (!sender) {
         sender = client.createSender(topic);
         senders.set(topic, sender);
       }
-      const message = applicationProperties ? { body, applicationProperties } : { body };
+      const message = {
+        body,
+        ...(applicationProperties !== undefined ? { applicationProperties } : {}),
+        ...(messageId !== undefined ? { messageId } : {}),
+      };
       await sender.sendMessages(message);
     },
     open: async (
@@ -945,8 +960,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     return reachable !== false;
   }
 
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -954,13 +969,16 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#transport) {
       throw new Error('ServiceBusBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     try {
-      await this.#transport.send(topic, serialized, headers);
+      await this.#transport.send(topic, serialized, wireHeaders, validated.deduplicationId);
     } catch (error) {
       // M95b: narrowed by ORIGIN — the guard and the serializer above threw
       // before the transport was reached and say nothing about the network;

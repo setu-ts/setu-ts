@@ -5,7 +5,7 @@ import { Buffer } from 'node:buffer';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMessageBroker, MessageHandler } from '@setu-ts/common';
+import type { IMessageBroker, MessageHandler, MessageMetadata } from '@setu-ts/common';
 import { MessagingPlugin } from '../../src/index.ts';
 import {
   loggerPlugin,
@@ -438,6 +438,96 @@ describe('REAL RabbitMQ consumer retry', () => {
         await until(() => attempts === 2, 15000);
         await wait(200);
         expect(attempts).toBe(2);
+      } finally {
+        await app.stop();
+        await f.close();
+      }
+    },
+  );
+
+  // §3.8's documented limit, pinned so a later change to it is deliberate:
+  // RabbitMQ retry queues REDELIVER the failed message later, so a later
+  // message for the same key is handled while the first waits.
+  it(
+    'handles a later message for one key BEFORE the failed one is retried (M106 §3.8)',
+    guard,
+    async () => {
+      const f = await fixture([1000], 3);
+      const handled: string[] = [];
+      let attempts = 0;
+      const app = f.application(
+        (message, _metadata) => {
+          if (message === 'first') {
+            attempts++;
+            handled.push(`first-attempt-${attempts}`);
+            if (attempts === 1) throw Error('transient');
+            return;
+          }
+          handled.push('second');
+        },
+        [1000],
+        3,
+      );
+      try {
+        await app.start();
+        const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+        await broker.publish(f.topic, 'first', { orderingKey: 'agg-1' });
+        await broker.publish(f.topic, 'second', { orderingKey: 'agg-1' });
+        await until(() => handled.includes('second') && attempts >= 2, 30000);
+        const order = JSON.stringify(handled);
+        expect(handled.indexOf('second'), `handler order ${order}`).toBeLessThan(
+          handled.indexOf('first-attempt-2'),
+        );
+      } finally {
+        await app.stop();
+        await f.close();
+      }
+    },
+  );
+
+  it(
+    'refuses a caller CC header and routes no copy to the queue it named (M106 §3.4, D1)',
+    guard,
+    async () => {
+      const f = await fixture([200]);
+      const bystander = `${f.queue}.bystander`;
+      await f.channel.assertQueue(bystander, { durable: true });
+      const app = f.application(() => {});
+      try {
+        await app.start();
+        const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+        await expect(broker.publish(f.topic, 'm1', { headers: { cc: bystander } }))
+          .rejects.toThrow(RangeError);
+        await expect(broker.publish(f.topic, 'm1', { headers: { CC: bystander } }))
+          .rejects.toThrow(RangeError);
+        await wait(500);
+        expect((await f.channel.checkQueue(bystander)).messageCount).toBe(0);
+        expect((await f.channel.checkQueue(f.queue)).messageCount).toBe(0);
+      } finally {
+        await app.stop();
+        await f.channel.deleteQueue(bystander);
+        await f.close();
+      }
+    },
+  );
+
+  it(
+    'round-trips a permitted caller header byte for byte (M106 §10 obligation 9)',
+    guard,
+    async () => {
+      const f = await fixture([200]);
+      const seen: MessageMetadata[] = [];
+      const app = f.application((_message, metadata) => {
+        seen.push(metadata);
+      });
+      try {
+        await app.start();
+        const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+        await broker.publish(f.topic, 'm1', { headers: { 'x-tenant': 'acme' } });
+        await until(() => seen.length > 0, 15000);
+        const headers = seen[0]?.headers ?? {};
+        expect(headers['x-tenant']).toBe('acme');
+        expect(headers['x-setu-ordering-key']).toBeUndefined();
       } finally {
         await app.stop();
         await f.close();

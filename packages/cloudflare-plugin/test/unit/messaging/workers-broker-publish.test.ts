@@ -5,12 +5,40 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type { MessageMetadata } from '@setu-ts/common';
+import { MAX_PUBLISH_HEADERS } from '@setu-ts/common';
 
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import { WorkersBroker } from '../../../src/messaging/workers-broker.ts';
 import { FakeQueueBatch, FakeQueueMessage, FakeQueueProducer } from '../../fakes.ts';
 import { FakeDurableObjectNamespace } from '../../do-fakes.ts';
 import { ExplodingQueueProducer, FakeBrokerRuntime } from '../../messaging-fakes.ts';
+
+/**
+ * Runs `fn` with the `Object.prototype.__proto__` accessor Node, Bun and workerd
+ * keep and Deno deletes, so a test running on Deno sees what those runtimes do
+ * to a `__proto__` key built by assignment. Restores the prior state after.
+ */
+function withProtoAccessor<T>(fn: () => T): T {
+  const previous = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__');
+  Object.defineProperty(Object.prototype, '__proto__', {
+    configurable: true,
+    get(this: object): object | null {
+      return Object.getPrototypeOf(this);
+    },
+    set(this: object, value: unknown): void {
+      if ((typeof value === 'object' && value !== null) || value === null) {
+        Object.setPrototypeOf(this, value);
+      }
+    },
+  });
+  try {
+    return fn();
+  } finally {
+    if (previous) Object.defineProperty(Object.prototype, '__proto__', previous);
+    else delete (Object.prototype as { __proto__?: unknown }).__proto__;
+  }
+}
 
 /**
  * Lets the inbox open and the request publish settle.
@@ -53,6 +81,225 @@ describe('WorkersBroker.publish', () => {
   it('propagates a refused send rather than reporting success', async () => {
     const broker = new WorkersBroker(new ExplodingQueueProducer(), new FakeBrokerRuntime());
     await expect(broker.publish('t', 1)).rejects.toThrow('queue send failed');
+  });
+
+  it('carries orderingKey and deduplicationId as envelope fields (M106 §3.3)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await broker.publish('orders', { id: 1 }, {
+      orderingKey: 'agg-1',
+      deduplicationId: 'dedup-1',
+    });
+
+    expect(producer.sends[0]?.body).toEqual({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'id-1',
+      payload: { id: 1 },
+      orderingKey: 'agg-1',
+      deduplicationId: 'dedup-1',
+    });
+  });
+
+  it('carries a caller headers record on the envelope, since a queue has none (M106 §3.3)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await broker.publish('orders', { id: 1 }, { headers: { 'x-tenant': 'acme' } });
+
+    expect(producer.sends[0]?.body).toEqual({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'id-1',
+      payload: { id: 1 },
+      headers: { 'x-tenant': 'acme' },
+    });
+  });
+
+  it('refuses a reserved name (as a rejected promise) and never reaches the platform (M106 §3.4)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await expect(broker.publish('orders', 1, { headers: { cc: 'x' } })).rejects.toThrow(RangeError);
+    await expect(broker.publish('orders', 1, { headers: { 'x-setu-ordering-key': 'k' } })).rejects
+      .toThrow(RangeError);
+    expect(producer.sends).toEqual([]);
+  });
+
+  it('refuses a header with an invalid name or value (M106 §3.4)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await expect(broker.publish('orders', 1, { headers: { 'bad:name': 'v' } })).rejects.toThrow(
+      RangeError,
+    );
+    await expect(broker.publish('orders', 1, { headers: { 'x-a': 'v'.repeat(1025) } })).rejects
+      .toThrow(RangeError);
+    expect(producer.sends).toEqual([]);
+  });
+
+  it('keeps a __proto__ header on the envelope where the __proto__ setter exists (M106 §10 D10)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+    const headers = JSON.parse('{"__proto__":"v","x-a":"1"}');
+
+    await withProtoAccessor(() => {
+      // Vacuity guard: under the accessor, assigning a string to `__proto__`
+      // is a no-op (the setter ignores non-objects), so the key is dropped.
+      // `Reflect.set` performs that ordinary assignment, setter included.
+      const assigned: Record<string, string> = {};
+      Reflect.set(assigned, '__proto__', 'v');
+      expect(Object.keys(assigned)).toEqual([]);
+      return broker.publish('orders', 1, { headers });
+    });
+
+    const sent = producer.sends[0]?.body as { headers: Record<string, string> };
+    expect(Object.keys(sent.headers)).toEqual(['__proto__', 'x-a']);
+  });
+
+  it('refuses a class instance as headers, as messaging-plugin does (M106 §3.4)', async () => {
+    class NotPlain {
+      'x-a' = '1';
+    }
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await expect(broker.publish('orders', 1, { headers: new NotPlain() as never })).rejects.toThrow(
+      'publish options headers must be a plain object',
+    );
+    expect(producer.sends).toHaveLength(0);
+  });
+
+  it('accepts an empty headers record, which carries nothing', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    await broker.publish('orders', 1, { headers: {} });
+
+    expect(producer.sends).toHaveLength(1);
+  });
+
+  it('refuses an invalid ordering key as a rejected promise, never synchronously (M106 §3.4)', async () => {
+    const producer = new FakeQueueProducer();
+    const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
+
+    let promise: Promise<void> | undefined;
+    expect(() => {
+      promise = broker.publish('orders', 1, { orderingKey: 'a'.repeat(129) });
+    }).not.toThrow();
+    await expect(promise!).rejects.toThrow(RangeError);
+    expect(producer.sends).toEqual([]);
+  });
+});
+
+describe('WorkersBroker message metadata (M106 §3.3)', () => {
+  async function deliver(envelope: Record<string, unknown>): Promise<MessageMetadata> {
+    const broker = new WorkersBroker(new FakeQueueProducer(), new FakeBrokerRuntime());
+    const delivered: MessageMetadata[] = [];
+    await broker.subscribe('orders', (_message, metadata) => {
+      delivered.push(metadata);
+    });
+    await broker.dispatch(new FakeQueueBatch('q', [new FakeQueueMessage('m1', envelope)]));
+    return delivered[0]!;
+  }
+
+  it('surfaces valid envelope fields as the transport headers', async () => {
+    const metadata = await deliver({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'i',
+      payload: 1,
+      orderingKey: 'agg-1',
+      deduplicationId: 'dedup-1',
+    });
+    expect(metadata.headers).toEqual({
+      'x-setu-ordering-key': 'agg-1',
+      'x-setu-deduplication-id': 'dedup-1',
+    });
+  });
+
+  it('surfaces a caller header carried on the envelope, dropping an invalid one (M106 §3.4)', async () => {
+    const metadata = await deliver({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'i',
+      payload: 1,
+      headers: {
+        'x-tenant': 'acme',
+        cc: 'sneaky',
+        'x-bad': 'v'.repeat(1025),
+        'bad:name': 'v',
+      },
+    });
+    // Only the valid entry survives; the reserved name, the over-long value and
+    // the un-encodable name are all dropped, never surfaced.
+    expect(metadata.headers).toEqual({ 'x-tenant': 'acme' });
+  });
+
+  it('ignores a non-object headers field a foreign producer wrote (M106 §3.4)', async () => {
+    const metadata = await deliver({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'i',
+      payload: 1,
+      headers: 'not-an-object',
+    });
+    expect(metadata.headers).toEqual({});
+  });
+
+  it('surfaces a __proto__ header as an own key where the __proto__ setter exists (M106 §10 D10)', async () => {
+    const envelope = JSON.parse(
+      '{"v":1,"kind":"msg","topic":"orders","id":"i","payload":1,"headers":{"__proto__":"v"}}',
+    );
+    const delivered: MessageMetadata[] = [];
+    const broker = new WorkersBroker(new FakeQueueProducer(), new FakeBrokerRuntime());
+    await broker.subscribe('orders', (_message, metadata) => {
+      delivered.push(metadata);
+    });
+    // The dispatch runs synchronously up to its first await, which is where
+    // `envelopeHeaders` builds the record — so the accessor must be live for it.
+    await withProtoAccessor(() =>
+      broker.dispatch(new FakeQueueBatch('q', [new FakeQueueMessage('m1', envelope)]))
+    );
+    expect(Object.keys(delivered[0]!.headers ?? {})).toEqual(['__proto__']);
+  });
+
+  it('drops every carried header when the record is over the publish count bound, keeping the id headers', async () => {
+    const atBound = Object.fromEntries(
+      Array.from({ length: MAX_PUBLISH_HEADERS }, (_, i) => [`x-h${i}`, 'v']),
+    );
+    const overBound = { ...atBound, 'x-extra': 'v' };
+    const base = { v: 1, kind: 'msg', topic: 'orders', id: 'i', payload: 1 } as const;
+
+    const kept = await deliver({ ...base, headers: atBound });
+    expect(Object.keys(kept.headers ?? {})).toHaveLength(MAX_PUBLISH_HEADERS);
+
+    const dropped = await deliver({ ...base, headers: overBound, orderingKey: 'agg-1' });
+    expect(dropped.headers).toEqual({ 'x-setu-ordering-key': 'agg-1' });
+  });
+
+  it('reports empty headers when the envelope carries neither field', async () => {
+    const metadata = await deliver({ v: 1, kind: 'msg', topic: 'orders', id: 'i', payload: 1 });
+    expect(metadata.headers).toEqual({});
+  });
+
+  it('drops a field that fails the id rule, surfacing no header for it (M106 §3.4)', async () => {
+    const metadata = await deliver({
+      v: 1,
+      kind: 'msg',
+      topic: 'orders',
+      id: 'i',
+      payload: 1,
+      orderingKey: 'a'.repeat(129),
+      deduplicationId: 42,
+    });
+    expect(metadata.headers).toEqual({});
   });
 });
 

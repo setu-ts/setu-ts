@@ -57,6 +57,69 @@ supplies its own reporter via `InMemoryBrokerOptions.onDispatchError`; absent on
 observed and dropped. One slow or throwing fan-out handler also no longer delays or aborts delivery
 to its siblings.
 
+## Publish options and trust
+
+`broker.publish(topic, message, options)` takes an optional third argument:
+
+| Option            | Bound                                                                            | Mapped to                                                                                                                   |
+| ----------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `orderingKey`     | non-empty string ≤ 128 UTF-8 bytes, no control characters, no edge whitespace    | Kafka message `key`, Pub/Sub `orderingKey`, and the `x-setu-ordering-key` header on every broker                            |
+| `deduplicationId` | same rule                                                                        | NATS `Nats-Msg-Id`, Service Bus `messageId`, RabbitMQ `messageId`, and the `x-setu-deduplication-id` header on every broker |
+| `headers`         | ≤ 32 entries; names 1–255 bytes of visible ASCII except `:`; values ≤ 1024 bytes | written beside the framework's own headers                                                                                  |
+
+Every option is carried as a transport header beside any native mapping, so it is observable through
+`MessageMetadata.headers` on every broker and never silently dropped. The constants
+`ORDERING_KEY_HEADER` and `DEDUPLICATION_ID_HEADER` (from `@setu-ts/common`) name the two headers.
+The `Cloudflare Workers` broker carries `orderingKey`, `deduplicationId` and the caller's `headers`
+as envelope fields, because a Cloudflare queue has no transport header channel; on delivery all of
+them are surfaced as the same transport headers. Invalid options are refused on publish; on
+delivery, an envelope entry failing the shared rules is dropped. A `NatsBroker` with an injected
+connection and no `headersFactory` drops caller headers and the ordering key (reported once through
+the logger) but still applies the de-duplication id as nats.js's native `msgID`.
+
+### What `orderingKey` promises
+
+`orderingKey` decides **placement** — the same key reaches the same partition, retry queue or
+ordered subscription where the broker has one — not the order handlers **finish** in. Measured
+2026-10-07 against real backends:
+
+| Broker          | On a handler failure                                                                                                                                                                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kafka           | Order kept by blocking: the offset stays uncommitted, so one failing message stalls its partition                                                                                                                                                              |
+| Pub/Sub         | Order kept by blocking, on an ordering subscription (`enableMessageOrdering`)                                                                                                                                                                                  |
+| Service Bus     | Order kept by blocking ONLY at `maxConcurrentCalls: 1` (the broker's default): the abandoned message is redelivered before the next is handled. At `maxConcurrentCalls: 2` the later message is handled first, so order is LOST. Measured both ways 2026-10-07 |
+| RabbitMQ        | Order lost on retry: later messages for the key are handled while the failed one waits                                                                                                                                                                         |
+| Redis Streams   | Order lost on retry (reclaim)                                                                                                                                                                                                                                  |
+| NATS            | Order lost on retry                                                                                                                                                                                                                                            |
+| in-memory       | Dispatch already follows publish order                                                                                                                                                                                                                         |
+| `WorkersBroker` | Follows `dispatch` batch order                                                                                                                                                                                                                                 |
+
+A consumer that needs order compares the delivered envelope's version and drops or defers a stale
+message.
+
+### What a consumer may trust, and what a producer must not derive
+
+1. A delivered `x-setu-ordering-key` or `x-setu-deduplication-id` header is a **hint written by
+   whoever published the message** — validation runs on the publish side only — so a foreign or
+   compromised producer can send any value under these names. Use it to order or de-duplicate your
+   own work, **never to authorize anything**.
+2. A `deduplicationId` derived from request input lets the caller who chooses it suppress another
+   message with the same id for the broker's window (NATS's `duplicate_window`, 120 s by default;
+   Service Bus's configured detection window). Derive it from a producer-assigned id — the envelope
+   id `publishIntegrationEvent` uses by default is one.
+3. An `orderingKey` derived from request input lets a caller concentrate load on one Kafka partition
+   or one Pub/Sub ordering key (1 MB/s per key), and on a log-compacted Kafka topic it lets the
+   caller erase an earlier message that carries the same key. Derive it from an aggregate the
+   application owns.
+
+Invalid options are rejected with a `RangeError` **as a rejected promise**, naming the field and the
+rule and never echoing the refused value. A header name a broker or its server acts on
+(`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*`, `x-setu-*`, RabbitMQ's `x-death` /
+`x-delivery-count` / `x-acquired-count` / `x-delay` and the `x-first-death-*` / `x-last-death-*`
+forms) is refused on **every** broker, compared case-insensitively. A `goog` prefix is refused too,
+as a precaution: Pub/Sub's reservation of it is stated only by third-party documentation, and the
+emulator accepts `goog` attributes.
+
 ## Options
 
 `MessagingPluginOptions` is a union discriminated on `broker`. Two options are shared by every arm:
@@ -521,6 +584,14 @@ what the producer put in. The string is the honest type. `correlationId`, `causa
 JSON serialization maps `NaN`/`Infinity` to `null` — a non-finite one would arrive as `null`. Each
 is checked on both sides: refused at the producer, and refused as a `malformed` rejection at the
 consumer.
+
+**Publish options.** `publishIntegrationEvent` takes the same `PublishOptions` as `broker.publish`
+as an optional sixth argument (after the causal metadata), with two defaults of its own:
+`deduplicationId` defaults to the envelope `id`, so re-publishing the same envelope is de-duplicated
+where the broker supports it; and `orderingKey` comes from the caller, else from an optional
+`orderingKey: (envelope) => string | undefined` selector on the definition, else none. The selector
+runs only when the caller supplied no key; if it throws or returns a value the rules refuse, the
+publish rejects.
 
 One definition serves both directions — the producer reads its `type`/`version`/`topic`, the
 consumer the same three plus `parse`:

@@ -3,6 +3,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -11,6 +12,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
@@ -24,6 +26,13 @@ import { toJetStreamConsumerName } from './nats-consumer-name.ts';
 
 /** Consumer metadata key recording the raw queue a consumer was created for (M101b). */
 const QUEUE_METADATA_KEY = 'setu.queue';
+
+/**
+ * JetStream's own de-duplication header — the broker's NATIVE mapping for
+ * `deduplicationId`. The `nats-` prefix is reserved for callers, so the
+ * framework writes it here.
+ */
+const NATS_MSG_ID_HEADER = 'Nats-Msg-Id';
 
 /** JetStream API error code for "consumer already exists" (probed, nats-server 2.14). */
 const CONSUMER_EXISTS_ERR_CODE = 10148;
@@ -493,8 +502,8 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -502,10 +511,13 @@ export class NatsBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#connection) {
       throw new Error('NatsBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     const encoder = new TextEncoder();
     const data = encoder.encode(serialized);
@@ -519,21 +531,34 @@ export class NatsBroker implements MessageBrokerAdapter {
       publish(
         subject: string,
         data: Uint8Array,
-        options?: { headers: INatsHeaders },
+        options?: { headers: INatsHeaders } | { msgID: string },
       ): Promise<unknown>;
     };
     const natsHeaders = this.#headersFactory?.();
     try {
       if (natsHeaders) {
-        for (const [key, value] of Object.entries(headers)) natsHeaders.set(key, value);
+        for (const [key, value] of Object.entries(wireHeaders)) natsHeaders.set(key, value);
+        // NATS's native mapping: the server de-duplicates within the stream's
+        // `duplicate_window` from this header. Framework-written, because the
+        // `nats-` prefix is reserved for callers.
+        if (validated.deduplicationId !== undefined) {
+          natsHeaders.set(NATS_MSG_ID_HEADER, validated.deduplicationId);
+        }
         await realJs.publish(topic, data, { headers: natsHeaders });
       } else {
         // No `MsgHdrs` factory: an injected connection carries no nats module,
         // so there is nothing to build headers with. Publishing still
-        // succeeds, but trace context cannot cross this broker — report it
-        // once rather than dropping the header silently on every publish.
-        this.#reportMissingHeaderChannel(headers);
-        await realJs.publish(topic, data);
+        // succeeds, but trace context and caller headers cannot cross this
+        // broker — report it once rather than dropping them silently on every
+        // publish. The de-duplication id survives: nats.js's own `msgID`
+        // option builds the `Nats-Msg-Id` header internally, so the server
+        // still de-duplicates.
+        this.#reportMissingHeaderChannel(wireHeaders);
+        if (validated.deduplicationId !== undefined) {
+          await realJs.publish(topic, data, { msgID: validated.deduplicationId });
+        } else {
+          await realJs.publish(topic, data);
+        }
       }
     } catch (error) {
       throw new Error(describePublishRefusal(topic, error), { cause: error });
@@ -805,9 +830,11 @@ export class NatsBroker implements MessageBrokerAdapter {
     }
     this.#headerWarningEmitted = true;
     this.#logger?.error(
-      'NatsBroker: transport headers dropped because no NATS headers factory is available. ' +
-        'Pass NatsOptions.headersFactory (for example `() => nats.headers()`) alongside an ' +
-        'injected client so trace context can cross the broker.',
+      'NatsBroker: transport headers (trace context, publish-option headers and the ' +
+        'ordering key) dropped because no NATS headers factory is available; a ' +
+        'de-duplication id is still applied as the native message id. Pass ' +
+        'NatsOptions.headersFactory (for example `() => nats.headers()`) alongside an ' +
+        'injected client so headers can cross the broker.',
     );
   }
 }
@@ -816,10 +843,13 @@ function toHeaderRecord(headers: unknown): Readonly<Record<string, string>> {
   if (!headers || typeof headers !== 'object') return {};
   const candidate = headers as { keys?: unknown; get?: unknown };
   if (typeof candidate.keys !== 'function' || typeof candidate.get !== 'function') return {};
-  const values: Record<string, string> = {};
+  const entries: [string, string][] = [];
   for (const key of candidate.keys() as Iterable<string>) {
     const value = (candidate.get as (name: string) => unknown)(key);
-    if (typeof value === 'string') values[key] = value;
+    if (typeof value === 'string') entries.push([key, value]);
   }
-  return values;
+  // `Object.fromEntries`, never assignment: Node and Bun keep the
+  // `Object.prototype.__proto__` setter, which would swallow a delivered
+  // `__proto__` header (M106 §10 obligation 4).
+  return Object.fromEntries(entries);
 }

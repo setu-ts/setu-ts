@@ -16,6 +16,7 @@
 
 import type { IMessageBroker } from '@setu-ts/common';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { validatePublishOptions } from './publish-options.ts';
 
 /**
  * Converts a public {@linkcode IMessageBroker} into a
@@ -73,8 +74,15 @@ export function asBrokerAdapter(instance: IMessageBroker): MessageBrokerAdapter 
       await instance.disconnect();
       connected = false;
     },
-    publish: (topic, message) => instance.publish(topic, message),
-    publishWithHeaders: (topic, message, _headers) => instance.publish(topic, message),
+    publish: async (topic, message, options) => {
+      await instance.publish(topic, message, await validatePublishOptions(options));
+    },
+    publishWithHeaders: async (topic, message, _headers, options) => {
+      // The custom instance owns its own header channel, so the framework
+      // headers are dropped as before; the caller options are validated here and
+      // forwarded, so a custom broker is held to the same rules as a built-in.
+      await instance.publish(topic, message, await validatePublishOptions(options));
+    },
     subscribe: (topic, handler, options) => instance.subscribe(topic, handler, options),
     subscribeWithHeaders: (topic, handler, options) => instance.subscribe(topic, handler, options),
     requestWithHeaders: (topic, message, _headers, options) =>

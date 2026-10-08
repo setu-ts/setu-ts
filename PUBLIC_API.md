@@ -5149,9 +5149,16 @@ interface RabbitMqMessagingOptions extends MessagingCommonOptions {
   url?: string;
   /** Injected AMQP connection. */
   client?: IAmqpConnection;
-  /** Topic exchange name. @defaultValue 'messaging' */
+  /**
+   * Topic exchange name, at most 255 UTF-8 bytes (an AMQP short string; longer
+   * is refused at construction). @defaultValue 'messaging'
+   */
   exchangeName?: string;
-  /** Default consumer group / queue name. */
+  /**
+   * Default consumer group / queue name. A private queue is named
+   * `<defaultQueue>-<uuid>`, so it must be at most 218 UTF-8 bytes; longer is
+   * refused at construction.
+   */
   defaultQueue?: string;
   /**
    * Publish every message persistent (`delivery_mode` 2), so it survives a broker restart.
@@ -5268,6 +5275,13 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
    */
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * Refused on this arm (compile error, and `RangeError` from a standalone
+   * `GcpPubSubBroker`): the injected transport creates its own subscriptions, so
+   * the broker cannot switch ordering on. Pass `enableMessageOrdering` to
+   * `adaptPubSubModule` when building the transport instead.
+   */
+  enableMessageOrdering?: never;
 }
 
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
@@ -5282,6 +5296,13 @@ interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
   /** Per-topic default subscription prefix — see the injected arm. @defaultValue 'messaging-consumers' */
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * Create the broker's own subscriptions with message ordering (M106), which a
+   * native `orderingKey` needs to be delivered in order. Fixed when a
+   * subscription is created and it costs throughput, so it is opt-in.
+   * @defaultValue false
+   */
+  enableMessageOrdering?: boolean;
 }
 
 /** GCP Pub/Sub options — exclusive union of injected and production arms. */
@@ -5689,6 +5710,90 @@ export type {
 
 ---
 
+### Publish options — ordering key, de-duplication ID and headers
+
+`publish` takes an optional trailing `PublishOptions` (from `@setu-ts/common`):
+
+```typescript
+interface PublishOptions {
+  readonly orderingKey?: string; // ≤ 128 UTF-8 bytes
+  readonly deduplicationId?: string; // ≤ 128 UTF-8 bytes
+  readonly headers?: Readonly<Record<string, string>>; // ≤ 32 headers, ≤ 1024 bytes each
+}
+
+publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void>;
+```
+
+Every option is carried as a transport header beside any native mapping, so it is observable through
+`MessageMetadata.headers` on every broker and never silently dropped. Use the exported constants
+`ORDERING_KEY_HEADER` (`'x-setu-ordering-key'`) and `DEDUPLICATION_ID_HEADER`
+(`'x-setu-deduplication-id'`) to read them.
+
+| Broker          | `orderingKey`                                         | `deduplicationId`                                                      |
+| --------------- | ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| Kafka           | message `key` → one partition, in order               | header only                                                            |
+| Pub/Sub         | native `orderingKey` (needs an ordering subscription) | header only                                                            |
+| NATS            | header only                                           | `Nats-Msg-Id` → server de-duplicates within the stream's dedup window  |
+| Service Bus     | header only                                           | `messageId` → de-duplicated only on an entity with duplicate detection |
+| RabbitMQ        | header only                                           | header, and the `messageId` property                                   |
+| Redis Streams   | header only                                           | header only                                                            |
+| In-memory       | header only                                           | header only                                                            |
+| `WorkersBroker` | envelope field, surfaced as the header                | envelope field, surfaced as the header                                 |
+
+**What `orderingKey` promises.** It decides **placement** — the same key reaches the same partition,
+retry queue or ordered subscription where the broker has one — not the order handlers **finish** in.
+What a handler failure does to order differs per broker:
+
+- **Order kept by blocking:** Kafka (a throwing handler leaves the offset uncommitted, so one
+  failing message stalls its whole partition until it succeeds) and Pub/Sub on an ordering
+  subscription.
+- **Service Bus — the condition decides, so it is always stated.** Measured 2026-10-07 both ways: at
+  the broker's default `maxConcurrentCalls` (1) the abandoned message is redelivered before the next
+  is handled (order kept by blocking); at `maxConcurrentCalls: 2` the later message is handled first
+  (order lost).
+- **Order lost on retry:** RabbitMQ, Redis Streams and NATS redelivery — later messages for the key
+  are handled while the failed one waits.
+
+A consumer that needs order compares the delivered envelope's version and drops or defers a stale
+message.
+
+**What a consumer may trust, and what a producer must not derive.**
+
+1. A delivered `x-setu-ordering-key` or `x-setu-deduplication-id` header is a **hint written by
+   whoever published the message** — validation runs on the publish side only — so a foreign or
+   compromised producer can send any value under these names. Use it to order or de-duplicate your
+   own work, **never to authorize anything**.
+2. A `deduplicationId` derived from request input lets the caller who chooses it suppress another
+   message with the same id for the broker's window (NATS's `duplicate_window`, 120 s by default;
+   Service Bus's configured detection window). Derive it from a producer-assigned id — the envelope
+   id `publishIntegrationEvent` uses by default is one.
+3. An `orderingKey` derived from request input lets a caller concentrate load on one Kafka partition
+   or one Pub/Sub ordering key (1 MB/s per key), and on a log-compacted Kafka topic it lets the
+   caller erase an earlier message that carries the same key. Derive it from an aggregate the
+   application owns.
+
+Invalid options are rejected with a `RangeError` **as a rejected promise** (never a synchronous
+throw), naming the field and the rule; a refused value is never echoed. A header name a broker or
+its server acts on (`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*`, `x-setu-*`,
+RabbitMQ's `x-death` / `x-delivery-count` / `x-acquired-count` / `x-delay` and the `x-first-death-*`
+/ `x-last-death-*` forms) is refused on **every** broker, compared case-insensitively. A `goog`
+prefix is refused too, as a precaution: Pub/Sub's reservation of it is stated only by third-party
+documentation, and the emulator accepts `goog` attributes.
+
+The `Cloudflare Workers` broker has no transport header channel, so it carries all three options as
+envelope fields and surfaces them on delivery as the same headers. On publish it refuses invalid
+options with the same `RangeError` as every other broker; on delivery, an envelope `orderingKey`,
+`deduplicationId` or header entry that fails the shared rules — or every caller header, when the
+record holds more than `MAX_PUBLISH_HEADERS` entries — is dropped, never surfaced, since a foreign
+producer may have written the envelope.
+
+One exception to "never silently dropped" above: a `NatsBroker` given an injected connection and no
+`headersFactory` has nothing to build NATS headers with, so caller headers and the ordering key are
+dropped and reported once through the logger; the de-duplication id is still applied, as nats.js's
+native `msgID`.
+
+---
+
 ### Trace context across the broker
 
 When `CAPABILITIES.TELEMETRY` is registered, the plugin wraps the broker so `publish`, `subscribe`,
@@ -5807,7 +5912,8 @@ import {
   publishIntegrationEvent,
 } from '@setu-ts/messaging-plugin';
 
-// The contract: four fields, validated eagerly. The topic MUST end with the
+// The contract: four required fields (plus an optional `orderingKey`
+// selector, below), validated eagerly. The topic MUST end with the
 // exact `.v${version}` suffix — the versioned-topic rollout policy enforced
 // by the factory, not documented prose. A pre-existing unversioned topic has
 // no definition; keep using the raw broker.publish/subscribe surface for it.
@@ -5845,6 +5951,31 @@ const subscription = onIntegrationEvent(orderPlaced, async (payload, envelope) =
 const causal = causedBy(envelope); // { correlationId: envelope.correlationId ?? envelope.id, causationId: envelope.id }
 ```
 
+**Publish options (M106).** `publishIntegrationEvent` takes an optional sixth argument,
+`PublishOptions` (see "Publish options" above), validated once as on every broker. Two defaults
+differ from a raw `broker.publish`:
+
+- `deduplicationId` defaults to the envelope `id`, so a retried publish of the SAME envelope is
+  de-duplicated where the broker supports it. A caller-supplied `deduplicationId` wins.
+- `orderingKey` comes from the caller first, then from the definition's optional
+  `orderingKey(envelope)` selector, then none. The selector is called only when the caller supplied
+  no key; a selector that throws, or returns a value the rules refuse, rejects the publish.
+
+```typescript
+const orderShipped = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.shipped',
+  version: 1,
+  topic: 'orders.shipped.v1',
+  parse: (value) => value as { orderId: string },
+  // Keep every event for one order on one partition / ordering key.
+  orderingKey: (envelope) => `order-${envelope.data.orderId}`,
+});
+
+await publishIntegrationEvent(runtime, broker, orderShipped, { orderId: '123' }, undefined, {
+  headers: { 'x-tenant': 'acme' },
+});
+```
+
 The wire envelope, published as the message payload:
 
 | Field              | Type     | Present always? | Meaning                                                          |
@@ -5880,8 +6011,9 @@ The ten exported symbols of this section: the four functions above (`defineInteg
 class (rejections, below), and five types:
 
 - **`IntegrationEventDefinition<T>`** (interface) — the contract `defineIntegrationEvent` returns
-  and both directions read: readonly `type`, `version`, `topic`, and `parse: (value: unknown) => T`.
-  `parse` runs on the consumer side only.
+  and both directions read: readonly `type`, `version`, `topic`, `parse: (value: unknown) => T`, and
+  the optional `orderingKey?(envelope): string | undefined` selector (M106). `parse` runs on the
+  consumer side only.
 - **`IntegrationEventEnvelope<T>`** (interface) — the wire shape in the table above. The handler
   receives it with `data` rebuilt to the parsed value, so `envelope.data === payload` holds on every
   delivery.
@@ -10636,7 +10768,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection`, `TransactionOptions`, `TransactionIsolationLevel`, `ITransactionIsolationSupport` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first); the last three carry portable transaction isolation (M90g)                                                                                                                                                                                                                                                                                             |
 | Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Messaging           | `IMessageBroker`, `PublishOptions`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`, `ORDERING_KEY_HEADER`, `DEDUPLICATION_ID_HEADER`, `MAX_PUBLISH_ID_BYTES`, `parsePublishOptions`, `ParsedPublishOptions`, `publishIdProblem`, `isValidPublishId`, `MAX_PUBLISH_HEADERS`, `MAX_PUBLISH_HEADER_NAME_BYTES`, `MAX_PUBLISH_HEADER_VALUE_BYTES`, `RESERVED_HEADER_NAMES`, `RESERVED_HEADER_PREFIXES`, `publishHeaderNameProblem`, `publishHeaderValueProblem`                                                                                                                                                                                          |
 | Ingress             | `IngressKind`, `IngressContext<TPayload>`, `BehaviorLike<TWork, TResult>`, `IIngressBehavior`, `composeBehaviorChain`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |

@@ -16,7 +16,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IMessageBroker } from '@setu-ts/common';
+import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -389,6 +389,117 @@ describe({
       } finally {
         await appB.stop();
         await appA.stop();
+        await jsm.streams.delete(streamName).catch(() => {});
+        await jsmConn.close();
+      }
+    });
+
+    it('stores ONE copy for a repeated deduplicationId (M106 §3.3, §10 obligation 9)', async () => {
+      const nats = await import('npm:nats@2.x');
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const streamName = `M106_DEDUP_${suffix}`;
+      const scope = `m106dedup.${suffix}`;
+      const topic = `${scope}.orders`;
+
+      let broker: IMessageBroker | undefined;
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({ broker: 'nats', url, streamName, streamSubjects: [`${scope}.>`] }),
+          brokerProbe((b) => {
+            broker = b;
+          }),
+        ],
+      });
+
+      const jsmConn = await nats.connect({ servers: url });
+      const jsm = await jsmConn.jetstreamManager();
+      try {
+        await app.start();
+        await broker!.publish(topic, { id: 1 }, { deduplicationId: 'dedup-1' });
+        // The server answers `duplicate: true` on the PubAck and keeps one copy.
+        await broker!.publish(topic, { id: 1 }, { deduplicationId: 'dedup-1' });
+        expect((await jsm.streams.info(streamName)).state.messages).toBe(1);
+
+        // A different id is NOT a duplicate.
+        await broker!.publish(topic, { id: 2 }, { deduplicationId: 'dedup-2' });
+        expect((await jsm.streams.info(streamName)).state.messages).toBe(2);
+      } finally {
+        await app.stop();
+        await jsm.streams.delete(streamName).catch(() => {});
+        await jsmConn.close();
+      }
+    });
+
+    it('refuses a caller Nats-Rollup header before the server ever sees it (M106 §3.4, §10 obligation 9)', async () => {
+      const nats = await import('npm:nats@2.x');
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const streamName = `M106_ROLLUP_${suffix}`;
+      const scope = `m106rollup.${suffix}`;
+      const topic = `${scope}.orders`;
+
+      let broker: IMessageBroker | undefined;
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({ broker: 'nats', url, streamName, streamSubjects: [`${scope}.>`] }),
+          brokerProbe((b) => {
+            broker = b;
+          }),
+        ],
+      });
+
+      const jsmConn = await nats.connect({ servers: url });
+      const jsm = await jsmConn.jetstreamManager();
+      try {
+        await app.start();
+        await expect(broker!.publish(topic, { id: 1 }, { headers: { 'Nats-Rollup': 'sub' } }))
+          .rejects.toThrow(RangeError);
+        await expect(broker!.publish(topic, { id: 1 }, { headers: { 'nats-rollup': 'sub' } }))
+          .rejects.toThrow(RangeError);
+        // Nothing was appended: the server never saw the refused publish.
+        expect((await jsm.streams.info(streamName)).state.messages).toBe(0);
+      } finally {
+        await app.stop();
+        await jsm.streams.delete(streamName).catch(() => {});
+        await jsmConn.close();
+      }
+    });
+
+    it('round-trips a permitted caller header byte for byte (M106 §10 obligation 9)', async () => {
+      const nats = await import('npm:nats@2.x');
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const streamName = `M106_HDR_${suffix}`;
+      const scope = `m106hdr.${suffix}`;
+      const topic = `${scope}.orders`;
+
+      let broker: IMessageBroker | undefined;
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({ broker: 'nats', url, streamName, streamSubjects: [`${scope}.>`] }),
+          brokerProbe((b) => {
+            broker = b;
+          }),
+        ],
+      });
+
+      const jsmConn = await nats.connect({ servers: url });
+      const jsm = await jsmConn.jetstreamManager();
+      const seen: MessageMetadata[] = [];
+      try {
+        await app.start();
+        await broker!.subscribe(topic, (_message, metadata) => {
+          seen.push(metadata);
+        });
+        await broker!.publish(topic, { id: 1 }, { headers: { 'x-tenant': 'acme' } });
+        await waitFor(() => seen.length > 0, 'NATS header delivery');
+        const headers = seen[0]?.headers ?? {};
+        expect(headers['x-tenant']).toBe('acme');
+        // The framework's own header rides beside the caller's.
+        expect(headers['x-setu-ordering-key']).toBeUndefined();
+      } finally {
+        await app.stop();
         await jsm.streams.delete(streamName).catch(() => {});
         await jsmConn.close();
       }

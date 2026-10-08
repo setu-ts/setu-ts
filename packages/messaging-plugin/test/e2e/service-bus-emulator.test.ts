@@ -37,6 +37,8 @@ const connectionString = Deno.env.get('SERVICEBUS_CONNECTION_STRING');
 const ROUNDTRIP_TOPIC = 'orders-roundtrip';
 const ABANDON_TOPIC = 'orders-abandon';
 const CLOSE_TOPIC = 'orders-close';
+/** M106 §3.3: declared with `RequiresDuplicateDetection` and a one-minute window. */
+const DEDUP_TOPIC = 'orders-dedup';
 const SUBSCRIPTION = 'consumers';
 const REPLY_TOPIC = 'messaging.replies';
 
@@ -183,6 +185,29 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { ignore: !connectionS
       expect(caught).toBeInstanceOf(ReplyInboxUnavailableError);
       expect((caught as Error).message).toContain(REPLY_TOPIC);
       expect((caught as Error).message).toContain('Manage');
+    });
+  });
+
+  it('drops a re-sent messageId on a topic with duplicate detection (M106 §3.3)', async () => {
+    // `orders-dedup` is declared with `RequiresDuplicateDetection: true` and a
+    // one-minute window, so the broker's NATIVE mapping (`messageId`) is what
+    // makes the second publish disappear — a property of the entity, not of this
+    // process. A unique id per run keeps a rerun inside the window honest.
+    await withBroker(async (broker) => {
+      const received: { id: string }[] = [];
+      await broker.subscribe<{ id: string }>(DEDUP_TOPIC, (message) => {
+        received.push(message);
+      }, { queue: SUBSCRIPTION });
+
+      const suffix = crypto.randomUUID().slice(0, 8);
+      const first = `dedup-${suffix}`;
+      await broker.publish(DEDUP_TOPIC, { id: 'a' }, { deduplicationId: first });
+      await broker.publish(DEDUP_TOPIC, { id: 'a' }, { deduplicationId: first });
+      await broker.publish(DEDUP_TOPIC, { id: 'c' }, { deduplicationId: `dedup2-${suffix}` });
+      await until(() => received.length >= 2);
+
+      // The duplicate never arrives: two messages, not three.
+      expect(received).toEqual([{ id: 'a' }, { id: 'c' }]);
     });
   });
 });

@@ -9532,7 +9532,10 @@ finishing successfully; the messaging README's current dispatch timing remains t
 write business state and an integration-event envelope atomically, relay persisted rows with
 at-least-once delivery, and de-duplicate per consumer by stable event ID. It must decide ordering,
 retention, replay, and failure observability across the database and messaging contracts; none of
-those choices belongs in a local recorder or a typed publishing convenience API.
+those choices belongs in a local recorder or a typed publishing convenience API. The publish-side
+primitive those rows are relayed WITH ships in M106 — a per-aggregate ordering key, a stable
+de-duplication ID and transport headers — while THIS milestone owns relay ordering and the
+per-consumer de-duplication the inbox performs.
 
 ---
 
@@ -12967,6 +12970,72 @@ isolation lets it through, and D1, DynamoDB and Cosmos defer writes until commit
 
 ---
 
+## Milestone 106: Publish Options — Ordering Key, Deduplication ID and Headers
+
+**Package(s):** `packages/common`, `packages/messaging-plugin`, `packages/cloudflare-plugin`
+(`WorkersBroker`), and `packages/queue-plugin` — added after the security audit, at the maintainer's
+direction, for the pre-existing AMQP 255-byte name defect in `RabbitMqQueue` (the same class the
+audit found in `RabbitMqBroker`; plan §10 rows A6, A7, A9).
+
+**Objective:** let a producer say which messages must stay in order, which re-send is a duplicate,
+and what metadata travels with a message — the three things `IMessageBroker.publish(topic, message)`
+cannot express today. It is step 3 of the reliability order (broker redelivery fixes #418–#421, the
+portable duplicate-key error #420, then this, then the outbox and inbox milestones): the outbox
+relay publishes at least once and needs both a per-aggregate ordering key and a stable deduplication
+ID to hand the broker.
+
+**Why.** Measured against real backends (2026-10-07): Kafka with no message key spread one
+aggregate's messages over all three partitions of a test topic, so the framework's Kafka publish
+loses per-aggregate order today, while the same messages with a key landed on one partition in
+order. NATS JetStream answered a repeated `msgID` with `duplicate: true` and stored one copy, inside
+a 2-minute default window. Service Bus delivered a repeated `messageId` twice to a subscription
+without duplicate detection, and ignored `sessionId` on a non-session subscription. The Pub/Sub
+emulator accepted an `orderingKey`. None of it is reachable through the contract.
+
+**Scope.**
+
+- `IMessageBroker.publish(topic, message, options?: PublishOptions)` with `orderingKey`,
+  `deduplicationId` and `headers` — an optional trailing parameter, so no caller and no implementor
+  breaks.
+- Each option maps natively where the broker has the primitive (Kafka message key, Pub/Sub
+  `orderingKey`, NATS `Nats-Msg-Id`, Service Bus `messageId`) and is carried as a transport header
+  on every broker, so it is observable everywhere and never silently dropped. A per-broker guarantee
+  table is the documentation, and a conformance test iterates it.
+- `publishIntegrationEvent` passes its envelope ID as the deduplication ID, and
+  `defineIntegrationEvent` takes an opt-in `orderingKey` selector (for example the envelope's
+  `aggregateId`), so ordering is configured per event type and no existing producer re-partitions.
+- The documentation states what `orderingKey` promises: where a message is placed, not the order
+  handlers finish in once a retry occurs; consumers needing order compare `aggregateVersion`.
+- Shaped by a survey of nine frameworks (NestJS, Encore.ts, Moleculer, Dapr, CloudEvents, Spring
+  Cloud Stream, MassTransit, NServiceBus, Watermill): none refuses an option the broker cannot
+  honour, and the plan records each precedent it follows or rejects.
+
+**Prerequisite (found while designing this, 2026-10-07):** `NatsBroker.publish` never awaits
+JetStream's acknowledgement. A publish to a subject no stream covers resolves as a success while the
+server's refusal becomes an unhandled rejection, which terminates a Deno or Node process by default.
+That is a defect in merged code and ships first on a `fix/…` branch; the NATS deduplication mapping
+depends on reading the acknowledgement.
+
+**Deliverables**
+
+- [x] `PublishOptions` and the two header-name constants in `common`; the optional parameter on
+      `IMessageBroker.publish`
+- [x] Native mappings for Kafka, Pub/Sub, NATS and Service Bus; header carriage on all seven brokers
+      and `WorkersBroker`; both decorators forward the options
+- [x] Invalid options rejected by name (never a synchronous throw from a `Promise` method)
+- [x] Header names a broker or its server acts on (`CC`/`BCC`, `Nats-*`, `x-setu-*`, the trace
+      headers) refused case-insensitively; one portable count/byte bound; the validated copy is the
+      value on the wire; refusals never quote the value (plan §3.4)
+- [x] README "Publish options and trust" section (plan §3.9); committed-tree security audit against
+      the plan's §10 design review
+- [x] A conformance test over all brokers, plus real-backend tests for Kafka partition affinity and
+      NATS deduplication in CI, and guarded emulator tests for Pub/Sub and Service Bus
+- [x] The opt-in ordering selector on `defineIntegrationEvent`, and a real RabbitMQ test pinning the
+      documented retry-reorders limit
+- [x] PUBLIC_API.md, the messaging README's per-broker table and ordering statement, and CHANGELOG
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -13199,3 +13268,4 @@ patch by construction and gains nothing new here.
 | 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |
 | 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
 | 105       | ⬜     | database-plugin + cloudflare-plugin — conditional writes on `IRepository` (closes the M101c tenant-bridge check-then-write race)                                                                                                              |
+| 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
