@@ -8,12 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR pending).** One page answers
-  the questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability
-  lookup misses and what each error message is telling you, whether a service lives in the service
-  registry or the DI container (and how `DiPlugin`'s `autoRegister` fallback links them), and
-  whether a test should use `overrideCapability`, `overrideProvider` or `without`. Every example
-  compiles under the guide fence gate.
+- **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
+  questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup
+  misses and what each error message is telling you, whether a service lives in the service registry
+  or the DI container (and how `DiPlugin`'s `autoRegister` fallback links them), and whether a test
+  should use `overrideCapability`, `overrideProvider` or `without`. Every example compiles under the
+  guide fence gate.
 
 - **A full-stack project's `dev` task serves route edits without a restart, on Deno, Node and Bun
   (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR #426).** `setu new --template full-stack` now
