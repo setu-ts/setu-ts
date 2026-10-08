@@ -195,6 +195,21 @@ describe('decodeHttpRecord (M109a §3.10)', () => {
     );
   });
 
+  it('returns an error, never throws, for a binary body that is not valid base64 (M109a audit F3)', () => {
+    // atob throws InvalidCharacterError here; a throw surfaced as a masked
+    // 500 instead of the 503 a tampered record answers.
+    const tampered = record({ v: 1, s: 200, h: [], b: { data: '!!!notbase64', binary: true } });
+    let result: unknown;
+    expect(() => {
+      result = decodeHttpRecord(tampered, resolved());
+    }).not.toThrow();
+    expect(result).toBeInstanceOf(IdempotencyRecordError);
+    expect((result as Error).message).toBe('stored body is not valid base64');
+    // A valid base64 body under the same flag still decodes.
+    const valid = record({ v: 1, s: 200, h: [], b: { data: btoa('ok'), binary: true } });
+    expect(decodeHttpRecord(valid, resolved())).not.toBeInstanceOf(IdempotencyRecordError);
+  });
+
   it('rejects a decoded body larger than the current maxResponseBytes', () => {
     const encoded = encodeHttpRecord(buffered({ body: 'abcd' }), resolved(), undefined);
     expect(decodeHttpRecord(encoded.record, resolved({ maxResponseBytes: 1 }))).toBeInstanceOf(

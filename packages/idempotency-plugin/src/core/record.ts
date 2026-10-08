@@ -248,7 +248,16 @@ export function decodeHttpRecord(
   const encodedBody: EncodedPayload = body.binary === true
     ? { data: body.data, binary: true }
     : { data: body.data };
-  const decoded = decodeFrameData(encodedBody);
+  // `decodeFrameData` throws on malformed base64 (`atob`'s
+  // InvalidCharacterError). A tampered record must come back as an
+  // IdempotencyRecordError, the 503 this function promises, not a thrown 500
+  // (M109a audit F3).
+  let decoded: string | Uint8Array;
+  try {
+    decoded = decodeFrameData(encodedBody);
+  } catch {
+    return new IdempotencyRecordError('stored body is not valid base64');
+  }
   const byteLength = typeof decoded === 'string' ? utf8Length(decoded) : decoded.byteLength;
   if (byteLength > resolved.maxResponseBytes) {
     return new IdempotencyRecordError('stored body exceeds the route maxResponseBytes');
