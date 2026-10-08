@@ -39,6 +39,7 @@ function makeInstrumentedPool(
       size: overrides?.size ?? 2,
       maxQueue: overrides?.maxQueue ?? 1024,
       taskTimeoutMs: overrides?.taskTimeoutMs ?? 0,
+      startupTimeoutMs: 60_000,
     },
     host,
     runtime,

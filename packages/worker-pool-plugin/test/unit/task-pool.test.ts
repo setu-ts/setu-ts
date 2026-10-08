@@ -33,6 +33,7 @@ function makePool(config?: Partial<TaskPoolConfig>, parallelism = 2): {
       size: config?.size ?? 2,
       maxQueue: config?.maxQueue ?? 1024,
       taskTimeoutMs: config?.taskTimeoutMs ?? 0,
+      startupTimeoutMs: config?.startupTimeoutMs ?? 60_000,
       ...config,
     },
     host,
@@ -231,8 +232,9 @@ describe('TaskPool — error and crash semantics', () => {
     await expect(inFlight).rejects.toBeInstanceOf(WorkerTaskError);
     await expect(inFlight).rejects.toMatchObject({ remoteName: 'Error' });
     // Timers are armed at enqueue: 'dies' cleared on its rejection, 'survives'
-    // still armed while it waits for a replacement worker.
-    expect(timers.armed).toBe(1);
+    // still armed while it waits for a replacement worker — plus that
+    // replacement's startup deadline, cleared once it signals ready.
+    expect(timers.armed).toBe(2);
 
     // Queued task re-dispatched to a replacement worker once it is ready.
     expect(host.handles).toHaveLength(2);
@@ -283,7 +285,9 @@ describe('TaskPool — timeout while never dispatched', () => {
     const promise = pool.run('never-ready');
     // Worker spawned but the module never calls defineWorkerTask → no ready.
     expect(host.handles).toHaveLength(1);
-    expect(timers.armed).toBe(1); // armed at ENQUEUE, not at dispatch
+    // The task timer is armed at ENQUEUE, not at dispatch; the second is the
+    // worker's startup deadline.
+    expect(timers.armed).toBe(2);
 
     timers.fire();
     await expect(promise).rejects.toBeInstanceOf(WorkerTaskTimeoutError);

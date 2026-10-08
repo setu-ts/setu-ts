@@ -16,7 +16,8 @@ import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import { WorkerPoolUnavailableError } from '../errors.ts';
 import { TaskPool } from '../pool/task-pool.ts';
 import { WorkerBudget } from '../pool/worker-budget.ts';
-import { resolveMaxWorkers, validateSizingOptions } from './sizing.ts';
+import { readSizingOptions, resolveMaxWorkers } from './sizing.ts';
+import type { SizingSnapshot } from './sizing.ts';
 import type { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 
 /** Default pending-queue bound per pool. */
@@ -48,6 +49,7 @@ export class WorkerPoolService implements IWorkerPool {
   private readonly host: IWorkerHost | undefined;
   private readonly pools = new Map<string, TaskPool>();
   private readonly budget: WorkerBudget;
+  private readonly sizing: SizingSnapshot;
   private closed = false;
 
   constructor(
@@ -59,9 +61,9 @@ export class WorkerPoolService implements IWorkerPool {
      */
     private readonly collector?: WorkerPoolCollector,
   ) {
-    validateSizingOptions(options);
+    this.sizing = readSizingOptions(options);
     this.host = options?.host ?? runtime.workers;
-    const limit = resolveMaxWorkers(options, this.host?.availableParallelism() ?? 0);
+    const limit = resolveMaxWorkers(options, this.sizing, this.host?.availableParallelism() ?? 0);
     this.budget = new WorkerBudget(limit);
     budgetLimits.set(this, limit);
   }
@@ -134,6 +136,7 @@ export class WorkerPoolService implements IWorkerPool {
     size: number;
     maxQueue: number;
     taskTimeoutMs: number;
+    startupTimeoutMs: number;
   } {
     const overrides = this.options?.pools?.[taskModule];
     return {
@@ -142,6 +145,7 @@ export class WorkerPoolService implements IWorkerPool {
       maxQueue: overrides?.maxQueue ?? this.options?.maxQueue ?? DEFAULT_MAX_QUEUE,
       taskTimeoutMs: overrides?.taskTimeoutMs ?? this.options?.taskTimeoutMs ??
         DEFAULT_TASK_TIMEOUT_MS,
+      startupTimeoutMs: this.sizing.startupTimeoutMs,
     };
   }
 }

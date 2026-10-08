@@ -38,6 +38,15 @@ export interface WorkerPoolPluginOptions {
    */
   readonly maxWorkers?: number;
   /**
+   * How long a spawned worker may take to signal ready before it is
+   * terminated, its slot returned to the shared budget, and the oldest waiting
+   * task for that module rejected with `WorkerTaskError`. Applies even when
+   * `taskTimeoutMs` is `0`. Defaults to 10 000; must be a positive safe
+   * integer (there is no way to disable it).
+   * @since 0.9.0
+   */
+  readonly startupTimeoutMs?: number;
+  /**
    * Default workers per pool. Defaults to the host's
    * `availableParallelism()`.
    */

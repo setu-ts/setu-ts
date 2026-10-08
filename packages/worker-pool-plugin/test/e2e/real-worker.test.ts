@@ -19,6 +19,7 @@ import { WORKER_POOL_METRICS } from '../../src/metrics/metric-names.ts';
 const echoTaskUrl = new URL('../fixtures/echo-task.ts', import.meta.url).href;
 const errorTaskUrl = new URL('../fixtures/error-task.ts', import.meta.url).href;
 const noHandlerTaskUrl = new URL('../fixtures/no-handler-task.ts', import.meta.url).href;
+const importThrowsTaskUrl = new URL('../fixtures/import-throws-task.ts', import.meta.url).href;
 
 describe('WorkerPoolPlugin — e2e on real worker threads', () => {
   it('completes two modules under one slot and shares SAB writes with the caller', async () => {
@@ -116,6 +117,49 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
         doubled: 42,
         from: 'worker',
       });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('survives a task module that throws at import, and keeps serving others', async () => {
+    // Before the runtime host cancelled the worker error event, Deno re-raised
+    // it in the parent as `Unhandled error in child worker` and this test
+    // process died before reaching the second assertion.
+    const app = createApplication({
+      plugins: [RuntimePlugin(), WorkerPoolPlugin({ maxWorkers: 1, taskTimeoutMs: 3_000 })],
+    });
+    await app.start();
+    try {
+      const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      const broken = pool.run(importThrowsTaskUrl, {});
+      await expect(broken).rejects.toBeInstanceOf(WorkerTaskError);
+      await expect(broken).rejects.toThrow('fixture-import-failure');
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await expect(pool.run(echoTaskUrl, { n: 2 })).resolves.toEqual({
+        doubled: 4,
+        from: 'worker',
+      });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it("returns a never-ready worker's slot by startup deadline even with task timeouts off", async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        WorkerPoolPlugin({ maxWorkers: 1, taskTimeoutMs: 0, startupTimeoutMs: 300 }),
+      ],
+    });
+    await app.start();
+    try {
+      const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      const stuck = pool.run(noHandlerTaskUrl, {});
+      const other = pool.run(echoTaskUrl, { n: 5 });
+      await expect(stuck).rejects.toBeInstanceOf(WorkerTaskError);
+      await expect(stuck).rejects.toMatchObject({ remoteName: 'WorkerStartupTimeout' });
+      await expect(other).resolves.toEqual({ doubled: 10, from: 'worker' });
     } finally {
       await app.stop();
     }

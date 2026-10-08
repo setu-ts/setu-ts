@@ -40,6 +40,13 @@ export interface TaskPoolConfig {
   readonly maxQueue: number;
   /** Default task timeout in ms; `0` disables. */
   readonly taskTimeoutMs: number;
+  /**
+   * How long a spawned worker may take to signal ready before it is
+   * terminated and its slot returned. Independent of `taskTimeoutMs`, so a
+   * module that never starts cannot hold shared capacity when task timeouts
+   * are disabled.
+   */
+  readonly startupTimeoutMs: number;
 }
 
 /**
@@ -85,6 +92,8 @@ interface WorkerSlot {
    * because each not-yet-ready slot's exit takes the startup-failure branch.
    */
   terminating: boolean;
+  /** Startup deadline armed at spawn; cleared on ready and on removal. */
+  startupTimer: TimerHandle | null;
 }
 
 /**
@@ -212,6 +221,7 @@ export class TaskPool {
     this.budget.cancel(this);
     const slots = this.slots.splice(0);
     for (const slot of slots) {
+      this.clearStartupTimer(slot);
       this.budget.release();
       if (slot.task !== null) {
         this.rejectTask(
@@ -284,16 +294,68 @@ export class TaskPool {
 
   private spawnSlot(): void {
     const handle = this.host.spawn(this.config.specifier);
+    const slot: WorkerSlot = {
+      handle,
+      ready: false,
+      task: null,
+      terminating: false,
+      startupTimer: null,
+    };
+    try {
+      handle.onMessage((message) => this.onMessage(slot, message));
+      handle.onError((error) => this.onWorkerError(slot, error));
+      // Optional: absent on hosts whose runtime reports nothing when a thread
+      // ends (Deno's web `Worker`). Where it IS present, a worker that stops
+      // without erroring settles its task instead of leaving it pending until
+      // the timeout — which `taskTimeoutMs: 0` disables entirely (X8-7).
+      handle.onExit?.((code) => this.onWorkerExit(slot, code));
+    } catch (error) {
+      // A handle whose listeners could not be attached can never report ready,
+      // an error or an exit, so nothing would ever release a slot charged for
+      // it. It is never charged: terminate it and let pump() settle a task.
+      slot.terminating = true;
+      this.terminateSlot(slot);
+      throw error;
+    }
     this.budget.acquired(this);
-    const slot: WorkerSlot = { handle, ready: false, task: null, terminating: false };
-    handle.onMessage((message) => this.onMessage(slot, message));
-    handle.onError((error) => this.onWorkerError(slot, error));
-    // Optional: absent on hosts whose runtime reports nothing when a thread
-    // ends (Deno's web `Worker`). Where it IS present, a worker that stops
-    // without erroring settles its task instead of leaving it pending until the
-    // timeout — which `taskTimeoutMs: 0` disables entirely (X8-7).
-    handle.onExit?.((code) => this.onWorkerExit(slot, code));
+    slot.startupTimer = this.runtime.setTimeout(
+      () => this.onStartupTimeout(slot),
+      this.config.startupTimeoutMs,
+    );
     this.slots.push(slot);
+  }
+
+  /**
+   * A worker did not signal ready within `startupTimeoutMs`. Treated like a
+   * crash during startup: the slot is removed and terminated, and the oldest
+   * waiting task fails, so a module that cannot start reports it instead of
+   * holding a shared slot forever (with `taskTimeoutMs: 0` nothing else would).
+   */
+  private onStartupTimeout(slot: WorkerSlot): void {
+    slot.startupTimer = null;
+    if (slot.ready || slot.terminating || !this.dropSlot(slot)) return;
+    slot.terminating = true;
+    this.terminateSlot(slot);
+    const waiting = this.pending.shift();
+    if (waiting !== undefined) {
+      this.rejectTask(
+        waiting,
+        new WorkerTaskError(this.config.specifier, {
+          name: 'WorkerStartupTimeout',
+          message: `Worker did not signal ready within ${this.config.startupTimeoutMs}ms`,
+        }),
+        'timeout',
+      );
+    }
+    this.pump();
+    this.syncMetrics();
+  }
+
+  private clearStartupTimer(slot: WorkerSlot): void {
+    if (slot.startupTimer !== null) {
+      this.runtime.clearTimeout(slot.startupTimer);
+      slot.startupTimer = null;
+    }
   }
 
   /**
@@ -333,6 +395,7 @@ export class TaskPool {
   private onMessage(slot: WorkerSlot, message: unknown): void {
     if (slot.terminating || !this.slots.includes(slot)) return;
     if (isWorkerReadySignal(message)) {
+      this.clearStartupTimer(slot);
       slot.ready = true;
       this.pump();
       this.syncMetrics();
@@ -446,7 +509,19 @@ export class TaskPool {
       // excess startup capacity so a module that never signals ready cannot
       // retain the shared budget after its queued deadlines expire.
       const starting = this.slots.filter((slot) => !slot.ready);
-      for (const slot of starting.slice(this.pending.length)) {
+      // Keep one starting worker per task still queued — unless another module
+      // has queued work and no worker at all. Then yield one, so a module that
+      // never becomes ready under steady demand cannot hold the shared budget
+      // against it: each expiry hands the freed slot to the starved module.
+      const keep = this.budget.hasStarvedWaiter()
+        ? Math.min(this.pending.length, starting.length - 1)
+        : this.pending.length;
+      const reclaimed = starting.slice(Math.max(0, keep));
+      // Give up this pool's own place in the waiter queue first, exactly as
+      // retireIdle() does: a pool already queued for an extra worker would
+      // otherwise be handed back the very slot it is yielding.
+      if (reclaimed.length > 0) this.budget.cancel(this);
+      for (const slot of reclaimed) {
         slot.terminating = true;
         this.dropSlot(slot);
         this.terminateSlot(slot);
@@ -504,7 +579,8 @@ export class TaskPool {
    * the two surfaces cannot disagree.
    *
    * Called from `run`, `onMessage`, `onWorkerError`, `onWorkerExit`,
-   * `onTimeout`, `shutdown`, budget `resume` and `retireIdle`. Every other mutation
+   * `onTimeout`, `onStartupTimeout`, `shutdown`, budget `resume` and
+   * `retireIdle`. Every other mutation
    * (`pump`, `dispatch`, `spawnSlot`, `dropSlot`, the settle helpers) is
    * reached only from one of those, so no transition escapes.
    */
@@ -556,6 +632,7 @@ export class TaskPool {
       return false;
     }
     this.slots.splice(index, 1);
+    this.clearStartupTimer(slot);
     this.budget.release();
     return true;
   }

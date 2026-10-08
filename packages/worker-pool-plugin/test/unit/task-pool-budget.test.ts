@@ -17,7 +17,7 @@ function setup(limit = 1, host = new FakeHost(2, undefined, true)) {
   const collector = new WorkerPoolCollector(metrics, throwOnReport);
   const make = (specifier: string, size = 2, injected: IWorkerHost = host) =>
     new TaskPool(
-      { specifier, size, maxQueue: 100, taskTimeoutMs: 0 },
+      { specifier, size, maxQueue: 100, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
       injected,
       runtime,
       budget,
@@ -211,7 +211,7 @@ describe('TaskPool shared budget', () => {
     await a.shutdown();
     const owner = new FakeHost();
     const active = new TaskPool(
-      { specifier: 'owner', size: 1, maxQueue: 10, taskTimeoutMs: 0 },
+      { specifier: 'owner', size: 1, maxQueue: 10, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
       owner,
       createFakeRuntime(timers),
       budget,

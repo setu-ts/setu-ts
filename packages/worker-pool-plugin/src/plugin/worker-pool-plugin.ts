@@ -81,6 +81,7 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
       const exitDetection = host?.reportsExit?.() ?? false;
 
       warnIfDeathUndetectable(ctx, options, exitDetection, available);
+      warnIfUntimedTasksCanHoldBudget(ctx, options, budgetLimitOf(service), available);
 
       // H-70c-5: this hardcoded `status: 'up'` beside a live `available`
       // field that could read `false` — a pool with no `IWorkerHost` throws
@@ -174,6 +175,43 @@ function warnIfDeathUndetectable(
     'worker-pool: taskTimeoutMs is 0 on a runtime that cannot report a worker exit — ' +
       'a worker that ends itself will never settle its task and its pool slot leaks',
     { pools: disabled, runtime: ctx.runtime.platform() },
+  );
+}
+
+/**
+ * Warns ONCE, at registration, when a pool runs with no task timeout under a
+ * finite shared budget.
+ *
+ * The budget keeps a bound on live workers, and a task that never settles keeps
+ * its worker — so once every slot is held by such tasks, every other task
+ * module waits (until its own timeout, or forever) until the process restarts.
+ * That is the price of the bound, not something the pool can reclaim: killing
+ * a task the application said may run indefinitely would be worse. Workers that
+ * never START are handled separately by `startupTimeoutMs`. The remedy is a
+ * task timeout, or `maxWorkers: Infinity` to opt out of the shared bound.
+ *
+ * @param ctx - The plugin context supplying the logger
+ * @param options - The plugin's configuration, if any
+ * @param maxWorkers - The resolved shared bound
+ * @param available - Whether a worker host exists at all
+ */
+function warnIfUntimedTasksCanHoldBudget(
+  ctx: IPluginContext,
+  options: WorkerPoolPluginOptions | undefined,
+  maxWorkers: number,
+  available: boolean,
+): void {
+  if (!available || maxWorkers === Infinity) {
+    return;
+  }
+  const untimed = collectDisabledTimeoutPools(options);
+  if (untimed.length === 0) {
+    return;
+  }
+  ctx.logger?.warn(
+    'worker-pool: taskTimeoutMs is 0 under a finite maxWorkers — a task that never settles ' +
+      'keeps its worker slot, and once every slot is held other task modules wait until restart',
+    { pools: untimed, maxWorkers },
   );
 }
 
