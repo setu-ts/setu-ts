@@ -12973,7 +12973,9 @@ isolation lets it through, and D1, DynamoDB and Cosmos defer writes until commit
 ## Milestone 106: Publish Options — Ordering Key, Deduplication ID and Headers
 
 **Package(s):** `packages/common`, `packages/messaging-plugin`, `packages/cloudflare-plugin`
-(`WorkersBroker`).
+(`WorkersBroker`), and `packages/queue-plugin` — added after the security audit, at the maintainer's
+direction, for the pre-existing AMQP 255-byte name defect in `RabbitMqQueue` (the same class the
+audit found in `RabbitMqBroker`; plan §10 rows A6, A7, A9).
 
 **Objective:** let a producer say which messages must stay in order, which re-send is a duplicate,
 and what metadata travels with a message — the three things `IMessageBroker.publish(topic, message)`
@@ -13016,21 +13018,21 @@ depends on reading the acknowledgement.
 
 **Deliverables**
 
-- [ ] `PublishOptions` and the two header-name constants in `common`; the optional parameter on
+- [x] `PublishOptions` and the two header-name constants in `common`; the optional parameter on
       `IMessageBroker.publish`
-- [ ] Native mappings for Kafka, Pub/Sub, NATS and Service Bus; header carriage on all seven brokers
+- [x] Native mappings for Kafka, Pub/Sub, NATS and Service Bus; header carriage on all seven brokers
       and `WorkersBroker`; both decorators forward the options
-- [ ] Invalid options rejected by name (never a synchronous throw from a `Promise` method)
-- [ ] Header names a broker or its server acts on (`CC`/`BCC`, `Nats-*`, `x-setu-*`, the trace
+- [x] Invalid options rejected by name (never a synchronous throw from a `Promise` method)
+- [x] Header names a broker or its server acts on (`CC`/`BCC`, `Nats-*`, `x-setu-*`, the trace
       headers) refused case-insensitively; one portable count/byte bound; the validated copy is the
       value on the wire; refusals never quote the value (plan §3.4)
-- [ ] README "Publish options and trust" section (plan §3.9); committed-tree security audit against
+- [x] README "Publish options and trust" section (plan §3.9); committed-tree security audit against
       the plan's §10 design review
-- [ ] A conformance test over all brokers, plus real-backend tests for Kafka partition affinity and
+- [x] A conformance test over all brokers, plus real-backend tests for Kafka partition affinity and
       NATS deduplication in CI, and guarded emulator tests for Pub/Sub and Service Bus
-- [ ] The opt-in ordering selector on `defineIntegrationEvent`, and a real RabbitMQ test pinning the
+- [x] The opt-in ordering selector on `defineIntegrationEvent`, and a real RabbitMQ test pinning the
       documented retry-reorders limit
-- [ ] PUBLIC_API.md, the messaging README's per-broker table and ordering statement, and CHANGELOG
+- [x] PUBLIC_API.md, the messaging README's per-broker table and ordering statement, and CHANGELOG
 
 ---
 
@@ -13266,4 +13268,4 @@ patch by construction and gains nothing new here.
 | 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |
 | 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
 | 105       | ⬜     | database-plugin + cloudflare-plugin — conditional writes on `IRepository` (closes the M101c tenant-bridge check-then-write race)                                                                                                              |
-| 106       | ⬜     | common + messaging-plugin + cloudflare-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                                   |
+| 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |

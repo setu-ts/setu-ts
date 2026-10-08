@@ -543,15 +543,6 @@ All notable changes to this project are documented here. The format follows
   generic like `Body`, so `Query<z.infer<typeof schema>>()` declares the shape `@ValidateQuery`
   wrote instead of a cast. `apps/static-site` takes its port as the first argument (default `8000`).
 
-- **A long RabbitMQ field no longer misattributes every later publisher confirm
-  (`@setu-ts/messaging-plugin`, M106).** AMQP limits the exchange, the routing key (the topic), the
-  message id and each header name to 255 bytes, and amqplib's `ConfirmChannel.publish` queues its
-  confirm callback before encoding. A value over the limit was rejected, but the orphaned callback
-  then took the next broker ack, so each later awaited publish resolved only when the one after it
-  was confirmed, for the life of the channel. A payload `messageId` or topic over 255 bytes reached
-  this before 0.9.0. `RabbitMqBroker` now refuses any of the four fields over 255 bytes before
-  publishing, with a `RangeError` naming the field.
-
 - **A name over 255 bytes no longer jams a RabbitMQ channel (`@setu-ts/messaging-plugin`, M106).**
   AMQP limits the exchange, a queue, the routing key (the topic), the message id and each header
   name to 255 bytes, and amqplib prepares a publish's confirm callback, or a channel operation's
