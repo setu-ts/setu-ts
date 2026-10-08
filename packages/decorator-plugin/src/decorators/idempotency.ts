@@ -28,7 +28,8 @@ import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
  * class PaymentController {
  *   @Post('/')
  *   @Idempotent()
- *   create(@Params(Body()) input: PaymentInput) {
+ *   @Params(Body())
+ *   create(input: PaymentInput) {
  *     return this.payments.create(input);
  *   }
  * }
