@@ -12,7 +12,7 @@ permissions:
 # config by default, so anything the job runs afterwards can read it — including third-party code
 # this workflow resolves, installs and in places imports. Every job below was reviewed one at a
 # time, and NONE performs a networked git operation: the only git commands anywhere in these gates
-# are `git show <tag>:<path>`, `git rev-parse` and `git ls-files`, which are local object reads.
+# are `git show <tag>:<path>`, `git rev-parse`, `git ls-files` and `git diff`, all local reads.
 # So every checkout here sets `persist-credentials: false`, each with its own reason recorded at
 # the step. `fetch-depth: 0` still works, because the fetch happens during checkout while the
 # credential is live; only its persistence afterwards is dropped. A job that later needs a real
@@ -215,9 +215,8 @@ jobs:
           # Executes third-party code: `deno ci` resolves the whole graph, the
           # suite lazily imports `npm:` drivers, and `check:apps` installs
           # dependencies into the example projects. No step needs a credential
-          # afterwards — the only git this job runs is three LOCAL object reads
-          # (`git show` at a release tag, `git rev-parse`, `git ls-files`), none
-          # of which touches the remote.
+          # afterwards — git only reads local objects and checks for app
+          # lockfile drift; none of these commands touches the remote.
           persist-credentials: false
           # The changelog-coverage gate compares each published barrel against the
           # last RELEASE TAG, and a shallow checkout fetches no tags — it would fail
@@ -428,7 +427,9 @@ jobs:
         run: deno task check:docs
 
       - name: Example applications
-        run: deno task check:apps
+        run: |
+          deno task check:apps
+          git diff --exit-code -- apps
         env:
           ALLOW_SKIP: cloudflare
 
