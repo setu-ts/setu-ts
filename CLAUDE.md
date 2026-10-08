@@ -5823,7 +5823,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   on its own interval, shutdown drains in `onShutdown`, and an `outbox` health indicator plus
   metrics report it. Proven on real PostgreSQL → RabbitMQ and → Redis Streams, a Mongo replica set,
   DynamoDB Local and the real OpenTelemetry SDK. The full suite found the dependency drift gate
-  refusing the new `.sql` fixtures. The security audit ran two fresh-context rounds: round 1 found
+  refusing the new `.sql` fixtures. The security audit ran four fresh-context rounds: round 1 found
   F1 (Medium) — a lap overflowing its 10 000-key blocked set ended in the same sweep, which cleared
   the flag before health read it, so an attacker with table write access stalled every keyed row
   while `/health` read `up`; the holder now keeps the last completed lap's overflow until a clean
@@ -5832,7 +5832,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   fails `start()` with `OutboxStoreVerifyTimeoutError` (Drizzle's `connect()` does no I/O, so on
   `pg`, whose driver sets no connect timeout, `verify()` is the first database call and `start()`
   hung for ever), and stored `options` longer than any the outbox writes — a bound derived from the
-  M106 limits — are refused before the parse. Not verified: workerd, Prisma, MySQL DDL, a non-`C`
+  M106 limits — are refused before the parse. Round 3 found L1 (Low): the test for that order fed an
+  unparseable string, so it passed with the check moved after the parse; it now spies on
+  `JSON.parse`. Round 4 passed on `f31148bf`. Not verified: workerd, Prisma, MySQL DDL, a non-`C`
   PostgreSQL collation — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
