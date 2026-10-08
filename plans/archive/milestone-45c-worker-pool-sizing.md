@@ -507,3 +507,13 @@ Not changed: OBS-2 (metrics label characters, metrics-plugin, pre-existing) and 
 metadata retained for the service lifetime, already documented). The finding-1 never-settling half
 is a maintainer decision to record in the PR: the bound is kept, so untimed tasks can hold every
 slot. A fresh re-audit of the fix commit is required before merge.
+
+### 12.1 Third audit round, 2026-10-09
+
+`.verify/milestone-45c-security-audit-round3.md` (commit 971139fc) confirmed every round-2 fix with
+13 observed negative controls and failed on the open finding-1 never-settling half plus two Lows,
+both fixed afterwards: **R3-1** `startupTimeoutMs` is refused above 2 147 483 647 ms, the largest
+delay a runtime timer honours (a larger value fired at about 1 ms and killed every worker); **R3-2**
+the warning text and docs now cover a per-call `timeoutMs: 0`, which holds a slot the same way and
+cannot be seen at registration. `taskTimeoutMs` and per-call `timeoutMs` overflow identically; that
+predates M45c and is not changed here.

@@ -210,7 +210,8 @@ function warnIfUntimedTasksCanHoldBudget(
   }
   ctx.logger?.warn(
     'worker-pool: taskTimeoutMs is 0 under a finite maxWorkers — a task that never settles ' +
-      'keeps its worker slot, and once every slot is held other task modules wait until restart',
+      'keeps its worker slot, and once every slot is held other task modules wait until restart ' +
+      '(a per-call run() timeoutMs of 0 does the same and is not detectable here)',
     { pools: untimed, maxWorkers },
   );
 }

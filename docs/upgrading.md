@@ -34,11 +34,12 @@ the service lifetime. `NaN` or `Infinity` legacy default/pool sizes contribute z
 budget; their per-pool behavior remains unchanged, while independently valid configured modules
 remain usable.
 
-With `taskTimeoutMs: 0` under a finite `maxWorkers`, a task that never settles holds its slot until
-restart and can starve other modules; keep a task timeout on modules that share the budget, or pass
-`maxWorkers: Infinity`. `register()` logs a warning for that configuration. On Deno a timed-out
-CPU-bound task keeps running after its slot is released, and may keep writing to a
-`SharedArrayBuffer` after its promise rejected: do not reuse such a buffer.
+With `taskTimeoutMs: 0` (or a per-call `run()` option of `timeoutMs: 0`) under a finite
+`maxWorkers`, a task that never settles holds its slot until restart and can starve other modules;
+keep a task timeout on modules that share the budget, or pass `maxWorkers: Infinity`. `register()`
+logs a warning for that configuration. On Deno a timed-out CPU-bound task keeps running after its
+slot is released, and may keep writing to a `SharedArrayBuffer` after its promise rejected: do not
+reuse such a buffer.
 
 The worker-pool example starts on 127.0.0.1 with scoped Deno permissions. Remote health exposure
 requires an explicit application deployment decision.

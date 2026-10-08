@@ -41,8 +41,9 @@ export interface WorkerPoolPluginOptions {
    * How long a spawned worker may take to signal ready before it is
    * terminated, its slot returned to the shared budget, and the oldest waiting
    * task for that module rejected with `WorkerTaskError`. Applies even when
-   * `taskTimeoutMs` is `0`. Defaults to 10 000; must be a positive safe
-   * integer (there is no way to disable it).
+   * `taskTimeoutMs` is `0`. Defaults to 10 000; must be a positive integer no
+   * greater than 2 147 483 647 (the largest delay a runtime timer honours —
+   * a larger one would fire immediately). There is no way to disable it.
    * @since 0.9.0
    */
   readonly startupTimeoutMs?: number;

@@ -4266,15 +4266,15 @@ app.router.post('/thumbnail', async (ctx) => {
 
 ### Options
 
-| Option             | Type                              | Default                  | Description                                                        |
-| ------------------ | --------------------------------- | ------------------------ | ------------------------------------------------------------------ |
-| `maxWorkers`       | `number`                          | See budget rule below    | Total worker slots across all modules; `Infinity` disables.        |
-| `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready; cannot be disabled. |
-| `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                  |
-| `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                  |
-| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies.             |
-| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                 |
-| `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                 |
+| Option             | Type                              | Default                  | Description                                                                            |
+| ------------------ | --------------------------------- | ------------------------ | -------------------------------------------------------------------------------------- |
+| `maxWorkers`       | `number`                          | See budget rule below    | Total worker slots across all modules; `Infinity` disables.                            |
+| `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready; cannot be disabled; at most 2147483647. |
+| `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                      |
+| `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                      |
+| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies.                                 |
+| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                     |
+| `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                     |
 
 ### Interface Reference
 
@@ -4312,12 +4312,13 @@ another module has no slot. Timeouts include time waiting for this budget. Rotat
 spawn; size `maxWorkers` at least as large as the number of task modules active concurrently when
 that cost matters. Workers stay resident between bursts; there is no timed idle reaping.
 
-**Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, a task that never settles keeps its
-worker. Once every slot is held that way, other task modules wait (until their own timeouts, or
-forever if theirs are disabled too) until the process restarts. The pool does not reclaim a running
-task the application allowed to run indefinitely; `register()` warns when `taskTimeoutMs` is `0`
-under a finite `maxWorkers`. Keep a timeout on modules that share the budget, or opt out of the
-bound with `maxWorkers: Infinity`.
+**Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, or a per-call `run()` option of
+`timeoutMs: 0`, a task that never settles keeps its worker. Once every slot is held that way, other
+task modules wait (until their own timeouts, or forever if theirs are disabled too) until the
+process restarts. The pool does not reclaim a running task the application allowed to run
+indefinitely; `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers` (a per-call
+`timeoutMs: 0` cannot be seen at registration, so it gets no warning). Keep a timeout on modules
+that share the budget, or opt out of the bound with `maxWorkers: Infinity`.
 
 **Containers:** CPU limits lower `availableParallelism()` (measured on Deno and Node with
 `--cpus=2`); pods without CPU limits see all node cores. Set an explicit bound for the pod's memory

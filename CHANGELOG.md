@@ -504,8 +504,9 @@ All notable changes to this project are documented here. The format follows
 
 - **Worker slots held by workers that never start (M45c, PR pending).** A spawned worker that does
   not signal ready within the new `WorkerPoolPluginOptions.startupTimeoutMs` (default 10 000 ms,
-  applied even with `taskTimeoutMs: 0`, and not disableable) is terminated, its slot returns to the
-  shared budget, and the oldest waiting task for that module rejects with `WorkerTaskError`
+  applied even with `taskTimeoutMs: 0`, not disableable, and refused above 2 147 483 647 ms because
+  a larger timer delay overflows and fires at once) is terminated, its slot returns to the shared
+  budget, and the oldest waiting task for that module rejects with `WorkerTaskError`
   (`remoteName: 'WorkerStartupTimeout'`). Before this, one call to a module that never became ready
   held a shared slot until restart with task timeouts off, and under steady demand starved every
   other module even with them on; a queued task expiring now also yields a starting worker to a

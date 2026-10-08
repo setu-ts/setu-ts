@@ -4,6 +4,13 @@ import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 /** Default `startupTimeoutMs`: how long a spawned worker may take to signal ready. */
 export const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 
+/**
+ * Largest delay a runtime timer honours: 2^31 - 1 ms (about 24.8 days). A
+ * larger delay overflows and the timer fires after about 1 ms, so a deadline
+ * meant to be "very long" would instead kill every worker before it started.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 /** One validated read of the sizing options; later code never re-reads them. */
 export interface SizingSnapshot {
   /** The configured bound, or `undefined` to derive the default. */
@@ -20,7 +27,8 @@ export interface SizingSnapshot {
  * @param options - The plugin options, if any
  * @returns The validated snapshot
  * @throws {RangeError} When `maxWorkers` is neither `Infinity` nor a positive
- * safe integer, or `startupTimeoutMs` is not a positive safe integer
+ * safe integer, or `startupTimeoutMs` is not a positive integer no greater
+ * than {@linkcode MAX_TIMER_DELAY_MS}
  */
 export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnapshot {
   const maxWorkers: unknown = options?.maxWorkers;
@@ -33,12 +41,17 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
     );
   }
   const startup: unknown = options?.startupTimeoutMs;
-  if (startup !== undefined && (!Number.isSafeInteger(startup) || (startup as number) <= 0)) {
+  if (
+    startup !== undefined &&
+    (!Number.isSafeInteger(startup) || (startup as number) <= 0 ||
+      (startup as number) > MAX_TIMER_DELAY_MS)
+  ) {
     // No Infinity opt-out on purpose: without a startup deadline a worker that
     // never signals ready holds its shared slot for as long as the process
     // lives once task timeouts are disabled.
     throw new RangeError(
-      `startupTimeoutMs must be a positive safe integer; received ${describe(startup)}`,
+      `startupTimeoutMs must be a positive integer no greater than ${MAX_TIMER_DELAY_MS}; ` +
+        `received ${describe(startup)}`,
     );
   }
   return {

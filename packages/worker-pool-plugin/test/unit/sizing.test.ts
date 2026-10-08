@@ -44,12 +44,12 @@ describe('worker sizing', () => {
     expect(budgetLimitOf(service)).toBe(2);
   });
 
-  for (const value of [0, -1, 1.5, NaN, Infinity]) {
+  for (const value of [0, -1, 1.5, NaN, Infinity, 2 ** 31, 2 ** 40, Number.MAX_SAFE_INTEGER]) {
     it(`refuses startupTimeoutMs ${value}: a startup deadline cannot be disabled`, () => {
       const options = { startupTimeoutMs: value };
       expect(() => WorkerPoolPlugin(options)).toThrow(RangeError);
       expect(() => WorkerPoolPlugin(options)).toThrow(
-        `startupTimeoutMs must be a positive safe integer; received ${value}`,
+        `startupTimeoutMs must be a positive integer no greater than 2147483647; received ${value}`,
       );
       expect(() => new WorkerPoolService(options, createFakeRuntime(new FakeTimers())))
         .toThrow(RangeError);
@@ -59,6 +59,9 @@ describe('worker sizing', () => {
   it('defaults startupTimeoutMs to 10 000 ms and keeps a configured value', () => {
     expect(readSizingOptions().startupTimeoutMs).toBe(10_000);
     expect(readSizingOptions({ startupTimeoutMs: 250 }).startupTimeoutMs).toBe(250);
+    // The largest delay a runtime timer honours; one more overflows to ~1 ms.
+    expect(readSizingOptions({ startupTimeoutMs: 2_147_483_647 }).startupTimeoutMs)
+      .toBe(2_147_483_647);
   });
 
   it('does not let an Infinity legacy pool size make the derived budget unbounded', () => {
