@@ -73,6 +73,8 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
    * audit observation).
    */
   readonly #lastScopeSweep = new Map<string, number>();
+  /** Keys the most recent scope sweep visited, read by the test seam only. */
+  #lastScopeSweepVisits = 0;
 
   /**
    * @param options - The capacity bounds
@@ -170,6 +172,7 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
     this.#entries.clear();
     this.#keysByScope.clear();
     this.#lastScopeSweep.clear();
+    this.#scopeOfKey.clear();
     this.#bytes = 0;
     return Promise.resolve();
   }
@@ -186,15 +189,24 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
   }
 
   /**
-   * How many scopes the store tracks and how many sweep-throttle rows it
-   * holds — the two maps the M109a audit found able to grow past the live
-   * entries.
+   * How many scopes the store tracks, how many sweep-throttle rows it holds,
+   * and how many keys the most recent scope sweep visited — the two maps the
+   * M109a audit found able to grow past the live entries, and the sweep cost
+   * it found scanning the whole store.
    *
    * @internal Test seam: this class is not a barrel export.
-   * @returns The two map sizes
+   * @returns The two map sizes and the last sweep's visit count
    */
-  trackedScopeCounts(): { readonly scopes: number; readonly sweepRows: number } {
-    return { scopes: this.#keysByScope.size, sweepRows: this.#lastScopeSweep.size };
+  trackedScopeCounts(): {
+    readonly scopes: number;
+    readonly sweepRows: number;
+    readonly lastSweepVisits: number;
+  } {
+    return {
+      scopes: this.#keysByScope.size,
+      sweepRows: this.#lastScopeSweep.size,
+      lastSweepVisits: this.#lastScopeSweepVisits,
+    };
   }
 
   /** Inserts or replaces an in-progress entry, updating accounting. */
@@ -248,8 +260,10 @@ export class MemoryIdempotencyStore implements IIdempotencyStore {
     if (last !== undefined && now - last < SWEEP_THROTTLE_MS) return;
     this.#lastScopeSweep.set(scope, now);
     const keys = this.#keysByScope.get(scope);
+    this.#lastScopeSweepVisits = 0;
     if (keys === undefined) return;
     for (const key of [...keys]) {
+      this.#lastScopeSweepVisits += 1;
       const entry = this.#entries.get(key);
       if (entry !== undefined && entry.expiresAt <= now) this.#remove(key, now);
     }

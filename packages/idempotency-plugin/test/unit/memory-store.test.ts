@@ -119,7 +119,7 @@ describe('MemoryIdempotencyStore specifics (M109a §3.16)', () => {
       // At its cap: this claim sweeps the scope, creating its throttle row.
       await store.claim(request({ key: hex(`b${n}`), scope: `s${n}`, ttlMs: 100 }));
     }
-    expect(store.trackedScopeCounts()).toEqual({ scopes: 50, sweepRows: 50 });
+    expect(store.trackedScopeCounts()).toMatchObject({ scopes: 50, sweepRows: 50 });
     // Past both the keys' TTL and the throttle window.
     clock.advance(1_100);
     // Each scope's next at-cap claim sweeps out its expired key, emptying the
@@ -127,7 +127,25 @@ describe('MemoryIdempotencyStore specifics (M109a §3.16)', () => {
     for (let n = 0; n < 50; n++) {
       await store.claim(request({ key: hex(`c${n}`), scope: `s${n}`, ttlMs: 100 }));
     }
-    expect(store.trackedScopeCounts()).toEqual({ scopes: 50, sweepRows: 0 });
+    expect(store.trackedScopeCounts()).toMatchObject({ scopes: 50, sweepRows: 0 });
+  });
+
+  it('sweeps only the scope at its cap, not the whole store (M109a audit F2)', async () => {
+    // A sweep used to scan every entry, so each scope at its cap cost a full
+    // scan per window; with 100k entries that blocked the event loop for
+    // seconds. It must visit only that scope's own keys.
+    const clock = createClockRuntime();
+    const store = new MemoryIdempotencyStore({ maxEntriesPerScope: 2, maxEntries: 10_000 });
+    await store.connect(clock);
+    for (let n = 0; n < 5_000; n++) {
+      await store.claim(request({ key: `other-${n}`, scope: 'other', ttlMs: 60_000 }));
+    }
+    await store.claim(request({ key: hex('1'), scope: 'target', ttlMs: 100 }));
+    await store.claim(request({ key: hex('2'), scope: 'target', ttlMs: 60_000 }));
+    clock.advance(150);
+    expect((await store.claim(request({ key: hex('3'), scope: 'target' }))).outcome)
+      .toBe('claimed');
+    expect(store.trackedScopeCounts().lastSweepVisits).toBe(2);
   });
 
   it('clears on disconnect', async () => {
