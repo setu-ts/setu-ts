@@ -25,6 +25,19 @@ All notable changes to this project are documented here. The format follows
   dispatch identity so per-consumer state (an idempotency record) is keyed per subscriber rather
   than per topic. The mechanism itself ships in `@setu-ts/idempotency-plugin`.
 
+- **A repeated HTTP request, queue job or broker message does its work once per key
+  (`@setu-ts/idempotency-plugin`, M109a).** The new package exposes `IdempotencyPlugin`, which
+  registers an `IIdempotencyService` under `CAPABILITIES.IDEMPOTENCY`; `idempotent()` for a route's
+  `middleware` array and `idempotentIngress()` for queue/broker behaviours; and
+  `derivedIdempotencyKey()`, which a handler forwards to a provider that de-duplicates. It ships an
+  in-process store, a Redis store (atomic Lua, an inject-or-lazy ioredis client, a connect-time
+  `maxmemory-policy` warning and a required `namespace`) and, from `@setu-ts/cloudflare-plugin`, a
+  Cloudflare Durable Object store. A refusal carries `IdempotencyRefusedError` with
+  `IdempotencyRefusalReason`; a bad option carries `IdempotencyConfigurationError`;
+  `IdempotencyPluginOptions`, `IdempotencyStoreConfig`, `IRedisIdempotencyClient`,
+  `IDEMPOTENCY_KEY_HEADER` and `IDEMPOTENT_REPLAYED_HEADER` complete the surface. The `idempotency`
+  health indicator reports lifecycle truth then a bounded store probe.
+
 - **A full-stack project's `dev` task serves route edits without a restart, on Deno, Node and Bun
   (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR #426).** `setu new --template full-stack` now
   emits a `dev.ts` entry and a `dev` task (`deno task dev`, `npm run dev`, `bun run dev`); a Workers

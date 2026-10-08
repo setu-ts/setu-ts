@@ -158,6 +158,10 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     // serve assets through Workers Assets or R2 via `cloudflare-plugin`.
     runtimeCompat: NO_EDGE,
   },
+  'idempotency-plugin': {
+    description: 'A repeated request, queue job or broker message does its work once per key',
+    runtimeCompat: PORTABLE,
+  },
   'localization-plugin': {
     description:
       'Localization: message catalogues, request locale resolution, a formatter shared with the browser',

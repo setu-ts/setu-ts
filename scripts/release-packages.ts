@@ -47,6 +47,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/grpc-plugin',
   'packages/health-plugin',
   'packages/http-security-plugin',
+  'packages/idempotency-plugin',
   'packages/localization-plugin',
   'packages/logger-plugin',
   'packages/mail-plugin',

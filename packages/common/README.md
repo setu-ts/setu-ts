@@ -105,7 +105,7 @@ contract `IIdempotencyService`, the route option type `IdempotentRouteOptions` w
 `IngressIdempotencyKeySource` and `IngressIdempotencyFingerprintSource`. The mechanism —
 `IdempotencyPlugin`, `idempotent()`, `idempotentIngress()` and `@Idempotent` — lives in
 `@setu-ts/idempotency-plugin`. The guarantee is **no duplicate processing within the limits of the
-store**, never "exactly once".
+store** — it is not a single-execution guarantee.
 
 ### Error diagnostics
 

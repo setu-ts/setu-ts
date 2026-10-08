@@ -67,9 +67,10 @@
 58. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
 59. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
 60. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
-61. [Localization Plugin (`@setu-ts/localization-plugin`)](#localization-plugin-setu-tslocalization-plugin)
-62. [Boundary-Type Compatibility](#boundary-type-compatibility)
-63. [Summary](#summary)
+61. [IdempotencyPlugin() (`@setu-ts/idempotency-plugin`)](#idempotencyplugin-setu-tsidempotency-plugin)
+62. [Localization Plugin (`@setu-ts/localization-plugin`)](#localization-plugin-setu-tslocalization-plugin)
+63. [Boundary-Type Compatibility](#boundary-type-compatibility)
+64. [Summary](#summary)
 
 ---
 
@@ -11416,7 +11417,7 @@ option types live in `@setu-ts/common` so a store adapter (`memory`, Redis, a Cl
 Object) and the decorator plugin can consume them without importing one another (AI_GUIDELINES
 §2.2). The mechanism — `IdempotencyPlugin`, `idempotent()`, `idempotentIngress()`, `@Idempotent` —
 lives in `@setu-ts/idempotency-plugin`; see that package's section. The guarantee is **no duplicate
-processing within the limits of the store**, never "exactly once".
+processing within the limits of the store** — it is not a single-execution guarantee.
 
 `WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
 either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
@@ -13813,6 +13814,48 @@ rather than a deliberate empty render.
 - **Layouts are components.** A layout is an ordinary component taking `children`. There is no
   plugin-level `layout` option: it would wrap every render, including fragment responses where a
   full document is wrong.
+
+## IdempotencyPlugin() (`@setu-ts/idempotency-plugin`)
+
+A repeated HTTP request, queue job or broker message does its work once per key, over one
+`claim`/`complete`/`release` state machine and an in-process, Redis or Cloudflare Durable Object
+store. The guarantee is **no duplicate processing within the limits of the store** — it is not a
+single-execution guarantee. See
+[`packages/idempotency-plugin/README.md`](packages/idempotency-plugin/README.md) for placement, the
+HTTP check order, failure classification, replay rules, the ingress allow-list and the store
+guarantees.
+
+### Values (runtime exports)
+
+| Export                          | Kind     | Purpose                                                                                   |
+| ------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `IdempotencyPlugin`             | function | Registers `IIdempotencyService` under `CAPABILITIES.IDEMPOTENCY` and the health indicator |
+| `idempotent`                    | function | Builds the route-level HTTP middleware (list it LAST)                                     |
+| `idempotentIngress`             | function | Builds the ingress behaviour over a required `topics`/`jobNames` allow-list               |
+| `derivedIdempotencyKey`         | function | Reads the store key the middleware recorded, to forward to a provider                     |
+| `IdempotencyRefusedError`       | class    | An ingress refusal, carrying `reason`, `ingress` and `target`                             |
+| `IdempotencyConfigurationError` | class    | An option refusal, carrying the failing `option` path                                     |
+| `IDEMPOTENCY_KEY_HEADER`        | const    | `'Idempotency-Key'`                                                                       |
+| `IDEMPOTENT_REPLAYED_HEADER`    | const    | `'Idempotent-Replayed'`                                                                   |
+
+### Types
+
+| Export                     | Kind | Purpose                                                     |
+| -------------------------- | ---- | ----------------------------------------------------------- |
+| `IdempotencyPluginOptions` | type | The `IdempotencyPlugin` options (`store`, leases, ttl, cap) |
+| `IdempotencyStoreConfig`   | type | The store arm (`memory`, `redis` built/injected, `custom`)  |
+| `IRedisIdempotencyClient`  | type | The Redis facade an injected client must satisfy            |
+| `IdempotencyRefusalReason` | type | The union carried by `IdempotencyRefusedError.reason`       |
+
+### The queue retry span versus the lease
+
+A crashed holder's claim blocks redeliveries of its key until the lease lapses, and each redelivery
+inside the lease consumes a queue attempt. The retry span (the sum of
+`computeBackoffMs(2..maxAttempts)`) must EXCEED the lease: with the default backoff and the default
+30 s ingress lease that means `defaultMaxAttempts ≥ 6`. The queue's retry configuration is not
+readable from this plugin, so this is documented, not checked.
+
+---
 
 ## Localization Plugin (`@setu-ts/localization-plugin`)
 

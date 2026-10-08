@@ -902,6 +902,39 @@ emitDecoratorMetadata).
 
 ---
 
+### @setu-ts/idempotency-plugin
+
+**Purpose:** A repeated HTTP request, queue job or broker message does its work once per key, over
+one claim/complete/release state machine and an in-process, Redis or Cloudflare Durable Object
+store.
+
+**Capability Token:** `CAPABILITIES.IDEMPOTENCY`
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ✅      |
+
+**Features:**
+
+- `idempotent()` middleware for a route's `middleware` array and `idempotentIngress()` for queue and
+  broker behaviours on an explicit allow-list
+- An in-process store, a Redis store (atomic Lua, inject-or-lazy ioredis) and, from
+  `@setu-ts/cloudflare-plugin`, a Durable Object store
+- The `idempotency` health indicator: lifecycle truth then a bounded store probe
+
+> On Cloudflare Workers, HTTP is supported through the Durable Object store; the ingress entry point
+> is not available there in this release. The guarantee is no duplicate processing within the limits
+> of the store, not a single-execution guarantee.
+
+**Links:**
+
+- [README](../packages/idempotency-plugin/README.md)
+- [API Reference](./api/idempotency-plugin/src/index.ts/index.html)
+
+---
+
 ### @setu-ts/localization-plugin
 
 **Purpose:** Message catalogues per locale, request locale resolution, and a formatter shared with

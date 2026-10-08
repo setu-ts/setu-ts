@@ -49,7 +49,8 @@
     "./packages/static-plugin",
     "./packages/view-plugin",
     "./packages/localization-plugin",
-    "./packages/diagnostics-plugin"
+    "./packages/diagnostics-plugin",
+    "./packages/idempotency-plugin"
   ],
   "tasks": {
     "check": "deno check packages",
