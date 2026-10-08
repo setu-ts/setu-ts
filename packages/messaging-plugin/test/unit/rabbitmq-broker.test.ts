@@ -57,6 +57,49 @@ describe('RabbitMqBroker', () => {
     await broker.disconnect();
   });
 
+  it('refuses each field AMQP cannot encode before the channel is reached (M106 audit F1)', async () => {
+    const cases: { label: string; options?: object; act: (b: RabbitMqBroker) => Promise<void> }[] =
+      [
+        {
+          label: 'exchange name',
+          options: { exchangeName: 'e'.repeat(256) },
+          act: (b) => b.publish('t', 1),
+        },
+        { label: 'routing key (the topic)', act: (b) => b.publish('t'.repeat(256), 1) },
+        { label: 'message id', act: (b) => b.publish('t', { messageId: 'm'.repeat(256) }) },
+        {
+          label: 'a header name',
+          act: (b) => b.publishWithHeaders('t', 1, { ['h'.repeat(256)]: 'v' }),
+        },
+      ];
+    for (const { label, options, act } of cases) {
+      const fakeConnection = new FakeAmqpConnection();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: fakeConnection,
+        ...options,
+      });
+      await broker.connect();
+      await expect(act(broker)).rejects.toThrow(`the ${label} exceeds AMQP's 255 UTF-8 byte`);
+      const channel = await fakeConnection.createChannel();
+      expect({ label, publishes: channel.calls.filter((c) => c.method === 'publish').length })
+        .toEqual({ label, publishes: 0 });
+      await broker.disconnect();
+    }
+    // Exactly 255 bytes everywhere is accepted: the bound is the protocol's.
+    const fakeConnection = new FakeAmqpConnection();
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: fakeConnection,
+      exchangeName: 'e'.repeat(255),
+    });
+    await broker.connect();
+    await broker.publishWithHeaders('t'.repeat(255), { messageId: 'm'.repeat(255) }, {
+      ['h'.repeat(255)]: 'v',
+    });
+    const channel = await fakeConnection.createChannel();
+    expect(channel.calls.filter((c) => c.method === 'publish')).toHaveLength(1);
+    await broker.disconnect();
+  });
+
   it('subscribe creates queue and binds to topic', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();

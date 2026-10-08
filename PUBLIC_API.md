@@ -5761,14 +5761,17 @@ message.
    Service Bus's configured detection window). Derive it from a producer-assigned id — the envelope
    id `publishIntegrationEvent` uses by default is one.
 3. An `orderingKey` derived from request input lets a caller concentrate load on one Kafka partition
-   or one Pub/Sub ordering key (1 MB/s per key). Derive it from an aggregate the application owns.
+   or one Pub/Sub ordering key (1 MB/s per key), and on a log-compacted Kafka topic it lets the
+   caller erase an earlier message that carries the same key. Derive it from an aggregate the
+   application owns.
 
 Invalid options are rejected with a `RangeError` **as a rejected promise** (never a synchronous
 throw), naming the field and the rule; a refused value is never echoed. A header name a broker or
 its server acts on (`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*`, `x-setu-*`,
-`goog`, RabbitMQ's `x-death` / `x-delivery-count` / `x-acquired-count` / `x-delay` and the
-`x-first-death-*` / `x-last-death-*` forms) is refused on **every** broker, compared
-case-insensitively.
+RabbitMQ's `x-death` / `x-delivery-count` / `x-acquired-count` / `x-delay` and the `x-first-death-*`
+/ `x-last-death-*` forms) is refused on **every** broker, compared case-insensitively. A `goog`
+prefix is refused too, as a precaution: Pub/Sub's reservation of it is stated only by third-party
+documentation, and the emulator accepts `goog` attributes.
 
 The `Cloudflare Workers` broker has no transport header channel, so it carries all three options as
 envelope fields and surfaces them on delivery as the same headers. On publish it refuses invalid

@@ -60,8 +60,8 @@ describe('validatePublishOptions — acceptance', () => {
     expect(Object.keys(validated.headers)).toHaveLength(32);
   });
 
-  it('accepts a 256-byte header name and a 1024-byte value', async () => {
-    const name = 'a'.repeat(256);
+  it('accepts a 255-byte header name and a 1024-byte value', async () => {
+    const name = 'a'.repeat(255);
     const value = 'b'.repeat(1024);
     const validated = await validatePublishOptions({ headers: { [name]: value } });
     expect(validated.headers[name]).toBe(value);
@@ -221,8 +221,8 @@ describe('validatePublishOptions — header name rules', () => {
     expect(error.message).toContain('index 0');
   });
 
-  it('refuses a header name longer than 256 bytes', async () => {
-    expect((await expectRejection({ headers: { ['a'.repeat(257)]: 'v' } })).message).toContain(
+  it('refuses a 256-byte header name, which AMQP cannot encode (M106 audit F1)', async () => {
+    expect((await expectRejection({ headers: { ['a'.repeat(256)]: 'v' } })).message).toContain(
       'index 0',
     );
   });

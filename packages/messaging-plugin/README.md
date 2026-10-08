@@ -65,7 +65,7 @@ to its siblings.
 | ----------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `orderingKey`     | non-empty string ≤ 128 UTF-8 bytes, no control characters, no edge whitespace    | Kafka message `key`, Pub/Sub `orderingKey`, and the `x-setu-ordering-key` header on every broker                            |
 | `deduplicationId` | same rule                                                                        | NATS `Nats-Msg-Id`, Service Bus `messageId`, RabbitMQ `messageId`, and the `x-setu-deduplication-id` header on every broker |
-| `headers`         | ≤ 32 entries; names 1–256 bytes of visible ASCII except `:`; values ≤ 1024 bytes | written beside the framework's own headers                                                                                  |
+| `headers`         | ≤ 32 entries; names 1–255 bytes of visible ASCII except `:`; values ≤ 1024 bytes | written beside the framework's own headers                                                                                  |
 
 Every option is carried as a transport header beside any native mapping, so it is observable through
 `MessageMetadata.headers` on every broker and never silently dropped. The constants
@@ -108,13 +108,17 @@ message.
    Service Bus's configured detection window). Derive it from a producer-assigned id — the envelope
    id `publishIntegrationEvent` uses by default is one.
 3. An `orderingKey` derived from request input lets a caller concentrate load on one Kafka partition
-   or one Pub/Sub ordering key (1 MB/s per key). Derive it from an aggregate the application owns.
+   or one Pub/Sub ordering key (1 MB/s per key), and on a log-compacted Kafka topic it lets the
+   caller erase an earlier message that carries the same key. Derive it from an aggregate the
+   application owns.
 
 Invalid options are rejected with a `RangeError` **as a rejected promise**, naming the field and the
 rule and never echoing the refused value. A header name a broker or its server acts on
-(`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*`, `x-setu-*`, `goog`, RabbitMQ's
-`x-death` / `x-delivery-count` / `x-acquired-count` / `x-delay` and the `x-first-death-*` /
-`x-last-death-*` forms) is refused on **every** broker, compared case-insensitively.
+(`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*`, `x-setu-*`, RabbitMQ's `x-death` /
+`x-delivery-count` / `x-acquired-count` / `x-delay` and the `x-first-death-*` / `x-last-death-*`
+forms) is refused on **every** broker, compared case-insensitively. A `goog` prefix is refused too,
+as a precaution: Pub/Sub's reservation of it is stated only by third-party documentation, and the
+emulator accepts `goog` attributes.
 
 ## Options
 

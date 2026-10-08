@@ -257,6 +257,9 @@ export async function loadPubSubModule(): Promise<PubSubSdkModule> {
   return mod as unknown as PubSubSdkModule;
 }
 
+/** Most `Topic` handles {@linkcode adaptPubSubModule} keeps while idle (M106 audit L3). */
+const MAX_CACHED_TOPICS = 1024;
+
 /**
  * Adapts the real GCP Pub/Sub SDK module to the domain port.
  *
@@ -278,7 +281,19 @@ export function adaptPubSubModule(
   // M106 §3.5: the SDK keeps its ordered queue per `Topic` OBJECT, so one cached
   // Topic per name is required — building a fresh Topic per publish lets
   // concurrent publishes for one key race.
-  const topics = new Map<string, ReturnType<typeof pubsub.topic>>();
+  //
+  // The cache is bounded (M106 audit L3), least-recently-used first, and evicts
+  // only a handle with NOTHING in flight: every earlier publish on it has
+  // settled, so the next one on a fresh handle cannot overtake it. When every
+  // handle is busy the cache runs over the bound until one settles, so it is
+  // bounded by the topics in use at once rather than the topics ever named.
+  const topics = new Map<string, { handle: ReturnType<typeof pubsub.topic>; inFlight: number }>();
+  const evictIdle = (): void => {
+    for (const [name, entry] of topics) {
+      if (topics.size <= MAX_CACHED_TOPICS) return;
+      if (entry.inFlight === 0) topics.delete(name);
+    }
+  };
 
   return {
     publish: async (
@@ -287,16 +302,20 @@ export function adaptPubSubModule(
       attributes?: Readonly<Record<string, string>>,
       orderingKey?: string,
     ): Promise<void> => {
-      let handle = topics.get(topic);
-      if (!handle) {
-        handle = pubsub.topic(topic, { messageOrdering: true });
-        topics.set(topic, handle);
+      let entry = topics.get(topic);
+      if (entry) {
+        topics.delete(topic); // re-insert below, so Map order is recency order
+      } else {
+        entry = { handle: pubsub.topic(topic, { messageOrdering: true }), inFlight: 0 };
       }
+      topics.set(topic, entry);
+      const { handle } = entry;
       const message = {
         data: bytes,
         ...(attributes ? { attributes: { ...attributes } } : {}),
         ...(orderingKey !== undefined ? { orderingKey } : {}),
       };
+      entry.inFlight++;
       try {
         await handle.publishMessage(message);
       } catch (error) {
@@ -307,6 +326,9 @@ export function adaptPubSubModule(
           handle.resumePublishing?.(orderingKey);
         }
         throw error;
+      } finally {
+        entry.inFlight--;
+        evictIdle();
       }
     },
     open: async (

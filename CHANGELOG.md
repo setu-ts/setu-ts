@@ -57,8 +57,10 @@ All notable changes to this project are documented here. The format follows
   headers, and `parsePublishOptions` (returning `ParsedPublishOptions`) — the one copy-once parse of
   a whole options object — so the seven brokers, `WorkersBroker` and the envelope reader enforce one
   copy of every rule. `WorkersBroker` carries the caller's `headers` on the envelope beside the two
-  ids. The docs state the guarantee honestly: `orderingKey` decides placement, not the order
-  handlers finish in.
+  ids. Header names are bounded at 255 bytes, the AMQP limit, so a name is accepted on every broker
+  or refused on all of them. The Pub/Sub adapter keeps at most 1024 idle `Topic` handles, evicting
+  the least recently used one with nothing in flight. The docs state the guarantee honestly:
+  `orderingKey` decides placement, not the order handlers finish in.
 
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
@@ -540,6 +542,15 @@ All notable changes to this project are documented here. The format follows
   tested `=== null` for a missing header must test `=== undefined`. The whole-query source is now
   generic like `Body`, so `Query<z.infer<typeof schema>>()` declares the shape `@ValidateQuery`
   wrote instead of a cast. `apps/static-site` takes its port as the first argument (default `8000`).
+
+- **A long RabbitMQ field no longer misattributes every later publisher confirm
+  (`@setu-ts/messaging-plugin`, M106).** AMQP limits the exchange, the routing key (the topic), the
+  message id and each header name to 255 bytes, and amqplib's `ConfirmChannel.publish` queues its
+  confirm callback before encoding. A value over the limit was rejected, but the orphaned callback
+  then took the next broker ack, so each later awaited publish resolved only when the one after it
+  was confirmed, for the life of the channel. A payload `messageId` or topic over 255 bytes reached
+  this before 0.9.0. `RabbitMqBroker` now refuses any of the four fields over 255 bytes before
+  publishing, with a `RangeError` naming the field.
 
 - **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
   `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside

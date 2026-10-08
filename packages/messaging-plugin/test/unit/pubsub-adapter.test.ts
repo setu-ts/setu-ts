@@ -228,6 +228,65 @@ describe('adaptPubSubModule', () => {
     expect(sdk.resumed).toEqual([]);
   });
 
+  it('bounds the Topic cache, evicting the least recently used idle handle (M106 audit L3)', async () => {
+    const sdk = createFakeSdkModule();
+    const created: string[] = [];
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        created.push(name);
+        return super.topic(name, options);
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    const bytes = new TextEncoder().encode('a');
+
+    for (let i = 0; i <= 1024; i++) await transport.publish(`t-${i}`, bytes);
+    expect(created).toHaveLength(1025);
+
+    // The newest handle is kept; the oldest was evicted and is rebuilt.
+    await transport.publish('t-1024', bytes);
+    expect(created).toHaveLength(1025);
+    await transport.publish('t-0', bytes);
+    expect(created).toHaveLength(1026);
+  });
+
+  it('never evicts a handle with a publish in flight, so ordering cannot be overtaken', async () => {
+    const sdk = createFakeSdkModule();
+    const created: string[] = [];
+    let release: () => void = () => {};
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        created.push(name);
+        const handle = super.topic(name, options);
+        if (name !== 'busy') return handle;
+        let first = true;
+        return {
+          ...handle,
+          // Only the first publish is held, standing in for a slow network.
+          publishMessage: (message: { data: Uint8Array }) => {
+            if (!first) return handle.publishMessage(message);
+            first = false;
+            return new Promise<string>((resolve) => {
+              release = () => resolve('held');
+            });
+          },
+        };
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    const bytes = new TextEncoder().encode('a');
+
+    const pending = transport.publish('busy', bytes, undefined, 'agg-1');
+    for (let i = 0; i < 1100; i++) await transport.publish(`t-${i}`, bytes);
+    release();
+    await pending;
+    // 'busy' was the oldest entry throughout but always in flight.
+    await transport.publish('busy', bytes, undefined, 'agg-1');
+    expect(created.filter((name) => name === 'busy')).toHaveLength(1);
+  });
+
   it('does not resume a key when an UNORDERED publish fails (M106 §3.5)', async () => {
     const sdk = createFakeSdkModule();
     const transport = adaptPubSubModule(sdk, { projectId: 'demo' });

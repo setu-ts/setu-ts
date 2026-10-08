@@ -81,7 +81,7 @@ describe('PublishOptions contract', () => {
 
   it('exports the shared header bounds', () => {
     expect(MAX_PUBLISH_HEADERS).toBe(32);
-    expect(MAX_PUBLISH_HEADER_NAME_BYTES).toBe(256);
+    expect(MAX_PUBLISH_HEADER_NAME_BYTES).toBe(255);
     expect(MAX_PUBLISH_HEADER_VALUE_BYTES).toBe(1024);
   });
 

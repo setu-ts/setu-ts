@@ -77,8 +77,14 @@ export function isValidPublishId(value: unknown): value is string {
 /** Maximum number of caller headers accepted on one publish. @since 0.9.0 */
 export const MAX_PUBLISH_HEADERS = 32;
 
-/** Maximum UTF-8 byte length of a publish header name. @since 0.9.0 */
-export const MAX_PUBLISH_HEADER_NAME_BYTES = 256;
+/**
+ * Maximum UTF-8 byte length of a publish header name. 255, not 256: an AMQP
+ * header-table key is a short string, so RabbitMQ cannot carry a longer one,
+ * and the bound is portable — a name passes on every broker or on none.
+ *
+ * @since 0.9.0
+ */
+export const MAX_PUBLISH_HEADER_NAME_BYTES = 255;
 
 /** Maximum UTF-8 byte length of a publish header value. @since 0.9.0 */
 export const MAX_PUBLISH_HEADER_VALUE_BYTES = 1024;
@@ -200,7 +206,9 @@ export interface PublishOptions {
    * and {@linkcode ORDERING_KEY_HEADER} everywhere else. At most 128 UTF-8
    * bytes, no leading/trailing whitespace, no control characters. Derive it
    * from an aggregate the application owns — never from request input, which
-   * would let a caller concentrate load on one partition or ordering key.
+   * would let a caller concentrate load on one partition or ordering key, and,
+   * on a log-compacted Kafka topic, erase an earlier message carrying the same
+   * key.
    */
   readonly orderingKey?: string;
   /**
@@ -215,7 +223,9 @@ export interface PublishOptions {
   /**
    * Application headers written beside the framework's own. A name a transport
    * or its server acts on (including `traceparent`, `cc`, `bcc`, `payload`,
-   * `nats-*`, `x-setu-*` and `goog`) is refused on every broker.
+   * `nats-*` and `x-setu-*`) is refused on every broker, as is a `goog` prefix —
+   * a precaution: Pub/Sub's reservation of it is stated only by third-party
+   * documentation, and the emulator accepts it.
    */
   readonly headers?: Readonly<Record<string, string>>;
 }

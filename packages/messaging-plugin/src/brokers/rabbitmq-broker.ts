@@ -152,6 +152,41 @@ export function validateConsumerQueue(
   }
 }
 
+/**
+ * Names the first publish field AMQP cannot encode, or `null` when all fit.
+ *
+ * AMQP writes the exchange, the routing key, `messageId` and every header-table
+ * key as a short string of at most 255 UTF-8 bytes. amqplib's
+ * `ConfirmChannel.publish` queues its confirm callback BEFORE encoding, so an
+ * encoder throw leaves an orphan in the confirm window and every later confirm
+ * on the channel resolves the wrong publish (M106 audit F1). Checking first
+ * means `publish` is never called with a frame it cannot write.
+ *
+ * @param exchange - Exchange name
+ * @param routingKey - Routing key (the topic)
+ * @param properties - Publish properties
+ * @returns A field description, or `null`
+ */
+function amqpShortStringProblem(
+  exchange: string,
+  routingKey: string,
+  properties: Record<string, unknown>,
+): string | null {
+  const encoder = new TextEncoder();
+  const fits = (value: string): boolean => encoder.encode(value).length <= 255;
+  if (!fits(exchange)) return 'exchange name';
+  if (!fits(routingKey)) return 'routing key (the topic)';
+  const messageId = properties.messageId;
+  if (typeof messageId === 'string' && !fits(messageId)) return 'message id';
+  const headers = properties.headers;
+  if (typeof headers === 'object' && headers !== null) {
+    for (const name of Object.keys(headers)) {
+      if (!fits(name)) return 'a header name';
+    }
+  }
+  return null;
+}
+
 /** Framework-owned identifier for correlating concurrent mandatory publish returns. */
 const DISPOSITION_ID = 'x-setu-disposition-id';
 
@@ -735,6 +770,13 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     // may not: a positive confirm also arrives for an unroutable publish.
     if (requireRoute && (!confirmed || !isCloseObservable(channel))) {
       throw new Error('RabbitMQ consumer recovery requires confirms and on/off return listeners');
+    }
+    const unencodable = amqpShortStringProblem(exchange, routingKey, properties);
+    if (unencodable !== null) {
+      // Never quoted: the refused value may be caller data.
+      throw new RangeError(
+        `RabbitMQ cannot publish: the ${unencodable} exceeds AMQP's 255 UTF-8 byte limit`,
+      );
     }
     const dispositionId = requireRoute ? this.#runtime.uuid() : undefined;
     const outgoing = dispositionId === undefined ? properties : {

@@ -156,6 +156,18 @@ export class FakeAmqpChannel {
     if (!Buffer.isBuffer(content)) {
       throw new TypeError('content is not a buffer');
     }
+    // Faithful to amqplib's codec: the exchange, routing key, messageId and
+    // every header-table key are AMQP short strings of at most 255 bytes.
+    const props = (properties ?? {}) as { messageId?: unknown; headers?: object };
+    const shortStrings = [
+      exchange,
+      routingKey,
+      ...(typeof props.messageId === 'string' ? [props.messageId] : []),
+      ...Object.keys(props.headers ?? {}),
+    ];
+    if (shortStrings.some((value) => Buffer.byteLength(value) > 255)) {
+      throw new TypeError('a short string exceeds 255 bytes');
+    }
     this.#record('publish', [exchange, routingKey, content, properties]);
     if (this.#options.rejectPublish) {
       // amqplib throws synchronously on a closed channel (probed).
