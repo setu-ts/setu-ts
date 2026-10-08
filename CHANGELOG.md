@@ -458,12 +458,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).**
-  The error said "Register a plugin that provides it, or check the token spelling" for every miss,
-  which is wrong in the two commonest cases. Before `start()`, the plugin is listed but has not run,
-  so the error now says the application has not started and to resolve the service in a handler, in
-  a lifecycle hook, or after `await app.start()`. During a plugin's `register()`, a capability that
-  a later plugin provides now names that plugin and says to add the token to the consumer's
+- **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).** The
+  error said "Register a plugin that provides it, or check the token spelling" for every miss, which
+  is wrong in the two commonest cases. Before `start()`, the plugin is listed but has not run, so
+  the error now says the application has not started and to resolve the service in a handler, in a
+  lifecycle hook, or after `await app.start()`. During a plugin's `register()`, a capability that a
+  later plugin provides now names that plugin and says to add the token to the consumer's
   `dependencies` or `optionalDependencies`. Every other miss keeps the old advice, and the first
   sentence of the message is unchanged.
 

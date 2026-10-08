@@ -77,6 +77,29 @@ describe('the error for a missing capability', () => {
     );
   });
 
+  it('advises a lifecycle hook, not a dependency, when the runtime provider asks', async () => {
+    const fake = createFakeRuntime();
+    const eagerRuntime: IPlugin = {
+      name: 'eager-runtime',
+      version: '1.0.0',
+      provides: [CAPABILITIES.RUNTIME],
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.RUNTIME, fake.runtime);
+        ctx.services.get('greeter');
+      },
+    };
+    const app = createApplication({ plugins: [eagerRuntime, greeterPlugin()] });
+    let message = '';
+    try {
+      await app.start();
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("Plugin 'greeter-plugin' provides it");
+    expect(message).toContain('lifecycle hook such as onInit');
+    expect(message).not.toContain('dependencies (or optionalDependencies)');
+  });
+
   it('keeps the generic advice during register() when nothing provides the token', async () => {
     // A later plugin that provides nothing, and one that provides something else.
     const quiet: IPlugin = { name: 'quiet', version: '1.0.0', register() {} };

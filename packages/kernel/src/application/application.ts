@@ -489,6 +489,13 @@ class Application implements IKernelApplication {
     if (provider === undefined) {
       return undefined;
     }
+    // Every plugin implicitly depends on the runtime provider, so a dependency
+    // edge from it to a later plugin would be a cycle, not a fix.
+    if (this.#ordered[position]?.provides?.includes(CAPABILITIES.RUNTIME) === true) {
+      return `Plugin '${provider.name}' provides it, but registers after '${current}', which ` +
+        `provides the runtime and so always registers first. Resolve '${token}' in a lifecycle ` +
+        `hook such as onInit instead of during register().`;
+    }
     return `Plugin '${provider.name}' provides it, but registers after '${current}'. Add ` +
       `'${token}' to the dependencies (or optionalDependencies) of '${current}' so it ` +
       `registers first.`;
