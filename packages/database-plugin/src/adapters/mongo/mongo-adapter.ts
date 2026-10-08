@@ -224,9 +224,18 @@ export class MongoAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Opens a driver session and calls `startTransaction()`. A deployment
-   * without a replica set fails here, with the driver's own error wrapped in
-   * {@linkcode MongoTransactionUnavailableError} — never at `connect()`.
+   * Opens a driver session and calls `startTransaction()`.
+   *
+   * A deployment without a replica set does NOT fail here on the real
+   * `mongodb` driver: measured against a standalone `mongo:8` (M107),
+   * `startTransaction()` resolves, and the refusal surfaces at the FIRST
+   * operation inside the transaction — a read and a write alike — as the
+   * driver's own, unwrapped `MongoServerError` with `code: 20` and
+   * `codeName: 'IllegalOperation'` ("Transaction numbers are only allowed on a
+   * replica set member or mongos"). It never fails at `connect()`. The
+   * {@linkcode MongoTransactionUnavailableError} wrapping below applies only
+   * to a driver whose `startTransaction()` itself throws, which the real
+   * driver does not.
    *
    * @inheritdoc
    */

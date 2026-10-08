@@ -323,13 +323,18 @@ export class UnsupportedQueryFeatureError extends Error {
 }
 
 /**
- * Thrown by {@linkcode MongoAdapter.beginTransaction} on a deployment without
- * a replica set.
+ * Thrown by {@linkcode MongoAdapter.beginTransaction} when the driver's
+ * `startTransaction()` itself throws.
  *
- * A standalone `mongod` is a legitimate deployment for an application that
- * never opens a transaction, so the refusal is named and late — it happens at
- * `beginTransaction()`, never at `connect()`, where probing would cost a round
- * trip on every boot and refuse a working configuration.
+ * The real `mongodb` driver does not throw there on a standalone `mongod`:
+ * measured (M107), `startTransaction()` resolves and the refusal surfaces at
+ * the first operation inside the transaction, as the driver's own unwrapped
+ * `MongoServerError` (`code: 20`, `codeName: 'IllegalOperation'`). So on the
+ * real driver a deployment without a replica set does NOT produce this error;
+ * it wraps only a throwing `startTransaction()`. Either way the refusal is
+ * late — never at `connect()`, where probing would cost a round trip on every
+ * boot and refuse a working configuration for an application that never opens
+ * a transaction.
  *
  * @example
  * ```typescript

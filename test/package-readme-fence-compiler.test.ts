@@ -58,7 +58,8 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/storage-plugin/README.md': 3,
   // M93b: +4 for the integration-event producer/consumer, correlation,
   // dual-publish and domain-mapping examples.
-  'packages/messaging-plugin/README.md': 11,
+  // M107: +3 for the outbox usage, the backend mappings and the Workers wiring.
+  'packages/messaging-plugin/README.md': 14,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
   'packages/multi-tenancy-plugin/README.md': 3,

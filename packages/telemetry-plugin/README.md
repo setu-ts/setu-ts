@@ -94,6 +94,13 @@ Two outcomes count as active, and only one counts as failure:
 
 Pass an explicit `parentContext` where the relationship must hold regardless.
 
+Pass `root: true` (M107) to start a span with NO parent — ignoring both `parentContext` and the
+active span. Work that runs on behalf of something other than the surrounding request needs it: the
+messaging outbox relays a row that carries no valid stored `traceparent` under a root span, so a
+sweep dispatched from inside a request does not attribute that row to the request. The plugin
+carries the option to OpenTelemetry's own `SpanOptions.root`; an `ITelemetryService` implementation
+that ignores it starts the span under the active span.
+
 ## Request URL handling
 
 Request spans omit query strings and fragments from `http.url` by default. Set

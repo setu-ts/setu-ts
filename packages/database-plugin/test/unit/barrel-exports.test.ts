@@ -528,3 +528,30 @@ describe('database-plugin barrel exports — M101c tenant store bridge', () => {
     expect(typeof store.useIsolation).toBe('function');
   });
 });
+
+describe('database-plugin barrel exports — M107 outbox store bridge', () => {
+  it('exports createDatabaseOutboxStore, its options type and OutboxStoreUnavailableError', () => {
+    // Pinned against the BARREL: an application passes the factory to the
+    // messaging plugin's `outbox.store` option and `instanceof`s the refusal at
+    // startup (the M56 defect class). The options type is checked at compile
+    // time — dropping it from the barrel is a TS2305 here.
+    const options: database.DatabaseOutboxStoreOptions = { entity: 'Outbox', database: 'main' };
+    expect(typeof database.createDatabaseOutboxStore).toBe('function');
+    expect(typeof database.OutboxStoreUnavailableError).toBe('function');
+
+    const refusal = new database.OutboxStoreUnavailableError('Outbox', 'bigtable');
+    expect(refusal.name).toBe('OutboxStoreUnavailableError');
+    expect(refusal.reason).toBe('bigtable');
+
+    // The factory returns an IOutboxStore — the port in the common barrel.
+    const services = { get: () => ({}) } as unknown as common.IServiceRegistry;
+    const store: common.IOutboxStore = database.createDatabaseOutboxStore(options)(services);
+    expect(typeof store.verify).toBe('function');
+  });
+
+  it('keeps the store class and the cause walk internal', () => {
+    for (const name of ['DatabaseOutboxStore', 'causeChain']) {
+      expect(Object.hasOwn(database, name)).toBe(false);
+    }
+  });
+});

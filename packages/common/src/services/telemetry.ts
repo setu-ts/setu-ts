@@ -53,6 +53,21 @@ export interface SpanOptions {
    * @since 0.2.0
    */
   readonly parentContext?: TelemetryContext;
+  /**
+   * Starts the span as the ROOT of a new trace, ignoring both
+   * {@linkcode SpanOptions.parentContext} and whatever span is active.
+   *
+   * Use it for work that has no causal parent of its own but may run inside
+   * an unrelated span — a background sweep started from inside a request,
+   * for one — so the span is not attributed to that request.
+   *
+   * Optional for implementors: an `ITelemetryService` implementation that
+   * ignores it starts the span under the ACTIVE span (or under
+   * `parentContext` when that carries both ids).
+   *
+   * @since 0.9.0
+   */
+  readonly root?: boolean;
 }
 
 /**
@@ -174,7 +189,7 @@ export interface ITelemetryService {
    * @typeParam T - The return type of the callback
    * @param name - The span name
    * @param fn - Callback receiving the span; its return value is forwarded
-   * @param options - Optional span options (kind, attributes, parentSpan)
+   * @param options - Optional span options (kind, attributes, parentContext, root)
    * @returns The value returned by `fn`
    *
    * @example

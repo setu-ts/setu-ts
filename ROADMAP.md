@@ -13037,12 +13037,18 @@ depends on reading the acknowledgement.
 
 ## Milestone 107: Transactional Outbox
 
-**Package(s):** `packages/messaging-plugin`, with `packages/common` only for what §2.2 forces there
-(a type another plugin must implement), and `packages/cloudflare-plugin` for the Workers relay.
+**Package(s):** `packages/messaging-plugin` (the `outbox` arm, `IOutbox` and the relay),
+`packages/common` (the `IOutboxStore` port another plugin implements, `CAPABILITIES.OUTBOX` and
+`SpanOptions.root`), `packages/database-plugin` (the `createDatabaseOutboxStore` bridge),
+`packages/telemetry-plugin` (carrying `root` to OTel) and `packages/cli` (one claim-table line).
+**Corrected by the plan (C1, C2):** this list first named `packages/cloudflare-plugin` for the
+Workers relay; no source there changes — `WorkersCron` calls `outbox.sweep()`, `waitUntil` is the
+outbox's `background` hook, and D1 is reached through the bridge as a `'custom'` adapter.
 
 **Objective:** a service that changes its own data and announces the change does both or neither.
 The integration event is written as a row in the SAME database transaction as the business change,
-and a relay publishes persisted rows afterwards — at least once, per aggregate in order.
+and a relay publishes persisted rows afterwards — at least once, per ordering key in write order
+among committed rows (see the promise below for the two conditions).
 
 **Why.** Publishing after commit loses the event when the process dies between the two; publishing
 before commit announces a change that may roll back. Every service that emits integration events
@@ -13058,22 +13064,36 @@ publish (#425), and M106 gives a publish an ordering key and a deduplication id.
   `IUnitOfWork`, built at WRITE time (the envelope id is the end-to-end deduplication key and must
   not change across re-sends), capturing the active `traceparent`, tenant and `aggregateId`, and
   refusing an envelope too large to ever publish inside the business transaction rather than writing
-  an unsendable row. Per backend: SQL, MongoDB (replica set), DynamoDB and D1 support it; Cosmos
-  only when the row shares the business partition key; Bigtable cannot (single-row atomicity) and is
-  refused by name, pointing at the CDC follow-up.
+  an unsendable row. Per backend: SQL, MongoDB (replica set), DynamoDB (with a
+  `{ partitionKey: 'status', sortKey: 'position' }` GSI) and D1 support it; Cosmos only when the
+  outbox entity maps to the business CONTAINER and its partition-key path is a column the row
+  carries (`tenantId` or `orderingKey`) — and because Cosmos queries a whole container, every outbox
+  read carries a `kind: 'setu-outbox'` discriminator (corrected by the plan, C5); Bigtable is
+  refused by name at STARTUP, by the bridge's `verify()`, because the relay query cannot run there —
+  not at the write (C4).
 - **The relay queries the pending set, never a watermark.** "Everything after the last id or
   timestamp" skips a row whose transaction took an earlier id and committed later; every sweep reads
-  all rows still pending. Rows are published per aggregate in `createdAt` order with M106's
-  `orderingKey` (the aggregate) and `deduplicationId` (the envelope id), then marked sent.
+  all rows still pending. Rows are published in `position` order — one fixed-width column from the
+  writer's clock (clamped per process) and the envelope id, not `createdAt` — with M106's
+  `orderingKey` and `deduplicationId` (the envelope id), then marked sent. The watermark trap is
+  measured on real PostgreSQL and committed as `outbox-watermark-real.test.ts`.
 - **One relay at a time.** The portable repository has no `SKIP LOCKED` and no conditional update
   (M105 adds the latter), so the only portable mode is a single relay per database. The relay is a
   job on `CAPABILITIES.SCHEDULER`, whose slot lock and handler mutex (M70l) keep a job to one
   replica — but only with a SHARED `distributedLock` (Redis or a Durable Object); the default
-  `MemoryLock` is per process, so the plugin refuses a relay without one in a multi-replica setup,
-  or the plan states why it cannot tell. `IDistributedLock` itself lives in `scheduler-plugin`,
-  which this package may not import, so this is the route to it. The lease must outlast a batch; a
-  lease that expires mid-batch re-publishes, which the inbox (M108) absorbs. Native `SKIP LOCKED`
-  multi-relay is a later Postgres-only option.
+  `MemoryLock` is per process. The plugin CANNOT tell which lock is in use — `IScheduler` exposes no
+  lock accessor — so it does not refuse; it DETECTS an overlap (a status write finding the row
+  already `sent` by another instance) and degrades health, and the README states the rule.
+  `IDistributedLock` itself lives in `scheduler-plugin`, which this package may not import, so this
+  is the route to it. The lock has no renewal, so the plan bounds every sweep instead: one
+  `sweepDeadlineMs` on the monotonic clock, kept at least 10 s below the lock's TTL (a rule the
+  README states, since the plugin cannot read the TTL), with every publish and store call bounded
+  inside it, so a relay stops starting rows before its lock can expire. That is a time bound, not
+  fencing: a publish abandoned at its timeout, or in flight while the process is paused, can still
+  reach the broker later. Ordering of FIRST deliveries survives, because a key's later row cannot
+  publish until the earlier one is marked sent, so the late arrival is always a DUPLICATE, which the
+  inbox (M108) absorbs and `aggregateVersion` orders. True fencing needs a conditional status write
+  (M105). Native `SKIP LOCKED` multi-relay is a later Postgres-only option.
 - **Latency.** Optionally publish right after commit, best effort, with the relay sweeping whatever
   that missed. On Cloudflare Workers, where `SchedulerPlugin` refuses to register (M70l) and Cron
   Triggers fire at most once a minute, the immediate publish runs in `waitUntil` and the cron sweep
@@ -13081,29 +13101,49 @@ publish (#425), and M106 gives a publish an ordering key and a deduplication id.
 - **Trace continuity.** `TracedBroker` injects the trace active AT PUBLISH, which is the relay's
   tick, not the request that wrote the row. The relay re-parents each publish to the stored
   `traceparent` through `withSpan({ parentContext })`, so a request → row → publish → consume is one
-  trace again. No contract change.
-- **Poison rows.** `attempts`, `lastError` and an `availableAt` backoff; a row that fails N times
-  becomes `failed`, stops blocking its aggregate's later rows only if the plan decides it may, and
-  turns health `degraded`.
+  trace again. **One optional contract widening after all:** a row WITHOUT a valid `traceparent`,
+  swept by a `dispatch()` from inside a request, would otherwise parent to that unrelated request,
+  so `common` gains `SpanOptions.root?` and `telemetry-plugin` carries it to OTel's own `root`.
+- **Poison rows.** `attempts`, `lastError` and an `availableAt` backoff; a row that fails
+  `maxAttempts` times, or cannot be decoded, becomes `failed` and turns health `degraded`
+  (`failed-rows`). The plan decided that a `failed` row keeps BLOCKING its aggregate's later rows,
+  since letting them pass would publish them out of order. Recovery is an operator call,
+  `IOutbox.release(id, 'retry' | 'discard')`: `retry` returns the row to `pending`, and `discard`
+  settles it unpublished. So at-least-once covers every committed row an operator does not discard.
 - **Observability.** Health reports the age of the oldest pending row (degraded above a threshold —
   the M90b backlog pattern); metrics for published, failed, poisoned, and relay lag. A stuck relay
   is otherwise silent.
-- **Tenancy.** Column isolation is one table with the tenant in the row and in the headers.
-  Database-per-tenant needs the relay to iterate tenants, and no tenant catalog exists (M89c cut
-  `tenantById`), so the application supplies the list.
+- **Tenancy.** Column isolation is one table with the tenant in the row — NOT in the headers
+  (corrected by the plan, C3: a tenant header would ride the framework channel custom brokers drop,
+  and a delivered header is a hint a consumer may never authorize on; an event that needs its tenant
+  carries it in the payload). Database-per-tenant needs the relay to iterate tenants, and no tenant
+  catalog exists (M89c cut `tenantById`), so the application supplies the list.
 - **Provisioning.** There is no portable `migrate()`, so the plugin checks at startup that the
   outbox entity exists and refuses by name if not (the M52c binding-guard pattern); a migration
   template ships for the SQL adapters.
 
-**Decided in the plan, not here.** Placement — inside `messaging-plugin` (it owns the envelope, the
-internal `createEnvelope`, `onIntegrationEvent` and the broker capability, and reaches the database
-structurally the way `multi-tenancy-plugin` does) versus a new `outbox-plugin` with the envelope
-codec promoted to `common` (the M47 precedent). The analysis leans to the first. Also: whether a
-poisoned row blocks its aggregate, and the outbox row's exact column set.
+**Decided in the plan.** Placement: inside `messaging-plugin` (it owns the envelope, the internal
+`createEnvelope`, `onIntegrationEvent` and the broker capability). **Corrected by the plan (C1):**
+this paragraph said the plugin "reaches the database structurally the way `multi-tenancy-plugin`
+does"; source shows multi-tenancy reaches it through a PORT in `common` and a bridge in
+`database-plugin`, never by resolving `CAPABILITIES.DATABASE` itself, and the outbox follows that
+real precedent (`IOutboxStore` + `createDatabaseOutboxStore`). A poisoned row BLOCKS its key until
+an operator `release`s it. The column set is the plan's §3.2 record.
 
 **The promise, stated once and nowhere stronger:** at-least-once delivery from a committed write;
-per-aggregate publish order; delivery order as the broker gives it, corrected by the consumer
-comparing `aggregateVersion`. Never "exactly once".
+per-ordering-key publish order among COMMITTED rows, provided rows of one key commit in the order
+they were written and, across replicas, provided the writers' clocks agree; delivery order as the
+broker gives it, corrected by the consumer comparing `aggregateVersion`. Never "exactly once".
+**Corrected by the plan (C6):** "per-aggregate publish order" was unconditional; measured on real
+PostgreSQL, a pending-set relay cannot order a row whose transaction commits after a later row of
+its key was published — it publishes it, but after.
+
+**Other plan corrections, shipped with the milestone.** C7: `ITelemetryService.withSpan`'s JSDoc
+named a `parentSpan` option; the option is `parentContext`. C8: the M101a pin that kept
+`POSTGRES_URL` out of CI was a substring match, so the outbox suite's PostgreSQL service uses a
+distinct `OUTBOX_POSTGRES_URL` and the pin became a prefix-aware match. C9: `MongoAdapter`'s JSDoc
+said a standalone server fails at `beginTransaction`; measured, the real driver fails at the first
+operation INSIDE the transaction, unwrapped (the behaviour fix is a `fix/…` branch).
 
 **Out of scope.** Change-data-capture relays (PostgreSQL logical decoding, MongoDB change streams,
 DynamoDB Streams, Cosmos change feed) — a later milestone, and the natural relay for the backends
@@ -13111,17 +13151,21 @@ where "all pending rows in order" is expensive or impossible. The consumer side 
 
 **Deliverables**
 
-- [ ] The atomic-write API, implemented per backend or refused by name
-- [ ] A pending-set relay as a scheduled job, with the watermark trap as a committed negative
+- [x] The atomic-write API, implemented per backend or refused by name
+- [x] A pending-set relay as a scheduled job, with the watermark trap as a committed negative
       control (two transactions committing out of id order — both rows are published)
-- [ ] Crash-injection tests at each point of the crash table: before commit (nothing published),
+- [x] Crash-injection tests at each point of the crash table: before commit (nothing published),
       after commit (published by the relay), after publish before mark-sent (published twice, by
       design)
-- [ ] Trace re-parenting proven with the real OTel SDK (one trace, request to consumer)
-- [ ] Poison handling, health and metrics; real-broker runs on RabbitMQ and Redis (the fakes hid
+- [x] Trace re-parenting proven with the real OTel SDK (one trace, request to consumer)
+- [x] Poison handling, health and metrics; real-broker runs on RabbitMQ and Redis (the fakes hid
       both redelivery defects)
-- [ ] The Workers hybrid driven on real workerd
-- [ ] README, PUBLIC_API.md, a design security review in the plan, and a committed-tree audit
+- [ ] The Workers hybrid driven on real workerd — **not done.** Covered in process instead:
+      `outbox-workers.test.ts` drives the real `D1Adapter` over a real SQLite engine (the one D1
+      runs) through `WorkersCron` (covering `dispatch()` through `waitUntil`, the Cron Trigger sweep
+      and purge); `apps/cloudflare` has no D1 binding to drive it against, so a workerd run is left
+      for a follow-up that adds one
+- [x] README, PUBLIC_API.md, a design security review in the plan, and a committed-tree audit
 
 ---
 
@@ -13166,6 +13210,10 @@ hand-rolls the same check, usually against the wrong key.
   window; replaying anything older than that produces duplicates, documented.
 - **Backends.** The same per-backend table as M107: SQL, MongoDB, DynamoDB and D1 support it; Cosmos
   needs the inbox row in the business partition; Bigtable is refused by name.
+- **The discriminator hazard is inherited.** An inbox sharing a table, collection or Cosmos
+  container with business documents must carry a discriminator on every row and require it on every
+  read, count, transition and delete, exactly as M107's `kind: 'setu-outbox'` does — Cosmos queries
+  a container as a whole, so without it the inbox reads, counts or deletes business documents.
 
 **Depends on** broker redelivery being real, which #419 and #421 fixed — an inbox on a broker that
 discards failed messages has nothing to de-duplicate.
@@ -13492,6 +13540,6 @@ patch by construction and gains nothing new here.
 | 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
 | 105       | ⬜     | database-plugin + cloudflare-plugin — conditional writes on `IRepository` (closes the M101c tenant-bridge check-then-write race)                                                                                                              |
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
-| 107       | ⬜     | messaging-plugin (+ common, cloudflare-plugin as needed) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                                                                  |
+| 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
 | 108       | ⬜     | messaging-plugin — consumer inbox keyed by (consumer group, envelope id), in the handler's transaction                                                                                                                                        |
 | 109       | ⬜     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |

@@ -267,6 +267,15 @@ export const CAPABILITIES = {
    */
   LOCALIZATION: 'localization',
   /**
+   * Transactional outbox — the `IOutbox` the messaging plugin registers when
+   * its `outbox` option is set (`outbox.<name>` for a named messaging
+   * instance). Writes an integration event in the caller's own database
+   * transaction and relays it to the broker afterwards.
+   *
+   * @since 0.9.0
+   */
+  OUTBOX: 'outbox',
+  /**
    * Runtime-owned local diagnostics listener — the single IPv4-loopback port
    * the RuntimePlugin can bind for the local diagnostics connector
    * (`ILocalDiagnosticsListenerFactory`). Provided by the RuntimePlugin;

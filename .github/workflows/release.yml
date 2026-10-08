@@ -72,7 +72,30 @@ jobs:
       # wiring on both workflows.
       NATS_URL: nats://127.0.0.1:4222
       KAFKA_BROKERS: 127.0.0.1:9092
+      # M107 §6 (C8): the outbox real-backend suites (messaging-plugin) guard on
+      # these. `OUTBOX_POSTGRES_URL` is a DISTINCT variable from the bare one
+      # so the database-plugin live-Postgres cells (which need a generated Prisma
+      # client) keep ignoring here. Port 5433, not 5432: it is the port
+      # database-plugin's net grant already names, and the one the local
+      # backend runs on. `MONGODB_RS_URI` is a single-node REPLICA SET on its own
+      # port — the `mongo` service below is standalone, and a standalone server
+      # refuses transactions, which the outbox needs.
+      OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
+      MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true
     services:
+      # M107 §6 (C8): PostgreSQL for the outbox real-backend suites, on host port
+      # 5433 (see OUTBOX_POSTGRES_URL above).
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 127.0.0.1:5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
       mongo:
         image: mongo:8
         ports:
@@ -266,6 +289,38 @@ jobs:
           done
           echo 'kafka did not become ready'
           docker logs m90d-kafka
+          exit 1
+
+      # M107 §6 (C8): a single-node MongoDB REPLICA SET for the outbox suites.
+      # It cannot be the `mongo` service: `--replSet` is a command-line flag a
+      # service block cannot pass (`options` reaches `docker create` before the
+      # image), and that service must stay standalone, because the outbox's
+      # startup refusal of a standalone server is itself under test. Its own
+      # port, so both run side by side. Readiness means a PRIMARY exists, not an
+      # open port: transactions are refused until the member is elected.
+      - name: Start a MongoDB replica set (outbox suites)
+        run: |
+          docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8 \
+            --replSet rs0 --port 27018 --bind_ip_all
+          for _ in $(seq 1 60); do
+            if docker exec mongo-rs mongosh --port 27018 --quiet \
+              --eval 'db.runCommand({ ping: 1 }).ok' > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec mongo-rs mongosh --port 27018 --quiet --eval \
+            "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27018' }] })"
+          for _ in $(seq 1 60); do
+            if docker exec mongo-rs mongosh --port 27018 --quiet \
+              --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q true; then
+              echo 'mongodb replica set ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'mongodb replica set did not elect a primary'
+          docker logs mongo-rs
           exit 1
 
       # M70c §3.7: the S3 outage suite (storage-plugin) needs a real
