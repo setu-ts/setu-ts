@@ -5809,6 +5809,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
     direction — and then that the queue refusal starved every later processor, now refused at
     registration with per-name isolation in both loops. Round 5 passed with nothing open — complete
     (PR #427).
+- **Milestone 107** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` +
+  `packages/telemetry-plugin` — transactional outbox): `MessagingPlugin({ outbox })` registers an
+  `IOutbox` under the new `CAPABILITIES.OUTBOX`; `write(scope, definition, payload)` appends an
+  integration event inside the caller's own database transaction through the `IOutboxStore` port in
+  `common`, which `database-plugin`'s `createDatabaseOutboxStore` bridge implements over the
+  repository surface (every row carries the `'setu-outbox'` discriminator, so a shared table or
+  collection is safe; Bigtable, a DynamoDB table without its index and a standalone MongoDB are
+  refused at startup by name). A scheduled relay sweeps the PENDING set in keyset-paged laps with a
+  persisted cursor rather than a watermark, publishes at least once with M106's ordering key and
+  de-duplication id, blocks a key behind a failed or backed-off row, poisons unreadable rows, and
+  re-parents each publish to the trace that wrote the row via the new `SpanOptions.root`. Purge runs
+  on its own interval, shutdown drains in `onShutdown`, and an `outbox` health indicator plus
+  metrics report it. Proven on real PostgreSQL → RabbitMQ and → Redis Streams, a Mongo replica set,
+  DynamoDB Local and the real OpenTelemetry SDK. The full suite found the dependency drift gate
+  refusing the new `.sql` fixtures. The security audit ran two fresh-context rounds: round 1 found
+  F1 (Medium) — a lap overflowing its 10 000-key blocked set ended in the same sweep, which cleared
+  the flag before health read it, so an attacker with table write access stalled every keyed row
+  while `/health` read `up`; the holder now keeps the last completed lap's overflow until a clean
+  lap. Round 2 passed on `30e55237`. Not verified: workerd, Prisma, MySQL DDL, a non-`C` PostgreSQL
+  collation — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
