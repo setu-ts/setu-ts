@@ -571,12 +571,12 @@ export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   /** Service-account credentials. Optional when {@link client} is injected. */
   credentials?: unknown;
   /**
-   * Create the transport's own subscriptions with message ordering enabled
-   * (default `false`), required before a native `orderingKey` is delivered in
-   * order. Fixed at subscription creation and it costs throughput, so it is
-   * opt-in (M106 §3.5).
+   * Not accepted with an injected {@link client}: the broker creates
+   * subscriptions through the injected transport, so it cannot switch ordering
+   * on. Pass `enableMessageOrdering` to `adaptPubSubModule` when building the
+   * transport instead.
    */
-  enableMessageOrdering?: boolean;
+  enableMessageOrdering?: never;
   defaultQueue?: string;
   replyTopic?: string;
 }

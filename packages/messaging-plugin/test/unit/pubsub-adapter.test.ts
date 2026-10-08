@@ -204,6 +204,30 @@ describe('adaptPubSubModule', () => {
     expect(sdk.resumed).toEqual(['agg-1']);
   });
 
+  it('rethrows the real error when the SDK omits the optional resumePublishing', async () => {
+    const sdk = createFakeSdkModule();
+    // A module double that does not model ordering: the topic handle has no
+    // `resumePublishing`. Calling it unguarded would replace the publish error
+    // with a TypeError.
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        const handle = super.topic(name, options);
+        return {
+          publishMessage: handle.publishMessage,
+          createSubscription: handle.createSubscription,
+        };
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    sdk.failNextPublish = true;
+
+    await expect(
+      transport.publish('order-topic', new TextEncoder().encode('a'), undefined, 'agg-1'),
+    ).rejects.toThrow('publish failed');
+    expect(sdk.resumed).toEqual([]);
+  });
+
   it('does not resume a key when an UNORDERED publish fails (M106 §3.5)', async () => {
     const sdk = createFakeSdkModule();
     const transport = adaptPubSubModule(sdk, { projectId: 'demo' });

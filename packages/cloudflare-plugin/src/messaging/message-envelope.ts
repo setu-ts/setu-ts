@@ -21,6 +21,7 @@
 import {
   DEDUPLICATION_ID_HEADER,
   isValidPublishId,
+  MAX_PUBLISH_HEADERS,
   ORDERING_KEY_HEADER,
   publishHeaderNameProblem,
   publishHeaderValueProblem,
@@ -114,7 +115,8 @@ function hasEnvelopeHead(value: object): boolean {
  * @param topic - The caller's topic
  * @param id - Message id, from `IRuntimeServices.uuid()`
  * @param payload - The caller's payload
- * @param fields - Optional validated ordering key / de-duplication id (M106)
+ * @param fields - Optional validated ordering key, de-duplication id and
+ *   caller headers (M106)
  * @returns The envelope to hand to the producer binding
  * @example
  * ```typescript
@@ -148,9 +150,11 @@ export function encodePublishEnvelope(
  * Surfaces a delivered envelope's ordering and de-duplication fields as the
  * transport headers a handler reads (M106 §3.3).
  *
- * A field that is not a string satisfying the shared id rule is **dropped**,
- * never surfaced: the envelope is a JSON body a foreign producer may have
- * written, and this broker never re-runs the publish-side validator (§3.4).
+ * A field that is not a string satisfying the shared id rule, a header entry
+ * failing the shared name or value rule, and every caller header when the
+ * record holds more than `MAX_PUBLISH_HEADERS` entries are **dropped**, never
+ * surfaced: the envelope is a JSON body a foreign producer may have written,
+ * and this broker never re-runs the publish-side validator (§3.4).
  *
  * @param envelope - The decoded envelope
  * @returns The headers to attach to `MessageMetadata`
@@ -165,7 +169,13 @@ export function envelopeHeaders(envelope: QueueEnvelope): Record<string, string>
   // such an entry is dropped here by the same rule the publish side refuses.
   const carried: unknown = envelope.headers;
   if (typeof carried === 'object' && carried !== null && !Array.isArray(carried)) {
-    for (const [name, value] of Object.entries(carried as Record<string, unknown>)) {
+    // A record over the publish-side count bound was not written by this
+    // broker's publish, so every caller header is dropped rather than a prefix
+    // surfaced — the same "fails the shared rules, is dropped" disposition as a
+    // bad single entry.
+    const carriedEntries = Object.entries(carried as Record<string, unknown>);
+    if (carriedEntries.length > MAX_PUBLISH_HEADERS) carriedEntries.length = 0;
+    for (const [name, value] of carriedEntries) {
       if (publishHeaderNameProblem(name) !== null) continue;
       if (publishHeaderValueProblem(value) !== null) continue;
       entries.push([name, value as string]);

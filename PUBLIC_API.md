@@ -5268,6 +5268,13 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
    */
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * Refused on this arm (compile error, and `RangeError` from a standalone
+   * `GcpPubSubBroker`): the injected transport creates its own subscriptions, so
+   * the broker cannot switch ordering on. Pass `enableMessageOrdering` to
+   * `adaptPubSubModule` when building the transport instead.
+   */
+  enableMessageOrdering?: never;
 }
 
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
@@ -5282,6 +5289,13 @@ interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
   /** Per-topic default subscription prefix — see the injected arm. @defaultValue 'messaging-consumers' */
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * Create the broker's own subscriptions with message ordering (M106), which a
+   * native `orderingKey` needs to be delivered in order. Fixed when a
+   * subscription is created and it costs throughput, so it is opt-in.
+   * @defaultValue false
+   */
+  enableMessageOrdering?: boolean;
 }
 
 /** GCP Pub/Sub options — exclusive union of injected and production arms. */
@@ -5689,8 +5703,6 @@ export type {
 
 ---
 
----
-
 ### Publish options — ordering key, de-duplication ID and headers
 
 `publish` takes an optional trailing `PublishOptions` (from `@setu-ts/common`):
@@ -5759,8 +5771,16 @@ its server acts on (`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*
 case-insensitively.
 
 The `Cloudflare Workers` broker has no transport header channel, so it carries all three options as
-envelope fields and surfaces them on delivery as the same headers; a `PublishOptions.orderingKey`,
-`deduplicationId` or header entry that fails the shared rules is dropped, never surfaced.
+envelope fields and surfaces them on delivery as the same headers. On publish it refuses invalid
+options with the same `RangeError` as every other broker; on delivery, an envelope `orderingKey`,
+`deduplicationId` or header entry that fails the shared rules — or every caller header, when the
+record holds more than `MAX_PUBLISH_HEADERS` entries — is dropped, never surfaced, since a foreign
+producer may have written the envelope.
+
+One exception to "never silently dropped" above: a `NatsBroker` given an injected connection and no
+`headersFactory` has nothing to build NATS headers with, so caller headers and the ordering key are
+dropped and reported once through the logger; the de-duplication id is still applied, as nats.js's
+native `msgID`.
 
 ---
 
@@ -5882,7 +5902,8 @@ import {
   publishIntegrationEvent,
 } from '@setu-ts/messaging-plugin';
 
-// The contract: four fields, validated eagerly. The topic MUST end with the
+// The contract: four required fields (plus an optional `orderingKey`
+// selector, below), validated eagerly. The topic MUST end with the
 // exact `.v${version}` suffix — the versioned-topic rollout policy enforced
 // by the factory, not documented prose. A pre-existing unversioned topic has
 // no definition; keep using the raw broker.publish/subscribe surface for it.
@@ -5920,6 +5941,31 @@ const subscription = onIntegrationEvent(orderPlaced, async (payload, envelope) =
 const causal = causedBy(envelope); // { correlationId: envelope.correlationId ?? envelope.id, causationId: envelope.id }
 ```
 
+**Publish options (M106).** `publishIntegrationEvent` takes an optional sixth argument,
+`PublishOptions` (see "Publish options" above), validated once as on every broker. Two defaults
+differ from a raw `broker.publish`:
+
+- `deduplicationId` defaults to the envelope `id`, so a retried publish of the SAME envelope is
+  de-duplicated where the broker supports it. A caller-supplied `deduplicationId` wins.
+- `orderingKey` comes from the caller first, then from the definition's optional
+  `orderingKey(envelope)` selector, then none. The selector is called only when the caller supplied
+  no key; a selector that throws, or returns a value the rules refuse, rejects the publish.
+
+```typescript
+const orderShipped = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.shipped',
+  version: 1,
+  topic: 'orders.shipped.v1',
+  parse: (value) => value as { orderId: string },
+  // Keep every event for one order on one partition / ordering key.
+  orderingKey: (envelope) => `order-${envelope.data.orderId}`,
+});
+
+await publishIntegrationEvent(runtime, broker, orderShipped, { orderId: '123' }, undefined, {
+  headers: { 'x-tenant': 'acme' },
+});
+```
+
 The wire envelope, published as the message payload:
 
 | Field              | Type     | Present always? | Meaning                                                          |
@@ -5955,8 +6001,9 @@ The ten exported symbols of this section: the four functions above (`defineInteg
 class (rejections, below), and five types:
 
 - **`IntegrationEventDefinition<T>`** (interface) — the contract `defineIntegrationEvent` returns
-  and both directions read: readonly `type`, `version`, `topic`, and `parse: (value: unknown) => T`.
-  `parse` runs on the consumer side only.
+  and both directions read: readonly `type`, `version`, `topic`, `parse: (value: unknown) => T`, and
+  the optional `orderingKey?(envelope): string | undefined` selector (M106). `parse` runs on the
+  consumer side only.
 - **`IntegrationEventEnvelope<T>`** (interface) — the wire shape in the table above. The handler
   receives it with `data` rebuilt to the parsed value, so `envelope.data === payload` holds on every
   delivery.

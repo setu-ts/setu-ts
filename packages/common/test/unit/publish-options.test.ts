@@ -178,4 +178,42 @@ describe('parsePublishOptions — the one parse both publish entries share', () 
     expect(Object.isFrozen(parsed.headers)).toBe(true);
     expect(parsePublishOptions(undefined)).toEqual({ headers: {} });
   });
+
+  it('reports every throwing Proxy trap as the documented RangeError, never the raw error', () => {
+    const boom = (): never => {
+      throw new Error('trap');
+    };
+    const cases: { label: string; options: unknown; message: string }[] = [
+      {
+        label: 'options getPrototypeOf',
+        options: new Proxy({}, { getPrototypeOf: boom }),
+        message: 'publish options could not be read',
+      },
+      {
+        label: 'options get',
+        options: new Proxy({}, { get: boom }),
+        message: 'publish options could not be read',
+      },
+      {
+        label: 'headers getPrototypeOf',
+        options: { headers: new Proxy({}, { getPrototypeOf: boom }) },
+        message: 'publish options headers could not be read',
+      },
+      {
+        label: 'headers ownKeys',
+        options: { headers: new Proxy({}, { ownKeys: boom }) },
+        message: 'publish options headers could not be read',
+      },
+    ];
+    for (const { label, options, message } of cases) {
+      let caught: unknown;
+      try {
+        parsePublishOptions(options);
+      } catch (error) {
+        caught = error;
+      }
+      expect({ label, isRange: caught instanceof RangeError }).toEqual({ label, isRange: true });
+      expect((caught as Error).message).toBe(message);
+    }
+  });
 });

@@ -106,6 +106,44 @@ describe('asBrokerAdapter', () => {
     expect(published).toBe(true);
   });
 
+  it('forwards a validated frozen copy of the options, on both publish entries (M106 §3.4)', async () => {
+    const received: unknown[] = [];
+    const adapter = asBrokerAdapter(createMinimalBroker({
+      publish: (_topic: string, _message: unknown, options?: unknown) => {
+        received.push(options);
+        return Promise.resolve();
+      },
+    }));
+    const options = { orderingKey: 'agg-1', headers: { 'x-tenant': 'acme' } };
+
+    await adapter.publish('topic', 1, options);
+    await adapter.publishWithHeaders('topic', 2, { traceparent: '00-a' }, options);
+
+    expect(received).toEqual([options, options]);
+    for (const copy of received) {
+      expect(copy).not.toBe(options);
+      expect(Object.isFrozen(copy)).toBe(true);
+    }
+  });
+
+  it('refuses invalid options before the custom instance is reached (M106 §3.4)', async () => {
+    let calls = 0;
+    const adapter = asBrokerAdapter(createMinimalBroker({
+      publish: () => {
+        calls++;
+        return Promise.resolve();
+      },
+    }));
+
+    await expect(adapter.publish('topic', 1, { headers: { cc: 'x' } })).rejects.toThrow(
+      RangeError,
+    );
+    await expect(
+      adapter.publishWithHeaders('topic', 1, {}, { orderingKey: ' padded' }),
+    ).rejects.toThrow(RangeError);
+    expect(calls).toBe(0);
+  });
+
   it('drops headers when adapting a public custom broker', async () => {
     let published = false;
     const adapter = asBrokerAdapter(createMinimalBroker({

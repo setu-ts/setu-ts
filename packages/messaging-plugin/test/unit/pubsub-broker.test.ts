@@ -4,6 +4,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
 import type { IPubSubSubscription, IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
 import { CloudBrokerUnavailableError } from '../../src/errors.ts';
+import type { MessagingPluginOptions } from '../../src/index.ts';
 
 function createRuntime(platform: string = 'node'): IRuntimeServices {
   return {
@@ -42,6 +43,46 @@ describe('GcpPubSubBroker', () => {
 
       await broker.connect();
       expect(broker.isReady()).toBe(true);
+    });
+
+    it('refuses enableMessageOrdering beside an injected client, which could not honour it', () => {
+      const transport: IPubSubTransport = {
+        publish: () => Promise.resolve(),
+        open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
+        createSubscription: () => Promise.resolve(),
+        deleteSubscription: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      const serializer = { serialize: (v: unknown) => JSON.stringify(v), deserialize: JSON.parse };
+      expect(() =>
+        new GcpPubSubBroker(createRuntime(), serializer, {
+          client: transport,
+          enableMessageOrdering: true,
+        })
+      ).toThrow(/enableMessageOrdering.*adaptPubSubModule/);
+      // `false` is refused too: any value would be silently ignored.
+      expect(() =>
+        new GcpPubSubBroker(createRuntime(), serializer, {
+          client: transport,
+          enableMessageOrdering: false,
+        })
+      ).toThrow(RangeError);
+    });
+
+    it('makes enableMessageOrdering beside an injected client a compile error on the plugin arm', () => {
+      const client = {} as IPubSubTransport;
+      const ordered: MessagingPluginOptions = {
+        broker: 'pubsub',
+        projectId: 'demo',
+        enableMessageOrdering: true,
+      };
+      const refused: MessagingPluginOptions = {
+        broker: 'pubsub',
+        client,
+        // @ts-expect-error — the injected arm types the flag `never`.
+        enableMessageOrdering: true,
+      };
+      expect([ordered.broker, refused.broker]).toEqual(['pubsub', 'pubsub']);
     });
 
     it('throws CloudBrokerUnavailableError on cloudflare-workers', async () => {
@@ -924,10 +965,9 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
             }
             return Promise.resolve([]);
           },
-          // This double does not model ordering; the §3.5 assertions that record
-          // resumePublishing live in pubsub-adapter.test.ts. The member exists so
-          // the double honours the widened SDK contract.
-          resumePublishing() {},
+          // This double does not model ordering and deliberately omits the
+          // optional `resumePublishing`; the §3.5 assertions that record it
+          // live in pubsub-adapter.test.ts.
         };
       }
       subscription(subName: string) {

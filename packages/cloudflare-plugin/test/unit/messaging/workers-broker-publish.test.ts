@@ -6,6 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { MessageMetadata } from '@setu-ts/common';
+import { MAX_PUBLISH_HEADERS } from '@setu-ts/common';
 
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import { WorkersBroker } from '../../../src/messaging/workers-broker.ts';
@@ -265,6 +266,20 @@ describe('WorkersBroker message metadata (M106 §3.3)', () => {
       broker.dispatch(new FakeQueueBatch('q', [new FakeQueueMessage('m1', envelope)]))
     );
     expect(Object.keys(delivered[0]!.headers ?? {})).toEqual(['__proto__']);
+  });
+
+  it('drops every carried header when the record is over the publish count bound, keeping the id headers', async () => {
+    const atBound = Object.fromEntries(
+      Array.from({ length: MAX_PUBLISH_HEADERS }, (_, i) => [`x-h${i}`, 'v']),
+    );
+    const overBound = { ...atBound, 'x-extra': 'v' };
+    const base = { v: 1, kind: 'msg', topic: 'orders', id: 'i', payload: 1 } as const;
+
+    const kept = await deliver({ ...base, headers: atBound });
+    expect(Object.keys(kept.headers ?? {})).toHaveLength(MAX_PUBLISH_HEADERS);
+
+    const dropped = await deliver({ ...base, headers: overBound, orderingKey: 'agg-1' });
+    expect(dropped.headers).toEqual({ 'x-setu-ordering-key': 'agg-1' });
   });
 
   it('reports empty headers when the envelope carries neither field', async () => {

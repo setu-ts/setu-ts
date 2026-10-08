@@ -531,7 +531,7 @@ export class NatsBroker implements MessageBrokerAdapter {
       publish(
         subject: string,
         data: Uint8Array,
-        options?: { headers: INatsHeaders },
+        options?: { headers: INatsHeaders } | { msgID: string },
       ): Promise<unknown>;
     };
     const natsHeaders = this.#headersFactory?.();
@@ -548,10 +548,17 @@ export class NatsBroker implements MessageBrokerAdapter {
       } else {
         // No `MsgHdrs` factory: an injected connection carries no nats module,
         // so there is nothing to build headers with. Publishing still
-        // succeeds, but trace context cannot cross this broker — report it
-        // once rather than dropping the header silently on every publish.
+        // succeeds, but trace context and caller headers cannot cross this
+        // broker — report it once rather than dropping them silently on every
+        // publish. The de-duplication id survives: nats.js's own `msgID`
+        // option builds the `Nats-Msg-Id` header internally, so the server
+        // still de-duplicates.
         this.#reportMissingHeaderChannel(wireHeaders);
-        await realJs.publish(topic, data);
+        if (validated.deduplicationId !== undefined) {
+          await realJs.publish(topic, data, { msgID: validated.deduplicationId });
+        } else {
+          await realJs.publish(topic, data);
+        }
       }
     } catch (error) {
       throw new Error(describePublishRefusal(topic, error), { cause: error });
@@ -823,9 +830,11 @@ export class NatsBroker implements MessageBrokerAdapter {
     }
     this.#headerWarningEmitted = true;
     this.#logger?.error(
-      'NatsBroker: transport headers dropped because no NATS headers factory is available. ' +
-        'Pass NatsOptions.headersFactory (for example `() => nats.headers()`) alongside an ' +
-        'injected client so trace context can cross the broker.',
+      'NatsBroker: transport headers (trace context, publish-option headers and the ' +
+        'ordering key) dropped because no NATS headers factory is available; a ' +
+        'de-duplication id is still applied as the native message id. Pass ' +
+        'NatsOptions.headersFactory (for example `() => nats.headers()`) alongside an ' +
+        'injected client so headers can cross the broker.',
     );
   }
 }
@@ -834,10 +843,13 @@ function toHeaderRecord(headers: unknown): Readonly<Record<string, string>> {
   if (!headers || typeof headers !== 'object') return {};
   const candidate = headers as { keys?: unknown; get?: unknown };
   if (typeof candidate.keys !== 'function' || typeof candidate.get !== 'function') return {};
-  const values: Record<string, string> = {};
+  const entries: [string, string][] = [];
   for (const key of candidate.keys() as Iterable<string>) {
     const value = (candidate.get as (name: string) => unknown)(key);
-    if (typeof value === 'string') values[key] = value;
+    if (typeof value === 'string') entries.push([key, value]);
   }
-  return values;
+  // `Object.fromEntries`, never assignment: Node and Bun keep the
+  // `Object.prototype.__proto__` setter, which would swallow a delivered
+  // `__proto__` header (M106 §10 obligation 4).
+  return Object.fromEntries(entries);
 }

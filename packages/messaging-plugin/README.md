@@ -72,7 +72,10 @@ Every option is carried as a transport header beside any native mapping, so it i
 `ORDERING_KEY_HEADER` and `DEDUPLICATION_ID_HEADER` (from `@setu-ts/common`) name the two headers.
 The `Cloudflare Workers` broker carries `orderingKey`, `deduplicationId` and the caller's `headers`
 as envelope fields, because a Cloudflare queue has no transport header channel; on delivery all of
-them are surfaced as the same transport headers, and an entry failing the shared rules is dropped.
+them are surfaced as the same transport headers. Invalid options are refused on publish; on
+delivery, an envelope entry failing the shared rules is dropped. A `NatsBroker` with an injected
+connection and no `headersFactory` drops caller headers and the ordering key (reported once through
+the logger) but still applies the de-duplication id as nats.js's native `msgID`.
 
 ### What `orderingKey` promises
 
@@ -577,6 +580,14 @@ what the producer put in. The string is the honest type. `correlationId`, `causa
 JSON serialization maps `NaN`/`Infinity` to `null` — a non-finite one would arrive as `null`. Each
 is checked on both sides: refused at the producer, and refused as a `malformed` rejection at the
 consumer.
+
+**Publish options.** `publishIntegrationEvent` takes the same `PublishOptions` as `broker.publish`
+as an optional sixth argument (after the causal metadata), with two defaults of its own:
+`deduplicationId` defaults to the envelope `id`, so re-publishing the same envelope is de-duplicated
+where the broker supports it; and `orderingKey` comes from the caller, else from an optional
+`orderingKey: (envelope) => string | undefined` selector on the definition, else none. The selector
+runs only when the caller supplied no key; if it throws or returns a value the rules refuse, the
+publish rejects.
 
 One definition serves both directions — the producer reads its `type`/`version`/`topic`, the
 consumer the same three plus `parse`:

@@ -6,6 +6,8 @@
  * @module
  */
 
+import { hasForbiddenAliasCharacter } from '../diagnostics/alias.ts';
+
 /**
  * Transport header carrying a publisher's ordering key on a broker with no
  * native ordering primitive. Every first-party broker writes it beside any
@@ -56,7 +58,7 @@ export function publishIdProblem(
   if (value.length === 0) return 'empty';
   if (!value.isWellFormed()) return 'not-well-formed';
   if (value !== value.trim()) return 'whitespace';
-  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return 'forbidden-characters';
+  if (hasForbiddenAliasCharacter(value)) return 'forbidden-characters';
   if (UTF8_ENCODER.encode(value).length > MAX_PUBLISH_ID_BYTES) return 'too-long';
   return null;
 }
@@ -165,7 +167,7 @@ export function publishHeaderValueProblem(
   if (typeof value !== 'string') return 'not-a-string';
   if (!value.isWellFormed()) return 'not-well-formed';
   if (value !== value.trim()) return 'whitespace';
-  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return 'forbidden-characters';
+  if (hasForbiddenAliasCharacter(value)) return 'forbidden-characters';
   if (UTF8_ENCODER.encode(value).length > MAX_PUBLISH_HEADER_VALUE_BYTES) return 'too-long';
   return null;
 }
@@ -232,11 +234,21 @@ export interface ParsedPublishOptions {
   readonly headers: Readonly<Record<string, string>>;
 }
 
-/** A plain object: prototype is `Object.prototype` or `null`, and it is not an array. */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+/**
+ * A plain object: prototype is `Object.prototype` or `null`, and it is not an
+ * array. `Array.isArray` and `getPrototypeOf` run `Proxy` traps, so a trap that
+ * throws is reported as the documented `RangeError` naming `what`, never
+ * escaping as whatever the trap threw.
+ */
+function isPlainObject(value: unknown, what: string): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  try {
+    if (Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch (error) {
+    throw new RangeError(`${what} could not be read`, { cause: error });
+  }
 }
 
 const ID_PROBLEM_TEXT: Readonly<Record<string, string>> = {
@@ -266,19 +278,21 @@ function parseId(field: string, value: unknown): string | undefined {
 }
 
 function parseHeaders(raw: unknown): Readonly<Record<string, string>> {
-  if (!isPlainObject(raw)) {
+  if (!isPlainObject(raw, 'publish options headers')) {
     throw new RangeError('publish options headers must be a plain object');
   }
-  if (Object.getOwnPropertySymbols(raw).length > 0) {
-    throw new RangeError('publish options headers must not contain symbol keys');
-  }
+  let symbolCount: number;
   let names: string[];
   let values: unknown[];
   try {
+    symbolCount = Object.getOwnPropertySymbols(raw).length;
     names = Object.keys(raw); // own enumerable string keys, in one pass
     values = names.map((name) => raw[name]); // each value read exactly once
   } catch (error) {
     throw new RangeError('publish options headers could not be read', { cause: error });
+  }
+  if (symbolCount > 0) {
+    throw new RangeError('publish options headers must not contain symbol keys');
   }
   if (names.length > MAX_PUBLISH_HEADERS) {
     throw new RangeError(
@@ -345,7 +359,7 @@ function parseHeaders(raw: unknown): Readonly<Record<string, string>> {
  */
 export function parsePublishOptions(options: unknown): ParsedPublishOptions {
   if (options === undefined) return Object.freeze({ headers: Object.freeze({}) });
-  if (!isPlainObject(options)) {
+  if (!isPlainObject(options, 'publish options')) {
     throw new RangeError('publish options must be a plain object or undefined');
   }
   let rawOrderingKey: unknown;

@@ -109,9 +109,10 @@ export interface PubSubSdkModule {
       /**
        * Resumes a paused ordering key (M106 §3.5). The SDK pauses a key after a
        * failed ORDERED publish and refuses further publishes for it until this
-       * is called.
+       * is called. Optional so a hand-built module double that does not
+       * model ordering still satisfies this type; the real SDK has it.
        */
-      resumePublishing(orderingKey: string): void;
+      resumePublishing?(orderingKey: string): void;
     };
     subscription(subscriptionName: string): {
       on(
@@ -236,7 +237,9 @@ export interface PubSubOptions {
    * Create the transport's own subscriptions with message ordering enabled
    * (default `false`), required before a native `orderingKey` is delivered in
    * order. Fixed at subscription creation and it costs throughput, so it is
-   * opt-in (M106 §3.5).
+   * opt-in (M106 §3.5). Refused together with {@link client}: an injected
+   * transport creates its own subscriptions, so pass the flag to
+   * `adaptPubSubModule` instead.
    */
   enableMessageOrdering?: boolean;
   /** Optional logger. */
@@ -301,7 +304,7 @@ export function adaptPubSubModule(
         // refuses further publishes for it until `resumePublishing`; without
         // this one transient failure blocks that key for the process lifetime.
         if (orderingKey !== undefined) {
-          handle.resumePublishing(orderingKey);
+          handle.resumePublishing?.(orderingKey);
         }
         throw error;
       }
@@ -428,6 +431,14 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     this.#projectId = options?.projectId ?? '';
     this.#credentials = options?.credentials;
     this.#injectedClient = options?.client;
+    if (this.#injectedClient !== undefined && options?.enableMessageOrdering !== undefined) {
+      // Ordering is fixed when a subscription is created, and an injected
+      // transport creates its own — accepting the flag would do nothing.
+      throw new RangeError(
+        'GcpPubSubBroker: `enableMessageOrdering` has no effect with an injected `client`. ' +
+          'Pass it to `adaptPubSubModule` when building the transport instead.',
+      );
+    }
     this.#defaultQueue = options?.defaultQueue ?? DEFAULT_QUEUE;
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
     this.#enableMessageOrdering = options?.enableMessageOrdering ?? false;

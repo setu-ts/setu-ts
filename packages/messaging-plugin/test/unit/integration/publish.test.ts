@@ -248,6 +248,27 @@ describe('publishIntegrationEvent', () => {
     expect(broker.published).toHaveLength(0);
   });
 
+  it('does not call the selector when the caller supplies an orderingKey (M106 §3.7)', async () => {
+    let calls = 0;
+    const throwing = defineIntegrationEvent<{ orderId: string }>({
+      type: 'orders.placed',
+      version: 1,
+      topic: 'orders.placed.v1',
+      parse: (value) => value as { orderId: string },
+      orderingKey: () => {
+        calls++;
+        throw new Error('selector boom');
+      },
+    });
+    const broker = new RecordingBroker();
+
+    await publishIntegrationEvent(runtime, broker, throwing, { orderId: 'o-1' }, undefined, {
+      orderingKey: 'caller-key',
+    });
+    expect(calls).toBe(0);
+    expect(broker.published[0].options?.orderingKey).toBe('caller-key');
+  });
+
   it('rejects when the selector returns a value §3.4 refuses (M106 §3.7)', async () => {
     const invalid = defineIntegrationEvent<{ orderId: string }>({
       type: 'orders.placed',

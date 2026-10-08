@@ -79,9 +79,10 @@ export async function publishIntegrationEvent<T>(
   const envelope = createEnvelope(runtime, definition, payload, metadata);
 
   // Precedence (M106 §3.7): the caller's key, then the definition's selector,
-  // then none. A selector throw rejects (this function is async).
-  const selected = definition.orderingKey?.(envelope);
-  const orderingKey = validated.orderingKey ?? selected;
+  // then none. The selector is not called when the caller supplied a key, so
+  // one that throws cannot reject a publish whose key it would not have
+  // chosen. A selector throw otherwise rejects (this function is async).
+  const orderingKey = validated.orderingKey ?? definition.orderingKey?.(envelope);
 
   // Validating again HERE is what makes a selector's value subject to §3.4:
   // the second call reads only the fresh object below, never the caller's.

@@ -543,14 +543,25 @@ describe('broker header conformance', () => {
       await inner.disconnect();
     });
 
-    it('rejects a reserved name before the inner transport runs', async () => {
+    it('rejects a reserved name and delivers nothing for it', async () => {
       const inner = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
       await inner.connect();
       const pipelined = new PipelinedBroker(inner, []);
+      // PipelinedBroker forwards unread; the inner broker's own validation is
+      // what refuses, so the observable claim is that nothing is delivered.
+      const delivered: unknown[] = [];
+      await inner.subscribe(TOPIC, (message) => {
+        delivered.push(message);
+      });
 
       await expect(pipelined.publish(TOPIC, { id: 1 }, { headers: { cc: 'x' } })).rejects.toThrow(
         RangeError,
       );
+      expect(delivered).toEqual([]);
+      // A valid publish through the same path does deliver, so the empty list
+      // above is the refusal and not a subscription that never received.
+      await pipelined.publish(TOPIC, { id: 2 });
+      expect(delivered).toEqual([{ id: 2 }]);
       await inner.disconnect();
     });
   });
