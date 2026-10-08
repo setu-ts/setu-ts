@@ -1797,8 +1797,11 @@ MongoDB refuses `$and: []`/`$or: []` outright, and those are the answers Memory 
 
 `rawQuery` is refused by name with `UnsupportedRawQueryError` — MongoDB has no SQL, so an
 application reaches the injected client directly for native commands, exactly as it does for a
-Prisma raw query. Transactions use a `startSession()` and are refused at `beginTransaction()` with
-`MongoTransactionUnavailableError` on a deployment that is not a replica set, never at `connect()`.
+Prisma raw query. Transactions use a `startSession()`; on a deployment that is not a replica set
+they are refused late, never at `connect()`. On the real driver the refusal surfaces at the first
+operation inside the transaction as the driver's own unwrapped `MongoServerError` (`code: 20`,
+`codeName: 'IllegalOperation'`), not at `beginTransaction()` (measured, M107);
+`MongoTransactionUnavailableError` wraps only a `startTransaction()` that itself throws.
 
 `IMongoClient` and `IMongoObjectIdCtor` are the exported injection seam, and the real driver
 implements their structural shapes: `IMongoClient.connect()` is `Promise<unknown>` because the
@@ -2273,6 +2276,45 @@ The four transaction and concurrency errors — `MongoTransactionUnavailableErro
 `BigtableTransactionScopeError` — are deliberately **not** branded and keep their masked `500`: they
 may legitimately quote backend state, and a concurrency conflict is transient and retryable rather
 than permanent, which is a different contract statement deserving its own decision.
+
+### Transactional outbox store (M107)
+
+`createDatabaseOutboxStore(options?)` returns a `RegistryFactory<IOutboxStore>` — the shipped
+implementation of the `IOutboxStore` port in `@setu-ts/common` over `IDatabaseService` (the M101c
+`createDatabaseTenantDataStore` shape). It is passed to the messaging plugin's `outbox.store`
+option, which resolves it in `onInit` and runs `verify()` there.
+
+```typescript
+import { createDatabaseOutboxStore } from '@setu-ts/database-plugin';
+
+const store = createDatabaseOutboxStore({ entity: 'Outbox', database: 'orders' });
+```
+
+| Export                        | Kind      | Notes                                                                                                                                                                 |
+| ----------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createDatabaseOutboxStore`   | function  | Resolves `CAPABILITIES.DATABASE`, or `database.<name>` for `database: '<name>'` (`'default'` is the bare token). Throws `TypeError` at the call for an empty `entity` |
+| `DatabaseOutboxStoreOptions`  | interface | `entity?` (default `'Outbox'`), `database?` — must be the database the caller's unit of work belongs to, or the row is never relayed by this store                    |
+| `OutboxStoreUnavailableError` | class     | Rejected by `verify()`; `entity`, `reason` (`'bigtable'`, `'dynamodb-index'`, `'mongodb-replica-set'`, `'entity-unavailable'`), the adapter error as `cause`          |
+
+- **Discriminator.** Every row carries `kind: 'setu-outbox'` (`OUTBOX_RECORD_KIND`); every read
+  (`scanPending`, `failedKeys`, `stats`, `purge`) requires it, and a lookup by id before a
+  transition treats a row of another `kind` as `missing`.
+- **Conditional transitions.** `markSent`/`markFailure` write only from `pending`, `release` only
+  from `failed`; anything else answers `missing`, `not-pending` (with `sentBy` for a sent row) or
+  `not-failed`, and writes nothing. The read and the write are two calls, so a race between them can
+  overwrite once (a duplicate publish, never a loss) until M105's conditional write.
+- **Columns.** The row is the record's own fields; an absent optional field is written as `null` and
+  read back as absent. `failedKeys` selects only `tenantId` and `orderingKey`; `purge` deletes
+  `sent` then `discarded` rows with `settledAt < before`, at most `limit` per status.
+- **`verify()`** runs `scanPending(undefined, 1)`, then
+  `transaction(uow => uow.getRepository(entity).findAll({ where: { kind, status: 'pending' }, limit: 1 }))`.
+  An `UnsupportedQueryFeatureError` from `bigtable` is `'bigtable'`; one from `dynamodb` for
+  `orderBy` is `'dynamodb-index'` (a GSI `{ partitionKey: 'status', sortKey: 'position' }`,
+  projection `ALL`, is required); a cause chain carrying `code: 20` with
+  `codeName: 'IllegalOperation'` — what a standalone MongoDB answers at the first operation inside a
+  transaction — is `'mongodb-replica-set'`; anything else is `'entity-unavailable'`. On memory and
+  MongoDB a missing entity cannot be detected (both create lazily). Every refusal is a rejected
+  promise.
 
 ### Multiple Databases
 
@@ -5776,6 +5818,26 @@ export type {
   ServiceBusOptions,
 } from '@setu-ts/messaging-plugin';
 
+// Transactional outbox (M107)
+export {
+  OutboxEnvelopeTooLargeError,
+  OutboxNotReadyError,
+  OutboxRelayUnscheduledError,
+  OutboxRowStateError,
+  OutboxStoreVerifyTimeoutError,
+  OutboxUnknownTenantError,
+} from '@setu-ts/messaging-plugin';
+export type {
+  IOutbox,
+  OutboxCommonOptions,
+  OutboxHealthOptions,
+  OutboxOptions,
+  OutboxRelayOptions,
+  OutboxStoreEntry,
+  OutboxSweepResult,
+  OutboxWriteInput,
+} from '@setu-ts/messaging-plugin';
+
 // Re-exported types from @setu-ts/common
 export type {
   IMessageBroker,
@@ -6136,6 +6198,135 @@ Mapping a local domain event (M93a's `createDomainEvents()`) onto a published in
 application policy, written out explicitly — `event.type` is deliberately not the integration
 `type`, and `event.occurredOn` (when the fact happened) is deliberately not the envelope's
 `occurredAt` (when it was published).
+
+### Transactional outbox (M107)
+
+`MessagingPlugin({ outbox })` writes an integration event as a row in the SAME database transaction
+as the business change, through the caller's own unit of work, and relays committed rows to the
+broker afterwards. The store is reached through the `IOutboxStore` port in `@setu-ts/common` —
+normally `createDatabaseOutboxStore()` from `@setu-ts/database-plugin` — never by resolving
+`CAPABILITIES.DATABASE`.
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import type { IOutbox } from '@setu-ts/messaging-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+
+app.register(SchedulerPlugin());
+app.register(DatabasePlugin({ type: 'memory' }));
+app.register(MessagingPlugin({ outbox: { store: createDatabaseOutboxStore() } }));
+await app.start();
+
+const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+await db.transaction(async (uow) => {
+  await uow.getRepository('Order').create(order);
+  await outbox.write(uow, orderPlaced, { orderId: order.id });
+});
+outbox.dispatch(); // optional: sweep now rather than at the next tick
+```
+
+**The promise.** At-least-once delivery of every committed row; per ordering key, publish order
+among committed rows, provided rows of one key commit in the order they were written and, across
+replicas, provided the writers' clocks agree; delivery order as the broker gives it. Consumers
+compare `aggregateVersion`. Never exactly once — a re-send carries the same envelope id as its
+de-duplication id.
+
+| Export                          | Kind      | Notes                                                                                                                                         |
+| ------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IOutbox`                       | interface | `write(scope, definition, payload, input?)` → envelope id; `dispatch()` (never throws); `sweep()`; `purge()`; `release(id, action, options?)` |
+| `OutboxOptions`                 | type      | `OutboxCommonOptions` plus exactly one of `store` (one store) and `stores` (per tenant id); supplying both is a compile error                 |
+| `OutboxCommonOptions`           | interface | `maxEnvelopeBytes`, `background`, `relay`, `health`, `retainSentMs`, `purgeBatch`, `purgeIntervalMs`                                          |
+| `OutboxRelayOptions`            | interface | `schedule`, `intervalMs`, `pageSize`, `scanLimit`, `publishLimit`, `maxFailedScan`, `maxAttempts`, backoff bounds, the sweep deadline         |
+| `OutboxHealthOptions`           | interface | `degradedAfterMs` (default 60 000), `overlapWindowMs` (default 600 000)                                                                       |
+| `OutboxStoreEntry`              | type      | an `IOutboxStore` or a `RegistryFactory<IOutboxStore>`, resolved in `onInit`                                                                  |
+| `OutboxWriteInput`              | interface | `metadata?`, `options?` (`PublishOptions`, the `publishIntegrationEvent` precedence), `tenantId?`                                             |
+| `OutboxSweepResult`             | interface | `origin`, `scanned`, `published`, `failures`, `poisoned`, `endedBy`                                                                           |
+| `OutboxEnvelopeTooLargeError`   | class     | `write` — the serialized envelope exceeds `maxEnvelopeBytes` (`bytes`, `limit`); the caller's transaction rolls back                          |
+| `OutboxRelayUnscheduledError`   | class     | `start()` — the relay is scheduled (the default) but no `CAPABILITIES.SCHEDULER` is registered                                                |
+| `OutboxUnknownTenantError`      | class     | `write` / `release` with per-tenant `stores` naming no tenant, or one with no store; the tenant id is never quoted                            |
+| `OutboxRowStateError`           | class     | `release` — `outcome: 'missing'` or `'not-failed'` (with the row's `status`)                                                                  |
+| `OutboxNotReadyError`           | class     | any call before `onInit` resolved and verified the store                                                                                      |
+| `OutboxStoreVerifyTimeoutError` | class     | `start()` — a store's `verify()` did not settle within `relay.storeTimeoutMs` (`timeoutMs`); no tenant or store is named                      |
+
+**Wiring.** With `outbox` set the plugin also provides `CAPABILITIES.OUTBOX` (`outbox.<name>` for a
+named instance), declares `CAPABILITIES.SCHEDULER` and `CAPABILITIES.METRICS` as optional
+dependencies (ordering only), and registers an `outbox` (`outbox.<name>`) health indicator. Without
+it, nothing changes. Every numeric option is validated when `MessagingPlugin(...)` is called; a
+value out of range, `NaN` or a fraction throws a `RangeError` naming the option, and
+`relay.publishTimeoutMs + relay.storeTimeoutMs > relay.sweepDeadlineMs` is refused.
+
+- **`onInit`.** With `relay.schedule` (default `true`) and no scheduler registered, `start()`
+  rejects `OutboxRelayUnscheduledError` before any store I/O. Otherwise each store entry is
+  resolved, each store's `verify()` runs — a refusal (`OutboxStoreUnavailableError` from the bridge)
+  fails `start()` — the outbox is activated, and two jobs are scheduled with `IScheduler.every`:
+  `outbox-relay[.<name>]` every `relay.intervalMs` (default 1000) and `outbox-purge[.<name>]` every
+  `purgeIntervalMs` (default 60 000). With `relay: { schedule: false }` nothing is scheduled; call
+  `sweep()` and `purge()` yourself (on Cloudflare Workers, from a Cron Trigger).
+- **One deadline.** `relay.sweepDeadlineMs` (default 15 000, monotonic clock) bounds a whole sweep,
+  and — because the purge job holds the scheduler's handler mutex exactly as a sweep does — a whole
+  `purge()` run across every store too: a store call still running at the deadline rejects the
+  purge, and rows already deleted stay deleted. Keep `sweepDeadlineMs` at most
+  `distributedLock.ttlMs − 10 000`.
+- **Shutdown.** The relay drains in an `onShutdown` hook, which the kernel runs before ANY close
+  hook — the broker's and the database's included: the outbox becomes closing (`dispatch()` is a
+  no-op and a failure writes no attempt), both jobs are removed, and the in-flight sweep is awaited.
+  An `onClose` hook repeats the same drain idempotently, because a failed `start()` runs close hooks
+  only; it is registered ahead of the broker's own close hook, so the drain precedes the disconnect
+  on that path too.
+- **Health.** `down` with `ready: false` before the store is verified and once closing; `down` with
+  `reachable: false` when `stats()` does not answer (cached 5 s, bounded 2 s); `degraded` with
+  `data.reasons` from a fixed vocabulary — cluster-wide, from the store: `oldest-pending-age` (past
+  `health.degradedAfterMs`), `failed-rows`, `failed-scan-cap` (a store's failed count reaches
+  `relay.maxFailedScan`); per instance, from this relay: `blocked-key-cap`, `store-write-failing`,
+  `scheduled-overlap` (a replica that never sweeps reports none of these). `data` carries counts,
+  ages in ms and the last local sweep's counts — never a tenant id, ordering key, topic or error
+  text.
+- **Metrics.** With `CAPABILITIES.METRICS` registered: counters `outbox_published_total`,
+  `outbox_publish_failures_total`, `outbox_poisoned_total` (labels `outbox`, `topic`) and
+  `outbox_overlaps_total` (`outbox`, `origin`); gauges `outbox_pending_rows` and
+  `outbox_oldest_pending_seconds` (`outbox`), written from each fresh store read the health
+  indicator makes. `topic` comes only from a decoded row and is capped at 100 distinct values per
+  instance, then `other`; an undecodable poisoned row is labelled `invalid-row`. Every write is
+  guarded — a failing metrics backend never reaches the relay. The two gauges are written ONLY when
+  the health indicator reads the store, so they are as fresh as the last `/health` poll.
+- **Ordering limits.** The relay reads the PENDING set, never a watermark: a row whose transaction
+  commits after a later row of its key was published is still published (measured on real
+  PostgreSQL), but after that later row — order holds only among rows of one key that commit in
+  write order. `position` is taken from each writer's clock, clamped per process only, so across
+  replicas order also assumes the writers' clocks agree.
+- **Overlap detection.** The plugin cannot read which lock the scheduler uses. A status write that
+  finds its row already `sent` by ANOTHER instance is an overlap; two scheduled sweeps overlapping
+  degrade health (`scheduled-overlap`), one involving a `dispatch()` sweep is only counted.
+  `retainSentMs: 0` deletes a row at mark-sent and so disables detection; on DynamoDB a stale GSI
+  read can report a false overlap (from AWS's consistency model, not reproduced).
+- **Retention.** `purge()` deletes `sent` and `discarded` rows whose `settledAt` is older than
+  `retainSentMs` (default 7 days), at most `purgeBatch` per status per store; `failed` rows are
+  never purged. `retainSentMs: 0` deletes at mark-sent.
+- **`release` has no built-in authorization.** It is an operator capability; the application gates
+  the route that calls it. It takes effect at the relay's next lap.
+- **Tenancy.** `write(…, { tenantId })` records the tenant (column isolation, one `store`) or
+  selects the store (`stores`, database per tenant). The selected store must read the database the
+  caller's unit of work writes to — a caller obligation nothing can check, because a unit of work
+  carries no database identity; a mismatched row is relayed under the wrong tenant, or never. The
+  tenant is never a published header.
+- **Trust.** A row is re-validated on every read (size, id, options, ordering-key agreement, topic
+  format) and a failing row is `failed` with `lastError: 'invalid-row'`, never published; but a
+  VALID row's topic is published as stored. Protect the outbox table like the broker credentials.
+- **Trace.** `write` stores the active `traceparent`; each row is published inside an
+  `outbox relay <topic>` span parented to it, so request → relay → publish → receive is one trace. A
+  row without a valid `traceparent` gets `SpanOptions.root`, never the span of the request that
+  dispatched the sweep. A custom broker without the framework-header channel (`WorkersBroker`) drops
+  the producer's `traceparent`.
+- **Cloudflare Workers.** `relay: { schedule: false }`, `background: waitUntil`, and Cron Triggers
+  on `WorkersCron` calling `outbox.sweep()` and `outbox.purge()`, with the outbox in a D1 table
+  through `D1Adapter`. Driven at unit level (`D1Adapter` over real SQLite); not on real workerd.
+- **Backends.** The per-backend requirements are under
+  [Transactional outbox store](#transactional-outbox-store-m107) in the database plugin; the
+  messaging plugin README carries the DDL (PostgreSQL, SQLite/D1) and the adapter mappings.
 
 ## Queue (`@setu-ts/queue-plugin`)
 
@@ -8191,18 +8382,18 @@ The telemetry contract is framework-owned and exported from `@setu-ts/common` (z
 importable without the OTel SDK installed). The telemetry-plugin translates these to OTel types at
 its implementation seam.
 
-| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                                                            |
-| -------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`. Plus the OPTIONAL `activeSpanContext?(): SpanContext \| undefined` (see below). |
-| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                                                        |
-| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                                                   |
-| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                                                  |
-| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                                                  |
-| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                                                   |
-| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below.                      |
-| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                                       |
-| `TraceparentSource`        | interface       | Structural `traceId?`/`spanId?`/`traceFlags?` input accepted by `contextToTraceparent`; both `TelemetryContext` and `SpanContext` satisfy it.                                                                                                                                                                  |
-| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                                       |
+| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`. Plus the OPTIONAL `activeSpanContext?(): SpanContext \| undefined` (see below).                                                                                                                                                                                                   |
+| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                                                                                                                                                                                                                                                          |
+| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                                                                                                                                                                                                                                                     |
+| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext; readonly root?: boolean }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below. `root: true` (M107) starts a parentless span, ignoring both `parentContext` and the active span; an `ITelemetryService` implementation that ignores it starts the span under the ACTIVE span. |
+| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                                                                                                                                                                                                                                         |
+| `TraceparentSource`        | interface       | Structural `traceId?`/`spanId?`/`traceFlags?` input accepted by `contextToTraceparent`; both `TelemetryContext` and `SpanContext` satisfy it.                                                                                                                                                                                                                                                                                                                                                                    |
+| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 > **Implicit parent/child linking is conditional.** Since M75 the plugin DOES register an OTel
 > `ContextManager` — the `AsyncLocalStorageContextManager` from the optional
@@ -10777,7 +10968,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 
 | Export                                                 | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103), `OUTBOX: 'outbox'` (transactional outbox, `outbox.<name>` for a named messaging instance, M107)                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `createCapabilityToken(name)`                          | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `encodeFrameData(data)`                                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `decodeFrameData(payload)`                             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -10880,6 +11071,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | View rendering      | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Localization        | `ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue` — the localization port (`t(key, values?)`, `locale`, `locales`, `forLocale(tag)`) served under `CAPABILITIES.LOCALIZATION`, and the catalogue shape: a string with `{name}` placeholders or a CLDR plural record with `other` required (M103)                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Outbox              | `IOutboxStore`, `IOutboxWriteScope`, `OutboxRecord`, `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, `OUTBOX_RECORD_KIND` — the transactional-outbox store port (`append`, `scanPending`, `failedKeys`, `markSent`, `markFailure`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws), the row shape (every field a JSON scalar, times as epoch ms), the conditional-transition outcome (`applied` / `missing` / `not-pending` / `not-failed`), and the `'setu-outbox'` discriminator every row carries and every read requires (M107)                                                                                                                                               |
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and

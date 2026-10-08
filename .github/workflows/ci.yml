@@ -12,7 +12,7 @@ permissions:
 # config by default, so anything the job runs afterwards can read it — including third-party code
 # this workflow resolves, installs and in places imports. Every job below was reviewed one at a
 # time, and NONE performs a networked git operation: the only git commands anywhere in these gates
-# are `git show <tag>:<path>`, `git rev-parse` and `git ls-files`, which are local object reads.
+# are `git show <tag>:<path>`, `git rev-parse`, `git ls-files` and `git diff`, all local reads.
 # So every checkout here sets `persist-credentials: false`, each with its own reason recorded at
 # the step. `fetch-depth: 0` still works, because the fetch happens during checkout while the
 # credential is live; only its persistence afterwards is dropped. A job that later needs a real
@@ -97,7 +97,30 @@ jobs:
       # package manifest's net grant scopes. Started by the steps below.
       NATS_URL: nats://127.0.0.1:4222
       KAFKA_BROKERS: 127.0.0.1:9092
+      # M107 §6 (C8): the outbox real-backend suites (messaging-plugin) guard on
+      # these. `OUTBOX_POSTGRES_URL` is a DISTINCT variable from the bare one
+      # so the database-plugin live-Postgres cells (which need a generated Prisma
+      # client) keep ignoring here. Port 5433, not 5432: it is the port
+      # database-plugin's net grant already names, and the one the local
+      # backend runs on. `MONGODB_RS_URI` is a single-node REPLICA SET on its own
+      # port — the `mongo` service below is standalone, and a standalone server
+      # refuses transactions, which the outbox needs.
+      OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
+      MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true
     services:
+      # M107 §6 (C8): PostgreSQL for the outbox real-backend suites, on host port
+      # 5433 (see OUTBOX_POSTGRES_URL above).
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 127.0.0.1:5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
       mongo:
         image: mongo:8
         ports:
@@ -192,9 +215,8 @@ jobs:
           # Executes third-party code: `deno ci` resolves the whole graph, the
           # suite lazily imports `npm:` drivers, and `check:apps` installs
           # dependencies into the example projects. No step needs a credential
-          # afterwards — the only git this job runs is three LOCAL object reads
-          # (`git show` at a release tag, `git rev-parse`, `git ls-files`), none
-          # of which touches the remote.
+          # afterwards — git only reads local objects and checks for app
+          # lockfile drift; none of these commands touches the remote.
           persist-credentials: false
           # The changelog-coverage gate compares each published barrel against the
           # last RELEASE TAG, and a shallow checkout fetches no tags — it would fail
@@ -321,6 +343,38 @@ jobs:
           docker logs m90d-kafka
           exit 1
 
+      # M107 §6 (C8): a single-node MongoDB REPLICA SET for the outbox suites.
+      # It cannot be the `mongo` service: `--replSet` is a command-line flag a
+      # service block cannot pass (`options` reaches `docker create` before the
+      # image), and that service must stay standalone, because the outbox's
+      # startup refusal of a standalone server is itself under test. Its own
+      # port, so both run side by side. Readiness means a PRIMARY exists, not an
+      # open port: transactions are refused until the member is elected.
+      - name: Start a MongoDB replica set (outbox suites)
+        run: |
+          docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8 \
+            --replSet rs0 --port 27018 --bind_ip_all
+          for _ in $(seq 1 60); do
+            if docker exec mongo-rs mongosh --port 27018 --quiet \
+              --eval 'db.runCommand({ ping: 1 }).ok' > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec mongo-rs mongosh --port 27018 --quiet --eval \
+            "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27018' }] })"
+          for _ in $(seq 1 60); do
+            if docker exec mongo-rs mongosh --port 27018 --quiet \
+              --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q true; then
+              echo 'mongodb replica set ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'mongodb replica set did not elect a primary'
+          docker logs mongo-rs
+          exit 1
+
       # M70c §3.7: the S3 outage suite (storage-plugin) needs a real
       # S3-compatible server, and it cannot be a `services:` container: the
       # image's entrypoint is the bare `minio` binary, so `server /data` must
@@ -373,7 +427,9 @@ jobs:
         run: deno task check:docs
 
       - name: Example applications
-        run: deno task check:apps
+        run: |
+          deno task check:apps
+          git diff --exit-code -- apps
         env:
           ALLOW_SKIP: cloudflare
 

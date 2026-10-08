@@ -595,3 +595,68 @@ describe('@setu-ts/common barrel — M103 localization contract', () => {
     expect(localizer.forLocale('en')).toBe(localizer);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M107 — the transactional outbox port and SpanOptions.root
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M107 outbox port', () => {
+  it('exposes CAPABILITIES.OUTBOX and OUTBOX_RECORD_KIND', () => {
+    expect(common.CAPABILITIES.OUTBOX).toBe('outbox');
+    expect(common.OUTBOX_RECORD_KIND).toBe('setu-outbox');
+  });
+
+  it('exports the outbox types (declared against the barrel)', async () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class): every
+    // declaration below names its type through the barrel namespace.
+    const status: common.OutboxStatus = 'pending';
+    const record: common.OutboxRecord = {
+      id: 'e1',
+      kind: common.OUTBOX_RECORD_KIND,
+      topic: 'orders.created.v1',
+      envelope: '{}',
+      options: '{"deduplicationId":"e1"}',
+      position: '000000000000001e1',
+      createdAt: 1,
+      status,
+      attempts: 0,
+      availableAt: 1,
+    };
+    const key: common.OutboxKey = { orderingKey: 'order-1' };
+    const applied: common.OutboxTransition = { outcome: 'applied' };
+    const stats: common.OutboxStoreStats = { pending: 1, failed: 0, oldestPendingCreatedAt: 1 };
+    const written: Readonly<Record<string, unknown>>[] = [];
+    const scope: common.IOutboxWriteScope = {
+      getRepository: () => ({
+        create: (data) => {
+          written.push(data);
+          return Promise.resolve(data);
+        },
+      }),
+    };
+    const store: common.IOutboxStore = {
+      append: async (s, r) => {
+        await s.getRepository('Outbox').create({ ...r });
+      },
+      scanPending: () => Promise.resolve([record]),
+      failedKeys: () => Promise.resolve([key]),
+      markSent: () => Promise.resolve(applied),
+      markFailure: () => Promise.resolve(applied),
+      release: () => Promise.resolve({ outcome: 'not-failed', status: 'sent' }),
+      stats: () => Promise.resolve(stats),
+      purge: () => Promise.resolve(0),
+      verify: () => Promise.resolve(),
+    };
+
+    await store.append(scope, record);
+    expect(written).toEqual([record]);
+    await expect(store.scanPending(undefined, 1)).resolves.toEqual([record]);
+    await expect(store.failedKeys(1)).resolves.toEqual([key]);
+    await expect(store.stats()).resolves.toEqual(stats);
+  });
+
+  it('exports SpanOptions with the optional root member', () => {
+    const options: common.SpanOptions = { kind: 'internal', root: true };
+    expect(options.root).toBe(true);
+  });
+});

@@ -347,22 +347,23 @@ describe('release workflow wiring', () => {
     const environment = [...jobSection(prJob, 'env').matchAll(/^ +([A-Z0-9_]+): (\S+)$/gm)];
     expect(environment.length).toBeGreaterThan(10);
 
-    // The five backends that cannot be service containers — each needs a
-    // command or an argument, and `options` reaches `docker create` BEFORE the
-    // image while the command comes after it — so no image or endpoint pin
-    // above reaches them. Compared byte-for-byte against ci.yml's own steps
-    // rather than pinned as literals, so changing an image, a published port,
-    // a command or a readiness probe on the PR side requires the same change
-    // in every consumer; a hand-written literal is what let these drift
-    // already. Only Bigtable was compared before, which left the other three
-    // free to diverge.
-    const stepBackends = [
-      'Start the Cloud Bigtable emulator',
-      'Start the NATS server (JetStream)',
-      'Start Kafka (KRaft single-node)',
-      'Start MinIO (S3 storage outage suite)',
-      'Start Keycloak (outside-issuer suite)',
-    ];
+    // The backends that cannot be service containers — each needs a command
+    // or an argument, and `options` reaches `docker create` BEFORE the image
+    // while the command comes after it — so no image or endpoint pin above
+    // reaches them. Compared byte-for-byte against ci.yml's own steps rather
+    // than pinned as literals, so changing an image, a published port, a
+    // command or a readiness probe on the PR side requires the same change in
+    // every consumer.
+    //
+    // The step NAMES are derived too: every PR-job step that runs `docker run`.
+    // This list was hand-written, and M107's MongoDB replica-set step was added
+    // to all three workflows but not to it, so drift.yml's copy shipped without
+    // its `continue-on-error: true` and nothing here noticed.
+    const stepBackends = [...prJob.matchAll(/^ +- name: (.+)$/gm)]
+      .map((match) => match[1]!)
+      .filter((name) => stepBlock(prJob, name).includes('docker run'));
+    expect(stepBackends).toContain('Start a MongoDB replica set (outbox suites)');
+    expect(stepBackends.length).toBeGreaterThanOrEqual(6);
 
     for (const { workflow, job, expectedStep } of SUITE_CONSUMERS) {
       const text = await Deno.readTextFile(workflow);

@@ -85,6 +85,26 @@ export type { IntegrationEventMetadata } from './integration/publish.ts';
 export { onIntegrationEvent } from './integration/subscribe.ts';
 export type { IntegrationEventHandler } from './integration/subscribe.ts';
 
+// Transactional outbox (M107)
+export {
+  OutboxEnvelopeTooLargeError,
+  OutboxNotReadyError,
+  OutboxRelayUnscheduledError,
+  OutboxRowStateError,
+  OutboxStoreVerifyTimeoutError,
+  OutboxUnknownTenantError,
+} from './outbox/errors.ts';
+export type {
+  IOutbox,
+  OutboxCommonOptions,
+  OutboxHealthOptions,
+  OutboxOptions,
+  OutboxRelayOptions,
+  OutboxStoreEntry,
+  OutboxSweepResult,
+  OutboxWriteInput,
+} from './interfaces/index.ts';
+
 // Option types
 export type {
   ConsumerRetryOptions,

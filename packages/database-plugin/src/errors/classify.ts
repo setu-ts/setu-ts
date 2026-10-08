@@ -207,22 +207,40 @@ export function isPoolExhaustion(error: unknown): boolean {
 }
 
 /**
- * Reads the classifier members of every error in a cause chain, bounded by
- * `MAX_CAUSE_DEPTH` and stopping at a cycle.
+ * The objects of a cause chain — the error itself, then each `cause` hop —
+ * bounded by `MAX_CAUSE_DEPTH` and stopping at a cycle or at a non-object.
+ *
+ * The one cause walk in this package: the classifier reads it, and so does the
+ * outbox bridge's startup check, so the two cannot disagree about how deep a
+ * driver signal may sit or what a cyclic chain is.
+ *
+ * @param error - The thrown value
+ * @returns The chain's objects, outermost first
  */
-function causeChainMembers(error: unknown): DriverErrorMembers[] {
+export function causeChain(error: unknown): object[] {
   const visited = new Set<unknown>();
-  const candidates: DriverErrorMembers[] = [];
+  const chain: object[] = [];
   let current: unknown = error;
   for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
     if (typeof current !== 'object' || current === null) break;
     if (visited.has(current)) break; // cyclic cause chain
     visited.add(current);
-    const members = safeMembers(current);
+    chain.push(current);
+    current = causeOf(current);
+  }
+  return chain;
+}
+
+/**
+ * Reads the classifier members of every error in a cause chain.
+ */
+function causeChainMembers(error: unknown): DriverErrorMembers[] {
+  const candidates: DriverErrorMembers[] = [];
+  for (const member of causeChain(error)) {
+    const members = safeMembers(member);
     if (members !== undefined) {
       candidates.push(members);
     }
-    current = causeOf(current);
   }
   return candidates;
 }

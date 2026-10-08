@@ -1,5 +1,5 @@
-import { expect } from '@std/expect';
 import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import {
   classifySmokeExitCode,
   malformedAppDirMessage,
@@ -20,6 +20,20 @@ async function readJson<T>(path: string): Promise<T> {
 }
 
 describe('application gate configuration', () => {
+  it('fails CI when the example gate changes tracked application files', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const start = workflow.indexOf('\n  deno:');
+    const end = workflow.indexOf('\n  publish-dry-run:');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const denoJob = workflow.slice(start, end);
+    // Same step, immediately after the gate: an assertion elsewhere or a
+    // failure-tolerant shell command would let lockfile drift pass again.
+    expect(denoJob).toMatch(
+      /- name: Example applications\n {8}run: \|\n {10}deno task check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
+    );
+  });
+
   it('keeps applications outside the published workspace', async () => {
     const root = await readJson<RootConfig>('deno.json');
     expect(root.workspace.some((entry) => entry.includes('apps'))).toBe(false);
@@ -415,6 +429,16 @@ describe('real-backend CI wiring', () => {
           'localhost:4222',
           '127.0.0.1:9092',
           'localhost:9092',
+          // M107 §6: the outbox real-backend suites — PostgreSQL (5433, the
+          // port database-plugin already grants), the standalone MongoDB the
+          // refusal test drives, the replica set, DynamoDB Local, the Bigtable
+          // emulator and the local-only Cosmos emulator. IP literals only.
+          '127.0.0.1:5433',
+          '127.0.0.1:27017',
+          '127.0.0.1:27018',
+          '127.0.0.1:8000',
+          '127.0.0.1:8086',
+          '127.0.0.1:8082',
         ]);
       } else if (pkg === 'auth-plugin') {
         // M100b §6: plus the real-provider Keycloak suite, endpoint-scoped.
@@ -624,15 +648,22 @@ describe('real-backend CI wiring', () => {
     }
   });
 
-  it('keeps the M101a Vault and live-Postgres outage cells deliberately local-only (§3.8)', async () => {
-    // CI runs neither Vault nor PostgreSQL. Asserting that here — rather than
-    // leaving it implicit — keeps a later reader from mistaking the skipped
-    // cells for an oversight, and pins the `ignore:` guards so an unset
-    // variable is reported IGNORED, never passed by an early return.
+  it('keeps the M101a Vault and database-plugin live-Postgres cells local-only (§3.8, M107 C8)', async () => {
+    // CI runs no Vault, and does not set the BARE `POSTGRES_URL` the
+    // database-plugin live-Postgres cells guard on (they need a generated
+    // Prisma client). Asserting that here — rather than leaving it implicit —
+    // keeps a later reader from mistaking the skipped cells for an oversight,
+    // and pins the `ignore:` guards so an unset variable is reported IGNORED,
+    // never passed by an early return.
+    //
+    // M107 C8: CI now runs PostgreSQL for the OUTBOX suites, on the distinct
+    // `OUTBOX_POSTGRES_URL`. The pin was a substring match, which that name
+    // also fails; the lookbehind refuses the bare name and admits the
+    // prefixed one.
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
       const text = await Deno.readTextFile(workflow);
       expect(text).not.toContain('VAULT_ADDR');
-      expect(text).not.toContain('POSTGRES_URL');
+      expect(text).not.toMatch(/(?<![A-Z_])POSTGRES_URL/);
     }
     const vault = await Deno.readTextFile(
       'packages/secrets-plugin/test/integration/vault-outage-real.test.ts',
@@ -647,6 +678,57 @@ describe('real-backend CI wiring', () => {
     );
     expect(postgres).toContain("Deno.env.get('POSTGRES_URL')");
     expect(postgres).toContain('ignore: skipLivePg');
+  });
+
+  it('starts PostgreSQL and a MongoDB replica set for the outbox suites in all three workflows (M107 §6)', async () => {
+    // The outbox real-backend suites guard on OUTBOX_POSTGRES_URL and
+    // MONGODB_RS_URI via `ignore:`. A dropped service or variable would turn
+    // the proof into a permanent skip while CI stays green, so the service,
+    // its health check, the port mappings, the step and both variables are
+    // pinned in every workflow that runs the suite.
+    for (
+      const workflow of [
+        '.github/workflows/ci.yml',
+        '.github/workflows/drift.yml',
+        '.github/workflows/release.yml',
+      ]
+    ) {
+      const text = await Deno.readTextFile(workflow);
+      expect(text).toContain(
+        'OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      );
+      expect(text).toContain(
+        'MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
+      );
+      expect(text).toMatch(/\n {6}postgres:\n {8}image: postgres:16\n/);
+      expect(text).toContain('POSTGRES_PASSWORD: postgres');
+      expect(text).toContain('- 127.0.0.1:5433:5432');
+      expect(text).toContain('--health-cmd "pg_isready -U postgres"');
+      expect(text).toContain('docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8');
+      expect(text).toContain('--replSet rs0 --port 27018 --bind_ip_all');
+      expect(text).toContain(
+        "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27018' }] })",
+      );
+      expect(text).toContain('db.hello().isWritablePrimary');
+      // The standalone service is untouched: the outbox's refusal of a
+      // standalone server is itself under test on MONGODB_URI.
+      expect(text).toContain('MONGODB_URI: mongodb://127.0.0.1:27017');
+    }
+    const config = await readJson<{
+      readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
+    }>('packages/messaging-plugin/deno.json');
+    for (
+      const endpoint of [
+        '127.0.0.1:5433',
+        '127.0.0.1:27017',
+        '127.0.0.1:27018',
+        '127.0.0.1:8000',
+        '127.0.0.1:8086',
+        '127.0.0.1:8082',
+      ]
+    ) {
+      expect(config.test?.permissions?.net).toContain(endpoint);
+    }
   });
 
   it('starts the NATS and Kafka backends and declares their endpoints and grants (M90d §3.5)', async () => {

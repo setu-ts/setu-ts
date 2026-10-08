@@ -69,13 +69,19 @@ export interface SamplingConfig {
  * @since 0.2.0
  */
 export interface TracerHost {
-  /** Starts a new span. */
+  /**
+   * Starts a new span.
+   *
+   * `root: true` starts a parentless span, ignoring both `parentContext` and
+   * the active span (OTel's own `SpanOptions.root`).
+   */
   startSpan(
     name: string,
     options?: {
       kind?: number;
       attributes?: Record<string, unknown>;
       parentContext?: TelemetryContext;
+      root?: boolean;
     },
   ): unknown;
   /** Runs work with the supplied span as the active OTel span, when supported. */

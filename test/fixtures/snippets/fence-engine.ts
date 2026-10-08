@@ -74,13 +74,14 @@ export function fenceExtension(lang: string): 'ts' | 'tsx' {
   return lang === 'tsx' || lang === 'jsx' ? 'tsx' : 'ts';
 }
 
-/** The eleven curated guides whose copyable fences must compile or be classified. */
+/** The twelve curated guides whose copyable fences must compile or be classified. */
 export const GUIDES = [
   'docs/getting-started.md',
   'docs/programmatic-api.md',
   'docs/custom-plugins.md',
   'docs/cli.md',
   'docs/plugin-architecture.md',
+  'docs/how-it-fits-together.md',
   'docs/examples.md',
   'docs/decorators.md',
   'docs/mvc.md',

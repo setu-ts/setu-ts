@@ -203,6 +203,7 @@ package fits the plugin architecture.
 | `MAX_PUBLISH_HEADERS`                | const     |
 | `MAX_PUBLISH_ID_BYTES`               | const     |
 | `ORDERING_KEY_HEADER`                | const     |
+| `OUTBOX_RECORD_KIND`                 | const     |
 | `PLUGIN_PRIORITY`                    | const     |
 | `RESERVED_HEADER_NAMES`              | const     |
 | `RESERVED_HEADER_PREFIXES`           | const     |
@@ -331,6 +332,8 @@ package fits the plugin architecture.
 | `IOpenApiApi`                        | interface |
 | `IOrmAdapter`                        | interface |
 | `IOutboundHttpDiagnosticsSource`     | interface |
+| `IOutboxStore`                       | interface |
+| `IOutboxWriteScope`                  | interface |
 | `IPipelineBehavior`                  | interface |
 | `IPlugin`                            | interface |
 | `IPluginContext`                     | interface |
@@ -396,6 +399,9 @@ package fits the plugin architecture.
 | `OutboundHttpDiagnosticsRecord`      | interface |
 | `OutboundHttpDiagnosticsResponse`    | interface |
 | `OutboundHttpDiagnosticsSnapshot`    | interface |
+| `OutboxKey`                          | interface |
+| `OutboxRecord`                       | interface |
+| `OutboxStoreStats`                   | interface |
 | `PageResult`                         | interface |
 | `ParsedPublishOptions`               | interface |
 | `PendingSignIn`                      | interface |
@@ -544,6 +550,8 @@ package fits the plugin architecture.
 | `Option`                             | type      |
 | `OrderDirection`                     | type      |
 | `OutboundHttpStatusClass`            | type      |
+| `OutboxStatus`                       | type      |
+| `OutboxTransition`                   | type      |
 | `PathPattern`                        | type      |
 | `PluginPriority`                     | type      |
 | `Provider`                           | type      |

@@ -5827,6 +5827,33 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
     direction — and then that the queue refusal starved every later processor, now refused at
     registration with per-name isolation in both loops. Round 5 passed with nothing open — complete
     (PR #427).
+- **Milestone 107** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` +
+  `packages/telemetry-plugin` — transactional outbox): `MessagingPlugin({ outbox })` registers an
+  `IOutbox` under the new `CAPABILITIES.OUTBOX`; `write(scope, definition, payload)` appends an
+  integration event inside the caller's own database transaction through the `IOutboxStore` port in
+  `common`, which `database-plugin`'s `createDatabaseOutboxStore` bridge implements over the
+  repository surface (every row carries the `'setu-outbox'` discriminator, so a shared table or
+  collection is safe; Bigtable, a DynamoDB table without its index and a standalone MongoDB are
+  refused at startup by name). A scheduled relay sweeps the PENDING set in keyset-paged laps with a
+  persisted cursor rather than a watermark, publishes at least once with M106's ordering key and
+  de-duplication id, blocks a key behind a failed or backed-off row, poisons unreadable rows, and
+  re-parents each publish to the trace that wrote the row via the new `SpanOptions.root`. Purge runs
+  on its own interval, shutdown drains in `onShutdown`, and an `outbox` health indicator plus
+  metrics report it. Proven on real PostgreSQL → RabbitMQ and → Redis Streams, a Mongo replica set,
+  DynamoDB Local and the real OpenTelemetry SDK. The full suite found the dependency drift gate
+  refusing the new `.sql` fixtures. The security audit ran four fresh-context rounds: round 1 found
+  F1 (Medium) — a lap overflowing its 10 000-key blocked set ended in the same sweep, which cleared
+  the flag before health read it, so an attacker with table write access stalled every keyed row
+  while `/health` read `up`; the holder now keeps the last completed lap's overflow until a clean
+  lap. Round 2 passed on `30e55237`. Two of the auditor's observations were then fixed at the
+  maintainer's direction: each store's startup `verify()` is bounded by `relay.storeTimeoutMs` and
+  fails `start()` with `OutboxStoreVerifyTimeoutError` (Drizzle's `connect()` does no I/O, so on
+  `pg`, whose driver sets no connect timeout, `verify()` is the first database call and `start()`
+  hung for ever), and stored `options` longer than any the outbox writes — a bound derived from the
+  M106 limits — are refused before the parse. Round 3 found L1 (Low): the test for that order fed an
+  unparseable string, so it passed with the check moved after the parse; it now spies on
+  `JSON.parse`. Round 4 passed on `f31148bf`. Not verified: workerd, Prisma, MySQL DDL, a non-`C`
+  PostgreSQL collation — complete (PR #431).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 

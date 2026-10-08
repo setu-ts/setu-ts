@@ -91,7 +91,7 @@ describe('dependency drift gate configuration', () => {
     // Every extension under those roots is either a source the resolution must
     // cover or a documented non-source. A new one lands in neither list and
     // fails here, which is a decision to take rather than a hole to acquire.
-    const nonSource = new Set(['json', 'md', 'txt', 'prisma', 'html', 'gitkeep']);
+    const nonSource = new Set(['json', 'md', 'txt', 'prisma', 'html', 'gitkeep', 'sql']);
     const sources = tracked.filter((file) => !nonSource.has(extensionOf(file)));
     expect(sources.length).toBeGreaterThan(2000);
 

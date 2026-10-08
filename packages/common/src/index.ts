@@ -353,6 +353,16 @@ export type {
   ITenantRepository,
   ITenantResolver,
 } from './services/tenancy.ts';
+export { OUTBOX_RECORD_KIND } from './services/outbox.ts';
+export type {
+  IOutboxStore,
+  IOutboxWriteScope,
+  OutboxKey,
+  OutboxRecord,
+  OutboxStatus,
+  OutboxStoreStats,
+  OutboxTransition,
+} from './services/outbox.ts';
 export type {
   CqrsCommand,
   CqrsQuery,

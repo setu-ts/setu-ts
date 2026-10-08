@@ -300,6 +300,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
         kind?: number;
         attributes?: Record<string, unknown>;
         parentContext?: TelemetryContext;
+        root?: boolean;
       },
     ) {
       const otelSpanOptions: Record<string, unknown> = {};
@@ -308,6 +309,13 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
       }
       if (spanOptions?.kind !== undefined) {
         otelSpanOptions.kind = spanOptions.kind;
+      }
+      // A root span ignores every parent: OTel's own `SpanOptions.root` drops
+      // the ACTIVE span, and no parent context is built from `parentContext`,
+      // so the span starts a new trace whatever is running around it.
+      if (spanOptions?.root === true) {
+        otelSpanOptions.root = true;
+        return tracer.startSpan(name, otelSpanOptions);
       }
 
       // N1 fix: build an OTel parent context and pass it as the 3rd arg.
