@@ -454,7 +454,7 @@ error[private-type-ref]: public type references private type
       // M109a added `@setu-ts/idempotency-plugin`: four unavoidable
       // `private-type-ref` diagnostics naming `@setu-ts/common` types the
       // plugin's own barrel does not re-export, exactly as every plugin's does.
-      expect(DOC_LINT_BASELINE).toBe(500);
+      expect(DOC_LINT_BASELINE).toBe(510);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
       // the drift this pair exists to make impossible.

@@ -94,7 +94,7 @@ export const CLEAN_PACKAGES = new Set([
  * since M90a is the intended handling; there is no symbol to cut, because each
  * one is the package's public surface.
  */
-export const DOC_LINT_BASELINE = 500;
+export const DOC_LINT_BASELINE = 510;
 
 /**
  * The Deno version {@linkcode DOC_LINT_BASELINE} was measured on.

@@ -490,7 +490,9 @@ MIT
 | `D1Adapter`                               | class     |
 | `DistributedLockObjectCore`               | class     |
 | `DurableObjectBackplane`                  | class     |
+| `DurableObjectIdempotencyStore`           | class     |
 | `DurableObjectLock`                       | class     |
+| `IdempotencyObjectCore`                   | class     |
 | `KvCacheStore`                            | class     |
 | `KvSessionStore`                          | class     |
 | `R2Storage`                               | class     |
@@ -510,6 +512,7 @@ MIT
 | `DistributedLockObjectCoreOptions`        | interface |
 | `DurableObjectArm`                        | interface |
 | `DurableObjectBackplaneOptions`           | interface |
+| `DurableObjectIdempotencyStoreOptions`    | interface |
 | `DurableObjectLockOptions`                | interface |
 | `DurableObjectMessageEvent`               | interface |
 | `DurableObjectUpgradeResponse`            | interface |
@@ -519,11 +522,13 @@ MIT
 | `ICloudflareBindings`                     | interface |
 | `ID1Database`                             | interface |
 | `ID1PreparedStatement`                    | interface |
+| `IdempotencyObjectCoreOptions`            | interface |
 | `IDurableObjectClientSocket`              | interface |
 | `IDurableObjectNamespace`                 | interface |
 | `IDurableObjectState`                     | interface |
 | `IDurableObjectStorage`                   | interface |
 | `IDurableObjectWebSocket`                 | interface |
+| `IIdempotencyObjectState`                 | interface |
 | `IKvNamespace`                            | interface |
 | `IQueueMessage`                           | interface |
 | `IQueueMessageBatch`                      | interface |
@@ -566,3 +571,46 @@ MIT
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.
+
+## The Durable Object idempotency store (M109a)
+
+One Durable Object per idempotency store key — the tier-B store `@setu-ts/idempotency-plugin` can
+use on Workers. The application exports the DO class and hands the store to the plugin; the object
+owns the record, its lease and its alarm.
+
+```toml
+# wrangler.toml
+[[durable_objects.bindings]]
+name = "IDEMPOTENCY"
+class_name = "IdempotencyObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["IdempotencyObject"]
+```
+
+```typescript
+import { DurableObject } from 'cloudflare:workers';
+import { DurableObjectIdempotencyStore, IdempotencyObjectCore } from '@setu-ts/cloudflare-plugin';
+import { IdempotencyPlugin } from '@setu-ts/idempotency-plugin';
+
+// The Durable Object side — the class the binding names.
+export class IdempotencyObject extends DurableObject {
+  #core = new IdempotencyObjectCore(this.ctx);
+  override fetch(request: Request): Promise<Response> {
+    return this.#core.fetch(request);
+  }
+  override alarm(): Promise<void> {
+    return this.#core.alarm();
+  }
+}
+
+// The Worker side — one store, its `namespace` isolating this application's records.
+const store = new DurableObjectIdempotencyStore(env.IDEMPOTENCY, { namespace: 'shop' });
+app.register(IdempotencyPlugin({ store: { type: 'custom', store } }));
+```
+
+The store takes `namespace` (required), `keyPrefix` (default `'idempotency:'`), `binding` (for error
+messages) and `timeoutMs` (default 5,000; `0` disables). It advertises `maxRecordBytes` of 120,000 —
+under the KV-backed Durable Object value limit — and has no `isHealthy`, because probing it would
+create and bill an object.

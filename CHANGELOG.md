@@ -14,6 +14,13 @@ All notable changes to this project are documented here. The format follows
   or the DI container (and how `DiPlugin`'s `autoRegister` fallback links them), and whether a test
   should use `overrideCapability`, `overrideProvider` or `without`. Every example compiles under the
   guide fence gate.
+- **A Cloudflare Durable Object idempotency store (`@setu-ts/cloudflare-plugin`, M109a).** The
+  plugin gains `DurableObjectIdempotencyStore` (the Worker side, over a `durable_objects` binding
+  and a required `namespace`) and `IdempotencyObjectCore` (the Durable Object side, with
+  `IIdempotencyObjectState` and `IdempotencyObjectCoreOptions`), plus
+  `DurableObjectIdempotencyStoreOptions`. One object per store key, one alarm per record, and an
+  input gate that keeps each claim atomic.
+
 - **`@Idempotent()` makes a decorated route idempotent (`@setu-ts/decorator-plugin`, M109a).** The
   decorator plugin gains `Idempotent`, which records a route's idempotency options and appends the
   provider's middleware LAST — after guards, declarative authorization, the middleware band and the
