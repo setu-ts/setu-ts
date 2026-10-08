@@ -20,7 +20,7 @@ describe('worker sizing', () => {
     for (
       const [value, rendered] of [
         [Symbol('cap'), 'Symbol(cap)'],
-        ['4', '4'],
+        ['4', '"4"'], // strings are quoted, so control characters are escaped
         [4n, '4'],
         [null, 'null'],
       ] as const
@@ -29,6 +29,74 @@ describe('worker sizing', () => {
       expect(() => validateSizingOptions(options)).toThrow(RangeError);
       expect(() => validateSizingOptions(options)).toThrow(`received ${rendered}`);
     }
+  });
+
+  it('checks the per-call timeoutMs it uses: an accessor cannot pass the check then disable it', async () => {
+    const host = new FakeHost();
+    const timers = new FakeTimers();
+    const service = new WorkerPoolService({ host }, createFakeRuntime(timers));
+    let reads = 0;
+    const options = {
+      get timeoutMs(): number {
+        reads++;
+        return reads === 1 ? 50 : NaN; // valid to the check, NaN to a second read
+      },
+    };
+    const task = service.run('m', 1, options).catch((error: Error) => error.name);
+    expect(reads).toBe(1);
+    host.handles[0].emitReady();
+    timers.fire(); // the 50 ms task timer must exist and fire
+    await expect(task).resolves.toBe('WorkerTaskTimeoutError');
+    await service.shutdown();
+  });
+
+  it('uses the validated plugin and per-pool timeouts, read once, and ignores inherited pools', async () => {
+    const host = new FakeHost();
+    const timers = new FakeTimers();
+    let poolReads = 0;
+    const pool = {
+      get taskTimeoutMs(): number {
+        poolReads++;
+        return poolReads === 1 ? 50 : -1;
+      },
+    };
+    const inherited = Object.create({ 'inherited': { taskTimeoutMs: NaN } });
+    const options = { host, pools: Object.assign(inherited, { m: pool }) };
+    const service = new WorkerPoolService(options, createFakeRuntime(timers));
+    expect(poolReads).toBe(1);
+    const task = service.run('m', 1).catch((error: Error) => error.name);
+    host.handles[0].emitReady();
+    timers.fire();
+    await expect(task).resolves.toBe('WorkerTaskTimeoutError');
+    // The inherited entry was neither validated nor applied: its module gets
+    // the plugin default (30 000 ms), so a fired task-scale timer leaves it running.
+    const other = service.run('inherited', 2);
+    host.handles[1].emitReady();
+    host.handles[1].replyOk('ran');
+    await expect(other).resolves.toBe('ran');
+    expect(poolReads).toBe(1);
+    await service.shutdown();
+  });
+
+  it('renders a refused value bounded and escaped', () => {
+    const value = `${'x'.repeat(10_000)}\r\nforged`;
+    let message = '';
+    try {
+      validateSizingOptions({ maxWorkers: value } as unknown as WorkerPoolPluginOptions);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message.length).toBeLessThan(200);
+    expect(message).not.toContain('\n');
+    const hostile = {
+      toString: () => {
+        throw new Error('boom');
+      },
+    };
+    expect(() =>
+      validateSizingOptions({ maxWorkers: hostile } as unknown as WorkerPoolPluginOptions)
+    )
+      .toThrow('received [unprintable object]');
   });
 
   it('reads each option once, so an accessor cannot change the validated value', () => {
@@ -108,7 +176,7 @@ describe('worker sizing', () => {
 
   it('does not let an Infinity legacy pool size make the derived budget unbounded', () => {
     const options = { defaultPoolSize: Infinity, pools: { a: { size: Infinity }, b: { size: 3 } } };
-    expect(resolveMaxWorkers(options, readSizingOptions(options), 4)).toBe(4);
+    expect(resolveMaxWorkers(readSizingOptions(options), 4)).toBe(4);
   });
 
   for (const value of [NaN, 0, -1, 1.5, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
@@ -134,25 +202,17 @@ describe('worker sizing', () => {
     }
   });
   it('resolves parallelism, default size, sum of listed sizes and explicit limits', () => {
-    expect(resolveMaxWorkers(undefined, readSizingOptions(undefined), 4)).toBe(4);
-    expect(resolveMaxWorkers({ defaultPoolSize: 8 }, readSizingOptions({ defaultPoolSize: 8 }), 4))
+    expect(resolveMaxWorkers(readSizingOptions(undefined), 4)).toBe(4);
+    expect(resolveMaxWorkers(readSizingOptions({ defaultPoolSize: 8 }), 4))
       .toBe(8);
     expect(
-      resolveMaxWorkers(
-        { pools: { a: { size: 6 }, b: { size: 7 }, c: {} } },
-        readSizingOptions({ pools: { a: { size: 6 }, b: { size: 7 }, c: {} } }),
-        4,
-      ),
+      resolveMaxWorkers(readSizingOptions({ pools: { a: { size: 6 }, b: { size: 7 }, c: {} } }), 4),
     ).toBe(13);
     expect(
-      resolveMaxWorkers(
-        { maxWorkers: 1, defaultPoolSize: 8 },
-        readSizingOptions({ maxWorkers: 1, defaultPoolSize: 8 }),
-        4,
-      ),
+      resolveMaxWorkers(readSizingOptions({ maxWorkers: 1, defaultPoolSize: 8 }), 4),
     ).toBe(1);
     expect(
-      resolveMaxWorkers({ maxWorkers: Infinity }, readSizingOptions({ maxWorkers: Infinity }), 4),
+      resolveMaxWorkers(readSizingOptions({ maxWorkers: Infinity }), 4),
     ).toBe(Infinity);
   });
   for (const entry of ['factory', 'service']) {
@@ -177,7 +237,7 @@ describe('worker sizing', () => {
         host.handles[0].emitReady();
         host.handles[0].replyOk(42);
         await expect(task).resolves.toEqual({ result: 42 });
-        expect(resolveMaxWorkers(options, readSizingOptions(options), 2)).toBe(2);
+        expect(resolveMaxWorkers(readSizingOptions(options), 2)).toBe(2);
       } finally {
         if (entry === 'factory') await app.stop();
         else await pool.shutdown();

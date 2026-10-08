@@ -539,3 +539,16 @@ docs/upgrading.md state the risk, including that a per-call `timeoutMs: 0` gets 
 remedies are a task timeout, or `maxWorkers: Infinity` to opt out of the bound. Refusing untimed
 tasks under a finite bound was rejected because it breaks valid single-module configurations. This
 item is a recorded decision, not an open finding, and the PR body restates it.
+
+### 12.4 Fourth audit round, 2026-10-09
+
+`.verify/milestone-45c-security-audit-round4.md` (commit ca160878) confirmed R3-1, R3-2 and the
+task-timeout validation (132 hostile-value checks, 9 negative controls) and failed on two Lows, both
+fixed afterwards. **R4-1:** options were validated in one read and used in another, so an accessor
+could pass the check and then disable or overflow the timeout, and an inherited `pools` entry
+skipped validation but was still applied. `readSizingOptions` now snapshots every sizing and timeout
+value once, including each own `pools` entry; the service resolves pool configuration only from the
+snapshot; the per-call `timeoutMs` is read once; and refused values are rendered bounded and
+escaped. **R4-2:** docs/upgrading.md claimed the warning covered a per-call `timeoutMs: 0`; it now
+says that case is not visible at registration. Note: §12.1's sentence that the task-timeout overflow
+"is not changed here" was superseded by §12.2.

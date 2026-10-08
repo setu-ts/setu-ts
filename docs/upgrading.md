@@ -37,9 +37,10 @@ remain usable.
 With `taskTimeoutMs: 0` (or a per-call `run()` option of `timeoutMs: 0`) under a finite
 `maxWorkers`, a task that never settles holds its slot until restart and can starve other modules;
 keep a task timeout on modules that share the budget, or pass `maxWorkers: Infinity`. `register()`
-logs a warning for that configuration. On Deno a timed-out CPU-bound task keeps running after its
-slot is released, and may keep writing to a `SharedArrayBuffer` after its promise rejected: do not
-reuse such a buffer.
+logs a warning when the plugin-wide or a per-pool `taskTimeoutMs` is `0`; a per-call `timeoutMs: 0`
+is not visible at registration and gets no warning. On Deno a timed-out CPU-bound task keeps running
+after its slot is released, and may keep writing to a `SharedArrayBuffer` after its promise
+rejected: do not reuse such a buffer.
 
 `taskTimeoutMs` (plugin-wide and per pool) and the per-call `timeoutMs` are now validated: each must
 be `0` or a positive integer no greater than 2147483647. `NaN` (what `Number()` returns for an unset

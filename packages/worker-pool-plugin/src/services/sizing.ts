@@ -11,12 +11,35 @@ export const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
  */
 export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
-/** One validated read of the sizing options; later code never re-reads them. */
+/** One pool entry's overrides, each field read exactly once. */
+export interface PoolOverridesSnapshot {
+  readonly size: number | undefined;
+  readonly maxQueue: number | undefined;
+  readonly taskTimeoutMs: number | undefined;
+}
+
+/**
+ * One validated read of every sizing and timeout option. Later code reads only
+ * this, never the application's options object again, so an accessor cannot
+ * hand the check one value and the pool another.
+ */
 export interface SizingSnapshot {
   /** The configured bound, or `undefined` to derive the default. */
   readonly maxWorkers: number | undefined;
   /** The resolved startup deadline in milliseconds. */
   readonly startupTimeoutMs: number;
+  /** Plugin-wide `defaultPoolSize`, as configured. */
+  readonly defaultPoolSize: number | undefined;
+  /** Plugin-wide `maxQueue`, as configured. */
+  readonly maxQueue: number | undefined;
+  /** Plugin-wide `taskTimeoutMs`, validated. */
+  readonly taskTimeoutMs: number | undefined;
+  /**
+   * Per-module overrides from the OWN enumerable keys of `pools`. An entry
+   * inherited through a prototype is ignored, not half-applied: it would be
+   * invisible to validation and visible to a later property lookup.
+   */
+  readonly pools: ReadonlyMap<string, PoolOverridesSnapshot>;
 }
 
 /**
@@ -54,13 +77,25 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
         `received ${describe(startup)}`,
     );
   }
-  assertTaskTimeout(options?.taskTimeoutMs, 'taskTimeoutMs');
-  for (const [specifier, pool] of Object.entries(options?.pools ?? {})) {
-    assertTaskTimeout(pool.taskTimeoutMs, `pools[${JSON.stringify(specifier)}].taskTimeoutMs`);
+  const taskTimeoutMs: unknown = options?.taskTimeoutMs;
+  assertTaskTimeout(taskTimeoutMs, 'taskTimeoutMs');
+  const pools = new Map<string, PoolOverridesSnapshot>();
+  for (const [specifier, entry] of Object.entries(options?.pools ?? {})) {
+    const poolTimeout: unknown = entry.taskTimeoutMs;
+    assertTaskTimeout(poolTimeout, `pools[${JSON.stringify(specifier)}].taskTimeoutMs`);
+    pools.set(specifier, {
+      size: entry.size,
+      maxQueue: entry.maxQueue,
+      taskTimeoutMs: poolTimeout as number | undefined,
+    });
   }
   return {
     maxWorkers: maxWorkers as number | undefined,
     startupTimeoutMs: (startup as number | undefined) ?? DEFAULT_STARTUP_TIMEOUT_MS,
+    defaultPoolSize: options?.defaultPoolSize,
+    maxQueue: options?.maxQueue,
+    taskTimeoutMs: taskTimeoutMs as number | undefined,
+    pools,
   };
 }
 
@@ -100,15 +135,11 @@ export function validateSizingOptions(options?: WorkerPoolPluginOptions): void {
 }
 
 /** Resolves the service-wide bound once, preserving explicitly sized pools. */
-export function resolveMaxWorkers(
-  options: WorkerPoolPluginOptions | undefined,
-  snapshot: SizingSnapshot,
-  parallelism: number,
-): number {
+export function resolveMaxWorkers(snapshot: SizingSnapshot, parallelism: number): number {
   return snapshot.maxWorkers ?? Math.max(
     parallelism,
-    budgetSize(options?.defaultPoolSize),
-    Object.values(options?.pools ?? {}).reduce((sum, pool) => sum + budgetSize(pool.size), 0),
+    budgetSize(snapshot.defaultPoolSize),
+    [...snapshot.pools.values()].reduce((sum, pool) => sum + budgetSize(pool.size), 0),
   );
 }
 
@@ -121,10 +152,21 @@ function budgetSize(size: number | undefined): number {
   return size !== undefined && Number.isFinite(size) && size > 0 ? size : 0;
 }
 
+/** Longest rendering of a refused value an error message carries. */
+const MAX_DESCRIBED_LENGTH = 64;
+
 /**
- * Renders any refused value without throwing: a template literal throws
- * `TypeError` for a Symbol, while `String()` renders it.
+ * Renders a refused value for an error message: never throws (a template
+ * literal throws for a Symbol, and a hostile `toString` can throw too), quotes
+ * and escapes strings so control characters cannot forge log lines, and
+ * truncates so a caller-supplied value cannot inflate the message.
  */
 function describe(value: unknown): string {
-  return String(value);
+  let text: string;
+  try {
+    text = typeof value === 'string' ? JSON.stringify(value) : String(value);
+  } catch {
+    text = `[unprintable ${typeof value}]`;
+  }
+  return text.length > MAX_DESCRIBED_LENGTH ? `${text.slice(0, MAX_DESCRIBED_LENGTH)}…` : text;
 }

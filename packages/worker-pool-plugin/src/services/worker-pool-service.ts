@@ -53,7 +53,7 @@ export class WorkerPoolService implements IWorkerPool {
   private closed = false;
 
   constructor(
-    private readonly options: WorkerPoolPluginOptions | undefined,
+    options: WorkerPoolPluginOptions | undefined,
     private readonly runtime: IRuntimeServices,
     /**
      * Present only when the application registered `CAPABILITIES.METRICS`.
@@ -63,7 +63,7 @@ export class WorkerPoolService implements IWorkerPool {
   ) {
     this.sizing = readSizingOptions(options);
     this.host = options?.host ?? runtime.workers;
-    const limit = resolveMaxWorkers(options, this.sizing, this.host?.availableParallelism() ?? 0);
+    const limit = resolveMaxWorkers(this.sizing, this.host?.availableParallelism() ?? 0);
     this.budget = new WorkerBudget(limit);
     budgetLimits.set(this, limit);
   }
@@ -85,8 +85,10 @@ export class WorkerPoolService implements IWorkerPool {
     input: TInput,
     options?: WorkerRunOptions,
   ): Promise<TOutput> {
+    // Read once: the value checked is the value the pool uses.
+    const timeoutMs: unknown = options?.timeoutMs;
     try {
-      assertTaskTimeout(options?.timeoutMs, 'timeoutMs');
+      assertTaskTimeout(timeoutMs, 'timeoutMs');
     } catch (error) {
       // Refused before admission and before any pool exists. Not counted in
       // worker_pool_tasks_rejected_total: that series' reasons describe pool
@@ -118,7 +120,7 @@ export class WorkerPoolService implements IWorkerPool {
     }
     // The worker protocol erases types across the thread boundary; the cast
     // re-attaches the caller's declared output type.
-    return pool.run(input, options?.timeoutMs) as Promise<TOutput>;
+    return pool.run(input, timeoutMs as number | undefined) as Promise<TOutput>;
   }
 
   /**
@@ -148,13 +150,14 @@ export class WorkerPoolService implements IWorkerPool {
     taskTimeoutMs: number;
     startupTimeoutMs: number;
   } {
-    const overrides = this.options?.pools?.[taskModule];
+    // Only the validated snapshot is consulted; see SizingSnapshot.
+    const sizing = this.sizing;
+    const overrides = sizing.pools.get(taskModule);
     return {
       specifier: taskModule,
-      size: overrides?.size ?? this.options?.defaultPoolSize ?? host.availableParallelism(),
-      maxQueue: overrides?.maxQueue ?? this.options?.maxQueue ?? DEFAULT_MAX_QUEUE,
-      taskTimeoutMs: overrides?.taskTimeoutMs ?? this.options?.taskTimeoutMs ??
-        DEFAULT_TASK_TIMEOUT_MS,
+      size: overrides?.size ?? sizing.defaultPoolSize ?? host.availableParallelism(),
+      maxQueue: overrides?.maxQueue ?? sizing.maxQueue ?? DEFAULT_MAX_QUEUE,
+      taskTimeoutMs: overrides?.taskTimeoutMs ?? sizing.taskTimeoutMs ?? DEFAULT_TASK_TIMEOUT_MS,
       startupTimeoutMs: this.sizing.startupTimeoutMs,
     };
   }

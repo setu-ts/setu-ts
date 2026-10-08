@@ -155,7 +155,9 @@ that cost matters. Workers stay resident between bursts; there is no timed idle 
 must be `0` (disabled) or a positive integer no greater than 2 147 483 647, the largest delay a
 runtime timer honours. Anything else throws `RangeError` at construction, or rejects that `run()`
 call before admission: `NaN` and negative values used to disable the timeout silently, and larger
-values overflowed the timer and timed every task out after about 1 ms.
+values overflowed the timer and timed every task out after about 1 ms. Each option is read once and
+the pools use exactly the validated value; only the own enumerable keys of `pools` are read, so an
+entry inherited through a prototype is ignored.
 
 **Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, or a per-call `run()` option of
 `timeoutMs: 0`, a task that never settles keeps its worker. Once every slot is held that way, other
