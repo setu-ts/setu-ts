@@ -1,5 +1,5 @@
-import { expect } from '@std/expect';
 import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import {
   classifySmokeExitCode,
   malformedAppDirMessage,
@@ -20,6 +20,20 @@ async function readJson<T>(path: string): Promise<T> {
 }
 
 describe('application gate configuration', () => {
+  it('fails CI when the example gate changes tracked application files', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const start = workflow.indexOf('\n  deno:');
+    const end = workflow.indexOf('\n  publish-dry-run:');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const denoJob = workflow.slice(start, end);
+    // Same step, immediately after the gate: an assertion elsewhere or a
+    // failure-tolerant shell command would let lockfile drift pass again.
+    expect(denoJob).toMatch(
+      /- name: Example applications\n {8}run: \|\n {10}deno task check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
+    );
+  });
+
   it('keeps applications outside the published workspace', async () => {
     const root = await readJson<RootConfig>('deno.json');
     expect(root.workspace.some((entry) => entry.includes('apps'))).toBe(false);
