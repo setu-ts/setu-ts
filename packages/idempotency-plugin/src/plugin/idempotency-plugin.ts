@@ -4,7 +4,7 @@
  * @module
  */
 import type { IIdempotencyService, ILogger, IPlugin } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, createConnectionErrorReporter, PLUGIN_PRIORITY } from '@setu-ts/common';
 import denoJson from '../../deno.json' with { type: 'json' };
 import { resolveDefaults, validatePluginOptionShape } from '../core/options.ts';
 import { createIdempotencyIndicator } from '../health/indicator.ts';
@@ -39,7 +39,14 @@ export function IdempotencyPlugin(options?: IdempotencyPluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
     async register(ctx) {
       const logger = (): ILogger | undefined => ctx.logger;
-      const store = await resolveStore(options?.store, logger);
+      // A built ioredis client's connection errors go to the logger instead of
+      // ioredis printing each reconnect failure to the console. The logger is
+      // read at call time, so one registered later is still honoured (§3.5).
+      const reporter = createConnectionErrorReporter({
+        source: 'idempotency-plugin: redis store',
+        logger: () => ctx.logger,
+      });
+      const store = await resolveStore(options?.store, reporter, logger);
       await store.connect(ctx.runtime);
       state = 'connected';
       // Registered immediately after connect, so a store whose indicator

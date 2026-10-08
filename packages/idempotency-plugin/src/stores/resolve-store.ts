@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IIdempotencyStore, ILogger } from '@setu-ts/common';
+import type { ConnectionErrorReporter, IIdempotencyStore, ILogger } from '@setu-ts/common';
 import type { IdempotencyStoreConfig } from '../interfaces/index.ts';
 import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS, DEFAULT_REDIS_KEY_PREFIX } from '../constants.ts';
 import { createRedisIdempotencyClient, loadIoredis } from './redis-client.ts';
@@ -14,11 +14,14 @@ import { RedisIdempotencyStore } from './redis-store.ts';
  * Builds the store described by `config`.
  *
  * @param config - The store configuration (`{ type: 'memory' }` when omitted)
+ * @param reporter - Routes a BUILT client's connection errors to the logger;
+ *   never attached to an injected client
  * @param logger - The logger thunk
  * @returns The store
  */
 export async function resolveStore(
   config: IdempotencyStoreConfig | undefined,
+  reporter: ConnectionErrorReporter | undefined,
   logger: () => ILogger | undefined,
 ): Promise<IIdempotencyStore> {
   const resolved = config ?? { type: 'memory' as const };
@@ -43,6 +46,7 @@ export async function resolveStore(
     RedisCtor,
     built.url,
     built.commandTimeoutMs ?? DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
+    reporter,
   );
   return new RedisIdempotencyStore(client, {
     namespace: built.namespace,

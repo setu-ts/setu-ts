@@ -7,6 +7,8 @@
  *
  * @module
  */
+import type { ConnectionErrorReporter } from '@setu-ts/common';
+import { attachConnectionErrorReporter } from '@setu-ts/common';
 import { IdempotencyConfigurationError } from '../errors.ts';
 import type { IBuiltRedisIdempotencyClient, IRedisIdempotencyClient } from '../interfaces/index.ts';
 
@@ -36,9 +38,16 @@ export async function loadIoredis(): Promise<RedisCtor> {
 /**
  * Constructs a lazily-connected client.
  *
+ * The connection-error reporter is attached HERE and only here: ioredis emits
+ * `'error'` on every failed reconnect and, with no listener, writes each one to
+ * the console itself, bypassing the application's logger (plan §3.5). An
+ * INJECTED client never reaches this function, so the caller's own handling of
+ * its events is left alone (§3.5).
+ *
  * @param RedisCtor - The ioredis `Redis` constructor
  * @param url - The Redis connection URL
  * @param commandTimeoutMs - Per-command timeout; `0` omits the option
+ * @param reporter - Routes `'error'`/`'ready'` events to the plugin's logger
  * @returns A client that connects only when `connect()` is called
  * @since 0.9.0
  */
@@ -46,11 +55,15 @@ export function createRedisIdempotencyClient(
   RedisCtor: RedisCtor,
   url: string,
   commandTimeoutMs: number,
+  reporter?: ConnectionErrorReporter,
 ): IBuiltRedisIdempotencyClient {
-  if (commandTimeoutMs === 0) {
-    return new RedisCtor(url, { lazyConnect: true });
+  const client = commandTimeoutMs === 0
+    ? new RedisCtor(url, { lazyConnect: true })
+    : new RedisCtor(url, { lazyConnect: true, commandTimeout: commandTimeoutMs });
+  if (reporter !== undefined) {
+    attachConnectionErrorReporter(client, reporter);
   }
-  return new RedisCtor(url, { lazyConnect: true, commandTimeout: commandTimeoutMs });
+  return client;
 }
 
 /**

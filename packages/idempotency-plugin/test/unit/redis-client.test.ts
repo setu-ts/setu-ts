@@ -15,6 +15,8 @@ import type { RedisCtor } from '../../src/stores/redis-client.ts';
 /** A recording Redis constructor. */
 class RecordingRedis {
   static last: { url: string; options: Record<string, unknown> | undefined } | undefined;
+  /** Every `on(event, handler)` the client received, in order. */
+  static listeners: Array<{ event: string; handler: (value: unknown) => void }> = [];
   constructor(url: string, options?: Record<string, unknown>) {
     RecordingRedis.last = { url, options };
   }
@@ -33,7 +35,8 @@ class RecordingRedis {
   connect(): Promise<void> {
     return Promise.resolve();
   }
-  on(): unknown {
+  on(event: string, handler: (value: unknown) => void): unknown {
+    RecordingRedis.listeners.push({ event, handler });
     return this;
   }
 }
@@ -58,6 +61,28 @@ describe('createRedisIdempotencyClient (M109a §3.5)', () => {
   it('omits commandTimeout at 0', () => {
     createRedisIdempotencyClient(RecordingRedis as unknown as RedisCtor, 'redis://x', 0);
     expect(RecordingRedis.last?.options).toEqual({ lazyConnect: true });
+  });
+
+  it('attaches the connection-error reporter to the client it BUILDS', () => {
+    RecordingRedis.listeners = [];
+    const reported: unknown[] = [];
+    createRedisIdempotencyClient(RecordingRedis as unknown as RedisCtor, 'redis://x', 0, {
+      report: (error) => void reported.push(error),
+      recovered: () => {},
+    });
+    // Both events are wired: `ready` is what turns an outage into one warning
+    // plus one recovery line rather than a warning per reconnect attempt.
+    expect(RecordingRedis.listeners.map((entry) => entry.event)).toEqual(['error', 'ready']);
+    const errorListener = RecordingRedis.listeners.find((entry) => entry.event === 'error');
+    const boom = new Error('connect ECONNREFUSED 127.0.0.1:6379');
+    errorListener?.handler(boom);
+    expect(reported).toEqual([boom]);
+  });
+
+  it('attaches nothing when no reporter is supplied', () => {
+    RecordingRedis.listeners = [];
+    createRedisIdempotencyClient(RecordingRedis as unknown as RedisCtor, 'redis://x', 0);
+    expect(RecordingRedis.listeners).toEqual([]);
   });
 });
 

@@ -33,6 +33,7 @@ async function makeStore(
   if (REDIS_URL === undefined) throw new Error('REDIS_URL is not set');
   const store = await resolveStore(
     { type: 'redis', namespace, url: REDIS_URL, ...(keyPrefix === undefined ? {} : { keyPrefix }) },
+    { report: () => {}, recovered: () => {} },
     () => undefined,
   );
   await store.connect(runtime);
@@ -122,6 +123,7 @@ describe('Redis store on real Redis (M109a §3.5)', { ignore }, () => {
     const logger = { level: 'info', warn: (m: string) => void warnings.push(m) } as never;
     const store = await resolveStore(
       { type: 'redis', namespace: nextNamespace(), url: REDIS_URL as string },
+      { report: () => {}, recovered: () => {} },
       () => logger,
     );
     await store.connect(runtime);
