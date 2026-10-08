@@ -5827,8 +5827,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   F1 (Medium) — a lap overflowing its 10 000-key blocked set ended in the same sweep, which cleared
   the flag before health read it, so an attacker with table write access stalled every keyed row
   while `/health` read `up`; the holder now keeps the last completed lap's overflow until a clean
-  lap. Round 2 passed on `30e55237`. Not verified: workerd, Prisma, MySQL DDL, a non-`C` PostgreSQL
-  collation — complete (PR pending).
+  lap. Round 2 passed on `30e55237`. Two of the auditor's observations were then fixed at the
+  maintainer's direction: each store's startup `verify()` is bounded by `relay.storeTimeoutMs` and
+  fails `start()` with `OutboxStoreVerifyTimeoutError` (Drizzle's `connect()` does no I/O, so on
+  `pg`, whose driver sets no connect timeout, `verify()` is the first database call and `start()`
+  hung for ever), and stored `options` longer than any the outbox writes — a bound derived from the
+  M106 limits — are refused before the parse. Not verified: workerd, Prisma, MySQL DDL, a non-`C`
+  PostgreSQL collation — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
