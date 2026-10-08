@@ -24,6 +24,7 @@
  * @since 0.9.0
  */
 export interface IIdempotencyObjectState {
+  /** The object's transactional storage, plus the alarm it schedules. */
   readonly storage: {
     /** Reads a value. */
     get<T>(key: string): Promise<T | undefined>;
@@ -118,6 +119,8 @@ export class IdempotencyObjectCore {
   readonly #now: () => number;
 
   /**
+   * Creates the core over a Durable Object's state.
+   *
    * @param state - The Durable Object's `ctx`
    * @param options - Optional seams; the defaults are the deployment path
    */

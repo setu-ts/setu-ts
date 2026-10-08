@@ -85,16 +85,14 @@ export const CLEAN_PACKAGES = new Set([
  * down on files the milestone already touched. Lowered rather than widened,
  * which is the whole point.
  *
- * M109a added `@setu-ts/idempotency-plugin`, which raises it to 500. Four
- * `private-type-ref` diagnostics are unavoidable on a new plugin package: its
- * public functions and its store-config union name `@setu-ts/common` types
- * (`IPlugin`, `IRequestContext`, `MiddlewareFunction`, `IIdempotencyStore`) the
- * plugin's own barrel does not — and must not — re-export, exactly as every
- * other plugin's barrel does. Widening the ratchet for the first package added
- * since M90a is the intended handling; there is no symbol to cut, because each
- * one is the package's public surface.
+ * M109a added `@setu-ts/idempotency-plugin` and the Durable Object idempotency
+ * store in `cloudflare-plugin` and left the count where it was. The first draft
+ * raised it to 510 and called the new diagnostics unavoidable `private-type-ref`
+ * reports; measured, all fourteen were `missing-jsdoc` (`@inheritdoc` alone and
+ * `@param`-only constructor blocks carry no description), so each was documented
+ * instead. A new package does not license a wider ratchet.
  */
-export const DOC_LINT_BASELINE = 510;
+export const DOC_LINT_BASELINE = 496;
 
 /**
  * The Deno version {@linkcode DOC_LINT_BASELINE} was measured on.

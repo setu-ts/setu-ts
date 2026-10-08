@@ -76,11 +76,11 @@ function validateOptions(options: DurableObjectIdempotencyStoreOptions): void {
  * @since 0.9.0
  */
 export class DurableObjectIdempotencyStore implements IIdempotencyStore {
-  /** @inheritdoc */
+  /** The store's name, `'durable-object'`. */
   readonly name = 'durable-object';
 
-  /** @inheritdoc */
-  readonly maxRecordBytes = MAX_RECORD_BYTES;
+  /** The largest encoded record the store accepts, in bytes. */
+  readonly maxRecordBytes: number = MAX_RECORD_BYTES;
 
   readonly #namespace: IDurableObjectNamespace;
   readonly #namespaceName: string;
@@ -90,6 +90,8 @@ export class DurableObjectIdempotencyStore implements IIdempotencyStore {
   #runtime: IRuntimeServices | undefined;
 
   /**
+   * Creates a store over a Durable Object namespace binding.
+   *
    * @param namespaceBinding - The Durable Object namespace binding
    * @param options - The store options
    * @throws {CloudflareBindingMissingError} When the binding is not a namespace
@@ -112,13 +114,13 @@ export class DurableObjectIdempotencyStore implements IIdempotencyStore {
     this.#timeoutMs = options.timeoutMs ?? 5_000;
   }
 
-  /** @inheritdoc */
+  /** Captures the runtime; the binding needs no connection. */
   connect(runtime: IRuntimeServices): Promise<void> {
     this.#runtime = runtime;
     return Promise.resolve();
   }
 
-  /** @inheritdoc */
+  /** Claims a key through its Durable Object. */
   async claim(request: IdempotencyClaimRequest): Promise<IdempotencyClaimResult> {
     const answer = await this.#call<{ outcome: string; takeover?: boolean; record?: string }>(
       request.key,
@@ -144,7 +146,7 @@ export class DurableObjectIdempotencyStore implements IIdempotencyStore {
     }
   }
 
-  /** @inheritdoc */
+  /** Completes a claim held by `token`, storing the response record. */
   async complete(
     key: string,
     token: string,
@@ -154,7 +156,7 @@ export class DurableObjectIdempotencyStore implements IIdempotencyStore {
     return await this.#settle(key, '/complete', { token, record, ttlMs });
   }
 
-  /** @inheritdoc */
+  /** Releases a claim held by `token` so the key can be claimed again. */
   async release(key: string, token: string): Promise<IdempotencySettleResult> {
     return await this.#settle(key, '/release', { token });
   }

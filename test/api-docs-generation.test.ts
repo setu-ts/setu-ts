@@ -451,10 +451,9 @@ error[private-type-ref]: public type references private type
       // precedent), and two pre-existing missing-description diagnostics were
       // paid down on files the milestone already touched. Lowered rather than
       // widened, which is the whole point of a ratchet.
-      // M109a added `@setu-ts/idempotency-plugin`: four unavoidable
-      // `private-type-ref` diagnostics naming `@setu-ts/common` types the
-      // plugin's own barrel does not re-export, exactly as every plugin's does.
-      expect(DOC_LINT_BASELINE).toBe(510);
+      // M109a added two packages' worth of surface and documented every new
+      // symbol, so the count is unchanged.
+      expect(DOC_LINT_BASELINE).toBe(496);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
       // the drift this pair exists to make impossible.
