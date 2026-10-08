@@ -103,16 +103,28 @@ export class PipelinedBroker implements MessageBrokerAdapter {
   /** Clock + bound for the never-settled-gate backstop; absent → unbounded. */
   readonly #clock: ChainGateClock | undefined;
 
+  /**
+   * Prefix for a queue-less subscription's consumer id (M109a §3.19). The
+   * plugin passes a per-process UUID, so two app instances (or two replicas)
+   * never mint the same id.
+   */
+  readonly #subscriptionIdPrefix: string;
+
+  /** Monotonic counter behind `subscription:<prefix>:<n>`. */
+  #subscriptions = 0;
+
   constructor(
     broker: MessageBrokerAdapter,
     behaviors: readonly IIngressBehavior[],
     chainReady?: Promise<void>,
     clock?: ChainGateClock,
+    subscriptionIdPrefix = 'pipelined',
   ) {
     this.#broker = broker;
     this.#behaviors = behaviors;
     this.#chainReady = chainReady;
     this.#clock = clock;
+    this.#subscriptionIdPrefix = subscriptionIdPrefix;
     // Clear the gate once settled so later deliveries take the direct path.
     // A REJECTED gate is deliberately left in place (see the field JSDoc for
     // the two refusing cases and why neither clears it).
@@ -180,6 +192,13 @@ export class PipelinedBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    // The consumer identity is minted ONCE per subscription (M109a §3.19): the
+    // subscription's `queue` when given — a competing-consumer group shared
+    // across replicas — otherwise a per-process id unique to this subscription,
+    // so two subscribers on one topic never share an idempotency record.
+    const consumer = options?.queue ??
+      `subscription:${this.#subscriptionIdPrefix}:${++this.#subscriptions}`;
+
     const dispatch = (message: unknown, metadata: MessageMetadata): void | Promise<void> => {
       if (this.#behaviors.length === 0) {
         return handler(message as T, metadata);
@@ -189,6 +208,7 @@ export class PipelinedBroker implements MessageBrokerAdapter {
         kind: 'messaging',
         name: topic,
         payload: message as T,
+        consumer,
         ...(metadata.headers !== undefined ? { headers: metadata.headers } : {}),
       };
       return composeBehaviorChain<IngressContext, void>(
