@@ -81,11 +81,18 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
   assertTaskTimeout(taskTimeoutMs, 'taskTimeoutMs');
   const pools = new Map<string, PoolOverridesSnapshot>();
   for (const [specifier, entry] of Object.entries(options?.pools ?? {})) {
-    const poolTimeout: unknown = entry.taskTimeoutMs;
+    // A `null`/`undefined` entry (easy to produce from JSON config) means "no
+    // overrides", exactly as the pool lookup treated it before validation was
+    // added; reading through it must not throw TypeError at construction.
+    const fields = entry as
+      | Partial<Record<keyof PoolOverridesSnapshot, unknown>>
+      | null
+      | undefined;
+    const poolTimeout: unknown = fields?.taskTimeoutMs;
     assertTaskTimeout(poolTimeout, `pools[${JSON.stringify(specifier)}].taskTimeoutMs`);
     pools.set(specifier, {
-      size: entry.size,
-      maxQueue: entry.maxQueue,
+      size: fields?.size as number | undefined,
+      maxQueue: fields?.maxQueue as number | undefined,
       taskTimeoutMs: poolTimeout as number | undefined,
     });
   }

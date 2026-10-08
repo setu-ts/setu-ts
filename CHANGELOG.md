@@ -571,16 +571,16 @@ All notable changes to this project are documented here. The format follows
   module with no worker. A worker whose listeners fail to attach is no longer charged a slot.
   `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers`, because a task that
   never settles keeps its slot. Every sizing and timeout option, including each own `pools` entry,
-  is read once into a validated snapshot that the pools use (an inherited `pools` entry is ignored),
-  a per-call `timeoutMs` is read once, refused values are rendered bounded and escaped, a Symbol
-  `maxWorkers` is refused with the documented `RangeError`, and an `Infinity` legacy pool size no
-  longer makes the derived default unbounded. **Breaking:** `taskTimeoutMs` (plugin-wide and per
-  pool) and the per-call `timeoutMs` must now be `0` or a positive integer no greater than 2 147
-  483 647. `NaN` and negative values used to disable the timeout silently and larger values timed
-  every task out after about 1 ms; they now throw `RangeError` at construction or reject that
-  `run()`. Pass `0` for no timeout. The sizing documentation now states that the bound counts slots,
-  not threads: on Deno a timed-out CPU-bound task keeps running, and can keep writing to a
-  `SharedArrayBuffer`, after its promise rejects.
+  is read once into a validated snapshot that the pools use (an inherited `pools` entry is ignored;
+  a `null` entry means no overrides), a per-call `timeoutMs` is read once, refused values are
+  rendered bounded and escaped, a Symbol `maxWorkers` is refused with the documented `RangeError`,
+  and an `Infinity` legacy pool size no longer makes the derived default unbounded. **Breaking:**
+  `taskTimeoutMs` (plugin-wide and per pool) and the per-call `timeoutMs` must now be `0` or a
+  positive integer no greater than 2 147 483 647. `NaN` and negative values used to disable the
+  timeout silently and larger values timed every task out after about 1 ms; they now throw
+  `RangeError` at construction or reject that `run()`. Pass `0` for no timeout. The sizing
+  documentation now states that the bound counts slots, not threads: on Deno a timed-out CPU-bound
+  task keeps running, and can keep writing to a `SharedArrayBuffer`, after its promise rejects.
 
 - **Idle worker crashes are reported (M45c, #433).** A worker error that settles no task (an idle
   worker crashing, or a startup crash with nothing queued) is now logged by the worker-pool plugin

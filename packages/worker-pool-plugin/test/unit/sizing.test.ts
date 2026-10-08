@@ -78,6 +78,30 @@ describe('worker sizing', () => {
     await service.shutdown();
   });
 
+  it('treats a null or undefined pools entry as no overrides instead of throwing', async () => {
+    // JSON-derived config can carry `"pools": { "m": null }`; before validation
+    // was added the pool lookup tolerated it, so construction must too.
+    const host = new FakeHost();
+    const options = {
+      host,
+      taskTimeoutMs: 5_000,
+      pools: { m: null, n: undefined },
+    } as unknown as WorkerPoolPluginOptions;
+    expect(() => WorkerPoolPlugin(options)).not.toThrow();
+    const snapshot = readSizingOptions(options);
+    expect(snapshot.pools.get('m')).toEqual({
+      size: undefined,
+      maxQueue: undefined,
+      taskTimeoutMs: undefined,
+    });
+    const service = new WorkerPoolService(options, createFakeRuntime(new FakeTimers()));
+    const task = service.run('m', 1);
+    host.handles[0].emitReady();
+    host.handles[0].replyOk('ok');
+    await expect(task).resolves.toBe('ok');
+    await service.shutdown();
+  });
+
   it('renders a refused value bounded and escaped', () => {
     const value = `${'x'.repeat(10_000)}\r\nforged`;
     let message = '';
