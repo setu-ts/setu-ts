@@ -5778,6 +5778,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   import maps); everything else gets the printed registration line instead of an edit. Round 7
   failed on four Low findings, fixed afterwards on this branch and NOT re-audited, at the
   maintainer's limit of seven rounds — complete (PR #415).
+- **Milestone 101i** (`packages/cli` + `packages/kernel` + `packages/di-plugin` +
+  `packages/decorator-plugin` + `packages/testing` + `packages/react-router-plugin` + the starters +
+  docs — first-run repairs; no ROADMAP entry, by the maintainer's direction): every command the
+  newcomer path tells a reader to run now runs. `app.fetch` is bound, so
+  `export default { fetch: app.fetch }` serves on Workers; a full-stack npm project builds before it
+  starts; `DiPlugin` defaults `autoRegister: true` (breaking); `@setu-ts/testing` gains
+  `overrideProvider`; an absent header resolves to `undefined` and `Query<T>()` is generic; the
+  full-stack `dev` entry serves route edits on Deno, Node and Bun through `viteDevExternals`; and
+  the full-stack starter leaves `SchedulerPlugin` out on Workers, where every full-stack application
+  failed to start. Every newcomer guide was cold-read and its examples run or checked against source
+  — complete (PR #426).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 

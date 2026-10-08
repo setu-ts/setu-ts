@@ -67,7 +67,7 @@ naming the canonical spelling, and the output is identical.
 
 | You want    | Scaffold with                                      | You get                                                                                                                      |
 | ----------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Neither     | `setu new app`                                     | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g module` and `g job` all work.               |
+| Neither     | `setu new app`                                     | The runtime plugin alone. `g route`, `g controller`, `g middleware`, `g plugin`, `g service`, `g module` and `g job` work.   |
 | Functional  | `setu new app --template rest`                     | The REST plugin set. `g module` writes a plain service and a registered route with `GET` and `POST` handlers.                |
 | Class-based | `setu new app --template rest --style class-based` | `DecoratorPlugin` + `DiPlugin`, decorated controllers and ingress classes, `@Injectable` services, and class module barrels. |
 
@@ -78,10 +78,9 @@ decorated classes through.
 
 The choice **persists**. `setu generate` reads the target project's manifest, so a project holding
 `@setu-ts/decorator-plugin` gets class output and one without it gets functional output — a later
-generate cannot silently emit the other style. That is also why `g controller` is refused in a
-functional project: its emitted source imports `@setu-ts/decorator-plugin`, so an ungated one could
-not resolve its own import. The refusal names `setu generate route`, which registers handlers on the
-router API and needs no decorators.
+generate cannot silently emit the other style. `g controller`, for example, writes a decorated
+`@Controller` class in a class-based project and a `register…Routes(router)` function in a
+functional one; both land in `src/controllers/`, and neither needs a plugin the project lacks.
 
 **The independent `--di` flag was removed.** It is refused with a message pointing at
 `--style class-based` (with `--template rest` or `microservice`); there is no longer a
@@ -100,7 +99,7 @@ provider on the container when one is present and never touches the kernel regis
 | -------------------- | ----------------------------- | --------------------------------------------------------- | ------------------- |
 | `deno` (default)     | `main.ts` → `app.start()`     | `deno.json`                                               | `deno task start`   |
 | `node`               | `main.ts` → `app.start()`     | `package.json` + `.npmrc` + `tsconfig.json`               | `npm start` (`tsx`) |
-| `bun`                | `main.ts` → `app.start()`     | `package.json` + `.npmrc` + `tsconfig.json`               | `bun run main.ts`   |
+| `bun`                | `main.ts` → `app.start()`     | `package.json` + `.npmrc` + `tsconfig.json`               | `bun run start`     |
 | `cloudflare-workers` | `src/index.ts` `fetch` export | `deno.json` + `package.json` + `.npmrc` + `wrangler.toml` | `npx wrangler dev`  |
 
 **`--runtime` picks the packaging, not the code.** For `deno`, `node` and `bun`, the generated
@@ -110,7 +109,9 @@ Only the manifest and the start command differ, so moving a project between thos
 manifest change:
 
 - **Node → Bun:** keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
-  replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. (Bun also runs an
+  replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. A `full-stack` project
+  keeps its `build` script and builds first: `start` becomes `bun run build && bun run main.ts`,
+  `test` becomes `bun run build && bun test`, and `dev` becomes `bun run dev.ts`. (Bun also runs an
   unmodified Node project's `main.ts` directly.)
 - **Node or Bun → Deno:** _replace_ `package.json`, `.npmrc`, `tsconfig.json` and the npm lockfile
   with the `deno.json` that `setu new --runtime deno` emits. A `deno.json` added beside a kept
@@ -189,9 +190,9 @@ is omitted from the template choices because two names for one project would tel
 Broker and queue are asked only when the answers already given can take them, which is the same test
 the flags apply: a template registering no messaging (the minimal default, `rest`), the
 starter-composed `full-stack`, and Cloudflare Workers are all skipped, so a `microservice` answer
-gets five questions and the default gets three. It never invents a question whose answer no flag can
-express, and `--dry-run` stays exact because prompting only rewrites the flag record before the
-ordinary pipeline runs.
+gets five questions, `rest` three, and accepting the default template two. It never invents a
+question whose answer no flag can express, and `--dry-run` stays exact because prompting only
+rewrites the flag record before the ordinary pipeline runs.
 
 It fails closed in three layers, so scripts, CI and editors are never blocked: programmatic callers
 pass no prompter at all; the installed executable supplies one only when stdin is a terminal; and
@@ -209,25 +210,28 @@ setu g service billing --dry-run  # print the plan, write nothing
 Any casing of the name produces identical output: `setu g controller user-profile` and
 `setu g controller UserProfile` emit the same file.
 
-Eleven of the fourteen schematics land in a barrel the generated `setu.config.ts` already imports,
-so a generated artifact reaches its registration site with **no edit to a file you own**:
+There are sixteen built-in schematics. Every one except `guard`, `migration` and — in a functional
+project — `service` and `job` lands in a barrel the generated `setu.config.ts` already imports, so a
+generated artifact reaches its registration site with **no edit to a file you own**:
 
-| Schematic          | Requires           | Emits into                      | Reaches                                                                              |
-| ------------------ | ------------------ | ------------------------------- | ------------------------------------------------------------------------------------ |
-| `module`           | `decorator-plugin` | `src/modules/`                  | `DecoratorPlugin({ controllers, services })`                                         |
-| `controller`       | —                  | `src/controllers/`              | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call |
-| `service`          | —                  | `src/services/`                 | `DecoratorPlugin({ services })`, when installed                                      |
-| `route`            | —                  | `src/controllers/`              | A `register…Routes(router)` call in `createApp()`                                    |
-| `middleware`       | —                  | `src/middleware/`               | The global middleware pipeline                                                       |
-| `plugin`           | —                  | `src/plugins/`                  | The `plugins: [...]` array                                                           |
-| `health-indicator` | `health-plugin`    | `src/health/`                   | `HealthPlugin({ indicators })` → `GET /health`                                       |
-| `metric`           | `metrics-plugin`   | `src/metrics/`                  | `MetricsPlugin({ customMetrics })` → `/metrics`                                      |
-| `command-handler`  | `cqrs-plugin`      | `src/cqrs/` or `src/ingress/`   | `CqrsPlugin({ commandHandlers })`, or `DecoratorPlugin({ ingress })` in class mode   |
-| `query-handler`    | `cqrs-plugin`      | `src/cqrs/` or `src/ingress/`   | `CqrsPlugin({ queryHandlers })`, or `DecoratorPlugin({ ingress })` in class mode     |
-| `event-handler`    | `events-plugin`    | `src/events/` or `src/ingress/` | `EventsPlugin({ handlers })`, or `DecoratorPlugin({ ingress })` in class mode        |
-| `guard`            | `auth-plugin`      | `src/guards/`                   | Nothing — attach it per route                                                        |
-| `job`              | —                  | `src/jobs/` or `src/ingress/`   | Transport-agnostic function, or `DecoratorPlugin({ ingress })` in class mode         |
-| `migration`        | `database-plugin`  | `src/migrations/`               | Nothing — no framework code reads migrations                                         |
+| Schematic          | Requires                    | Emits into                       | Reaches                                                                               |
+| ------------------ | --------------------------- | -------------------------------- | ------------------------------------------------------------------------------------- |
+| `module`           | —                           | `src/modules/`                   | `DecoratorPlugin({ modules })` (class mode), or a `register…Routes(router)` call      |
+| `controller`       | —                           | `src/controllers/`               | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call  |
+| `service`          | —                           | `src/services/`                  | `DecoratorPlugin({ services })`, when installed                                       |
+| `route`            | —                           | `src/controllers/`               | A `register…Routes(router)` call in `createApp()`                                     |
+| `middleware`       | —                           | `src/middleware/`                | The global middleware pipeline                                                        |
+| `plugin`           | —                           | `src/plugins/`                   | The `plugins: [...]` array                                                            |
+| `health-indicator` | `health-plugin`             | `src/health/`                    | `HealthPlugin({ indicators })` → `GET /health`                                        |
+| `metric`           | `metrics-plugin`            | `src/metrics/`                   | `MetricsPlugin({ customMetrics })` → `/metrics`                                       |
+| `command-handler`  | `cqrs-plugin`               | `src/cqrs/` or `src/ingress/`    | `CqrsPlugin({ commandHandlers })`, or `DecoratorPlugin({ ingress })` in class mode    |
+| `query-handler`    | `cqrs-plugin`               | `src/cqrs/` or `src/ingress/`    | `CqrsPlugin({ queryHandlers })`, or `DecoratorPlugin({ ingress })` in class mode      |
+| `event-handler`    | `events-plugin`             | `src/events/` or `src/ingress/`  | `EventsPlugin({ handlers })`, or `DecoratorPlugin({ ingress })` in class mode         |
+| `guard`            | `auth-plugin`               | `src/guards/`                    | Nothing — attach it per route                                                         |
+| `job`              | `queue-plugin` (class mode) | `src/jobs/` or `src/ingress/`    | Transport-agnostic function, or `DecoratorPlugin({ ingress })` in class mode          |
+| `migration`        | `database-plugin`           | `src/migrations/`                | Nothing — no framework code reads migrations                                          |
+| `ws-route`         | `websocket-plugin`          | `src/plugins/` or `src/ingress/` | The `plugins: [...]` array, or `DecoratorPlugin({ ingress })` in class mode           |
+| `sse`              | `sse-plugin`                | `src/controllers/`               | A `register…Routes(router)` call, or `DecoratorPlugin({ controllers })` in class mode |
 
 `guard` and `migration` are unwired deliberately, not by omission. A `guard` answers `401` when
 `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and `/` —
@@ -236,15 +240,15 @@ turning a generated file into an outage; its positions are per route (`@UseGuard
 queue processor would start a worker loop polling for a name nothing enqueues, and scheduling it
 needs a cron expression the artifact does not carry. In class mode with `QueuePlugin` installed it
 becomes a decorated queue processor in the ingress barrel. Nothing in the framework reads migration
-files at all.
+files at all. A functional `service` is a plain exported function, which has no registration site;
+`src/services/index.ts` re-exports it for convenience and registers nothing.
 
 A schematic gated on a plugin refuses rather than emitting source whose own import cannot resolve,
-and names the decorator-free alternative when there is one:
+and names the `setu add` command that installs it:
 
 ```
-The "controller" schematic requires @setu-ts/decorator-plugin, which is not installed in /path/to/app.
-Install it, then run this command again.
-Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
+The "guard" schematic requires @setu-ts/auth-plugin, which is not installed in /path/to/app.
+Run `setu add auth`, then this command again.
 ```
 
 For generated projects in either style, `setu add` registers the safe zero-configuration defaults
@@ -311,22 +315,26 @@ src/modules/orders/
 ├── orders.service.ts             # export function listOrders()
 └── orders.service.test.ts        # describe/it + expect
 src/controllers/
-├── index.ts                      # managed: registerGeneratedRoutes(app.router)
-└── orders.routes.ts              # registerOrdersRoutes — GET / and POST / (201)
+├── index.ts                      # managed: registerGeneratedRoutes(app.router, app.services)
+└── orders.routes.ts              # registerOrdersRoutes — GET /orders and POST /orders (201)
 ```
 
-In a **class-based** project it writes the decorated aggregate and rewrites the module barrel, which
-the scaffolded `setu.config.ts` already spreads into `DecoratorPlugin`:
+In a **class-based** project it writes the decorated aggregate and rewrites the module barrel, whose
+`MODULES` array the scaffolded `setu.config.ts` already passes to `DecoratorPlugin({ modules })`:
 
 ```
 src/modules/
-├── index.ts                      # managed: MODULE_CONTROLLERS, MODULE_SERVICES
+├── index.ts                      # managed: MODULES (the active @Module classes)
 └── orders/
     ├── index.ts                  # the module's own barrel
+    ├── orders.module.ts          # @Module({ controllers, providers }) — yours; never rewritten
     ├── orders.controller.ts      # @Controller, injecting the service by token
     ├── orders.service.ts         # @Injectable
     └── orders.service.test.ts    # describe/it + expect
 ```
+
+The managed barrel also exports `MODULE_CONTROLLERS` and `MODULE_SERVICES`, deprecated, so a config
+written before `@Module` declarations keeps working.
 
 The schematic is **ungated**: it works in every project shape, including one scaffolded with no
 template at all. Which of the two shapes you get is decided by whether `@setu-ts/decorator-plugin`
@@ -359,6 +367,9 @@ setu generate app billing --template microservice   # apps/billing
 acme/
 ├── deno.json               # "workspace": ["./apps/*"]   (package.json on the npm arm)
 ├── setu.workspace.json     # members, their ports, the transport, the runtime
+├── scripts/dev.ts          # the root `dev` runner: starts every member
+├── docker/                 # a Compose stack for the members
+├── k8s/                    # members.yaml: a Deployment and Service per member
 └── apps/
     ├── orders/
     └── billing/
@@ -391,9 +402,15 @@ export const SERVICE_PORT = 3000;
 
 /** Every OTHER member of this workspace, by service name. */
 export const SERVICE_ENDPOINTS = {
+  // The generated file reads the BILLING_HOST environment variable first.
   'billing': [{ host: '127.0.0.1', port: 3001 }],
 };
 ```
+
+Each sibling's host falls back to `127.0.0.1`, which is right only while every member runs on one
+machine, so it is overridable per service through `<MEMBER>_HOST`. The generated Compose stack sets
+those variables to the siblings' service names, because inside a container loopback is the container
+itself.
 
 `main.ts` binds `SERVICE_PORT` and `setu.config.ts` hands `SERVICE_ENDPOINTS` to
 `ServiceDiscoveryPlugin({ provider: 'static', … })`, so the port a member binds and the port its

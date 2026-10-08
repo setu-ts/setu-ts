@@ -307,6 +307,13 @@ class Application implements IKernelApplication {
   readonly #diagnostics: IDiagnosticsSource | undefined;
 
   constructor(diagnostics?: KernelDiagnosticsOptions) {
+    // Bound so `fetch` survives being passed around as a bare function. The
+    // Workers entry this framework documents is `export default { fetch:
+    // app.fetch }`, and Cloudflare invokes it as `exported.fetch(request, …)`,
+    // so `this` is the exported object: unbound, the `#registry` read below
+    // threw "Cannot read private member" and every request answered 500.
+    // Measured on workerd. Hono binds its `app.fetch` for the same reason.
+    this.fetch = this.fetch.bind(this);
     if (diagnostics === undefined) {
       return;
     }

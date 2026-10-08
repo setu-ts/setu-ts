@@ -1,8 +1,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';
+import { projectFiles, resolveHost, servedRoutes } from '../../../src/templates/project-files.ts';
 import type { TargetRuntime } from '../../../src/constants.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
+import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
 
 /**
  * Reads one planned file's contents.
@@ -244,6 +245,71 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(contentsOf([...projectFiles('shop', 'deno', host)], '.gitignore')).toContain('build/\n');
   });
 
+  it('emits a development entry and a dev task that skips the production build', () => {
+    const files = [...projectFiles('shop', 'deno', host)];
+    const tasks = (manifestOf('deno') as unknown as { tasks: Record<string, string> }).tasks;
+    expect(tasks['dev']).toBe('deno task install && deno run -A dev.ts');
+    const dev = contentsOf(files, 'dev.ts');
+    expect(dev).toContain('viteDevExternals({');
+    expect(dev).toContain('packages: [...frameworkPackages, ...workspaceLibraries]');
+    expect(dev).toContain('resolve: (specifier) => import.meta.resolve(specifier)');
+    expect(dev).toContain("mode: 'development'");
+    // The externals list dev.ts imports is the one the server build uses.
+    const vite = contentsOf(files, 'vite.config.ts');
+    expect(vite).toContain('export const frameworkPackages = [');
+    expect(vite).toContain('export const workspaceLibraries: string[] = [];');
+  });
+
+  it('hands the development SSR runtime to the plugin in place of assetsDir', () => {
+    const config = contentsOf([...projectFiles('shop', 'deno', host)], 'setu.config.ts');
+    expect(config).toContain(
+      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+    );
+    expect(config).toContain(
+      "...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),",
+    );
+    expect(config).toContain(
+      "import type { ReactRouterPluginOptions } from '@setu-ts/react-router-plugin';",
+    );
+  });
+
+  it('emits the same development entry on Node and Bun, run by a dev script', () => {
+    const deno = contentsOf([...projectFiles('shop', 'deno', host)], 'dev.ts');
+    for (const [runtime, dev] of [['node', 'tsx dev.ts'], ['bun', 'bun run dev.ts']] as const) {
+      const files = [
+        ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
+      ];
+      expect(contentsOf(files, 'dev.ts')).toBe(deno);
+      const scripts = (JSON.parse(contentsOf(files, 'package.json')) as {
+        scripts: Record<string, string>;
+      }).scripts;
+      expect(scripts['dev']).toBe(dev);
+      expect(contentsOf(files, 'README.md')).toContain(
+        runtime === 'bun' ? '```bash\nbun run dev\n```' : '```bash\nnpm run dev\n```',
+      );
+      // `ssr` is read on these targets, not underscore-prefixed.
+      expect(contentsOf(files, 'setu.config.ts')).toContain(
+        "...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),",
+      );
+    }
+  });
+
+  it('emits no development entry on Workers', () => {
+    const workersHost = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+    const files = [...projectFiles('shop', 'cloudflare-workers', workersHost)];
+    expect(files.some((file) => file.path === 'dev.ts')).toBe(false);
+    const workers = contentsOf(files, 'setu.config.ts');
+    // One signature on every target; Workers reads none of it.
+    expect(workers).toContain(
+      "  _ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+    );
+    expect(workers).not.toContain('ssr === undefined');
+    const scripts = (JSON.parse(contentsOf(files, 'package.json')) as {
+      scripts: Record<string, string>;
+    }).scripts;
+    expect(scripts['dev']).not.toContain('dev.ts');
+  });
+
   it('leaves a template WITHOUT a frontend build untouched', () => {
     // The three settings above ride one signal, so a REST project must gain
     // none of them — a `package.json` in a Deno project is the trap M58 hit.
@@ -395,5 +461,97 @@ describe('the Cloudflare Workers target', () => {
     // The two facts a reader cannot infer from the stanza alone.
     expect(toml).toContain('max_batch_timeout = 0');
     expect(toml).toContain('EXPORTED from your own src/index.ts');
+  });
+});
+
+describe('the routes a generated README lists', () => {
+  // Measured by booting each template and requesting every path; the scaffold
+  // e2e re-checks the list against a running project on every run.
+  const PLUGIN_PATHS = ['/health', '/live', '/ready', '/metrics', '/docs', '/openapi.json'];
+  const pathsOf = (name: string | undefined, runtime: TargetRuntime = 'deno') =>
+    servedRoutes(
+      resolveHost(name === undefined ? MINIMAL_HOST : getTemplate(name)!, runtime),
+    ).map((route) => route.path);
+
+  it('lists only the hello-world route for the template-less host', () => {
+    expect(pathsOf(undefined)).toEqual(['/']);
+  });
+
+  it('lists the greeting showcase and the plugin endpoints for rest, in either style', () => {
+    const expected = ['/', '/greetings', '/greetings/:name', ...PLUGIN_PATHS];
+    expect(pathsOf('rest')).toEqual(expected);
+    expect(pathsOf('class-based')).toEqual(expected);
+  });
+
+  it('lists no showcase for microservice, which emits none', () => {
+    expect(pathsOf('microservice')).toEqual(['/', ...PLUGIN_PATHS]);
+  });
+
+  it('lists what the full-stack starter composes, though its plugin list is empty', () => {
+    // The factory hides HealthPlugin, MetricsPlugin and OpenApiPlugin from the
+    // wirings, so only its `composes` declaration can put them here.
+    expect(resolveHost(getTemplate('full-stack')!, 'deno').plugins).toEqual([]);
+    expect(pathsOf('full-stack')).toEqual(['/', '/products', '/login', ...PLUGIN_PATHS]);
+  });
+
+  it('keeps the list after a runtime swap', () => {
+    expect(pathsOf('microservice', 'cloudflare-workers')).toEqual(['/', ...PLUGIN_PATHS]);
+  });
+
+  it('writes the section into the README with the address for each runtime', () => {
+    const readme = (runtime: TargetRuntime) =>
+      projectFiles('proj', runtime, resolveHost(getTemplate('rest')!, runtime))
+        .find((f) => f.path === 'README.md')?.contents ?? '';
+    expect(readme('deno')).toContain('## What it serves\n\nAt `http://localhost:3000`');
+    expect(readme('node')).toContain('- `/docs` — Swagger UI for the API');
+    expect(readme('cloudflare-workers')).toContain(
+      'Under `npx wrangler dev`, at `http://localhost:8787`',
+    );
+  });
+
+  it('names the allocated port for a workspace member', () => {
+    const files = projectFiles(
+      'proj',
+      'deno',
+      resolveHost(getTemplate('rest')!, 'deno'),
+      { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
+    );
+    const readme = files.find((f) => f.path === 'README.md')?.contents ?? '';
+    expect(readme).toContain('On the port `./src/discovery/services.ts` exports:');
+  });
+});
+
+describe('the emitted smoke test', () => {
+  const smokeTest = (name: string, runtime: TargetRuntime = 'deno') =>
+    contentsOf(
+      [...projectFiles('proj', runtime, resolveHost(getTemplate(name)!, runtime))],
+      'test/app.test.ts',
+    );
+
+  // I2 (X66-3): `/health` stays 200 when `populateLoadContext` throws, so the
+  // full-stack smoke test also requests the SSR home page — through `fetch`,
+  // since an SSR body streams and `inject()` refuses one, with the body
+  // consumed so the test's resource sanitizer does not report a leak.
+  it('requests the SSR home page through fetch for full-stack, beside /health', () => {
+    const test = smokeTest('full-stack');
+    expect(test).toContain("url: '/health'");
+    expect(test).toContain("app.fetch(new Request('http://localhost/'))");
+    expect(test).toContain('await page.text();');
+  });
+
+  it('keeps the /health-only smoke test for a host without a factory', () => {
+    const test = smokeTest('rest');
+    expect(test).toContain("url: '/health'");
+    expect(test).not.toContain('app.fetch');
+  });
+
+  // The emitted test runs on all three runtimes through testHarnessFor, so the
+  // fetch assertion must render in each target's own idiom.
+  it('renders the fetch assertion in each runtime idiom', () => {
+    expect(smokeTest('full-stack', 'node')).toContain(
+      'assert.deepStrictEqual(page.status, 200);',
+    );
+    expect(smokeTest('full-stack', 'bun')).toContain('expect(page.status).toEqual(200);');
+    expect(smokeTest('full-stack', 'deno')).toContain('expect(page.status).toEqual(200);');
   });
 });

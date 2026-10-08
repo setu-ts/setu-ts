@@ -8,6 +8,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A full-stack project's `dev` task serves route edits without a restart, on Deno, Node and Bun
+  (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR #426).** `setu new --template full-stack` now
+  emits a `dev.ts` entry and a `dev` task (`deno task dev`, `npm run dev`, `bun run dev`); a Workers
+  project gets neither, since the entry runs Vite in-process. On Deno, Vite's development SSR runner
+  could not load a route that imports a `@setu-ts` package: it resolves imports through
+  `node_modules`, so every page answered `500` with
+  `Cannot find module '@setu-ts/react-router-plugin'`, and a package it loaded itself would be a
+  second copy whose `contextKeyFor()` keys match nothing. The new `viteDevExternals()` resolves
+  those packages with the runtime's own resolver and keeps them external in the SSR environment; a
+  client import, which a browser could not load from that specifier, is left to Vite. On Node and
+  Bun the packages are in `node_modules`, which Vite externalises already, so the same `dev.ts` runs
+  unchanged there. The plugin is typed structurally (`ViteDevExternalsOptions`,
+  `ViteDevExternalsPlugin`, `ViteDevExternalId`, `ViteHookContext`, `ViteResolvedEnvironments`), so
+  the package still imports no Vite. Verified on all three runtimes against the published packages,
+  and on Deno against the workspace sources too: `/login` renders with its CSRF token, client
+  modules load through the app port, an edited route is served on the next request, and SIGINT stops
+  the app and Vite with exit code 0. If either fails to stop, the failure is logged and the process
+  exits 1.
+
+- **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR #426).**
+  With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the container,
+  where `overrideCapability()` cannot reach it, and the container refuses a second registration.
+  `overrideProvider('pricing-service', { useValue: fake })` registers the double before the real
+  class, so a decorated controller is constructed with it. A mistyped token, an application without
+  a container, or a provider registered too early fails `start()` instead of testing the real class.
+  A child scope from `createScope()` keeps the double even when it registers the token itself.
+
 - **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
   a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
   error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s
@@ -201,6 +228,23 @@ All notable changes to this project are documented here. The format follows
   field is validated at construction, `factor` (kafkajs's jitter) included, held to [0, 1].
 
 ### Changed
+
+- **A generated full-stack `setu.config.ts` takes an `ssr` parameter, and its `vite.config.ts`
+  exports `frameworkPackages` and `workspaceLibraries` (`@setu-ts/cli`, PR #426).** `dev.ts` passes
+  the development SSR runtime as `createApp`'s third argument, which replaces `assetsDir`; omitted,
+  production behaviour is unchanged. Workers projects declare the parameter as `_ssr` and read none
+  of it. Existing projects are unaffected; to adopt the dev loop, copy those changes and `dev.ts`
+  from a fresh scaffold.
+
+- **BREAKING: `DiPlugin()` now defaults `autoRegister` to `true` (`@setu-ts/di-plugin`, PR #426).**
+  With the old `false` default, a bare `DiPlugin()` could not resolve any framework capability, so
+  `@Inject(CAPABILITIES.LOGGER)` or `CAPABILITIES.CACHE` failed at startup with "No provider
+  registered for DI token". The container now falls back to the kernel `ServiceRegistry` for a token
+  it does not hold; explicit container registrations still win. **Migration:** pass
+  `DiPlugin({ autoRegister: false })` to keep resolution confined to the container. A starter's
+  `di: {}` arm passes its options through, so `@Inject(CAPABILITIES.LOGGER)` — the pairing both
+  starter READMEs show — now resolves there too. `createContainer()` outside the plugin is
+  unchanged.
 
 - **BREAKING: RabbitMQ consumer retry defaults (#421).** Durable messaging consumer groups now retry
   failures with five total attempts and tiered delays, create durable retry/dead queues (retry
@@ -413,6 +457,64 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **A full-stack application could not start on Cloudflare Workers (`@setu-ts/full-stack-starter`,
+  PR #426).** The starter always registered `SchedulerPlugin`, which refuses Workers at
+  `register()`, so `createFullStackApp()`, and every project from
+  `setu new --template full-stack --runtime cloudflare-workers`, threw `SchedulerUnavailableError`
+  before serving a request. The starter now leaves the scheduler out on Workers unless a `scheduler`
+  arm is passed; schedule there with `cloudflare-plugin`'s `WorkersCron`. Verified by booting the
+  composed set with the runtime forced to `cloudflare-workers` on Deno, not on workerd. The starter
+  README's Workers section, which said the starter does not run there, is corrected.
+
+- **A newly scaffolded full-stack project's smoke test now also requests `/` (`@setu-ts/cli`, PR
+  #426).** `populateLoadContext` runs only on an SSR request, so any DI misconfiguration left
+  `/health` at 200 while every page answered 500 and the generated `deno task test` passed over it.
+  The emitted `test/app.test.ts` now fetches `/` through `app.fetch` — an SSR body streams, which
+  `inject()` refuses — and asserts 200; other templates are unchanged.
+
+- **`export default { fetch: app.fetch }` answered every Workers request with 500
+  (`@setu-ts/kernel`, PR #426).** It is the Workers entry the `cloudflare-plugin` README,
+  `PUBLIC_API.md`, the `rest-starter` README and the Workers adapter's own `listen()` error all
+  name, and Cloudflare calls it as `exported.fetch(request, …)`, so `this` was the exported object
+  and `Application.fetch` threw `Cannot read private member #registry`. Measured on workerd. The
+  application now binds `fetch` at construction, so it works passed around as a bare function.
+
+- **A fresh full-stack project on Node or Bun crashed on its first `start` (`@setu-ts/cli`, PR
+  #426).** `setu new --template full-stack --runtime node` (or `bun`) prints
+  `npm install && npm start`, and the generated README says the same, but the `start` script ran
+  `tsx main.ts` (or `bun run main.ts`) without building first, so the React Router plugin failed
+  with "Failed to load React Router server build" because `build/server/index.js` did not exist.
+  `start` now runs the build first, as the Deno `start` task and the npm `test` script already did.
+  An existing project can prefix its own `start` with `npm run build &&` (or `bun run build &&`).
+
+- **A generated README now says what the project serves (`@setu-ts/cli`).** A new section lists each
+  route a fresh project answers, such as `/docs` (Swagger UI), `/openapi.json`, `/health` and
+  `/metrics`, with the address to reach them. The scaffold e2e requests every listed path on a
+  booted project, so the list cannot name a route that does not answer.
+
+- **The runtime deployment guide's setup commands did not run.** `npm install jsr:…`,
+  `npm add jsr:…` and `bun add jsr:…` all fail, and `wrangler init --type` takes no `--type`; the
+  guide now uses `npx jsr add` / `bunx jsr add` and `setu new`. It also showed a `package.json`
+  `imports` block Node cannot use, a `node:20` Docker base below the documented Node 22 floor,
+  Workers startup that cached a failed start for the isolate's life, `ctx.runtime` in request
+  handlers (where `ctx` has no `runtime`), and a 120-second Workers execution limit that does not
+  exist: an HTTP Worker has no wall-clock limit, and its CPU time is what is capped. Each startup
+  retry constructs a fresh application, because the kernel refuses restarting one after plugin
+  registration has begun.
+
+- **The getting-started guide's CLI install command did not work.** It omitted `-g`, which Deno 2.9
+  requires for a global install, and `-n setu`, without which the binary is named `cli` and every
+  `setu …` command in the guide is not found. It now matches the other four documented sites, and a
+  test fails if any documented install command drifts from them.
+
+- **An absent header resolves to `undefined`, and a validated query can be typed
+  (`@setu-ts/decorator-plugin`, PR #426).** `@Params(Header('X-Name'))` declared its source as
+  `string | undefined` but passed `null` for an absent header, because `Headers.get` answers `null`.
+  It now passes `undefined`, like a missing cookie or query parameter. **Migration:** a handler that
+  tested `=== null` for a missing header must test `=== undefined`. The whole-query source is now
+  generic like `Body`, so `Query<z.infer<typeof schema>>()` declares the shape `@ValidateQuery`
+  wrote instead of a cast. `apps/static-site` takes its port as the first argument (default `8000`).
 
 - **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
   `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
@@ -635,6 +737,134 @@ All notable changes to this project are documented here. The format follows
   corrected to the first published version whose file contains the symbol. They survived because the
   `@since` gate skipped every `0.1.0` tag — that line shipped only as `0.1.0-alpha.*` — and now
   checks such a tag against the line's last prerelease instead.
+
+- **The Cloudflare example cached a failed start for the isolate's whole life (`apps/cloudflare`, PR
+  #426).** `createWorkerHandler` memoised the start promise even when it rejected, so one transient
+  failure at cold start left that isolate answering errors to every later request. It now forgets a
+  failed start and retries on the next request, the rule the generated Workers entry has followed
+  since M70l. Concurrent requests still share one start, and none reaches `fetch` on an application
+  whose start failed.
+
+- **Constructor injection in a full-stack app was undocumented (`@setu-ts/full-stack-starter`,
+  `@setu-ts/rest-starter`, `@setu-ts/testing` docs, PR #426).** Nothing said how a React Router
+  loader reaches an injected service; the `full-stack-starter` README now shows resolving it from
+  `CAPABILITIES.DI_CONTAINER` in `populateLoadContext` and carrying it on a context key, and says
+  that a DI mistake starts cleanly and fails every server-rendered page. Both starter READMEs say
+  what the `di` arm turns on, and the testing README points a container-provided service at
+  `overrideProvider` rather than `overrideCapability`.
+
+- **The root README's quick examples did not run as written (README, PR #426).** The first example
+  registered `LoggerPlugin` without telling the reader to install it, so following the documented
+  install failed to resolve the import; it now says to add the package. The second read `JWT_SECRET`
+  before any plugin had registered; it now loads configuration with `loadConfig` and hands the same
+  snapshot to `ConfigPlugin({ instance })`. The feature table no longer claims event sourcing, which
+  the framework does not ship, and now lists Cosmos DB and Bigtable.
+
+- **The CLI guide described a CLI several milestones old (`docs/cli.md`, PR #426).** It said
+  `generate controller` and `generate module` need `decorator-plugin` (neither has since M70h),
+  listed fourteen schematics where there are sixteen (`ws-route` and `sse` were missing), quoted a
+  refusal message the CLI no longer prints, and left the M83 `@Module` file and `MODULES` barrel out
+  of the class-based module tree. It also miscounted the interactive questions, gave the wrong `bun`
+  start command, and showed the workspace discovery map without its `<MEMBER>_HOST` override. Each
+  corrected claim was checked against a project the CLI scaffolded.
+
+- **The NestJS migration guide mapped several NestJS features to hand-written code the framework
+  replaces (`docs/migration-nestjs.md`, PR #426).** Guards now map to `AuthPlugin` with
+  `requireAuth()`/`requireRole()`, in place of a hand-written global middleware that would also have
+  refused `/health`. Exception filters map to `errorHandler({ respond })`, WebSocket gateways to
+  `@Gateway`, and the testing module to `createTestApp({ app: createApp(), overrides })`. The guide
+  also says that a decorated `@Injectable` lives in the DI container, which `overrideCapability`
+  does not reach. The decorator example now passes `DiPlugin({ autoRegister: true })`, without which
+  injecting a framework capability fails at startup. The guide no longer says Setu-TS has no
+  `@Module`.
+
+- **The examples guide described applications that are not in `apps/` (`docs/examples.md`, PR
+  #426).** Its code blocks were written as illustrations rather than taken from the apps, and had
+  drifted. They showed routes the apps do not serve (`/items`, `/users`, `/my-route`), a health
+  endpoint `minimal` does not have, D1 and Cache API use the Cloudflare example does not make, and
+  WebSocket rooms in an SSE-only `realtime` example. They also named a `build` task where
+  `compiled-binary` has `compile`. The guide also did not say that `cqrs` and `microservices` print
+  a result and exit, or which port each app uses. Each deep dive now gives the commands it was
+  checked with against the running app, and links to that app's source.
+
+- **The Fastify migration guide's testing example threw at startup, and several sections described
+  behaviour the framework does not have (`docs/migration-fastify.md`, PR #426).** `createTestApp()`
+  with no plugins throws, because the kernel requires a runtime plugin. The example now passes
+  `RuntimePlugin()`, and the guide points at `app.inject()`, which works as Fastify's does. The
+  shutdown hooks' comments were reversed (`onStopping` runs while the application still serves;
+  `onShutdown` runs after the socket closes). The encapsulation section claimed capability tokens
+  scope a service, but every registered service is application-wide. Validation and error handling
+  now show `validateBody(...)` and `errorHandler()` in place of hand-written equivalents, and query
+  parameters come from `ctx.query`.
+
+- **The React Router development guide's loop failed for the CLI's full-stack skeleton on Deno
+  (`docs/react-router-dev.md`, PR #426).** Re-verified on Deno 2.9.6, Vite 8.3.1 and react-router
+  8.4.0: the build thunk, the `/__vite/` proxy and editing a route without a restart all still work.
+  A project from `setu new --template full-stack` imports `@setu-ts/react-router-plugin` in its
+  route modules, though, and Vite's development SSR runner cannot resolve that JSR import, so every
+  page answered `500`. The guide's loop now passes `viteDevExternals` (see Added), and points such a
+  project at its own `deno task dev`. It also pins Vite 8 as the CLI does, and says `isbot` is
+  needed only with React Router's default server entry.
+
+- **The telemetry fan-out guide's validation command failed as printed
+  (`docs/telemetry-collector-fanout.md`, PR #426).** The collector config reads five credentials
+  from the environment, and `otelcol-contrib validate` rejects it while they are empty, so the
+  command exited `1` on a clean checkout. The guide now sets placeholders in the command and says
+  validation contacts no vendor. It also says the config validates on 0.156.0 and on the 0.115.1
+  that the Compose stack pins. A scope note still sent readers to Milestone 39 for Compose. It now
+  links the `telemetry` profile that shipped there.
+
+- **The MVC guide's redirect example could never take its error branch (`docs/mvc.md`, PR #426).**
+  It decided acceptance with `ctx.request.method === 'POST'` on a `POST` route, so it always
+  redirected. It now validates the submitted title, re-renders the form with `422` when it is too
+  short, and redirects with `303` otherwise; both branches were driven through a running app. The
+  guide's other claims were checked the same way and hold.
+
+- **The custom-plugin guide's two test examples failed as printed (`docs/custom-plugins.md`, PR
+  #426).** The integration test registered its plugin after `createTestApp()` had started the
+  application, which throws; the unit test asserted a service its plugin never registered. Both now
+  pass when run, and every example was checked against the source or a running app. Step 1 used
+  `CAPABILITIES` without importing it, the service-registration block registered one token twice and
+  paired `override` with `multi` (which ignores it), the `subtle` example called it optional and
+  imported an HMAC key without a hash, and the sample README's outer fence closed early, so its
+  Usage and Options sections rendered as part of the guide.
+
+- **The programmatic API reference resolved capabilities before `start()`
+  (`docs/programmatic-api.md`, PR #426).** Both streaming examples and the `router.post` example
+  read a service at module scope, where the plugin providing it has not registered yet, so each
+  threw `No service registered`. They now resolve inside the handler, and the disconnect example no
+  longer closes a stream the client has already cancelled. The `middleware.add` section showed only
+  a plugin registration; it now adds a middleware. `register()` takes no options, `start()`'s
+  hostname defaults to the runtime's own, and the transcribed `IResponse` and `IRequestContext` gain
+  `html()` and `raw`.
+
+- **The plugin catalog described packages that have since changed (`docs/plugins.md`, PR #426).**
+  The kernel listed three exports it does not have (`createApplication` is its only value), the DI
+  token was `CAPABILITIES.CONTAINER` rather than `DI_CONTAINER`, the database entry listed neither
+  the MongoDB, DynamoDB, Cosmos DB nor Bigtable arms nor their drivers, telemetry omitted
+  `@opentelemetry/context-async-hooks`, audit claimed a Cloudflare KV store it does not ship,
+  multi-tenancy claimed physical schema and database isolation, LaunchDarkly was called Node-only,
+  and the CLI count was 14 schematics rather than 16. Every listed export and token is now checked
+  against its package's barrel and `CAPABILITIES`.
+
+- **The decorators guide's validation examples answered `500` on every request, and it said role
+  decorators are not enforced (`docs/decorators.md`, PR #426).** `@ValidateBody` and
+  `@ValidateQuery` were given plain `{ type, required }` objects, which are not schemas the
+  validation plugin can run, so every request to those routes failed. They now use Zod schemas.
+  `@Roles` and `@Permissions` have been enforced since M89a (`401`, `403`, or `501` with no
+  authorization service), while the guide described them as metadata only. The `DiPlugin()` examples
+  now pass `autoRegister: true`; without it, injecting `CAPABILITIES.CACHE` fails at startup. Also
+  corrected: the path `@Version` produces (`/v1/api/users`, not `/v1/users`), and the
+  `MetadataStore` example, which iterated a new, empty store instead of `metadataStore`.
+
+- **The plugin architecture guide's replacement and testing examples failed at startup
+  (`docs/plugin-architecture.md`, PR #426).** "Plugin Replacement" registered a custom logger beside
+  `LoggerPlugin`, which the kernel refuses because a capability has one provider. The testing
+  example registered a plugin after `createTestApp` had started the application, which throws. The
+  middleware priority table now lists every first-party middleware with its real priority; it had
+  omitted the error handler, locale resolution and request logging. The shutdown hook comments now
+  say when each hook runs relative to serving, and the guide no longer says routing and middleware
+  are plugins.
 
 ## [0.8.0] — 2026-10-03
 
@@ -5022,14 +5252,20 @@ Nothing here requires an application change unless it is named **Breaking** belo
   ```typescript
   // Before — compiled, then threw at app.start()
   DatabasePlugin({ type: 'prisma' });
-  DatabasePlugin({ type: 'drizzle', options: { drizzleTables: { User: users } } });
+  DatabasePlugin({
+    type: 'drizzle',
+    options: { drizzleTables: { User: users } },
+  });
 
   // After
   DatabasePlugin({ type: 'prisma', options: { prismaClient } });
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { User: users },
     },
   });
@@ -5603,7 +5839,10 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { User: users },
     },
   });
@@ -6270,7 +6509,9 @@ migration.
 
   ```typescript
   app.register(OpenApiPlugin({
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    },
     security: [{ bearerAuth: [] }], // document-level default
   }));
 

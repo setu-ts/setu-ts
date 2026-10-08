@@ -1,8 +1,8 @@
 # Plugin Architecture
 
-The Setu-TS framework is built around a powerful, flexible plugin architecture. Every capability in
-the framework is implemented as a plugin, from routing and middleware to database access and
-authentication.
+The Setu-TS framework is built around a plugin architecture. The kernel provides the router, the
+middleware pipeline, the service registry and the lifecycle; every capability on top of that —
+configuration, logging, database access, authentication and the rest — is a plugin.
 
 ## Core Concepts
 
@@ -23,14 +23,16 @@ A plugin is a modular unit of functionality that can be registered with your app
 Every plugin implements the `IPlugin` interface:
 
 ```typescript
+import type { CapabilityToken, IPluginContext } from '@setu-ts/common';
+
 interface IPlugin {
-  name: string;
-  version: string;
-  dependencies?: string[]; // Hard dependencies (must be present)
-  optionalDependencies?: string[]; // Soft dependencies (optional)
-  provides?: string[]; // Capability tokens this plugin provides
-  consumes?: string[]; // Capability tokens this plugin needs
-  priority?: number; // Registration order (lower = first)
+  readonly name: string;
+  readonly version: string;
+  readonly dependencies?: readonly CapabilityToken[]; // Must be provided, or startup fails
+  readonly optionalDependencies?: readonly CapabilityToken[]; // Ordered first when present
+  readonly provides?: readonly CapabilityToken[]; // Tokens this plugin registers
+  readonly consumes?: readonly CapabilityToken[]; // Tokens it reads; a warning if unprovided
+  readonly priority?: number; // Registration order among unrelated plugins (lower = first)
   register(ctx: IPluginContext): void | Promise<void>;
 }
 ```
@@ -146,16 +148,26 @@ async function addMiddleware(ctx: IPluginContext) {
 
 The default middleware priority order:
 
-| Priority | Middleware               | Description                   |
-| -------- | ------------------------ | ----------------------------- |
-| 20       | `metricsMiddleware`      | Metrics collection            |
-| 30       | `telemetryMiddleware`    | Telemetry/request tracing     |
-| 40       | `multiTenancyMiddleware` | Multi-tenancy                 |
-| 120–270  | HTTP security middleware | CORS, headers, CSRF, size, IP |
-| 260      | `sessionMiddleware`      | Session load and commit       |
-| 275      | `csrfFormMiddleware`     | Synchronizer-token check      |
-| 300      | `authMiddleware`         | Authentication                |
-| 500      | Default middleware       | Application routes            |
+| Priority | Middleware                          | Registered by                                       |
+| -------- | ----------------------------------- | --------------------------------------------------- |
+| 0        | `errorHandler()`                    | The application (the starters and `setu new` do it) |
+| 20       | Metrics collection                  | `MetricsPlugin`                                     |
+| 30       | Request tracing                     | `TelemetryPlugin`                                   |
+| 40       | Tenant resolution                   | `MultiTenancyPlugin`                                |
+| 45       | Locale resolution                   | `LocalizationPlugin`                                |
+| 100      | Request logging                     | `LoggerPlugin`                                      |
+| 120      | IP allow/deny lists                 | `HttpSecurityPlugin`                                |
+| 180      | Request size limit                  | `HttpSecurityPlugin`                                |
+| 200      | CORS                                | `HttpSecurityPlugin`                                |
+| 250      | Security headers                    | `HttpSecurityPlugin`                                |
+| 260      | Session load and commit             | `SessionPlugin`                                     |
+| 270      | Origin-based CSRF check             | `HttpSecurityPlugin`                                |
+| 275      | Form CSRF (synchronizer)            | `SessionPlugin`                                     |
+| 300      | Authentication                      | `AuthPlugin`                                        |
+| 500      | Middleware added with no `priority` | The application                                     |
+
+Lower numbers run first on the way in and last on the way out. Route-level middleware (a route's
+`middleware` list, or a decorator's guards) runs after all of these, just before the handler.
 
 ## Plugin Context
 
@@ -218,12 +230,12 @@ Plugins can register lifecycle hooks to respond to application events:
 
 ```typescript
 async function registerLifecycleHooks(ctx: IPluginContext) {
-  // Register when app starts (before pipeline compilation)
+  // After every plugin's register(): every capability is now resolvable
   ctx.lifecycle.onInit(() => {
     // Initialization logic
   });
 
-  // Register when app is ready to accept requests
+  // After every onInit, before the server binds its port
   ctx.lifecycle.onBootstrap(() => {
     // Bootstrap logic
   });
@@ -242,17 +254,19 @@ async function registerLifecycleHooks(ctx: IPluginContext) {
     // Handle error
   });
 
-  // Shutdown hooks (drain period)
+  // First thing in stop(), while the app still serves: deregister from discovery
   ctx.lifecycle.onStopping(() => {
-    // Start graceful shutdown
+    // Stop new traffic arriving
   });
 
+  // The app now refuses requests and the socket is closed: close connections
   ctx.lifecycle.onShutdown(() => {
-    // Final cleanup
+    // Close connections, flush buffers
   });
 
+  // After shutdown completes
   ctx.lifecycle.onClose(() => {
-    // Release resources
+    // Release remaining resources
   });
 }
 ```
@@ -295,7 +309,9 @@ const MyPlugin: IPlugin = {
 
 ### Consumes (Soft Dependencies)
 
-The `consumes` field indicates capabilities your plugin needs but won't fail if missing:
+The `consumes` field declares capabilities your plugin reads. Startup does not fail when one is
+missing; the kernel logs a warning through the registered logger, and says nothing when no logger is
+registered:
 
 ```typescript
 const MyPlugin: IPlugin = {
@@ -334,12 +350,17 @@ the middleware priority table above).
 
 ## Plugin Replacement
 
-Plugins can be replaced by custom implementations:
+A capability has one provider, so replacing a plugin means registering yours **instead of** the
+original. Registering both fails at startup with
+`Capability 'logger' is provided by both 'logger-plugin' and 'custom-logger'`.
 
 ```typescript
-// Register a custom logger plugin
+// Register a custom logger plugin in place of LoggerPlugin, not beside it
 app.register(CustomLoggerPlugin());
 ```
+
+To replace one service while keeping the rest of a plugin, register it under the same token with
+`{ override: true }` from a plugin that runs later.
 
 ## Runtime Independence
 
@@ -412,18 +433,17 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 describe('MyPlugin', () => {
   it('registers services correctly', async () => {
     const app = await createTestApp({
-      plugins: [RuntimePlugin()],
+      plugins: [RuntimePlugin(), MyPlugin(undefined)],
     });
-    app.register(MyPlugin(undefined));
 
     expect(app.services.has('my-service')).toBe(true);
+    await app.stop();
   });
 
   it('adds middleware to the pipeline', async () => {
     const app = await createTestApp({
-      plugins: [RuntimePlugin()],
+      plugins: [RuntimePlugin(), MyPlugin(undefined)],
     });
-    app.register(MyPlugin(undefined));
 
     const response = await inject(app, {
       method: 'GET',
@@ -431,9 +451,14 @@ describe('MyPlugin', () => {
     });
 
     // Assert middleware behavior
+    await app.stop();
   });
 });
 ```
+
+`createTestApp` starts the application, and a plugin cannot be registered after `start()`: pass
+every plugin in `plugins`. To test your real composition instead, pass your app factory:
+`createTestApp({ app: createApp() })`.
 
 ## Next Steps
 

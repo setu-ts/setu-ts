@@ -60,6 +60,11 @@ app.register(DiPlugin()); // Optional: adds a container, so `scope` is honored
 app.register(DecoratorPlugin()); // Required for decorator processing
 ```
 
+The container falls back to the kernel's service registry for a token it has no provider for, so a
+class can inject a framework capability such as `CAPABILITIES.CACHE` or `CAPABILITIES.LOGGER`, which
+live in the registry rather than the container. `DiPlugin({ autoRegister: false })` turns the
+fallback off. On `0.8.0` and earlier the default was `false`, so pass `autoRegister: true` there.
+
 `DecoratorPlugin` is required — decorators are inert without it. **`DiPlugin` is not.**
 `DecoratorPlugin` branches on the container's presence: with `DiPlugin` registered, an `@Injectable`
 class is constructed through the container and its `scope` is honored; without it, the class is
@@ -270,7 +275,8 @@ to `''`. Multiple HTTP decorators on the same method register one route per verb
 ### Controller Options
 
 `@Controller(path)` takes a base path prefix string. Combine it with `@Version('v1')` to add an API
-version prefix; the effective path is `version + basePath + routePath` (e.g. `/v1/users`).
+version prefix; the effective path is `version + basePath + routePath`, so the controller below
+serves `GET /v1/api/users`.
 
 ```typescript
 import { Controller, Get, Version } from '@setu-ts/decorator-plugin';
@@ -500,9 +506,9 @@ import { Controller, Get, Header, Params } from '@setu-ts/decorator-plugin';
 export class UserController {
   @Get()
   @Params(Header('Authorization'))
-  async list(auth: string) {
-    // auth contains "Bearer <token>" or "Basic <credentials>"
-    return { hasAuth: auth !== null };
+  async list(auth: string | undefined) {
+    // "Bearer <token>" or "Basic <credentials>"; undefined when the header is absent.
+    return { hasAuth: auth !== undefined };
   }
 }
 ```
@@ -635,9 +641,12 @@ declaration does not carry.
 
 ## Validation
 
-`@ValidateBody`, `@ValidateQuery`, and `@ValidateParams` attach a schema to a route. The schema is
-stored on the route metadata and enforced only when the `ValidationPlugin` (or another schema-aware
-middleware) is registered; without it the schema is inert.
+`@ValidateBody`, `@ValidateQuery`, and `@ValidateParams` attach a Zod-compatible schema to a route.
+With the `ValidationPlugin` registered, `DecoratorPlugin` enforces it: an invalid request is
+answered `400` before the handler runs, and `@Params(Body())` / `@Params(Query())` then receive the
+**parsed** value, with the schema's defaults and coercions applied. Without a validation provider
+the schema is not enforced, and `register()` logs a warning naming each such route.
+`DecoratorPlugin({ enforceSchemas: false })` turns enforcement off deliberately.
 
 ```typescript
 import {
@@ -651,36 +660,37 @@ import {
   ValidateQuery,
 } from '@setu-ts/decorator-plugin';
 
-// A validation schema is a plain object (Zod schema by convention); it is a
-// VALUE, not a type, so @ValidateBody can attach it to the route metadata.
-const createUserSchema = {
-  name: { type: 'string' as const, required: true },
-  email: { type: 'string' as const, required: true },
-};
+import { z } from 'zod';
 
-interface CreateUserDto {
-  name: string;
-  email: string;
-}
+// The schema must be a Zod-compatible VALUE. A plain description object such as
+// `{ name: { type: 'string' } }` is not one, and every request to the route
+// would answer 500.
+const createUserSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+});
+
+const listQuerySchema = z.object({
+  page: z.coerce.number().default(1),
+  limit: z.coerce.number().default(10),
+});
 
 @Controller('/users')
 export class UserController {
   @Post()
   @ValidateBody(createUserSchema)
   @Params(Body())
-  async create(dto: CreateUserDto) {
+  async create(dto: z.infer<typeof createUserSchema>) {
     // dto is already validated
     return dto;
   }
 
   @Get()
-  @ValidateQuery({
-    page: { type: 'number', optional: true, default: 1 },
-    limit: { type: 'number', optional: true, default: 10 },
-  })
-  @Params(Query())
-  async list(query: Record<string, unknown>) {
-    // query is validated
+  @ValidateQuery(listQuerySchema)
+  @Params(Query<z.infer<typeof listQuerySchema>>())
+  async list(query: z.infer<typeof listQuerySchema>) {
+    // GET /users?page=3 → { page: 3, limit: 10 }: the parsed query, defaults
+    // and coerced numbers included.
     return query;
   }
 }
@@ -719,10 +729,15 @@ export class UserController {
 
 ### Authorization Metadata
 
-`@Roles`, `@Permissions`, and `@Public` attach authorization metadata to a route. The metadata is
-stored but **not** enforced by this plugin; enforcement is the responsibility of guard middleware
-registered by the auth plugin (e.g. `requireAuth`, `requireRole`, `requirePermission` from
-`@setu-ts/auth-plugin`). `@Public` takes precedence over `@Roles`/`@Permissions` on the same target.
+`@Roles`, `@Permissions`, and `@Public` attach authorization metadata to a route, and
+`DecoratorPlugin` **enforces** `@Roles` and `@Permissions`. A restricted route answers `401` to an
+unauthenticated request and `403` to a principal without the role or permission, before the handler
+runs. It fails closed: with no authorization service registered (`AuthPlugin` with an `rbac`
+option), it answers `501` rather than serving the route unguarded, and `register()` warns once per
+affected route. Several roles on one route mean any of them; roles and permissions together mean
+both. `@Public` marks a route public for the OpenAPI document.
+`DecoratorPlugin({ enforceRoles:
+false })` restores metadata-only behaviour.
 
 ```typescript
 import { Controller, Get, Permissions, Public, Roles } from '@setu-ts/decorator-plugin';
@@ -899,12 +914,11 @@ instance under `CAPABILITIES.METADATA_STORE` so `ctx.metadata` resolves to it. I
 `set`/`get` key-value API.
 
 ```typescript
-import { MetadataStore } from '@setu-ts/decorator-plugin';
+import { metadataStore } from '@setu-ts/decorator-plugin';
 
-const store = new MetadataStore();
-
-// Inspect registered controllers and their materialized routes.
-for (const [target, routes] of store.routes) {
+// The shared singleton the decorators write to. A `new MetadataStore()` is a
+// separate, empty store.
+for (const [target, routes] of metadataStore.routes) {
   console.log(target.name, routes.length, 'route(s)');
 }
 ```
@@ -970,19 +984,21 @@ kernel's `ServiceRegistry` instead. Register it when you want a scoped or transi
 
 ### No Method Overloading
 
-Each decorator registers one route. For multiple methods, use separate methods:
+TypeScript has no runtime overloads, so one method is one handler. Two verb decorators on one method
+register the same handler for both verbs; when the verbs need different behaviour, use separate
+methods. Paths are relative to the controller's base path:
 
 ```typescript
 import { Controller, Get, Post } from '@setu-ts/decorator-plugin';
 
 @Controller('/items')
 export class ItemController {
-  @Get('/items')
+  @Get() // GET /items
   async getItems() {
     return [];
   }
 
-  @Post('/items')
+  @Post() // POST /items
   async createItem() {
     return { created: true };
   }
@@ -1024,16 +1040,14 @@ import {
   ValidateBody,
 } from '@setu-ts/decorator-plugin';
 import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { z } from 'zod';
 
-const createUserSchema = {
-  name: { type: 'string' as const, required: true },
-  email: { type: 'string' as const, required: true },
-};
+const createUserSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+});
 
-interface CreateUserDto {
-  name: string;
-  email: string;
-}
+type CreateUserDto = z.infer<typeof createUserSchema>;
 
 @Injectable({ token: 'user-service' })
 export class UserService {
@@ -1066,6 +1080,8 @@ const authGuard: MiddlewareFunction = async (ctx: IRequestContext, next) => {
   await next();
 };
 
+// @Roles is enforced: register AuthPlugin with an `rbac` option, or every
+// request to this controller answers 501.
 @Controller('/api/users')
 @UseGuards(authGuard)
 @Roles('admin')

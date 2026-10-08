@@ -165,6 +165,11 @@ Two bounds remain, both documented rather than surprising:
   declaring it fails startup with `Capability '<token>' is already registered`; declare `provides`,
   or use the removal form below.
 
+**A service provided by the DI container cannot be replaced this way.** With `DiPlugin` registered,
+`DecoratorPlugin` puts each `@Injectable` class into the container rather than the kernel registry,
+so `overrideCapability('pricing-service', fake)` throws that nothing provides the token. Use
+[`overrideProvider`](#overrideprovider) for it.
+
 To remove the provider instead of replacing it — which also prevents its eager side effects — supply
 the double as a provider ahead of its consumers:
 
@@ -191,6 +196,30 @@ post-registration provider count, not a list of known tokens — so the kernel's
 (`health-indicator`, `metric-registration`, `openapi-schema`, `decorator-handler`, `cli-command`)
 and any capability an application registers with `{ multi: true }` are refused alike. Exclude the
 plugin that registers the provider instead.
+
+### overrideProvider
+
+Replaces a provider in the **DI container**. With `DiPlugin` registered, `DecoratorPlugin` puts each
+`@Injectable` class into the container rather than the service registry, so `overrideCapability`
+cannot reach it. `overrideProvider` registers the double on the container before `DecoratorPlugin`
+registers the real class, and every class that injects the token, a controller included, is
+constructed with the double:
+
+```typescript
+import { createTestApp, overrideProvider } from '@setu-ts/testing';
+
+const app = await createTestApp({
+  app: createApp(),
+  overrides: [overrideProvider('pricing-service', { useValue: { price: () => 0 } })],
+});
+```
+
+The token is the class's `@Injectable({ token })` value, or the one the decorator derived from its
+name. The provider is any container provider: `{ useValue }`, `{ useFactory }` or `{ useClass }`. It
+depends on `CAPABILITIES.DI_CONTAINER`, so it runs after `DiPlugin` and before `DecoratorPlugin`.
+`start()` fails when the application has no container, when the real provider was registered before
+the override, or when nothing in the application registers or injects the token, so a mistyped token
+fails the test instead of passing against the real class.
 
 > **`overrideCapability` replaces, `createMockPlugin` provides.** `createMockPlugin` declares the
 > token in `provides` — which is what satisfies a dependent plugin's `dependencies` check, and which
@@ -328,6 +357,8 @@ in PUBLIC_API.md for the full option tables and notes.
   — Mock plugin builder
 - [`overrideCapability`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Capability replacement plugin builder
+- [`overrideProvider`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
+  — DI container provider replacement plugin builder
 - [`inject`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Free-function request injector
 - [`createTestContext`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
@@ -349,6 +380,7 @@ in PUBLIC_API.md for the full option tables and notes.
 | `createTestContext`   | function  |
 | `inject`              | function  |
 | `overrideCapability`  | function  |
+| `overrideProvider`    | function  |
 | `FixtureManager`      | class     |
 | `MockResponse`        | class     |
 | `MockServiceRegistry` | class     |

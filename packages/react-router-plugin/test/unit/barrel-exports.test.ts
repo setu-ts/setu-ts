@@ -19,6 +19,7 @@ import {
   servicesContext,
   SsrService,
   userContext,
+  viteDevExternals,
 } from '../../src/index.ts';
 import type {
   PopulateLoadContext,
@@ -27,9 +28,24 @@ import type {
   RouterLoadContext,
   SsrRequestHandler,
   SsrRuntime,
+  ViteDevExternalId,
+  ViteDevExternalsOptions,
+  ViteDevExternalsPlugin,
+  ViteHookContext,
+  ViteResolvedEnvironments,
 } from '../../src/index.ts';
 
 describe('barrel exports', () => {
+  it('exports viteDevExternals and its structural types', () => {
+    const options: ViteDevExternalsOptions = { packages: [], resolve: (s) => s };
+    const plugin: ViteDevExternalsPlugin = viteDevExternals(options);
+    const config: ViteResolvedEnvironments = { environments: {} };
+    plugin.configResolved(config);
+    const ssr: ViteHookContext = { environment: { name: 'ssr' } };
+    const resolved: ViteDevExternalId | null = plugin.resolveId.call(ssr, 'x');
+    expect(resolved).toBeNull();
+  });
+
   it('exports ReactRouterPlugin factory function', () => {
     expect(typeof ReactRouterPlugin).toBe('function');
   });

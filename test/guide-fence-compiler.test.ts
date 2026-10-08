@@ -66,9 +66,11 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/custom-plugins.md': {
-    total: 23,
-    ts: 20,
-    compile: 20,
+    // 23/20 until the cold-read pass: the sample README's outer fence closed
+    // early, so its inner Usage block was counted as a top-level guide fence.
+    total: 22,
+    ts: 19,
+    compile: 19,
     external: 0,
     pseudocode: 0,
     skipped: 3,
@@ -93,12 +95,17 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/examples.md': {
-    total: 14,
-    ts: 11,
-    compile: 11,
+    // Rewritten after the examples cold read: the per-app "Key code" blocks
+    // described apps that no longer existed (routes, plugins, ports), so each
+    // deep dive now gives the shell commands it was checked with and links to
+    // the app's source. One compiled block remains: the factory/smoke shape
+    // every example shares, taken from apps/minimal.
+    total: 18,
+    ts: 1,
+    compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 3,
+    skipped: 17,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -169,9 +176,12 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 2,
   },
   'docs/runtime-deployment.md': {
-    total: 30,
-    ts: 13,
-    compile: 13,
+    // 30/13 until the cold-read pass: the Workers execution-limits best
+    // practice is prose now, because its code block computed a timeout from a
+    // wrong 120 s limit.
+    total: 29,
+    ts: 12,
+    compile: 12,
     external: 0,
     pseudocode: 0,
     skipped: 17,
@@ -195,13 +205,17 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // Scaffolding and Microservices sections add two bash fences (+2, skipped).
   // 272 after the getting-started cold read: three identical per-runtime
   // blocks collapse to one and a "Stopping Cleanly" block is added (-2, all
-  // compiling).
-  total: 272,
-  ts: 224,
-  compile: 191,
+  // compiling). 271 after the runtime-deployment cold read: the Workers
+  // execution-limits best practice became prose (-1, compiling). 275 after
+  // the examples cold read: ten invented "Key code" blocks became shell
+  // commands and source links (-10 compiling, +14 skipped). 274 after the
+  // custom-plugins cold read: a nested README fence stopped leaking out (-1).
+  total: 274,
+  ts: 212,
+  compile: 179,
   external: 33,
   pseudocode: 0,
-  skipped: 48,
+  skipped: 62,
 };
 
 describe('actual-fence compiler — all ten guides (shared engine)', () => {

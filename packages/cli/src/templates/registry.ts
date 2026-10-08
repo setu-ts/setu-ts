@@ -101,6 +101,20 @@ export interface MiddlewareWiring extends Wiring {
  * static assets itself is a platform question, and a fixed string cannot ask
  * it.
  */
+/**
+ * One route a generated project serves, listed in its README.
+ *
+ * The README's "What it serves" section is built from these, and the scaffold
+ * e2e requests every path it lists, so the section cannot name a route the
+ * project does not answer.
+ */
+export interface ServedRoute {
+  /** The request path; a `:name` segment stands for any value. */
+  readonly path: string;
+  /** What the route is, completing "`<path>` — …". */
+  readonly purpose: string;
+}
+
 export interface AppFactoryWiring {
   /** Bare `@setu-ts` package name, e.g. `full-stack-starter`. */
   readonly pkg: string;
@@ -116,6 +130,32 @@ export interface AppFactoryWiring {
    * platform while the public template name stays the same.
    */
   readonly args?: (context: AppFactoryRenderContext) => string;
+  /**
+   * Plugin packages the factory registers by default, so their endpoints are
+   * listed in the generated README. A plugin-list host needs no equivalent:
+   * its wirings already name every package.
+   */
+  readonly composes?: readonly string[];
+  /**
+   * A third factory parameter, after `env` and the devtool composition.
+   * Omitted → the factory takes the two shared parameters only.
+   *
+   * Rendered on every target with one signature; where the target reads none
+   * of it, the name is underscore-prefixed, as the devtool parameter is.
+   */
+  readonly parameter?: AppFactoryParameter;
+}
+
+/** A starter-composed template's own factory parameter. */
+export interface AppFactoryParameter {
+  /** Parameter name, as `args` reads it. */
+  readonly name: string;
+  /** The parameter's type annotation. */
+  readonly type: string;
+  /** One-sentence JSDoc `@param` text. */
+  readonly doc: string;
+  /** Targets on which `args` reads the parameter. */
+  readonly readOn: readonly TargetRuntime[];
 }
 
 /** One configuration variable a template's generated source reads. */
@@ -232,6 +272,11 @@ export interface TemplateManifest {
      * listed only `coverage/` and the env file.
      */
     readonly outputDir: string;
+    /**
+     * A development entry emitted on every server target (never Workers), with
+     * a `dev` task or script that runs it. Omitted → neither is emitted.
+     */
+    readonly devEntry?: { readonly path: string; readonly contents: string };
   };
   /**
    * `compilerOptions` merged into `tsconfig.json`, which the npm toolchain reads.
@@ -326,6 +371,11 @@ export interface TemplateHost {
    * choose.
    */
   readonly appFactory?: AppFactoryWiring;
+  /**
+   * Routes the template's own source serves, beyond the endpoints of the
+   * plugins it installs, for the generated README's "What it serves" section.
+   */
+  readonly routes?: readonly ServedRoute[];
   /** Additional renderer context for an app factory, supplied by a workspace overlay. */
   readonly appFactoryContext?: Omit<AppFactoryRenderContext, 'runtime'>;
   /**

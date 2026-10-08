@@ -121,10 +121,16 @@ export function Body<T = unknown>(): ParamSource<T> {
 /**
  * Binds the whole query record.
  *
+ * Resolves to the validated query when validation middleware wrote one for
+ * this request (an `@ValidateQuery` schema's parsed output, coercions and
+ * defaults applied), and to the raw string record otherwise. Pass that output
+ * type as `T` on a validated route; like {@linkcode Body}, `T` is the caller's
+ * declaration, not a guarantee from this package.
+ *
  * @returns A query source resolving to every query parameter
  * @since 0.2.0
  */
-export function Query(): ParamSource<Readonly<Record<string, string>>>;
+export function Query<T = Readonly<Record<string, string>>>(): ParamSource<T>;
 /**
  * Binds one named query parameter.
  *

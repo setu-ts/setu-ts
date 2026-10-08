@@ -107,7 +107,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/react-router-plugin/README.md': 4,
   'packages/starters/rest-starter/README.md': 7,
   'packages/starters/microservice-starter/README.md': 6,
-  'packages/starters/full-stack-starter/README.md': 7,
+  'packages/starters/full-stack-starter/README.md': 8,
   // v0.6.0 follow-up: half of the package READMEs had never had a single fence
   // compiled — the list only ever grew when a milestone happened to touch a
   // README, so `kernel`, `runtime`, `sdk`, `exceptions` and `testing` sat
@@ -132,7 +132,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M98n: +1 for the devtool-gated observed-fetch composition.
   'packages/sdk/README.md': 15,
   'packages/telemetry-plugin/README.md': 2,
-  'packages/testing/README.md': 9,
+  'packages/testing/README.md': 10,
 };
 
 /** Reads every fence the engine would compile from one README. */

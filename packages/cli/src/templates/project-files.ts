@@ -28,6 +28,7 @@ import type {
   MiddlewareWiring,
   PackageImport,
   RuntimeSwap,
+  ServedRoute,
   TemplateHost,
   TemplateManifest,
   Wiring,
@@ -138,6 +139,8 @@ export interface ResolvedHost {
   readonly extraImports: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
+  /** Routes the template's own source serves, for the README. */
+  readonly routes: readonly ServedRoute[];
   readonly manifest?: TemplateManifest | undefined;
 }
 
@@ -179,6 +182,7 @@ export function resolveHost(
     extraTasks: { ...host.extraTasks },
     extraImports: {},
     appFactory: host.appFactory,
+    routes: host.routes ?? [],
     appFactoryContext: {
       ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
       ...host.appFactoryContext,
@@ -404,6 +408,18 @@ function configModule(
     const factoryPluginLines = plugins.length === 0
       ? ''
       : `\n${plugins.map((p) => `  app.register(${p.symbol}(${pluginArgs(p)}));`).join('\n')}\n`;
+    const parameter = appFactory.parameter;
+    const parameterName = parameter === undefined
+      ? ''
+      : parameter.readOn.includes(runtime)
+      ? parameter.name
+      : `_${parameter.name}`;
+    const factoryParameterDoc = parameter === undefined
+      ? ''
+      : `\n * @param ${parameterName} - ${parameter.doc}`;
+    const factoryParameterLine = parameter === undefined
+      ? ''
+      : `\n  ${parameterName}?: ${parameter.type},`;
     return `${imports}
 
 /**
@@ -417,12 +433,12 @@ function configModule(
  * forwarded through unchanged.
  * @param _devtool - Accepted for one signature on every target. The starter
  * owns its construction, so a devtool composition cannot be honored here —
- * the CLI refuses the devtool opt-in on this template by name.
+ * the CLI refuses the devtool opt-in on this template by name.${factoryParameterDoc}
  * @returns The configured, unstarted application
  */
 export async function ${CONFIG_EXPORT}(
   env?: Readonly<Record<string, unknown>>,
-  _${DEVTOOL_PARAMETER}
+  _${DEVTOOL_PARAMETER}${factoryParameterLine}
 ): Promise<IKernelApplication> {
   const app = await ${appFactory.symbol}(${
       appFactory.args?.({
@@ -1128,6 +1144,11 @@ function denoTasks(
     // build, so a fresh project's first `deno task test` needs it as much as
     // `start` does — without it the test fails on a missing build (V8-39).
     test: `deno task build && ${test.test}`,
+    // The development entry runs Vite in-process and needs it installed, but
+    // not the production build: Vite serves the route modules itself.
+    ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
+      ? { dev: `deno task install && deno run -A ${manifest.npmBuild.devEntry.path}` }
+      : {}),
     ...host.extraTasks,
   };
 }
@@ -1353,9 +1374,9 @@ function denoCompilerOptions(
 /**
  * The `scripts` a generated `package.json` carries.
  *
- * A template with a frontend build gets a `build` script alongside `start`,
- * because its `start` cannot work until the build has produced the server
- * bundle the SSR plugin loads.
+ * A template with a frontend build gets a `build` script, and its `start` and
+ * `test` run it first, because neither can work until the build has produced
+ * the server bundle the SSR plugin loads.
  *
  * @param runtime - The selected runtime target
  * @param manifest - The template's manifest contributions, when it declares them
@@ -1372,12 +1393,24 @@ function npmScripts(
   // test` for `bun:test`, and `node --test` under the same loader `start` uses,
   // since the generated test is TypeScript.
   const test = runtime === 'bun' ? 'bun test' : `${NODE_RUNNER} --test`;
-  // With a frontend build the smoke test boots an app that loads it, so the
-  // test script builds first, as the Deno `test` task does.
+  // With a frontend build both scripts boot an app that loads the server
+  // bundle, so both build first, as the Deno `start` and `test` tasks do. A
+  // `start` without it is what the next-step hint and the README tell a new
+  // user to run, and it crashed with "Failed to load React Router server
+  // build" on a fresh Node or Bun project. The build runs FIRST, so `start`
+  // still begins with `bun` on Bun, which is how `detectTargetRuntime` tells a
+  // Bun project from a Node one.
   const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
-  return manifest?.npmBuild === undefined
-    ? { start, test }
-    : { build: manifest.npmBuild.script, start, test: `${build} && ${test}` };
+  const devEntry = manifest?.npmBuild?.devEntry;
+  return manifest?.npmBuild === undefined ? { start, test } : {
+    build: manifest.npmBuild.script,
+    start: `${build} && ${start}`,
+    test: `${build} && ${test}`,
+    // No build first: Vite serves the route modules itself in development.
+    ...(devEntry === undefined ? {} : {
+      dev: runtime === 'bun' ? `bun run ${devEntry.path}` : `${NODE_RUNNER} ${devEntry.path}`,
+    }),
+  };
 }
 
 /**
@@ -1548,6 +1581,70 @@ function standaloneNpmFiles(
 }
 
 /**
+ * The endpoint each first-party plugin registers at its default path.
+ *
+ * The CLI never passes these plugins a custom path, so the defaults are what a
+ * generated project serves. Order is the order the README lists them in.
+ */
+const PLUGIN_ROUTES: Readonly<Record<string, readonly ServedRoute[]>> = {
+  'health-plugin': [
+    { path: '/health', purpose: 'aggregated health of every registered indicator' },
+    { path: '/live', purpose: 'liveness probe' },
+    { path: '/ready', purpose: 'readiness probe' },
+  ],
+  'metrics-plugin': [{ path: '/metrics', purpose: 'Prometheus metrics' }],
+  'openapi-plugin': [
+    { path: '/docs', purpose: 'Swagger UI for the API' },
+    { path: '/openapi.json', purpose: 'the OpenAPI document' },
+  ],
+};
+
+/**
+ * Every route a generated project serves out of the box.
+ *
+ * A plugin-list host serves the hello-world route its config module registers;
+ * a factory-composed host declares its own `/` among its routes. Plugin
+ * endpoints come from the wirings, or from what the factory says it composes.
+ *
+ * @param host - The resolved template host
+ * @returns The routes, in README order
+ */
+export function servedRoutes(host: ResolvedHost): readonly ServedRoute[] {
+  const plugins = new Set([
+    ...packagesOf(host.plugins, host.middleware),
+    ...(host.appFactory?.composes ?? []),
+  ]);
+  return [
+    ...(host.appFactory === undefined
+      ? [{ path: '/', purpose: 'the hello-world route in `setu.config.ts`' }]
+      : []),
+    ...host.routes,
+    ...Object.entries(PLUGIN_ROUTES).flatMap(([pkg, routes]) => plugins.has(pkg) ? routes : []),
+  ];
+}
+
+/**
+ * The README section listing what a fresh project serves.
+ *
+ * The lead-in names the address rather than pointing at startup output, because
+ * only Deno's server prints one: a Node or Bun project starts silently.
+ *
+ * @param host - The resolved template host
+ * @param runtime - The selected runtime target
+ * @param port - Where the entry gets its port, for a workspace member
+ * @returns The section, starting and ending with a blank line
+ */
+function servedRoutesSection(host: ResolvedHost, runtime: TargetRuntime, port?: EntryPort): string {
+  const where = runtime === 'cloudflare-workers'
+    ? 'Under `npx wrangler dev`, at `http://localhost:8787`'
+    : port === undefined
+    ? 'At `http://localhost:3000` (set `PORT` to change it)'
+    : `On the port \`${port.from}\` exports`;
+  const lines = servedRoutes(host).map((route) => `- \`${route.path}\` — ${route.purpose}`);
+  return `\n## What it serves\n\n${where}:\n\n${lines.join('\n')}\n`;
+}
+
+/**
  * Builds the file set for one runtime target and host.
  *
  * @param projectName - The project directory and manifest name
@@ -1598,8 +1695,14 @@ ${
       : 'npm start'
   }
 \`\`\`
-
+${servedRoutesSection(host, runtime, port)}
 ${
+    runtime !== 'cloudflare-workers' && manifest?.npmBuild?.devEntry !== undefined
+      ? `## Develop\n\n\`\`\`bash\n${
+        runtime === 'deno' ? 'deno task dev' : runtime === 'bun' ? 'bun run dev' : 'npm run dev'
+      }\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart. Vite\nlistens on \`VITE_PORT\` (default 5173); open the app's own port.\n\n`
+      : ''
+  }${
     host.devtoolPort === undefined
       ? ''
       : `## Devtool\n\nRun \`deno task dev\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
@@ -1634,11 +1737,24 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
         `${readme}\n## Testing\n\nThe application needs the platform environment to boot. No smoke test is emitted here;\n\`deno task test\` permits an empty suite until you add platform-aware tests.\n`,
     };
   } else {
-    const path = host.appFactory !== undefined || host.plugins.some((p) =>
-        p.pkg === 'health-plugin'
-      )
+    const hasAppFactory = host.appFactory !== undefined;
+    const path = hasAppFactory || host.plugins.some((p) => p.pkg === 'health-plugin')
       ? '/health'
       : '/';
+    // A factory host composes a starter that serves SSR pages (full-stack
+    // today). `/health` stays 200 when `populateLoadContext` throws, so the
+    // smoke test also requests `/` — through `fetch`, because an SSR body
+    // streams and `inject()` refuses one, with the body consumed so the
+    // test's resource sanitizer does not report a leak.
+    const ssrProbe = hasAppFactory
+      ? `
+      // The SSR home page streams, which inject() refuses — request it
+      // through fetch, and consume the body so the resource sanitizer
+      // does not report a leak.
+      const page = await app.fetch(new Request('http://localhost/'));
+      ${renderEquals(runtime, 'page.status', '200')}
+      await page.text();`
+      : '';
     files.push({
       path: 'test/app.test.ts',
       contents: `${testHarnessFor(runtime).imports}
@@ -1650,7 +1766,7 @@ describe('application composition', () => {
     const app = await createTestApp({ app: await createApp() });
     try {
       const response = await app.inject({ method: 'GET', url: '${path}' });
-      ${renderEquals(runtime, 'response.statusCode', '200')}
+      ${renderEquals(runtime, 'response.statusCode', '200')}${ssrProbe}
     } finally {
       await app.stop();
     }
@@ -1853,6 +1969,13 @@ ${host.wranglerToml}`,
     });
   } else {
     files.push({ path: 'main.ts', contents: serveEntry(runtime, port) });
+  }
+
+  // Every server runtime, never Workers: the entry runs Vite in-process and
+  // binds sockets, which an isolate cannot.
+  const devEntry = host.manifest?.npmBuild?.devEntry;
+  if (runtime !== 'cloudflare-workers' && devEntry !== undefined) {
+    files.push({ path: devEntry.path, contents: devEntry.contents });
   }
 
   // Template source files last. Any path colliding with the fixed set above is
