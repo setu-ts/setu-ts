@@ -2691,7 +2691,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `{ ...base }` on a class copies fields and DROPS every prototype method. All `src` files at 100%
   branch/function/line except `task-pool.ts` (98.8/100/100)) — complete (PR #170)
 - **Milestone 45c** (`packages/worker-pool-plugin` — service-wide worker pool sizing) — complete (PR
-  pending). `maxWorkers` bounds the sum of lazy module pools, with reserved asynchronous hand-over,
+  #433). `maxWorkers` bounds the sum of lazy module pools, with reserved asynchronous hand-over,
   idle eviction and priority for modules without a slot. Both construction paths validate the bound;
   health reports it. Synchronous spawn failures settle their oldest task without a ghost queue entry
   and continue scheduling the remaining queue, and shutdown refuses new work before closing the

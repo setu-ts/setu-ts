@@ -256,10 +256,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Worker pool sizing (M45c, PR pending).** `WorkerPoolPluginOptions.maxWorkers` now bounds the sum
-  of module pools, defaulting to the largest of available parallelism, defaultPoolSize and the sum
-  of explicit pool sizes. Multi-module applications share the cap fairly; pass
-  `maxWorkers: Infinity` to restore the previous unbounded sum. Health reports the budget.
+- **Worker pool sizing (M45c, #433).** `WorkerPoolPluginOptions.maxWorkers` now bounds the sum of
+  module pools, defaulting to the largest of available parallelism, defaultPoolSize and the sum of
+  explicit pool sizes. Multi-module applications share the cap fairly; pass `maxWorkers: Infinity`
+  to restore the previous unbounded sum. Health reports the budget.
 
 - **A generated full-stack `setu.config.ts` takes an `ssr` parameter, and its `vite.config.ts`
   exports `frameworkPackages` and `workspaceLibraries` (`@setu-ts/cli`, PR #426).** `dev.ts` passes
@@ -490,23 +490,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Worker lifecycle and example hardening (M45c, PR pending).** Expired pending tasks reclaim
-  excess starting slots; stale startup callbacks cannot reject unrelated work. Termination throws
-  and rejections are contained, and shutdown bounds its wait to one second per termination,
-  including retired workers. NaN legacy sizes no longer poison the default shared budget for valid
-  modules. The example binds loopback and uses scoped Deno permissions. The budget limits managed
-  slots, not physical worker exit when a host fails to terminate.
+- **Worker lifecycle and example hardening (M45c, #433).** Expired pending tasks reclaim excess
+  starting slots; stale startup callbacks cannot reject unrelated work. Termination throws and
+  rejections are contained, and shutdown bounds its wait to one second per termination, including
+  retired workers. NaN legacy sizes no longer poison the default shared budget for valid modules.
+  The example binds loopback and uses scoped Deno permissions. The budget limits managed slots, not
+  physical worker exit when a host fails to terminate.
 
-- **Worker spawn failures (M45c, PR pending).** A synchronous `host.spawn` throw now rejects the
-  oldest queued task as a crash, clears its timeout and holds no budget, instead of leaving a ghost
-  task queued after its caller rejected. Remaining queued tasks continue scheduling after a failed
-  spawn, including from a budget hand-over. Hand-over continuations cannot leak the spawn error.
+- **Worker spawn failures (M45c, #433).** A synchronous `host.spawn` throw now rejects the oldest
+  queued task as a crash, clears its timeout and holds no budget, instead of leaving a ghost task
+  queued after its caller rejected. Remaining queued tasks continue scheduling after a failed spawn,
+  including from a budget hand-over. Hand-over continuations cannot leak the spawn error.
 
-- **Worker slots held by workers that never start (M45c, PR pending).** A spawned worker that does
-  not signal ready within the new `WorkerPoolPluginOptions.startupTimeoutMs` (default 10 000 ms,
-  applied even with `taskTimeoutMs: 0`, not disableable, and refused above 2 147 483 647 ms because
-  a larger timer delay overflows and fires at once) is terminated, its slot returns to the shared
-  budget, and the oldest waiting task for that module rejects with `WorkerTaskError`
+- **Worker slots held by workers that never start (M45c, #433).** A spawned worker that does not
+  signal ready within the new `WorkerPoolPluginOptions.startupTimeoutMs` (default 10 000 ms, applied
+  even with `taskTimeoutMs: 0`, not disableable, and refused above 2 147 483 647 ms because a larger
+  timer delay overflows and fires at once) is terminated, its slot returns to the shared budget, and
+  the oldest waiting task for that module rejects with `WorkerTaskError`
   (`remoteName: 'WorkerStartupTimeout'`). Before this, one call to a module that never became ready
   held a shared slot until restart with task timeouts off, and under steady demand starved every
   other module even with them on; a queued task expiring now also yields a starting worker to a
@@ -524,9 +524,9 @@ All notable changes to this project are documented here. The format follows
   not threads: on Deno a timed-out CPU-bound task keeps running, and can keep writing to a
   `SharedArrayBuffer`, after its promise rejects.
 
-- **A Deno task module that throws at import no longer kills the host process (runtime, M45c, PR
-  pending).** The web-worker host now cancels the worker `error` event after reporting it to the
-  pool. Without that, Deno re-raised it in the parent as `Unhandled error in child worker` and the
+- **A Deno task module that throws at import no longer kills the host process (runtime, M45c,
+  #433).** The web-worker host now cancels the worker `error` event after reporting it to the pool.
+  Without that, Deno re-raised it in the parent as `Unhandled error in child worker` and the
   application exited.
 
 - **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).** The
