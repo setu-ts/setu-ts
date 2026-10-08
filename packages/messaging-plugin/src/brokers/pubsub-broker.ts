@@ -287,11 +287,18 @@ export function adaptPubSubModule(
   // settled, so the next one on a fresh handle cannot overtake it. When every
   // handle is busy the cache runs over the bound until one settles, so it is
   // bounded by the topics in use at once rather than the topics ever named.
+  //
+  // `idle` holds exactly the cached names with nothing in flight, in recency
+  // order (a Map iterates in insertion order), so eviction takes the oldest
+  // idle name in O(1) and never walks the busy ones — the busy set is bounded
+  // only by the application's concurrency (PR #427 review).
   const topics = new Map<string, { handle: ReturnType<typeof pubsub.topic>; inFlight: number }>();
+  const idle = new Set<string>();
   const evictIdle = (): void => {
-    for (const [name, entry] of topics) {
+    for (const name of idle) {
       if (topics.size <= MAX_CACHED_TOPICS) return;
-      if (entry.inFlight === 0) topics.delete(name);
+      idle.delete(name);
+      topics.delete(name);
     }
   };
 
@@ -303,12 +310,11 @@ export function adaptPubSubModule(
       orderingKey?: string,
     ): Promise<void> => {
       let entry = topics.get(topic);
-      if (entry) {
-        topics.delete(topic); // re-insert below, so Map order is recency order
-      } else {
+      if (entry === undefined) {
         entry = { handle: pubsub.topic(topic, { messageOrdering: true }), inFlight: 0 };
+        topics.set(topic, entry);
       }
-      topics.set(topic, entry);
+      idle.delete(topic); // busy now; re-enters `idle` as most recent once settled
       const { handle } = entry;
       const message = {
         data: bytes,
@@ -328,6 +334,7 @@ export function adaptPubSubModule(
         throw error;
       } finally {
         entry.inFlight--;
+        if (entry.inFlight === 0) idle.add(topic);
         evictIdle();
       }
     },

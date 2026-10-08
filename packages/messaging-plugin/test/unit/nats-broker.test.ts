@@ -224,9 +224,11 @@ describe('NatsBroker', () => {
       },
     });
     try {
-      // Vacuity guard: under the accessor, assignment really drops the key.
+      // Vacuity guard: under the accessor, assigning a string to `__proto__`
+      // is a no-op (the setter ignores non-objects), so the key is dropped.
+      // `Reflect.set` performs that ordinary assignment, setter included.
       const assigned: Record<string, string> = {};
-      assigned['__proto__'] = 'v';
+      Reflect.set(assigned, '__proto__', 'v');
       expect(Object.keys(assigned)).toEqual([]);
 
       const values = new Map([['__proto__', 'proto-value'], ['x-a', '1']]);

@@ -287,6 +287,81 @@ describe('adaptPubSubModule', () => {
     expect(created.filter((name) => name === 'busy')).toHaveLength(1);
   });
 
+  it('over the bound with every other handle busy, evicts only the idle one (PR #427 review)', async () => {
+    const sdk = createFakeSdkModule();
+    const created: string[] = [];
+    const releases: Array<() => void> = [];
+    let holding = true;
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        created.push(name);
+        const handle = super.topic(name, options);
+        if (!name.startsWith('busy-')) return handle;
+        return {
+          ...handle,
+          // Held only while the test is holding: standing in for a slow network.
+          publishMessage: (message: { data: Uint8Array }) =>
+            holding
+              ? new Promise<string>((resolve) => releases.push(() => resolve('ok')))
+              : handle.publishMessage(message),
+        };
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    const bytes = new TextEncoder().encode('a');
+
+    // 1100 handles in flight: more than the 1024 bound, none evictable.
+    const pending = Array.from({ length: 1100 }, (_, i) => transport.publish(`busy-${i}`, bytes));
+    await transport.publish('idle', bytes);
+    // The idle handle was the only evictable one, so the next use rebuilds it.
+    await transport.publish('idle', bytes);
+    expect(created.filter((name) => name === 'idle')).toHaveLength(2);
+
+    holding = false;
+    for (const release of releases) release();
+    await Promise.all(pending);
+    // Once they settle, the cache shrinks back to the bound; the newest stay.
+    await transport.publish('busy-1099', bytes);
+    expect(created.filter((name) => name === 'busy-1099')).toHaveLength(1);
+  });
+
+  it('never evicts a handle that went idle and is busy again', async () => {
+    const sdk = createFakeSdkModule();
+    const created: string[] = [];
+    let release: () => void = () => {};
+    let publishes = 0;
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        created.push(name);
+        const handle = super.topic(name, options);
+        if (name !== 'reused') return handle;
+        return {
+          ...handle,
+          // The SECOND publish is held: the handle has been idle once first.
+          publishMessage: (message: { data: Uint8Array }) => {
+            publishes++;
+            if (publishes !== 2) return handle.publishMessage(message);
+            return new Promise<string>((resolve) => {
+              release = () => resolve('held');
+            });
+          },
+        };
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    const bytes = new TextEncoder().encode('a');
+
+    await transport.publish('reused', bytes, undefined, 'agg-1'); // settles: idle
+    const pending = transport.publish('reused', bytes, undefined, 'agg-1'); // busy again
+    for (let i = 0; i < 1100; i++) await transport.publish(`t-${i}`, bytes);
+    release();
+    await pending;
+    await transport.publish('reused', bytes, undefined, 'agg-1');
+    expect(created.filter((name) => name === 'reused')).toHaveLength(1);
+  });
+
   it('does not resume a key when an UNORDERED publish fails (M106 §3.5)', async () => {
     const sdk = createFakeSdkModule();
     const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
