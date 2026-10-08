@@ -149,7 +149,9 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
-        WorkerPoolPlugin({ maxWorkers: 1, taskTimeoutMs: 0, startupTimeoutMs: 300 }),
+        // 2 s, not less: a HEALTHY worker shares this deadline, and a real Deno
+        // worker under a loaded full suite measured >300 ms to start.
+        WorkerPoolPlugin({ maxWorkers: 1, taskTimeoutMs: 0, startupTimeoutMs: 2_000 }),
       ],
     });
     await app.start();
