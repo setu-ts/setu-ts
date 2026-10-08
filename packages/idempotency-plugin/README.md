@@ -1,9 +1,10 @@
 # @setu-ts/idempotency-plugin
 
-A repeated HTTP request, queue job or broker message does its work **once per key**. One core state
-machine — `claim(key, fingerprint, lease)` → `claimed` with a token, then `complete(token, record)`
-or `release(token)` — sits behind one store port in `@setu-ts/common`, with an in-process store and
-two cross-replica stores (Redis and a Cloudflare Durable Object). Two entry points reach it: a
+A repeated HTTP request, queue job or broker message is recognised by its key: a repeat of completed
+work is **answered from its record or skipped** instead of running again. One core state machine —
+`claim(key, fingerprint, lease)` → `claimed` with a token, then `complete(token, record)` or
+`release(token)` — sits behind one store port in `@setu-ts/common`, with an in-process store and two
+cross-replica stores (Redis and a Cloudflare Durable Object). Two entry points reach it: a
 route-level `idempotent(options)` middleware plus an `@Idempotent()` decorator for HTTP, and an
 ingress behaviour `idempotentIngress(options)` for queue jobs and broker messages.
 

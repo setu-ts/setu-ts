@@ -904,9 +904,10 @@ emitDecoratorMetadata).
 
 ### @setu-ts/idempotency-plugin
 
-**Purpose:** A repeated HTTP request, queue job or broker message does its work once per key, over
-one claim/complete/release state machine and an in-process, Redis or Cloudflare Durable Object
-store.
+**Purpose:** A repeat of a completed HTTP request, queue job or broker message is answered from its
+record or skipped instead of running again, over one claim/complete/release state machine and an
+in-process, Redis or Cloudflare Durable Object store. A failure after an external side effect but
+before `complete` can still repeat that effect; see the package README for the limits.
 
 **Capability Token:** `CAPABILITIES.IDEMPOTENCY`
 

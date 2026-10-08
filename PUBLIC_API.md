@@ -13821,7 +13821,8 @@ rather than a deliberate empty render.
 
 ## IdempotencyPlugin() (`@setu-ts/idempotency-plugin`)
 
-A repeated HTTP request, queue job or broker message does its work once per key, over one
+A repeated HTTP request, queue job or broker message is recognised by its key, and a repeat of
+completed work is answered from its record or skipped instead of running again, over one
 `claim`/`complete`/`release` state machine and an in-process, Redis or Cloudflare Durable Object
 store. The guarantee is **no duplicate processing within the limits of the store** — it is not a
 single-execution guarantee. See

@@ -25,11 +25,12 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: all 49 packages are published in `v0.8.0` and are live on JSR.**
+> **Status: `v0.8.0` published 49 packages, all live on JSR.** Two members added since,
+> `localization-plugin` and `idempotency-plugin`, ship in the next release.
 >
 > <!-- version:history -->
 >
-> The kernel, the runtime layer, 37 plugins, the three starters, the test utilities, the client SDK,
+> The kernel, the runtime layer, 41 plugins, the three starters, the test utilities, the client SDK,
 > and the `setu` CLI are implemented, tested, and documented.
 >
 > <!-- version:history -->
@@ -161,16 +162,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Operations
 
-| Feature       | Status | Package              | Description                                                                                |
-| ------------- | ------ | -------------------- | ------------------------------------------------------------------------------------------ |
-| Health checks | ✅     | `health-plugin`      | `/health`, `/live`, `/ready` with pluggable indicators                                     |
-| Metrics       | ✅     | `metrics-plugin`     | Prometheus counters, gauges, histograms, summaries                                         |
-| Telemetry     | ✅     | `telemetry-plugin`   | OpenTelemetry tracing, W3C propagation, auto-instrumentation                               |
-| OpenAPI       | ✅     | `openapi-plugin`     | OpenAPI 3.1 from routes, Zod transform, Swagger UI                                         |
-| Audit logging | ✅     | `audit-plugin`       | Immutable trail over memory, log, database, or file                                        |
-| Resilience    | ✅     | `resilience-plugin`  | Circuit breaker, retry, timeout, bulkhead                                                  |
-| Idempotency   | ✅     | `idempotency-plugin` | One effect per key for a repeated request, message or job (memory, Redis, Durable Objects) |
-| Secrets       | ✅     | `secrets-plugin`     | Env, AWS KMS, GCP Secret Manager, Azure Key Vault, Vault                                   |
+| Feature       | Status | Package              | Description                                                                                     |
+| ------------- | ------ | -------------------- | ----------------------------------------------------------------------------------------------- |
+| Health checks | ✅     | `health-plugin`      | `/health`, `/live`, `/ready` with pluggable indicators                                          |
+| Metrics       | ✅     | `metrics-plugin`     | Prometheus counters, gauges, histograms, summaries                                              |
+| Telemetry     | ✅     | `telemetry-plugin`   | OpenTelemetry tracing, W3C propagation, auto-instrumentation                                    |
+| OpenAPI       | ✅     | `openapi-plugin`     | OpenAPI 3.1 from routes, Zod transform, Swagger UI                                              |
+| Audit logging | ✅     | `audit-plugin`       | Immutable trail over memory, log, database, or file                                             |
+| Resilience    | ✅     | `resilience-plugin`  | Circuit breaker, retry, timeout, bulkhead                                                       |
+| Idempotency   | ✅     | `idempotency-plugin` | Answers a repeat of completed work from its record or skips it (memory, Redis, Durable Objects) |
+| Secrets       | ✅     | `secrets-plugin`     | Env, AWS KMS, GCP Secret Manager, Azure Key Vault, Vault                                        |
 
 ### Delivery and ergonomics
 
@@ -234,8 +235,8 @@ The `-n setu` is required: Deno would otherwise name the binary after the packag
 
 All 51 workspace members are published on JSR as one release train: the core (`common`, `kernel`,
 `runtime`, `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`
-and the `cli` — except a member added since the last release (`idempotency-plugin` today), which the
-next release publishes.
+and the `cli` — except members added since the last release (`localization-plugin` and
+`idempotency-plugin` today), which the next release publishes.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
