@@ -141,6 +141,13 @@ export {
   TenantStoreStrategyUnsupportedError,
 } from './tenancy/database-tenant-data-store.ts';
 
+// Transactional outbox store bridge (M107) — the shipped `IOutboxStore` over
+// `IDatabaseService`, for the messaging plugin's `outbox.store` option. The
+// store class stays internal: it reaches an application only as `IOutboxStore`.
+export { createDatabaseOutboxStore } from './outbox/database-outbox-store.ts';
+export type { DatabaseOutboxStoreOptions } from './outbox/database-outbox-store.ts';
+export { OutboxStoreUnavailableError } from './outbox/errors.ts';
+
 // Typed native Drizzle query access
 export {
   createDrizzleDatabase,

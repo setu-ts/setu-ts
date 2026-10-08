@@ -1797,8 +1797,11 @@ MongoDB refuses `$and: []`/`$or: []` outright, and those are the answers Memory 
 
 `rawQuery` is refused by name with `UnsupportedRawQueryError` — MongoDB has no SQL, so an
 application reaches the injected client directly for native commands, exactly as it does for a
-Prisma raw query. Transactions use a `startSession()` and are refused at `beginTransaction()` with
-`MongoTransactionUnavailableError` on a deployment that is not a replica set, never at `connect()`.
+Prisma raw query. Transactions use a `startSession()`; on a deployment that is not a replica set
+they are refused late, never at `connect()`. On the real driver the refusal surfaces at the first
+operation inside the transaction as the driver's own unwrapped `MongoServerError` (`code: 20`,
+`codeName: 'IllegalOperation'`), not at `beginTransaction()` (measured, M107);
+`MongoTransactionUnavailableError` wraps only a `startTransaction()` that itself throws.
 
 `IMongoClient` and `IMongoObjectIdCtor` are the exported injection seam, and the real driver
 implements their structural shapes: `IMongoClient.connect()` is `Promise<unknown>` because the
@@ -2273,6 +2276,45 @@ The four transaction and concurrency errors — `MongoTransactionUnavailableErro
 `BigtableTransactionScopeError` — are deliberately **not** branded and keep their masked `500`: they
 may legitimately quote backend state, and a concurrency conflict is transient and retryable rather
 than permanent, which is a different contract statement deserving its own decision.
+
+### Transactional outbox store (M107)
+
+`createDatabaseOutboxStore(options?)` returns a `RegistryFactory<IOutboxStore>` — the shipped
+implementation of the `IOutboxStore` port in `@setu-ts/common` over `IDatabaseService` (the M101c
+`createDatabaseTenantDataStore` shape). It is passed to the messaging plugin's `outbox.store`
+option, which resolves it in `onInit` and runs `verify()` there.
+
+```typescript
+import { createDatabaseOutboxStore } from '@setu-ts/database-plugin';
+
+const store = createDatabaseOutboxStore({ entity: 'Outbox', database: 'orders' });
+```
+
+| Export                        | Kind      | Notes                                                                                                                                                                 |
+| ----------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createDatabaseOutboxStore`   | function  | Resolves `CAPABILITIES.DATABASE`, or `database.<name>` for `database: '<name>'` (`'default'` is the bare token). Throws `TypeError` at the call for an empty `entity` |
+| `DatabaseOutboxStoreOptions`  | interface | `entity?` (default `'Outbox'`), `database?` — must be the database the caller's unit of work belongs to, or the row is never relayed by this store                    |
+| `OutboxStoreUnavailableError` | class     | Rejected by `verify()`; `entity`, `reason` (`'bigtable'`, `'dynamodb-index'`, `'mongodb-replica-set'`, `'entity-unavailable'`), the adapter error as `cause`          |
+
+- **Discriminator.** Every row carries `kind: 'setu-outbox'` (`OUTBOX_RECORD_KIND`); every read
+  (`scanPending`, `failedKeys`, `stats`, `purge`) requires it, and a lookup by id before a
+  transition treats a row of another `kind` as `missing`.
+- **Conditional transitions.** `markSent`/`markFailure` write only from `pending`, `release` only
+  from `failed`; anything else answers `missing`, `not-pending` (with `sentBy` for a sent row) or
+  `not-failed`, and writes nothing. The read and the write are two calls, so a race between them can
+  overwrite once (a duplicate publish, never a loss) until M105's conditional write.
+- **Columns.** The row is the record's own fields; an absent optional field is written as `null` and
+  read back as absent. `failedKeys` selects only `tenantId` and `orderingKey`; `purge` deletes
+  `sent` then `discarded` rows with `settledAt < before`, at most `limit` per status.
+- **`verify()`** runs `scanPending(undefined, 1)`, then
+  `transaction(uow => uow.getRepository(entity).findAll({ where: { kind, status: 'pending' }, limit: 1 }))`.
+  An `UnsupportedQueryFeatureError` from `bigtable` is `'bigtable'`; one from `dynamodb` for
+  `orderBy` is `'dynamodb-index'` (a GSI `{ partitionKey: 'status', sortKey: 'position' }`,
+  projection `ALL`, is required); a cause chain carrying `code: 20` with
+  `codeName: 'IllegalOperation'` — what a standalone MongoDB answers at the first operation inside a
+  transaction — is `'mongodb-replica-set'`; anything else is `'entity-unavailable'`. On memory and
+  MongoDB a missing entity cannot be detected (both create lazily). Every refusal is a rejected
+  promise.
 
 ### Multiple Databases
 

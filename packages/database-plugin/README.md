@@ -130,6 +130,91 @@ back. `DatabaseTenantDataStore` is also exported for an application that holds i
 `IDatabaseService` and constructs the store directly; its optional second constructor argument names
 the column for a store used outside the multi-tenancy plugin.
 
+## Transactional outbox store
+
+`createDatabaseOutboxStore` is the shipped `IOutboxStore` (the port in `@setu-ts/common`) over
+`IDatabaseService`. Pass it to the messaging plugin's `outbox.store` option: the outbox writes each
+integration event as a row in the SAME transaction as the business change, through your own unit of
+work, and a relay publishes the rows afterwards.
+
+```typescript
+import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DatabasePlugin({ type: 'memory' }),
+    MessagingPlugin({ outbox: { store: createDatabaseOutboxStore() } }),
+  ],
+});
+```
+
+The factory resolves `CAPABILITIES.DATABASE` in `onInit`, so the two plugins may be registered in
+either order. Options: `entity` (default `'Outbox'`) and `database`, which selects a named
+connection (`DatabasePlugin({ name })` → `database.<name>`). That connection must be the database
+your unit of work belongs to: a row written through another database's unit of work is never relayed
+by this store.
+
+**The discriminator.** Every row carries `kind: 'setu-outbox'`; every read requires it, and a lookup
+by id treats a row of another `kind` as missing. An outbox sharing an entity with business data (a
+Cosmos container is queried as a whole) never reads, counts, transitions or deletes a business
+document that happens to carry `status: 'pending'` or `'sent'`.
+
+**Transitions are conditional.** `markSent`, `markFailure` and `release` read the row and write only
+from the expected status, so a late failure never regresses a `sent` row. `IRepository` has no
+conditional write, so the read and the write are two calls; the worst outcome of a race between them
+is one stale overwrite — a duplicate publish, never a lost row — until ROADMAP Milestone 105's
+conditional write closes the window. Absent optional columns are written as `NULL` and read back as
+absent.
+
+**Startup check.** `verify()`, run by the outbox before it schedules the relay or accepts a write,
+runs the relay's first query and a transactional read of the outbox entity, and rejects with
+`OutboxStoreUnavailableError` (`reason`, `entity`, the adapter error as `cause`) when either fails:
+
+| Backend  | Verdict                                                                                                                                              |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| memory   | supported (single process)                                                                                                                           |
+| Prisma   | supported; the table must exist                                                                                                                      |
+| Drizzle  | supported; `drizzleTables` must register the outbox table                                                                                            |
+| D1       | supported; the table must exist                                                                                                                      |
+| MongoDB  | supported on a replica set; a standalone server is refused (`reason: 'mongodb-replica-set'`)                                                         |
+| DynamoDB | supported with a GSI `{ partitionKey: 'status', sortKey: 'position' }`, projection `ALL`; refused without it (`'dynamodb-index'`)                    |
+| Cosmos   | supported when the outbox entity maps to the business container and its partition-key path is a column the row carries (`tenantId` or `orderingKey`) |
+| Bigtable | refused (`'bigtable'`): no secondary index, so the relay query cannot run — use a change-data-capture relay                                          |
+
+Any other refusal — a missing or unreadable table — is `reason: 'entity-unavailable'`. On the memory
+adapter and MongoDB a missing entity cannot be detected (both create lazily), so that check passes
+there by construction. No portable migration exists (`migrate()` always rejects): create the table
+yourself. For PostgreSQL:
+
+```sql
+CREATE TABLE setu_outbox (
+  id           text    PRIMARY KEY,
+  kind         text    NOT NULL,
+  topic        text    NOT NULL,
+  envelope     text    NOT NULL,
+  options      text    NOT NULL,
+  ordering_key text,
+  tenant_id    text,
+  traceparent  text,
+  position     text    NOT NULL,
+  created_at   bigint  NOT NULL,
+  status       text    NOT NULL,
+  attempts     integer NOT NULL,
+  available_at bigint  NOT NULL,
+  last_error   text,
+  settled_at   bigint,
+  sent_by      text
+);
+CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
+CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settled_at);
+```
+
+Map it with `drizzleTables: { Outbox: pgTable('setu_outbox', { … }) }` (JS keys `orderingKey`,
+`tenantId`, `createdAt`, `availableAt`, `lastError`, `settledAt`, `sentBy` over the snake_case
+columns; the `bigint` columns in `{ mode: 'number' }`).
+
 ## Options
 
 | Option    | Type                                                                                                 | Default     | Description                              |
@@ -347,9 +432,13 @@ case-insensitive collation leaves `contains` case-sensitive.
 `IDatabaseService.query()` is unavailable on this arm and an application reaches the injected client
 directly for native commands (`aggregate`, `runCommand`), exactly as it does for a Prisma raw query.
 
-**Transactions** use a driver session. They require a replica set, and the refusal is late and named
-— `beginTransaction()` throws `MongoTransactionUnavailableError`, never `connect()` — so a
-standalone `mongod` remains a valid deployment for an application that never opens one.
+**Transactions** use a driver session. They require a replica set, and the refusal is late — never
+at `connect()` — so a standalone `mongod` remains a valid deployment for an application that never
+opens one. On the real driver it surfaces at the first operation inside the transaction, not at
+`beginTransaction()`: `startTransaction()` resolves, and that operation rejects with the driver's
+own `MongoServerError` (`code: 20`, `codeName: 'IllegalOperation'`), unwrapped (measured, M107).
+`MongoTransactionUnavailableError` wraps only a `startTransaction()` that itself throws, which the
+real driver does not.
 
 ## The Azure Cosmos DB backend
 
@@ -877,6 +966,7 @@ imperative begin/commit.
 
 | Export                                    | Kind      |
 | ----------------------------------------- | --------- |
+| `createDatabaseOutboxStore`               | function  |
 | `createDatabaseTenantDataStore`           | function  |
 | `createDrizzleDatabase`                   | function  |
 | `createDrizzleDataSource`                 | function  |
@@ -907,6 +997,7 @@ imperative begin/commit.
 | `MemoryAdapter`                           | class     |
 | `MongoAdapter`                            | class     |
 | `MongoTransactionUnavailableError`        | class     |
+| `OutboxStoreUnavailableError`             | class     |
 | `PrismaAdapter`                           | class     |
 | `PrismaRepository`                        | class     |
 | `SerializationConflictError`              | class     |
@@ -950,6 +1041,7 @@ imperative begin/commit.
 | `CustomDatabaseOptions`                   | interface |
 | `DatabaseAdapterOptions`                  | interface |
 | `DatabaseConnectionOptions`               | interface |
+| `DatabaseOutboxStoreOptions`              | interface |
 | `DatabasePoolCapacity`                    | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
