@@ -83,11 +83,29 @@ code.
 `IngressKind`, `IngressContext`, `IIngressBehavior`, `BehaviorLike`, and `composeBehaviorChain`
 provide one transport-neutral, void-result behaviour chain for queue jobs, scheduler fires, broker
 deliveries, and WebSocket frames. An `IngressContext` contains only `kind`, `name`, `payload`, and
-the optional `attempt` and `headers` fields. Behaviours run in declared order; returning without
-`next()` short-circuits the native handler.
+the optional `attempt`, `headers` and `consumer` fields. Behaviours run in declared order; returning
+without `next()` short-circuits the native handler.
+
+`consumer` (M109a) is a dispatch identity, not a capability or state bag: the subscription's
+`SubscribeOptions.queue` when given, otherwise `subscription:<instance>:<n>` on `'messaging'`, and
+the job name on `'queue'`; absent on `'scheduler'` and `'websocket'`. It exists so per-consumer
+state (an idempotency record) is keyed per subscriber rather than per topic.
 
 `WebSocketUpgradeGuard` and `WebSocketGuardDecision` are the separate, route-scoped handshake guard
 types. They run before an accepted upgrade; they are not frame behaviours.
+
+### Idempotency (M109a)
+
+`CAPABILITIES.IDEMPOTENCY` (`'idempotency'`) names the provider of the idempotency service. The
+`common` package holds only the contracts — the store port `IIdempotencyStore` and its
+`IdempotencyClaimRequest`, `IdempotencyClaimResult` and `IdempotencySettleResult` types, the service
+contract `IIdempotencyService`, the route option type `IdempotentRouteOptions` with
+`IdempotencyKeySource` and `IdempotencyFingerprintSource`, and the ingress option types
+`IdempotentIngressOptions` (with its shared half `IdempotentIngressCommonOptions`),
+`IngressIdempotencyKeySource` and `IngressIdempotencyFingerprintSource`. The mechanism —
+`IdempotencyPlugin`, `idempotent()`, `idempotentIngress()` and `@Idempotent` — lives in
+`@setu-ts/idempotency-plugin`. The guarantee is **no duplicate processing within the limits of the
+store**, never "exactly once".
 
 ### Error diagnostics
 

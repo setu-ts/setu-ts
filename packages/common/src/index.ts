@@ -384,6 +384,24 @@ export type {
   IngressContext,
   IngressKind,
 } from './services/ingress.ts';
+// Idempotency port, service contract and option types (M109a). The mechanism
+// lives in `@setu-ts/idempotency-plugin`; only the contracts are shared so the
+// store adapters (memory, Redis, Durable Object) and the decorator plugin can
+// consume them without importing one another (AI_GUIDELINES §2.2).
+export type {
+  IdempotencyClaimRequest,
+  IdempotencyClaimResult,
+  IdempotencyFingerprintSource,
+  IdempotencyKeySource,
+  IdempotencySettleResult,
+  IdempotentIngressCommonOptions,
+  IdempotentIngressOptions,
+  IdempotentRouteOptions,
+  IIdempotencyService,
+  IIdempotencyStore,
+  IngressIdempotencyFingerprintSource,
+  IngressIdempotencyKeySource,
+} from './services/idempotency.ts';
 export type {
   IScheduler,
   RetryOptions,

@@ -14,6 +14,16 @@ All notable changes to this project are documented here. The format follows
   or the DI container (and how `DiPlugin`'s `autoRegister` fallback links them), and whether a test
   should use `overrideCapability`, `overrideProvider` or `without`. Every example compiles under the
   guide fence gate.
+- **Idempotency contracts in `@setu-ts/common` (M109a).** `CAPABILITIES.IDEMPOTENCY`
+  (`'idempotency'`) names the provider of the idempotency service. The package gains the store port
+  `IIdempotencyStore` and its `IdempotencyClaimRequest`, `IdempotencyClaimResult` and
+  `IdempotencySettleResult` types, the service contract `IIdempotencyService`, the route option type
+  `IdempotentRouteOptions` with `IdempotencyKeySource` and `IdempotencyFingerprintSource`, and the
+  ingress option types `IdempotentIngressOptions` with its shared half
+  `IdempotentIngressCommonOptions` and the `IngressIdempotencyKeySource` /
+  `IngressIdempotencyFingerprintSource` sources. `IngressContext` gains an OPTIONAL `consumer`
+  dispatch identity so per-consumer state (an idempotency record) is keyed per subscriber rather
+  than per topic. The mechanism itself ships in `@setu-ts/idempotency-plugin`.
 
 - **A full-stack project's `dev` task serves route edits without a restart, on Deno, Node and Bun
   (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR #426).** `setu new --template full-stack` now

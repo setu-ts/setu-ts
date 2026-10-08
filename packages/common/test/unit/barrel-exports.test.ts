@@ -660,3 +660,41 @@ describe('@setu-ts/common barrel — M107 outbox port', () => {
     expect(options.root).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M109a — the idempotency port, service contract and option types
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M109a idempotency contract', () => {
+  it('exposes CAPABILITIES.IDEMPOTENCY, resolved by the idempotency plugin and the decorator plugin', () => {
+    expect(common.CAPABILITIES.IDEMPOTENCY).toBe('idempotency');
+  });
+
+  it('exports the idempotency port and option types (declared against the barrel)', () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class): dropping
+    // any re-export stops this file compiling. The `IngressContext.consumer`
+    // member is pinned in `ingress-contract.test.ts`.
+    const store: common.IIdempotencyStore = {
+      name: 'stub',
+      connect: () => Promise.resolve(),
+      claim: () => Promise.resolve({ outcome: 'claimed', takeover: false }),
+      complete: () => Promise.resolve('settled'),
+      release: () => Promise.resolve('lost'),
+    };
+    const route: common.IdempotentRouteOptions = { response: 'status' };
+    const ingress: common.IdempotentIngressOptions = { jobNames: ['email.send'] };
+    const claim: common.IdempotencyClaimRequest = {
+      key: 'a'.repeat(64),
+      scope: 'b'.repeat(64),
+      fingerprint: 'c'.repeat(64),
+      token: 't',
+      leaseMs: 1_000,
+      ttlMs: 2_000,
+    };
+
+    expect(store.name).toBe('stub');
+    expect(route.response).toBe('status');
+    expect(ingress.jobNames).toEqual(['email.send']);
+    expect(claim.leaseMs).toBeLessThanOrEqual(claim.ttlMs);
+  });
+});

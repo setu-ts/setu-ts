@@ -10986,6 +10986,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | View rendering      | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Localization        | `ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue` — the localization port (`t(key, values?)`, `locale`, `locales`, `forLocale(tag)`) served under `CAPABILITIES.LOCALIZATION`, and the catalogue shape: a string with `{name}` placeholders or a CLDR plural record with `other` required (M103)                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Outbox              | `IOutboxStore`, `IOutboxWriteScope`, `OutboxRecord`, `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, `OUTBOX_RECORD_KIND` — the transactional-outbox store port (`append`, `scanPending`, `failedKeys`, `markSent`, `markFailure`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws), the row shape (every field a JSON scalar, times as epoch ms), the conditional-transition outcome (`applied` / `missing` / `not-pending` / `not-failed`), and the `'setu-outbox'` discriminator every row carries and every read requires (M107)                                                                                                                                               |
+| Idempotency         | `IIdempotencyStore`, `IdempotencyClaimRequest`, `IdempotencyClaimResult`, `IdempotencySettleResult`, `IIdempotencyService`, `IdempotentRouteOptions`, `IdempotencyKeySource`, `IdempotencyFingerprintSource`, `IdempotentIngressOptions`, `IdempotentIngressCommonOptions`, `IngressIdempotencyKeySource`, `IngressIdempotencyFingerprintSource` — the store port, the service contract served under `CAPABILITIES.IDEMPOTENCY`, and the route/ingress option types (M109a). The record is an opaque string so every store holds identical bytes; the mechanism lives in `@setu-ts/idempotency-plugin`. `IngressContext.consumer` (below) is the dispatch identity the ingress key is scoped by.                                  |
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
@@ -11390,15 +11391,32 @@ the first consumer: its absence latches `provider-identity-unavailable` and a fa
 
 `IngressKind` is `'queue' | 'scheduler' | 'messaging' | 'websocket'`. `IngressContext<TPayload>` is
 the immutable work envelope supplied to an ingress behaviour:
-`{ kind, name, payload, attempt?, headers? }`. Queue and scheduler populate the 1-based `attempt`;
-messaging supplies transport headers when available and WebSocket frames supply neither optional
-field.
+`{ kind, name, payload, attempt?, headers?, consumer? }`. Queue and scheduler populate the 1-based
+`attempt`; messaging supplies transport headers when available and WebSocket frames supply neither
+optional field.
+
+`consumer` (M109a) is a DISPATCH identity, not a capability and not a state bag: the subscription's
+`SubscribeOptions.queue` when given, otherwise `subscription:<instance>:<n>` (unique per
+subscription per process) on `'messaging'`, and the job name on `'queue'`; it is absent on
+`'scheduler'` and `'websocket'`. It exists so per-consumer state — an idempotency record — is keyed
+per subscriber rather than per topic. The envelope's "no `state`, no `services`" rule stands: a
+behaviour still reaches a capability through its `RegistryFactory` arm.
 
 `IIngressBehavior.handle(context, next)` is the void-result contract for non-HTTP work.
 `BehaviorLike<TWork, TResult>` is the structural shape shared with CQRS, and `composeBehaviorChain`
 runs behaviours in declared order. A behaviour that does not call `next()` short-circuits the
 terminal handler; a thrown error follows that ingress's existing error path. The common composer is
 also consumed internally by CQRS; it adds no CQRS surface.
+
+### Idempotency
+
+`CAPABILITIES.IDEMPOTENCY` (`'idempotency'`) names the service an idempotency provider registers;
+the port (`IIdempotencyStore`), the service contract (`IIdempotencyService`) and the route/ingress
+option types live in `@setu-ts/common` so a store adapter (`memory`, Redis, a Cloudflare Durable
+Object) and the decorator plugin can consume them without importing one another (AI_GUIDELINES
+§2.2). The mechanism — `IdempotencyPlugin`, `idempotent()`, `idempotentIngress()`, `@Idempotent` —
+lives in `@setu-ts/idempotency-plugin`; see that package's section. The guarantee is **no duplicate
+processing within the limits of the store**, never "exactly once".
 
 `WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
 either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
