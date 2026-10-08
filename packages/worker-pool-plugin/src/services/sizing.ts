@@ -54,10 +54,38 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
         `received ${describe(startup)}`,
     );
   }
+  assertTaskTimeout(options?.taskTimeoutMs, 'taskTimeoutMs');
+  for (const [specifier, pool] of Object.entries(options?.pools ?? {})) {
+    assertTaskTimeout(pool.taskTimeoutMs, `pools[${JSON.stringify(specifier)}].taskTimeoutMs`);
+  }
   return {
     maxWorkers: maxWorkers as number | undefined,
     startupTimeoutMs: (startup as number | undefined) ?? DEFAULT_STARTUP_TIMEOUT_MS,
   };
+}
+
+/**
+ * Refuses a task timeout the pool would silently misread. Before this, `NaN`
+ * or a negative value disabled the timeout (the pool arms a timer only for a
+ * value `> 0`), and a value above {@linkcode MAX_TIMER_DELAY_MS} overflowed
+ * the runtime timer and timed every task out after about 1 ms.
+ *
+ * @param value - The configured or per-call timeout; `undefined` is allowed
+ * @param name - The option name for the error message
+ * @throws {RangeError} Unless `value` is `undefined`, `0` (disabled), or a
+ * positive integer no greater than {@linkcode MAX_TIMER_DELAY_MS}
+ */
+export function assertTaskTimeout(value: unknown, name: string): void {
+  if (
+    value !== undefined &&
+    (!Number.isSafeInteger(value) || (value as number) < 0 ||
+      (value as number) > MAX_TIMER_DELAY_MS)
+  ) {
+    throw new RangeError(
+      `${name} must be 0 (disabled) or a positive integer no greater than ` +
+        `${MAX_TIMER_DELAY_MS}; received ${describe(value)}`,
+    );
+  }
 }
 
 /**

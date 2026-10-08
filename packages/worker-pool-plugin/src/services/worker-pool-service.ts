@@ -16,7 +16,7 @@ import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import { WorkerPoolUnavailableError } from '../errors.ts';
 import { TaskPool } from '../pool/task-pool.ts';
 import { WorkerBudget } from '../pool/worker-budget.ts';
-import { readSizingOptions, resolveMaxWorkers } from './sizing.ts';
+import { assertTaskTimeout, readSizingOptions, resolveMaxWorkers } from './sizing.ts';
 import type { SizingSnapshot } from './sizing.ts';
 import type { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 
@@ -77,12 +77,22 @@ export class WorkerPoolService implements IWorkerPool {
    * @returns The task's output
    * @throws {WorkerPoolUnavailableError} When the runtime has no worker
    * support
+   * @throws {RangeError} When `options.timeoutMs` is not `0` or a positive
+   * integer no greater than 2 147 483 647 (the call is rejected, not admitted)
    */
   run<TInput, TOutput>(
     taskModule: string,
     input: TInput,
     options?: WorkerRunOptions,
   ): Promise<TOutput> {
+    try {
+      assertTaskTimeout(options?.timeoutMs, 'timeoutMs');
+    } catch (error) {
+      // Refused before admission and before any pool exists. Not counted in
+      // worker_pool_tasks_rejected_total: that series' reasons describe pool
+      // state, and an invalid argument says nothing about the pool.
+      return Promise.reject(error);
+    }
     if (this.closed) {
       this.collector?.taskRejected(taskModule, 'pool_closed');
       return Promise.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));

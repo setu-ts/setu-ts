@@ -19,7 +19,10 @@
 export interface WorkerRunOptions {
   /**
    * Per-call task timeout in milliseconds, overriding the pool's configured
-   * timeout. `0` disables the timeout for this call.
+   * timeout. `0` disables the timeout for this call. The framework's pool
+   * rejects the call with `RangeError` unless the value is `0` or a positive
+   * integer no greater than 2 147 483 647, the largest delay a runtime timer
+   * honours.
    */
   readonly timeoutMs?: number;
 }

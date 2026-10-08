@@ -19,7 +19,9 @@ export interface TaskPoolOptions {
   readonly maxQueue?: number;
   /**
    * Task timeout in milliseconds for this pool; overrides the plugin
-   * `taskTimeoutMs`. `0` disables the timeout.
+   * `taskTimeoutMs`. `0` disables the timeout. Must be `0` or a positive
+   * integer no greater than 2 147 483 647; anything else throws `RangeError`
+   * at construction.
    */
   readonly taskTimeoutMs?: number;
 }
@@ -56,7 +58,11 @@ export interface WorkerPoolPluginOptions {
   readonly maxQueue?: number;
   /**
    * Default task timeout in milliseconds. Defaults to 30 000; `0` disables.
-   * A worker whose task times out is terminated and replaced.
+   * A worker whose task times out is terminated and replaced. Must be `0` or
+   * a positive integer no greater than 2 147 483 647 (the largest delay a
+   * runtime timer honours); `NaN`, negative, fractional and larger values
+   * throw `RangeError` at construction instead of silently disabling the
+   * timeout or firing it at once.
    */
   readonly taskTimeoutMs?: number;
   /** Per-task-module overrides, keyed by the specifier passed to `run()`. */

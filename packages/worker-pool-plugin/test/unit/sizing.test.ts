@@ -56,6 +56,48 @@ describe('worker sizing', () => {
     });
   }
 
+  for (const value of [NaN, -1, 1.5, 2 ** 31, Infinity]) {
+    it(`refuses taskTimeoutMs ${value} plugin-wide and per pool, at both entry points`, () => {
+      // Before: NaN and negatives silently disabled the timeout; 2^31+ fired at ~1 ms.
+      const message = `must be 0 (disabled) or a positive integer no greater than 2147483647; ` +
+        `received ${value}`;
+      for (
+        const options of [
+          { taskTimeoutMs: value },
+          { pools: { 'file:///t.ts': { taskTimeoutMs: value } } },
+        ]
+      ) {
+        expect(() => WorkerPoolPlugin(options)).toThrow(RangeError);
+        expect(() => WorkerPoolPlugin(options)).toThrow(message);
+        expect(() => new WorkerPoolService(options, createFakeRuntime(new FakeTimers())))
+          .toThrow(message);
+      }
+      expect(() => WorkerPoolPlugin({ pools: { 'file:///t.ts': { taskTimeoutMs: value } } }))
+        .toThrow('pools["file:///t.ts"].taskTimeoutMs');
+    });
+  }
+
+  it('accepts 0, 1 and the largest timer delay for taskTimeoutMs', () => {
+    for (const taskTimeoutMs of [0, 1, 2_147_483_647]) {
+      expect(() => readSizingOptions({ taskTimeoutMs, pools: { a: { taskTimeoutMs } } }))
+        .not.toThrow();
+    }
+  });
+
+  it('rejects an out-of-range per-call timeoutMs without admitting the task', async () => {
+    const host = new FakeHost();
+    const service = new WorkerPoolService({ host }, createFakeRuntime(new FakeTimers()));
+    for (const timeoutMs of [NaN, -5, 2 ** 31]) {
+      await expect(service.run('m', 1, { timeoutMs })).rejects.toThrow(
+        `timeoutMs must be 0 (disabled) or a positive integer no greater than 2147483647; ` +
+          `received ${timeoutMs}`,
+      );
+    }
+    expect(host.handles).toHaveLength(0);
+    expect(service.stats()).toEqual([]);
+    await service.shutdown();
+  });
+
   it('defaults startupTimeoutMs to 10 000 ms and keeps a configured value', () => {
     expect(readSizingOptions().startupTimeoutMs).toBe(10_000);
     expect(readSizingOptions({ startupTimeoutMs: 250 }).startupTimeoutMs).toBe(250);
