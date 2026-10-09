@@ -33,16 +33,21 @@ offer the member.
   - **Conditional writes inside a deferred-write transaction** (memory overlay, D1 batch, DynamoDB
     `TransactWriteItems`, Cosmos batch, Bigtable buffered row). The member is omitted there (§3.5).
     A commit-time condition (DynamoDB's per-item `ConditionExpression`, Cosmos batch `ifMatch`) is a
-    different contract — the outcome is known only at commit, so the call cannot return it — and is
-    **unowned**; the ROADMAP M105 section records it as a follow-on (C4).
+    different contract — the outcome is known only at commit, so the call cannot return it. **Not
+    owned by the framework** (C4): in ASP.NET Core and NestJS this is an ORM feature (EF Core
+    concurrency tokens at `SaveChanges`, TypeORM `@VersionColumn`, MikroORM `version` at `flush()`),
+    and an application needing it uses its ORM through the existing seams
+    (`getDrizzleDatabase`/`getDrizzleTransaction`, the application-supplied Prisma client, the
+    injected document-store clients).
   - **Non-equality predicates** (`FilterExpression`, `IS NULL`, ranges). Equality on scalar
-    `string`/`number` values covers every in-repo consumer; a richer predicate is **unowned** and
-    recorded the same way (C4).
-  - **The outbox relay's fencing.** This milestone makes each outbox transition conditional on its
-    expected status; it does not add a relay-instance fencing token or multi-relay sweeping, which
-    M107 leaves to "a later Postgres-only option" (`ROADMAP.md:13168`) and which stays unowned.
-  - **Making the members required.** Deferred to minor `0.10.0` (§4, ROADMAP "Versioning Policy From
-    `0.9.0`").
+    `string`/`number` values covers every in-repo consumer. **Not owned by the framework** (C4), for
+    the same reason: EF Core's `ExecuteUpdateAsync` with an arbitrary `Where`, TypeORM's query
+    builder and MikroORM's `nativeUpdate` are where that lives.
+  - **The outbox relay's fencing and multi-relay sweeping.** This milestone makes each outbox
+    transition conditional on its expected status, which stops a stale relay regressing a row but
+    not publishing it. A relay-instance fence and several relays at once are **M107b** (C5), which
+    depends on this milestone.
+  - **Making the members required.** Not planned: they stay optional permanently (§4).
 
 ## 1. Contracts verified from SOURCE (not names)
 
@@ -77,13 +82,13 @@ emulator, the Cosmos vnext emulator); the probe scripts are scratch and are not 
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                                                                       | Resolution (picked side)                                                                                                                                                                                                     | Doc deliverable (same PR)                                                                                                                                    |
-| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| C1 | ROADMAP M105 says `common` changes "only if a filter type must move there". `IDataSource` — the port every adapter implements — lives in `common` (`database.ts:203`), so `common` changes unconditionally.                                                                    | `common` gains the two optional `IDataSource` members, `WritePrecondition` and `writePreconditionProblem`.                                                                                                                   | ROADMAP M105 `Package(s)` line names `packages/common` without the condition.                                                                                |
-| C2 | ROADMAP M105 scope names only the tenant bridge, while the database-plugin README (`:176-178`, `:246-247`) and PUBLIC_API (`:2306`, `:2345`) promise that "Milestone 105's conditional write closes the window" for the outbox transitions and the inbox failure count.        | The docs' promise wins: the outbox and inbox stores switch over in this milestone (§3.8). It is the same mechanism through the same helper, and leaving the promise unkept would leave three published sentences false.      | ROADMAP M105 scope + deliverables list the two stores; the four README/PUBLIC_API sentences are rewritten to describe the conditional path and its fallback. |
-| C3 | ROADMAP M105 names "a Cosmos/Bigtable conditional mutation" for Cosmos. Cosmos offers no conditional delete on a predicate; its native guard is `IfMatch` on `_etag`.                                                                                                          | Cosmos uses a read followed by an `_etag`-guarded `replace`/`delete` (§3.6). This is a version compare-and-swap, not a check-then-write: the probe shows a delete-and-recreate under the same id fails the guard with `412`. | ROADMAP M105 scope bullet names `IfMatch` for Cosmos; PUBLIC_API states the per-adapter mechanism table.                                                     |
-| C4 | ROADMAP M105 says "a `WHERE key = ? AND col = ?` statement … DynamoDB `ConditionExpression`" without saying whether deferred-write transactions are covered; `IDataSource` (`database.ts:191`) says D1, DynamoDB and Cosmos transactions defer writes.                         | Deferred-write transactions omit the members (§3.5); commit-time conditions and non-equality predicates are recorded as unowned follow-ons.                                                                                  | ROADMAP M105 gains a "Not covered" bullet naming both.                                                                                                       |
-| C5 | `ROADMAP.md:13152-13168` (M107) says "The portable repository has no … conditional update (M105 adds the latter)" and "True fencing needs a conditional status write (M105)". After this milestone the status write IS conditional, but there is still no relay fencing token. | Status transitions become conditional here; relay fencing stays out of scope (§0).                                                                                                                                           | The two M107 sentences are rewritten to say M105 made transitions conditional and fencing remains unowned.                                                   |
+| #  | Conflict                                                                                                                                                                                                                                                                       | Resolution (picked side)                                                                                                                                                                                                                                                                         | Doc deliverable (same PR)                                                                                                                                                                                                   |
+| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | ROADMAP M105 says `common` changes "only if a filter type must move there". `IDataSource` — the port every adapter implements — lives in `common` (`database.ts:203`), so `common` changes unconditionally.                                                                    | `common` gains the two optional `IDataSource` members, `WritePrecondition` and `writePreconditionProblem`.                                                                                                                                                                                       | ROADMAP M105 `Package(s)` line names `packages/common` without the condition.                                                                                                                                               |
+| C2 | ROADMAP M105 scope names only the tenant bridge, while the database-plugin README (`:176-178`, `:246-247`) and PUBLIC_API (`:2306`, `:2345`) promise that "Milestone 105's conditional write closes the window" for the outbox transitions and the inbox failure count.        | The docs' promise wins: the outbox and inbox stores switch over in this milestone (§3.8). It is the same mechanism through the same helper, and leaving the promise unkept would leave three published sentences false. **Widened scope approved by the maintainer, 2026-10-10.**                | ROADMAP M105 scope + deliverables list the two stores; the four README/PUBLIC_API sentences are rewritten to describe the conditional path and its fallback.                                                                |
+| C3 | ROADMAP M105 names "a Cosmos/Bigtable conditional mutation" for Cosmos. Cosmos offers no conditional delete on a predicate; its native guard is `IfMatch` on `_etag`.                                                                                                          | Cosmos uses a read followed by an `_etag`-guarded `replace`/`delete` (§3.6). This is a version compare-and-swap, not a check-then-write: the probe shows a delete-and-recreate under the same id fails the guard with `412`.                                                                     | ROADMAP M105 scope bullet names `IfMatch` for Cosmos; PUBLIC_API states the per-adapter mechanism table.                                                                                                                    |
+| C4 | ROADMAP M105 says "a `WHERE key = ? AND col = ?` statement … DynamoDB `ConditionExpression`" without saying whether deferred-write transactions are covered; `IDataSource` (`database.ts:191`) says D1, DynamoDB and Cosmos transactions defer writes.                         | Deferred-write transactions omit the members (§3.5). Commit-time conditions and non-equality predicates are NOT owned by the framework: researched 2026-10-10, ASP.NET Core and NestJS leave both to the ORM (EF Core, TypeORM, MikroORM), and Setu already exposes its ORMs through seams (§0). | ROADMAP M105 gains a "Not covered, and not owned by the framework" bullet naming both, with the ORM precedent and the seams.                                                                                                |
+| C5 | `ROADMAP.md:13152-13168` (M107) says "The portable repository has no … conditional update (M105 adds the latter)" and "True fencing needs a conditional status write (M105)". After this milestone the status write IS conditional, but there is still no relay fencing token. | Status transitions become conditional here; relay fencing and multi-relay sweeping move to a new M107b, which depends on this milestone (§0).                                                                                                                                                    | The two M107 sentences are rewritten to say M105 made transitions conditional and to point at M107b; a new ROADMAP M107b section (with the MassTransit/Wolverine/CAP/NServiceBus prior art) and its Progress row are added. |
 
 ## 3. Design decisions
 
@@ -135,8 +140,10 @@ emulator, the Cosmos vnext emulator); the probe scripts are scratch and are not 
   `'conditional-write'` joins `QUERY_SHAPE_FEATURES` (branded `501`, like `'cursor-pagination'`).
   Every refusal is a rejection, never a synchronous throw.
 - **Why:** this is the `findPage` shape (`base-repository.ts:145`). Optional rather than required
-  per the versioning policy; the ambiguity ("absent" vs "not offered") is resolved by the
-  repository, which turns absence into one named error a caller can branch on.
+  per the versioning policy, and permanently so: a required form would break out-of-repo
+  implementors while removing no fallback, since the deferred-write transaction sources (§3.5) keep
+  refusing regardless. The ambiguity ("absent" vs "not offered") is resolved by the repository,
+  which turns absence into one named error a caller can branch on.
 - **Test home:** `base-repository-conditional.test.ts`.
 
 ### 3.4 Native mechanism per data source
@@ -176,7 +183,7 @@ emulator, the Cosmos vnext emulator); the probe scripts are scratch and are not 
 - **Why:** a deferred write lands at commit, so the predicate's outcome is not known when the call
   returns; answering "matched" at buffer time would be an emulated check-then-write, the defect
   itself. DynamoDB and Cosmos do offer commit-time conditions, but that is a different contract (the
-  outcome surfaces as a commit failure) and is recorded as unowned (C4).
+  outcome surfaces as a commit failure), and the framework does not own it (C4, §0).
 - **Test home:** `conditional-write-conformance.test.ts` ("deferred transaction refuses" rows).
 
 ### 3.6 Cosmos: a version compare-and-swap, bounded
@@ -255,8 +262,10 @@ emulator, the Cosmos vnext emulator); the probe scripts are scratch and are not 
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none — both members are optional on `IDataSource` and on
-`IRepository`, so no implementor and no caller breaks. The required form is deferred to minor
-`0.10.0`, recorded as a CHANGELOG `Unreleased` entry marked for the next minor.
+`IRepository`, so no implementor and no caller breaks, and they stay optional permanently (§3.3) —
+no required form is planned, so no CHANGELOG entry is marked for a future minor. The members ship in
+the next release after merge: `0.9.0` if M105 lands before that cut, otherwise a `0.9.x` patch, and
+every `@since` tag names that version.
 
 | Exported symbol                                                                                 | Kind                         | Consumer / real code path that READS it                                                                                        |
 | ----------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -280,29 +289,29 @@ exports, and one in `database-plugin` pins that the helper is NOT exported.
 
 ## 5. Implementation files
 
-| File                                                                                                                       | Purpose                                                                                                   |
-| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `packages/common/src/services/database.ts`                                                                                 | `WritePrecondition`; optional `updateWhere?`/`deleteWhere?` on `IDataSource` with per-arm JSDoc.          |
-| `packages/common/src/services/write-precondition.ts`                                                                       | `writePreconditionProblem`.                                                                               |
-| `packages/common/src/index.ts`                                                                                             | Barrel exports for the two new symbols.                                                                   |
-| `packages/database-plugin/src/interfaces/index.ts`                                                                         | Optional `IRepository` members.                                                                           |
-| `packages/database-plugin/src/repositories/base-repository.ts`                                                             | `updateWhere`/`deleteWhere` with validation and the `'conditional-write'` refusal.                        |
-| `packages/database-plugin/src/repositories/conditional-write.ts`                                                           | Internal `conditionalUpdate`/`conditionalDelete` fallback helper.                                         |
-| `packages/database-plugin/src/errors.ts`                                                                                   | `'conditional-write'` added to `QUERY_SHAPE_FEATURES`.                                                    |
-| `packages/database-plugin/src/services/database-service.ts`                                                                | `wrapDataSource` forwards both members.                                                                   |
-| `packages/database-plugin/src/adapters/memory/memory-adapter.ts`                                                           | Non-transactional implementation.                                                                         |
-| `packages/database-plugin/src/adapters/prisma/prisma-adapter.ts`                                                           | Implementation in `createPrismaDataSourceInner` (also reached by transactions).                           |
-| `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts`                                                         | Implementation in `createDrizzleDataSourceInner` (also reached by transactions).                          |
-| `packages/database-plugin/src/adapters/mongo/mongo-data-source.ts`                                                         | Implementation (also reached by the session-bound transaction source).                                    |
-| `packages/database-plugin/src/adapters/dynamo/dynamo-data-source.ts`                                                       | Non-transactional implementation; buffer path omits the members.                                          |
-| `packages/database-plugin/src/adapters/cosmos/cosmos-data-source.ts`, `cosmos-client-types.ts`, `cosmos-client.ts`         | Non-transactional implementation; facade `delete(options?)`.                                              |
-| `packages/database-plugin/src/adapters/bigtable/bigtable-data-source.ts`, `bigtable-scan.ts`                               | Non-transactional implementation; a `preconditionTest` built from `valueTest`.                            |
-| `packages/database-plugin/src/tenancy/database-tenant-data-store.ts`                                                       | Conditional path; class JSDoc limit narrowed to data sources lacking the member.                          |
-| `packages/database-plugin/src/outbox/database-outbox-store.ts`                                                             | Conditional transitions.                                                                                  |
-| `packages/database-plugin/src/inbox/database-inbox-store.ts`                                                               | Conditional increment and release.                                                                        |
-| `packages/cloudflare-plugin/src/database/d1-sql.ts`, `d1-data-source.ts`                                                   | `buildUpdateWhere`/`buildDeleteWhere`; non-transactional implementation; transaction source omits.        |
-| `PUBLIC_API.md`, `packages/database-plugin/README.md`, `packages/common/README.md`, `packages/cloudflare-plugin/README.md` | Members, per-adapter mechanism table, deferred-transaction refusal, C2 sentences, export tables.          |
-| `ROADMAP.md`, `CHANGELOG.md`, `CLAUDE.md`                                                                                  | C1–C5 corrections, Progress row, `Unreleased` entries (Added + the deferred-required note), status entry. |
+| File                                                                                                                       | Purpose                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `packages/common/src/services/database.ts`                                                                                 | `WritePrecondition`; optional `updateWhere?`/`deleteWhere?` on `IDataSource` with per-arm JSDoc.   |
+| `packages/common/src/services/write-precondition.ts`                                                                       | `writePreconditionProblem`.                                                                        |
+| `packages/common/src/index.ts`                                                                                             | Barrel exports for the two new symbols.                                                            |
+| `packages/database-plugin/src/interfaces/index.ts`                                                                         | Optional `IRepository` members.                                                                    |
+| `packages/database-plugin/src/repositories/base-repository.ts`                                                             | `updateWhere`/`deleteWhere` with validation and the `'conditional-write'` refusal.                 |
+| `packages/database-plugin/src/repositories/conditional-write.ts`                                                           | Internal `conditionalUpdate`/`conditionalDelete` fallback helper.                                  |
+| `packages/database-plugin/src/errors.ts`                                                                                   | `'conditional-write'` added to `QUERY_SHAPE_FEATURES`.                                             |
+| `packages/database-plugin/src/services/database-service.ts`                                                                | `wrapDataSource` forwards both members.                                                            |
+| `packages/database-plugin/src/adapters/memory/memory-adapter.ts`                                                           | Non-transactional implementation.                                                                  |
+| `packages/database-plugin/src/adapters/prisma/prisma-adapter.ts`                                                           | Implementation in `createPrismaDataSourceInner` (also reached by transactions).                    |
+| `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts`                                                         | Implementation in `createDrizzleDataSourceInner` (also reached by transactions).                   |
+| `packages/database-plugin/src/adapters/mongo/mongo-data-source.ts`                                                         | Implementation (also reached by the session-bound transaction source).                             |
+| `packages/database-plugin/src/adapters/dynamo/dynamo-data-source.ts`                                                       | Non-transactional implementation; buffer path omits the members.                                   |
+| `packages/database-plugin/src/adapters/cosmos/cosmos-data-source.ts`, `cosmos-client-types.ts`, `cosmos-client.ts`         | Non-transactional implementation; facade `delete(options?)`.                                       |
+| `packages/database-plugin/src/adapters/bigtable/bigtable-data-source.ts`, `bigtable-scan.ts`                               | Non-transactional implementation; a `preconditionTest` built from `valueTest`.                     |
+| `packages/database-plugin/src/tenancy/database-tenant-data-store.ts`                                                       | Conditional path; class JSDoc limit narrowed to data sources lacking the member.                   |
+| `packages/database-plugin/src/outbox/database-outbox-store.ts`                                                             | Conditional transitions.                                                                           |
+| `packages/database-plugin/src/inbox/database-inbox-store.ts`                                                               | Conditional increment and release.                                                                 |
+| `packages/cloudflare-plugin/src/database/d1-sql.ts`, `d1-data-source.ts`                                                   | `buildUpdateWhere`/`buildDeleteWhere`; non-transactional implementation; transaction source omits. |
+| `PUBLIC_API.md`, `packages/database-plugin/README.md`, `packages/common/README.md`, `packages/cloudflare-plugin/README.md` | Members, per-adapter mechanism table, deferred-transaction refusal, C2 sentences, export tables.   |
+| `ROADMAP.md`, `CHANGELOG.md`, `CLAUDE.md`                                                                                  | C1–C5 corrections, Progress row, `Unreleased` entry (Added), status entry.                         |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -373,8 +382,8 @@ deno task release:verify <version>
 ## 9. Out of scope
 
 - Commit-time conditional writes inside deferred-write transactions (DynamoDB `TransactWriteItems`
-  conditions, Cosmos batch `ifMatch`, D1 batch) — unowned, recorded in ROADMAP M105 (C4).
-- Non-equality and `null` predicates — unowned, recorded in ROADMAP M105 (C4).
-- Outbox relay fencing tokens and multi-relay sweeping — unowned since M107 (C5).
-- Making `updateWhere`/`deleteWhere` required — minor `0.10.0`.
+  conditions, Cosmos batch `ifMatch`, D1 batch) — not owned by the framework; the ORM seams (C4).
+- Non-equality and `null` predicates — not owned by the framework; the ORM seams (C4).
+- Outbox relay fencing tokens and multi-relay sweeping — M107b (C5).
+- Making `updateWhere`/`deleteWhere` required — not planned; optional permanently (§3.3).
 - A `meta.changes`-style row count from `updateWhere`; the row (or `null`) is the result.
