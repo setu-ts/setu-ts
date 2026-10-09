@@ -18,7 +18,10 @@ import {
   DatabaseInboxStore,
 } from '../../../src/inbox/database-inbox-store.ts';
 import { InboxStoreUnavailableError } from '../../../src/inbox/errors.ts';
-import { adapterTypeOf } from '../../../src/services/database-service.ts';
+import { adapterInfoOf, DatabaseService } from '../../../src/services/database-service.ts';
+import { BigtableAdapter } from '../../../src/adapters/bigtable/bigtable-adapter.ts';
+import { CosmosAdapter } from '../../../src/adapters/cosmos/cosmos-adapter.ts';
+import { MemoryAdapter } from '../../../src/index.ts';
 import { allRows, ENTITY, memoryService } from '../../fixtures/inbox-store.ts';
 
 /** The error the real `mongodb` driver raises inside a transaction on a standalone server. */
@@ -95,6 +98,23 @@ describe('DatabaseInboxStore.verify', () => {
     expect((await refusalOf(await memoryService('bigtable'))).reason).toBe('bigtable-unsupported');
   });
 
+  it('refuses a shipped Cosmos or Bigtable adapter handed to the custom arm, by class', async () => {
+    const memory = new MemoryAdapter();
+    await memory.connect();
+    for (
+      const [prototype, reason] of [
+        [CosmosAdapter.prototype, 'cosmos-unsupported'],
+        [BigtableAdapter.prototype, 'bigtable-unsupported'],
+      ] as const
+    ) {
+      // An instance of the class without a backend: `verify` must refuse it
+      // before any I/O, so nothing on it is ever called.
+      const adapter = Object.create(prototype) as CosmosAdapter;
+      const service = new DatabaseService(adapter, (e) => memory.createDataSource(e), 'custom');
+      expect((await refusalOf(service)).reason).toBe(reason);
+    }
+  });
+
   it('refuses a one-row-per-transaction adapter at the second probe row', async () => {
     const scope = new BigtableTransactionScopeError('one row per transaction');
     const error = await refusalOf(failingService(await memoryService(), { secondCreate: scope }));
@@ -145,8 +165,8 @@ describe('DatabaseInboxStore.verify', () => {
       isHealthy: () => inner.isHealthy(),
       close: () => inner.close(),
     };
-    expect(adapterTypeOf(own)).toBeUndefined();
-    expect(adapterTypeOf(inner)).toBe('memory');
+    expect(adapterInfoOf(own)).toBeUndefined();
+    expect(adapterInfoOf(inner)?.type).toBe('memory');
     await new DatabaseInboxStore(own, ENTITY, () => 'p').verify();
   });
 });

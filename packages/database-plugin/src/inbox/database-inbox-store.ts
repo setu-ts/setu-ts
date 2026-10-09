@@ -47,7 +47,9 @@ import { CAPABILITIES, createCapabilityToken, INBOX_RECORD_KIND } from '@setu-ts
 import { BigtableTransactionScopeError } from '../errors.ts';
 import { causeChain } from '../errors/classify.ts';
 import type { IDatabaseService, IRepository } from '../interfaces/index.ts';
-import { adapterTypeOf } from '../services/database-service.ts';
+import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
+import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
+import { adapterInfoOf } from '../services/database-service.ts';
 import { InboxStoreUnavailableError } from './errors.ts';
 
 /**
@@ -324,7 +326,7 @@ export class DatabaseInboxStore implements IInboxStore {
   }
 
   /**
-   * Refuses Cosmos DB and Bigtable by adapter type, then runs retention's
+   * Refuses Cosmos DB and Bigtable by adapter arm or class, then runs retention's
    * first query and a transactional probe that writes two rows and always
    * rolls back — refusing the backend by name when either rejects.
    *
@@ -336,11 +338,12 @@ export class DatabaseInboxStore implements IInboxStore {
    * @inheritdoc
    */
   async verify(): Promise<void> {
-    const type = adapterTypeOf(this.#service);
-    if (type === 'cosmos') {
+    // By arm, and by class for a shipped adapter handed to the `'custom'` arm.
+    const info = adapterInfoOf(this.#service);
+    if (info?.type === 'cosmos' || info?.adapter instanceof CosmosAdapter) {
       throw new InboxStoreUnavailableError(this.#entity, 'cosmos-unsupported');
     }
-    if (type === 'bigtable') {
+    if (info?.type === 'bigtable' || info?.adapter instanceof BigtableAdapter) {
       throw new InboxStoreUnavailableError(this.#entity, 'bigtable-unsupported');
     }
     const rollback = new ProbeRollback('inbox startup probe');

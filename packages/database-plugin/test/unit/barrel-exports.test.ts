@@ -574,7 +574,7 @@ describe('database-plugin barrel exports — M108 inbox store bridge', () => {
   });
 
   it('keeps the store class and the adapter-type lookup internal', () => {
-    for (const name of ['DatabaseInboxStore', 'adapterTypeOf']) {
+    for (const name of ['DatabaseInboxStore', 'adapterInfoOf']) {
       expect(Object.hasOwn(database, name)).toBe(false);
     }
   });
