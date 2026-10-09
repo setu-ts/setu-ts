@@ -5937,7 +5937,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   after another replica purged it; a hung purge stalling retention silently); round 3 on one Low,
   the narrower purge race plan §3.10 accepts — documented afterwards and NOT re-audited. The
   standalone-MongoDB refusal was also run once against a throwaway local `mongo:8`. Not verified: a
-  browser — complete (PR pending).
+  browser — complete (PR #438).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
