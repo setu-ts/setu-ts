@@ -158,21 +158,22 @@ All notable changes to this project are documented here. The format follows
   of work as a fourth argument (`IntegrationEventInboxHandler`, its type inferred from the
   annotation). A duplicate delivery is acknowledged without running the handler; a failed handler
   leaves no marker, so the redelivery runs it again; after any rejection the marker is re-read to
-  tell a lost race from a real failure. The broker `queue` defaults to `<consumer>.<topic>`. With
-  the `inbox` option the call returns a `RegistryFactory<SubscriptionDefinition>` resolved at
-  `onInit` after the store is verified; without it nothing changes. Optional `maxAttempts` counts
-  failures outside the transaction and parks a delivery at the limit (so a Kafka partition or a NATS
-  consumer moves on); `IInbox` lists parked deliveries and releases them (`retry` hands back the
-  envelope to re-publish, `discard` keeps them skipped). A scheduled purge (`inbox-purge`,
-  `retainMs`) — which deletes parked markers past the window too — and an `inbox` health indicator
-  ship with it. Refusals: `InboxNotConfiguredError`, `InboxConsumerConflictError` (two handlers
-  sharing a consumer name on one topic), `InboxNotReadyError`, `InboxPurgeUnscheduledError`,
-  `InboxStoreVerifyTimeoutError`, `InboxRowStateError`. The types are `InboxOptions` (with
-  `InboxPurgeOptions` and `InboxStoreEntry`), `IntegrationEventInboxOptions`,
-  `IntegrationEventSubscribeOptions`, `ParkedInboxEntry` and `InboxReleaseResult`. Driven against
-  real PostgreSQL with real RabbitMQ 4 and Redis Streams (duplicates, a failure rolled back and
-  redelivered, two consumer groups, and an outbox row relayed twice handled once), a MongoDB replica
-  set and the Bigtable emulator; D1 at unit level over real SQLite.
+  tell a lost race from a real failure. The broker `queue` defaults to `inbox.` plus a
+  16-hex-character hash of the consumer and the topic. With the `inbox` option the call returns a
+  `RegistryFactory<SubscriptionDefinition>` resolved at `onInit` after the store is verified;
+  without it nothing changes. Optional `maxAttempts` counts failures outside the transaction and
+  parks a delivery at the limit (so a Kafka partition or a NATS consumer moves on); `IInbox` lists
+  parked deliveries and releases them (`retry` hands back the envelope to re-publish, `discard`
+  keeps them skipped). A scheduled purge (`inbox-purge`, `retainMs`) — which deletes parked markers
+  past the window too — and an `inbox` health indicator ship with it. Refusals:
+  `InboxNotConfiguredError`, `InboxConsumerConflictError` (two handlers sharing a consumer name on
+  one topic), `InboxNotReadyError`, `InboxPurgeUnscheduledError`, `InboxStoreVerifyTimeoutError`,
+  `InboxRowStateError`. The types are `InboxOptions` (with `InboxPurgeOptions` and
+  `InboxStoreEntry`), `IntegrationEventInboxOptions`, `IntegrationEventSubscribeOptions`,
+  `ParkedInboxEntry` and `InboxReleaseResult`. Driven against real PostgreSQL with real RabbitMQ 4
+  and Redis Streams (duplicates, a failure rolled back and redelivered, two consumer groups, and an
+  outbox row relayed twice handled once), a MongoDB replica set and the Bigtable emulator; D1 at
+  unit level over real SQLite.
 
 - **The inbox store port in `@setu-ts/common` (M108).** `IInboxStore` — `find`, `run`,
   `recordFailure`, `park`, `parked`, `release`, `stats`, `purge` and `verify`, every method

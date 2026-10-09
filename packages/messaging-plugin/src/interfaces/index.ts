@@ -1350,7 +1350,7 @@ export interface InboxReleaseResult {
  * (`inbox.<name>` for a named messaging instance).
  *
  * **The promise.** For one consumer name, the handler's writes through the
- * supplied unit of work are committed at most once per envelope id while the
+ * supplied unit of work are committed at most once per topic and envelope id while the
  * marker is retained; a delivery after the marker is purged is processed
  * again. Nothing is promised about effects outside that unit of work, about
  * two processes using one consumer name with different handlers, or about a
@@ -1386,8 +1386,10 @@ export interface IInbox {
   release(rowId: string, action: 'retry' | 'discard'): Promise<InboxReleaseResult>;
 
   /**
-   * Deletes processed and discarded markers and failure-count rows last
-   * written before `retainMs` ago, at most `purge.batch` per status.
+   * Deletes rows of every status — processed, discarded and parked markers
+   * and failure-count rows — last written before `retainMs` ago, at most
+   * `purge.batch` per status per run. The table stays within the window only
+   * while inflow per status stays below that rate.
    *
    * @returns The number of rows deleted
    */

@@ -26,6 +26,14 @@ const ATTEMPTS_SUFFIX = '.attempts';
 /** A marker id: 64 lowercase hexadecimal characters. */
 const MARKER_ID = /^[0-9a-f]{64}$/;
 
+/** The prefix of a default inbox queue. */
+const QUEUE_PREFIX = 'inbox.';
+
+/** FNV-1a 64-bit offset basis and prime. */
+const FNV_OFFSET = 0xcbf29ce484222325n;
+const FNV_PRIME = 0x100000001b3n;
+const MASK_64 = 0xffffffffffffffffn;
+
 /** Encodes bytes as lowercase hex. */
 function hex(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('');
@@ -76,4 +84,32 @@ export function idsFromMarker(markerId: string): InboxIds {
  */
 export function isMarkerId(value: unknown): value is string {
   return typeof value === 'string' && MARKER_ID.test(value);
+}
+
+/**
+ * The broker queue an inbox subscription uses when the caller sets none:
+ * `inbox.` plus 16 lowercase hex characters of a 64-bit FNV-1a hash over
+ * `JSON.stringify([consumer, topic])`.
+ *
+ * Joining the names with a separator is not injective — consumer `a.b` on
+ * topic `c.v1` and consumer `a` on topic `b.c.v1` would share a queue, and a
+ * queue bound to two topics hands each handler the other's messages — and
+ * a topic may carry characters a broker refuses in a queue name (a Pub/Sub
+ * `projects/…/topics/…` path). The JSON array keeps the hashed input
+ * injective, and the result is 22 characters from `[a-z0-9.]`, legal on every
+ * broker. FNV rather than SHA-256 because resolution is synchronous; both
+ * names are application configuration, never message data, so only an
+ * accidental collision matters. Set `queue` for a readable name.
+ *
+ * @internal
+ * @param consumer - The consumer name
+ * @param topic - The subscription topic
+ * @returns The default queue name
+ */
+export function defaultInboxQueue(consumer: string, topic: string): string {
+  let hash = FNV_OFFSET;
+  for (const byte of new TextEncoder().encode(JSON.stringify([consumer, topic]))) {
+    hash = ((hash ^ BigInt(byte)) * FNV_PRIME) & MASK_64;
+  }
+  return `${QUEUE_PREFIX}${hash.toString(16).padStart(16, '0')}`;
 }

@@ -15,6 +15,7 @@ import type {
 import { CAPABILITIES, createCapabilityToken, publishIdProblem } from '@setu-ts/common';
 
 import { InboxNotConfiguredError } from '../inbox/errors.ts';
+import { defaultInboxQueue } from '../inbox/inbox-key.ts';
 import { inboxServiceOf } from '../inbox/inbox-service.ts';
 import type { SubscriptionDefinition } from '../interfaces/index.ts';
 import type { IntegrationEventDefinition } from './definition.ts';
@@ -67,10 +68,11 @@ export type IntegrationEventInboxHandler<T, S = unknown> = (
  */
 export interface IntegrationEventInboxOptions {
   /**
-   * The consumer name: one half of the inbox key `(consumer, envelope id)`,
-   * and the broker `queue` when `queue` is not set. It must be the SAME on
-   * every replica and every deployment of this consumer — a name that changes
-   * makes every redelivered event look new. A valid publish id: at most 128
+   * The consumer name: part of the inbox key `(consumer, topic, envelope id)`,
+   * and — with the topic — of the default broker `queue` (`inbox.` plus a
+   * 16-character hash of the pair) when `queue` is not set. It must be the
+   * SAME on every replica and every deployment of this consumer — a name that
+   * changes makes every redelivered event look new. A valid publish id: at most 128
    * UTF-8 bytes, no control or format characters, no surrounding whitespace.
    */
   readonly consumer: string;
@@ -97,17 +99,18 @@ export type IntegrationEventSubscribeOptions = SubscribeOptions & {
  * outbox and every broker deliver at least once.
  *
  * The handler receives a fourth argument — the unit of work of the
- * transaction in which the inbox marker `(consumer, envelope id)` is created
+ * transaction in which the inbox marker `(consumer, topic, envelope id)` is created
  * FIRST — and every write through it commits with the marker or not at all.
  * A duplicate delivery is acknowledged without running the handler; a handler
  * that fails leaves no marker, so the broker's redelivery runs it again; after
  * any rejection the marker is re-read, and only a present marker means
  * another delivery already handled the event. The broker `queue` defaults to
- * `inbox.consumer`.
+ * `inbox.` plus a 16-character hash of the consumer and the topic; set `queue`
+ * for a readable name.
  *
  * **The promise.** For one consumer name, the handler's writes through the
- * supplied unit of work are committed at most once per envelope id while the
- * marker is retained; a delivery after the marker is purged is processed
+ * supplied unit of work are committed at most once per topic and envelope id
+ * while the marker is retained; a delivery after the marker is purged is processed
  * again. Nothing is promised about effects outside that unit of work, about
  * two processes using one consumer name with different handlers, or about a
  * database other than the store's.
@@ -273,10 +276,10 @@ function inboxSubscription<T>(
         service.deliver(subscription, raw, metadata),
       // A named group by default: a queue-less subscriber on RabbitMQ gets a
       // private queue whose failures are discarded, which would leave the
-      // inbox nothing to de-duplicate (§3.4). Per topic, because one consumer
-      // may read several topics, and a RabbitMQ queue bound to two of them
-      // hands each handler the other's messages, which it then rejects.
-      options: { queue: queue ?? `${consumer}.${topic}` },
+      // inbox nothing to de-duplicate (§3.4). One per (consumer, topic) pair,
+      // because a queue bound to two topics hands each handler the other's
+      // messages, which it then rejects.
+      options: { queue: queue ?? defaultInboxQueue(consumer, topic) },
     };
   };
 }

@@ -719,9 +719,11 @@ sections above are left as the design record.
 - **§3.5 key.** The derivation hashes `['setu-inbox/1', consumer, topic, envelopeId]`. Keyed by
   consumer and id alone, one consumer reading two topics let a publisher on topic B suppress a
   topic-A event by reusing its id, which is wider than D2's "anyone who can publish to the topic".
-- **§3.4 queue default.** The broker queue defaults to `<consumer>.<topic>`. One consumer on two
-  topics shared one RabbitMQ queue under the old default, so each handler received the other topic's
-  messages and rejected them into the dead-letter queue (5 of 10 per topic, measured).
+- **§3.4 queue default.** The broker queue defaults to `inbox.` plus 16 hex characters of a 64-bit
+  FNV-1a hash of `JSON.stringify([consumer, topic])` (round 2: a joined `<consumer>.<topic>` was not
+  injective and carried a Pub/Sub topic path's `/`). One consumer on two topics shared one RabbitMQ
+  queue under the old default, so each handler received the other topic's messages and rejected them
+  into the dead-letter queue (5 of 10 per topic, measured).
 - **D7 logs.** A failed store call is logged with the error's class name (`errorKind`) and never its
   message: Drizzle's error quotes the bound parameters, which are the envelope id, the handler's
   error text and, when parking, the envelope.
@@ -730,4 +732,7 @@ sections above are left as the design record.
 - **D8 retention.** `purge()` deletes parked markers past `retainMs` too, envelope included. A
   stream of unparseable payloads otherwise grew the table without bound (200 rows, 40 MB, measured).
   An operator releases or discards a parked delivery within the window; the health indicator reports
-  `degraded` while any row is parked.
+  `degraded` while any row is parked. The bound holds while inflow per status stays below
+  `purge.batch` per interval (round 2).
+- **Round 2.** The provider idempotency-key recipe in the README carries the topic too, and the
+  remaining docs that said "once per envelope id" say "per topic and envelope id".

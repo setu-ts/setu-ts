@@ -13,13 +13,16 @@
  * - two consumer names each process the same event once;
  * - one consumer name on two topics gets every event of each topic on its
  *   own handler, and an id reused across the topics suppresses neither;
+ * - two (consumer, topic) pairs whose dotted names would join to the same
+ *   string get distinct default queues;
  * - end to end with M107: an outbox row the relay publishes TWICE (the crash
  *   shape — the row is still `pending` after its first publish) is handled
  *   once.
  *
  * Guarded with `ignore:` on the variables (never an early return, M70c):
  * `OUTBOX_POSTGRES_URL` + `RABBITMQ_URL`, and `OUTBOX_POSTGRES_URL` +
- * `REDIS_URL`.
+ * `REDIS_URL`. A last case drives the default queue against the REAL Pub/Sub
+ * emulator (memory database), guarded on `PUBSUB_EMULATOR_HOST`.
  *
  * @module
  */
@@ -54,6 +57,8 @@ import type {
 const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
 const rabbitUrl = Deno.env.get('RABBITMQ_URL');
 const redisUrl = Deno.env.get('REDIS_URL');
+const pubsubHost = Deno.env.get('PUBSUB_EMULATOR_HOST');
+const pubsubProject = Deno.env.get('PUBSUB_PROJECT_ID') ?? 'he-test';
 
 /** The event every case publishes. */
 interface Hired {
@@ -64,12 +69,12 @@ interface Hired {
 function definitionFor(
   transport: string,
   type = 'people.hired',
+  topic = `m108.${transport}.${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}.people.v1`,
 ): IntegrationEventDefinition<Hired> {
-  const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
   return defineIntegrationEvent<Hired>({
     type,
     version: 1,
-    topic: `m108.${transport}.${suffix}.people.v1`,
+    topic,
     parse: (value) => value as Hired,
   });
 }
@@ -304,6 +309,43 @@ for (const transport of transports) {
       }
     });
 
+    it('pairs whose dotted names join alike get distinct default queues', async () => {
+      const pg = await postgresInboxSchema(postgresUrl!);
+      const tag = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
+      // `<consumer>.<topic>` would be `m108.left.${tag}.people.v1` for both.
+      const first = definitionFor(label, 'people.hired', `${tag}.people.v1`);
+      const second = definitionFor(label, 'people.left', `left.${tag}.people.v1`);
+      const firstCalls: string[] = [];
+      const secondCalls: string[] = [];
+      const app = processFor(pg, transport, [
+        onIntegrationEvent(first, (p) => {
+          firstCalls.push(p.personId);
+        }, { inbox: { consumer: 'm108.left' } }),
+        onIntegrationEvent(second, (p) => {
+          secondCalls.push(p.personId);
+        }, { inbox: { consumer: 'm108' } }),
+      ]);
+      await app.start();
+      try {
+        for (let i = 0; i < 4; i++) {
+          await publish(app, first.topic, envelopeOf(`${tag}-${i}`, `f-${i}`));
+        }
+        for (let i = 0; i < 4; i++) {
+          await publish(app, second.topic, envelopeOf(`${tag}-${i}`, `s-${i}`, 'people.left'));
+        }
+        await waitFor(
+          () => firstCalls.length === 4 && secondCalls.length === 4,
+          'every event on both topics',
+        );
+        await settle();
+        expect(firstCalls.toSorted()).toEqual(['f-0', 'f-1', 'f-2', 'f-3']);
+        expect(secondCalls.toSorted()).toEqual(['s-0', 's-1', 's-2', 's-3']);
+      } finally {
+        await app.stop();
+        await pg.dispose();
+      }
+    });
+
     it('end to end with the outbox: a row relayed twice is handled once', async () => {
       const pg = await postgresInboxSchema(postgresUrl!);
       const definition = definitionFor(label);
@@ -337,3 +379,48 @@ for (const transport of transports) {
     });
   });
 }
+
+describe(
+  'consumer inbox default queue ← Pub/Sub emulator',
+  { ignore: pubsubHost === undefined },
+  () => {
+    it('a fully-qualified topic still yields a legal default subscription', async () => {
+      const mod = await import('npm:@google-cloud/pubsub@^6');
+      const admin = new mod.PubSub({ projectId: pubsubProject });
+      const topicId = `m108-${crypto.randomUUID().slice(0, 8)}.people.v1`;
+      await admin.createTopic(topicId);
+      const qualified = `projects/${pubsubProject}/topics/${topicId}`;
+      const definition = definitionFor('pubsub', 'people.hired', qualified);
+      const calls: string[] = [];
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          DatabasePlugin({ type: 'memory' }),
+          MessagingPlugin({
+            broker: 'pubsub',
+            projectId: pubsubProject,
+            inbox: { store: createDatabaseInboxStore(), purge: { schedule: false } },
+            subscriptions: [
+              onIntegrationEvent(definition, (p) => {
+                calls.push(p.personId);
+              }, { inbox: { consumer: 'm108-pubsub' } }),
+            ],
+          } as MessagingPluginOptions),
+        ],
+      });
+      // A `/` in the default name made the service refuse it: start() rejected.
+      await app.start();
+      try {
+        await publish(app, topicId, envelopeOf('e-1', 'p-1'));
+        await waitFor(() => calls.length === 1, 'the Pub/Sub delivery');
+        expect(calls).toEqual(['p-1']);
+      } finally {
+        await app.stop();
+        const [subscriptions] = await admin.topic(topicId).getSubscriptions();
+        for (const subscription of subscriptions) await subscription.delete();
+        await admin.topic(topicId).delete();
+        await admin.close();
+      }
+    });
+  },
+);

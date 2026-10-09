@@ -156,6 +156,17 @@ describe('inbox over a real MongoDB replica set', { ignore: mongoRsUri === undef
     } finally {
       await first.stop();
       await second.stop();
+      // The run's collections are unique to it; leave nothing behind.
+      const { MongoClient } = await import('npm:mongodb@^6.21.0');
+      const client = new MongoClient(mongoRsUri!);
+      try {
+        const db = client.db('setu_m108_inbox');
+        for (const name of [`inbox_${suffix}`, `people_${suffix}`]) {
+          await db.collection(name).drop().catch(() => false);
+        }
+      } finally {
+        await client.close();
+      }
     }
   });
 });

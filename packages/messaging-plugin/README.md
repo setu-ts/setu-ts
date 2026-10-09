@@ -1432,17 +1432,19 @@ with no scheduler registered `start()` rejects `InboxPurgeUnscheduledError`, unl
 every replica and every deployment of the consumer: a name that changes makes every redelivered
 event look new. The topic in the key keeps one consumer's topics apart, so an event on one topic
 never suppresses an event with the same id on another. Unless you set `queue`, the broker `queue` is
-`<consumer>.<topic>`: on RabbitMQ a queue-less subscriber gets a private queue whose failed messages
-are discarded, which would leave the inbox nothing to de-duplicate, and a queue shared by two topics
-hands each handler the other topic's messages. Two inbox subscriptions with the same consumer name
-on one topic in one application are refused with `InboxConsumerConflictError`, because each would
-skip the other's events. Across processes this cannot be detected: give each consumer its own name.
+`inbox.` plus 16 hex characters of a hash of the consumer and the topic (one queue per pair, legal
+on every broker; set `queue` for a readable name): on RabbitMQ a queue-less subscriber gets a
+private queue whose failed messages are discarded, which would leave the inbox nothing to
+de-duplicate, and a queue shared by two topics hands each handler the other topic's messages. Two
+inbox subscriptions with the same consumer name on one topic in one application are refused with
+`InboxConsumerConflictError`, because each would skip the other's events. Across processes this
+cannot be detected: give each consumer its own name.
 
 ### The promise
 
 For one consumer name, the handler's writes through the supplied unit of work are committed at most
-once per envelope id while the marker is retained; a delivery after the marker is purged is
-processed again. Nothing is promised about effects outside that unit of work, about two processes
+once per topic and envelope id while the marker is retained; a delivery after the marker is purged
+is processed again. Nothing is promised about effects outside that unit of work, about two processes
 using one consumer name with different handlers, or about a database other than the store's. The
 inbox is not authentication: anyone who can publish to the topic can still publish a new event.
 
@@ -1466,7 +1468,7 @@ effect:
 | Choice                     | How                                                                                                                                                                  | Guarantee                                               |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | Perform it in the handler  | anywhere in the handler (the default shape)                                                                                                                          | at least once                                           |
-| Forward a derived key      | pass `${consumer}:${envelope.id}` as the provider's idempotency key                                                                                                  | once, where the provider de-duplicates                  |
+| Forward a derived key      | pass `${consumer}:${topic}:${envelope.id}` as the provider's idempotency key — the topic too, or an event on another topic reusing the id is de-duplicated away      | once, where the provider de-duplicates                  |
 | Claim it before the effect | in the handler, COMMIT your own claim row for the effect in a SEPARATE transaction (not the inbox's unit of work), and skip the effect when the claim already exists | at most once — a crash after the claim loses the effect |
 
 On the backends that defer writes to commit (memory, D1, DynamoDB) the handler runs BEFORE a
@@ -1521,10 +1523,9 @@ redeliveries stay skipped. The inbox never re-runs a handler itself — that wou
 messaging behaviour chain. A re-publish reaches every consumer group of the topic: groups using an
 inbox skip it, groups without one process it again. `parked()` never returns an envelope, and the
 health indicator carries a count only. Parked rows are purged by `retainMs` like every other row,
-envelope included, so the table stays bounded however many deliveries park: release or discard a
-parked delivery within that window (the `inbox` health indicator reports `degraded` while any row is
-parked), and `discard` clears one sooner. These are operator capabilities — gate any route that
-calls them.
+envelope included, so a parked row does not outlive the window: release or discard a parked delivery
+within that window (the `inbox` health indicator reports `degraded` while any row is parked), and
+`discard` clears one sooner. These are operator capabilities — gate any route that calls them.
 
 ### Backends
 
@@ -1592,8 +1593,10 @@ CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updatedAt);
 older than that is processed again, so it must exceed the broker's redelivery window plus the
 outbox's re-send window (a crashed relay re-sends within its next sweep; an operator's
 `release('retry')` of a failed outbox row re-sends a row no consumer has seen). The purge deletes
-`processed` and `discarded` markers and stale failure-count rows, at most `purge.batch` per status
-per run.
+rows of every status older than the window — `processed`, `discarded` and `parked` markers and
+failure-count rows — but each run deletes at most `purge.batch` rows per status (default 100 a
+minute), so the table stays within the window only while inflow per status stays below that rate —
+raise `purge.batch` or shorten `purge.intervalMs` above it.
 
 ### Options
 

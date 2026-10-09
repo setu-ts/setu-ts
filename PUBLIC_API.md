@@ -6422,10 +6422,10 @@ app.register(MessagingPlugin({
 ```
 
 **The promise.** For one consumer name, the handler's writes through the supplied unit of work are
-committed at most once per envelope id while the marker is retained; a delivery after the marker is
-purged is processed again. Nothing is promised about effects outside that unit of work, about two
-processes using one consumer name with different handlers, or about a database other than the
-store's.
+committed at most once per topic and envelope id while the marker is retained; a delivery after the
+marker is purged is processed again. Nothing is promised about effects outside that unit of work,
+about two processes using one consumer name with different handlers, or about a database other than
+the store's.
 
 | Export                             | Kind      | Notes                                                                                                                                 |
 | ---------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -6451,10 +6451,12 @@ store's.
   ids are a SHA-256 of `(consumer, topic, envelope id)`, so any string id is keyable and one
   consumer's topics never suppress each other; the raw id is stored only when it is a valid publish
   id.
-- **Queue.** The broker `queue` defaults to `<consumer>.<topic>`, so the subscription is a durable
+- **Queue.** The broker `queue` defaults to `inbox.` plus 16 hex characters of a hash of the
+  consumer and the topic — injective and legal on every broker — so the subscription is a durable
   consumer group that redelivers, one per topic.
 - **Retention.** `purge()` deletes rows of every status older than `retainMs`, parked markers and
-  their envelopes included, so the table is bounded by the window.
+  their envelopes included, at most `purge.batch` per status per run — so the table stays within the
+  window only while inflow per status stays below that rate.
 - **Logs.** A failed store call is logged with the error's class name only (the `errorKind` log
   field), never its message, which a driver may fill with the statement's bound parameters.
 - **Failures.** Without `maxAttempts` a failure is rethrown and the broker's budget applies (NATS

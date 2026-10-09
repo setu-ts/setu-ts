@@ -7,7 +7,12 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { deriveInboxIds, idsFromMarker, isMarkerId } from '../../../src/inbox/inbox-key.ts';
+import {
+  defaultInboxQueue,
+  deriveInboxIds,
+  idsFromMarker,
+  isMarkerId,
+} from '../../../src/inbox/inbox-key.ts';
 
 const subtle = crypto.subtle;
 
@@ -57,6 +62,27 @@ describe('inbox row ids', () => {
   it('an ill-formed id keys as its well-formed replacement', async () => {
     expect((await deriveInboxIds(subtle, 'c', 't', 'a\ud800')).marker)
       .toBe((await deriveInboxIds(subtle, 'c', 't', 'a�')).marker);
+  });
+
+  it('a default queue is inbox. plus 16 hex characters, legal on every broker', () => {
+    for (const topic of ['people.hired.v1', 'projects/p/topics/x.v1', 'a b/c:d']) {
+      expect(defaultInboxQueue('payroll', topic)).toMatch(/^inbox\.[0-9a-f]{16}$/);
+    }
+    expect(defaultInboxQueue('payroll', 'people.hired.v1')).toBe('inbox.ceb43f8aaeee103e');
+  });
+
+  it('a default queue keeps pairs apart that a joined name would merge', () => {
+    // `a.b` + `c.v1` and `a` + `b.c.v1` both join to `a.b.c.v1`.
+    const pairs: [string, string][] = [
+      ['a.b', 'c.v1'],
+      ['a', 'b.c.v1'],
+      ['a', 'b'],
+      ['b', 'a'],
+      ['a","b', 'c'],
+      ['a', '","b'],
+    ];
+    const queues = new Set(pairs.map(([consumer, topic]) => defaultInboxQueue(consumer, topic)));
+    expect(queues.size).toBe(pairs.length);
   });
 
   it('idsFromMarker and isMarkerId', () => {

@@ -222,8 +222,9 @@ export interface IInboxStore {
 
   /**
    * Deletes rows of every status — `processed`, `discarded`, `attempting` and
-   * `parked` — last written before `before`. A parked marker is purged like
-   * any other, so the table stays bounded by the retention window.
+   * `parked` — last written before `before`, at most `limit` per status. A
+   * parked marker is purged like any other, so no row outlives the window
+   * while the caller's purge rate keeps up with inflow.
    *
    * @param before - Epoch milliseconds; rows with `updatedAt < before` are deleted
    * @param limit - Maximum rows deleted per status

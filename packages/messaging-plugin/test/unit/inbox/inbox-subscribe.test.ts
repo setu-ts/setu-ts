@@ -37,12 +37,13 @@ function activeService(): InboxService {
 }
 
 describe('inbox subscription resolution', () => {
-  it('resolves to a definition on the topic, defaulting the queue to consumer.topic', () => {
+  it('resolves to a definition on the topic, defaulting the queue to a hashed name', () => {
     const definition = onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'payroll' } })(
       registry({ inbox: activeService() }),
     );
     expect(definition.topic).toBe('people.hired.v1');
-    expect(definition.options).toEqual({ queue: 'payroll.people.hired.v1' });
+    // FNV-1a 64 over ["payroll","people.hired.v1"], computed independently.
+    expect(definition.options).toEqual({ queue: 'inbox.ceb43f8aaeee103e' });
     expect(Object.keys(definition.options ?? {})).toEqual(['queue']);
   });
 
@@ -53,7 +54,7 @@ describe('inbox subscription resolution', () => {
       inbox: { consumer: 'payroll' },
     })(services);
     expect(a.options?.queue).not.toBe(b.options?.queue);
-    expect(b.options).toEqual({ queue: 'payroll.people.left.v1' });
+    expect(b.options).toEqual({ queue: 'inbox.2b2a8963b3237cdb' });
   });
 
   it('keeps an explicit queue', () => {

@@ -187,10 +187,14 @@ export class FakeInboxStore implements IInboxStore {
 
   purge(before: number, limit: number): Promise<number> {
     this.calls.push(`purge:${before}:${limit}`);
+    // Every status, at most `limit` per status — the widened port contract.
+    const perStatus = new Map<string, number>();
     let deleted = 0;
     for (const [id, row] of this.rows) {
-      if (row.status !== 'parked' && row.updatedAt < before && deleted < limit) {
+      const count = perStatus.get(row.status) ?? 0;
+      if (row.updatedAt < before && count < limit) {
         this.rows.delete(id);
+        perStatus.set(row.status, count + 1);
         deleted += 1;
       }
     }
