@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Idempotency tier C — the work and its record committed together (`@setu-ts/idempotency-plugin`,
+  `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/sdk`, M109b).** A new
+  `IIdempotencyService.within(options, fn)` opens ONE database transaction, creates a claim row in
+  it FIRST, runs `fn` with that transaction's unit of work, creates a result row holding `fn`'s JSON
+  result and commits; a repeated key whose record is committed returns the stored result without
+  running `fn`, and a concurrent duplicate loses the race on the claim's primary key and its
+  business writes roll back with it — then it replays, or, where it failed before the winner
+  committed, rejects with a retryable `409`. The plugin gains `IdempotencyWithinError` (with
+  `IdempotencyWithinErrorReason`), `IdempotencyVerifyTimeoutError`,
+  `TransactionalIdempotencyOptions` and `TransactionalIdempotencyPurgeOptions`; `common` gains the
+  port `ITransactionalIdempotencyStore` with `TransactionalIdempotencyClaim`,
+  `TransactionalIdempotencyRecord`, the `IDEMPOTENCY_RECORD_KIND` discriminator, and the
+  `IdempotentWithinOptions` / `IdempotentWithinResult` option and result types; `database-plugin`
+  gains `createDatabaseIdempotencyStore` (with `DatabaseIdempotencyStoreOptions`) and
+  `TransactionalStoreUnavailableError`; and `@setu-ts/sdk` gains `ClientOptions.idempotency`
+  (`ClientIdempotencyOptions`) and `ClientRequest.idempotencyKey`, so a keyed request keeps ONE key
+  across every retry attempt and may retry any method and `409`.
+
 - **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
   questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup
   misses and what each error message is telling you, whether a service lives in the service registry

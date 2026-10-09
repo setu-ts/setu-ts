@@ -210,20 +210,25 @@ package implements.
 
 ## Exports
 
-| Export                          | Kind      |
-| ------------------------------- | --------- |
-| `derivedIdempotencyKey`         | function  |
-| `IdempotencyPlugin`             | function  |
-| `idempotent`                    | function  |
-| `idempotentIngress`             | function  |
-| `IdempotencyConfigurationError` | class     |
-| `IdempotencyRefusedError`       | class     |
-| `IDEMPOTENCY_KEY_HEADER`        | const     |
-| `IDEMPOTENT_REPLAYED_HEADER`    | const     |
-| `IdempotencyPluginOptions`      | interface |
-| `IRedisIdempotencyClient`       | interface |
-| `IdempotencyRefusalReason`      | type      |
-| `IdempotencyStoreConfig`        | type      |
+| Export                                 | Kind      |
+| -------------------------------------- | --------- |
+| `IdempotencyVerifyTimeoutError`        | class     |
+| `IdempotencyWithinError`               | class     |
+| `IdempotencyWithinErrorReason`         | type      |
+| `TransactionalIdempotencyOptions`      | interface |
+| `TransactionalIdempotencyPurgeOptions` | interface |
+| `derivedIdempotencyKey`                | function  |
+| `IdempotencyPlugin`                    | function  |
+| `idempotent`                           | function  |
+| `idempotentIngress`                    | function  |
+| `IdempotencyConfigurationError`        | class     |
+| `IdempotencyRefusedError`              | class     |
+| `IDEMPOTENCY_KEY_HEADER`               | const     |
+| `IDEMPOTENT_REPLAYED_HEADER`           | const     |
+| `IdempotencyPluginOptions`             | interface |
+| `IRedisIdempotencyClient`              | interface |
+| `IdempotencyRefusalReason`             | type      |
+| `IdempotencyStoreConfig`               | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

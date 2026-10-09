@@ -189,6 +189,8 @@ export class IdempotencyVerifyTimeoutError extends Error {
   readonly timeoutMs: number;
 
   /**
+   * Creates the error naming the bound that expired.
+   *
    * @param timeoutMs - The bound that expired
    */
   constructor(timeoutMs: number) {

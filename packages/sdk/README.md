@@ -548,6 +548,7 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 
 | Export                          | Kind      |
 | ------------------------------- | --------- |
+| `ClientIdempotencyOptions`      | interface |
 | `createApiKeyAuthInterceptor`   | function  |
 | `createBearerAuthInterceptor`   | function  |
 | `createClient`                  | function  |
