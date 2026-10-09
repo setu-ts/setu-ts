@@ -123,6 +123,9 @@ const READMES: Readonly<Record<string, number>> = {
   // M98d: +1 for the opt-in health-observations example.
   'packages/health-plugin/README.md': 3,
   'packages/http-security-plugin/README.md': 2,
+  // M109a: the new package's README is born gated — the usage example and the
+  // derived-key forwarding example.
+  'packages/idempotency-plugin/README.md': 2,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 3,
@@ -204,7 +207,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(41);
+    expect(Object.keys(READMES)).toHaveLength(42);
 
     // And pin the COVERAGE: every package README is gated or explicitly named
     // as a known gap. Half of them were in neither before v0.6.0, which is how

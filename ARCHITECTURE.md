@@ -1063,6 +1063,7 @@ graph TB
 
     subgraph Feature Plugins
         feature-flags[feature-flags-plugin]
+        idempotency[idempotency-plugin]
         multi-tenancy[multi-tenancy-plugin]
         resilience[resilience-plugin]
         session[session-plugin]
@@ -1156,6 +1157,7 @@ graph TB
     kernel --> feature-flags
     common --> multi-tenancy
     kernel --> multi-tenancy
+    common --> idempotency
     common --> service-discovery
     common --> cloudflare
     common --> session
@@ -1367,6 +1369,17 @@ AWS SQS with visibility timeouts, envelope-based retry tracking, and DLQ promoti
 then deletes the source message, with separate diagnostics for send vs delete failures. The
 `SnsPublisher` export is a separate AWS SNS fan-out helper (not a `QueueAdapter`): it publishes to a
 single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam as `SqsQueue`.
+
+#### @setu-ts/idempotency-plugin
+
+| Aspect               | Detail                                                                                                                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**          | One idempotency core that answers a repeat of completed work from its record (or skips it), reachable from HTTP, ingress and plain code. It deduplicates; it cannot make a handler's external side effects atomic with the record |
+| **Responsibilities** | The `claim`/`complete`/`release` state machine; memory, Redis (three Lua scripts) and Cloudflare Durable Object stores; the HTTP `idempotent()` middleware; the `idempotentIngress()` behaviour; the `idempotency` health indicator                     |
+| **Dependencies**     | `common` only — ioredis is injected or lazy-loaded, and the Durable Object store lives in `cloudflare-plugin` because no plugin imports a plugin                                                                                                   |
+| **Public API**       | `IdempotencyPlugin()`; `idempotent()`; `derivedIdempotencyKey()`; `idempotentIngress()`; `IdempotencyRefusedError`; `IdempotencyConfigurationError`; `IDEMPOTENCY_KEY_HEADER`; `IDEMPOTENT_REPLAYED_HEADER`; and the types `IdempotencyPluginOptions`, `IdempotencyStoreConfig`, `IRedisIdempotencyClient`, `IdempotencyRefusalReason`. The stores and `IIdempotencyService`/`IIdempotencyStore` are internal or owned by `common`, not barrel exports |
+| **Extension Points** | A custom `IIdempotencyStore` through the `store` option; the `scope`, `key` and `fingerprint` callbacks; `@Idempotent()` in `decorator-plugin` resolves the same capability token                                                                  |
+| **Rules**            | `idempotent()` and `@Idempotent()` are appended AFTER guards and validation, so a refused request consumes no key; the Redis tier owns its client rather than widening `ICacheStore`; tier A is per process, so Workers HTTP uses the Durable Object store |
 
 #### @setu-ts/auth-plugin
 

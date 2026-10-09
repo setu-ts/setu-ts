@@ -1,0 +1,20 @@
+{
+  "name": "@setu-ts/idempotency-plugin",
+  "version": "0.8.0",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "sys": [
+        "hostname"
+      ],
+      "net": [
+        "127.0.0.1:6379",
+        "localhost:6379"
+      ]
+    }
+  }
+}

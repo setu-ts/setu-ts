@@ -84,6 +84,13 @@ export const CLEAN_PACKAGES = new Set([
  * precedent), and two pre-existing missing-description diagnostics were paid
  * down on files the milestone already touched. Lowered rather than widened,
  * which is the whole point.
+ *
+ * M109a added `@setu-ts/idempotency-plugin` and the Durable Object idempotency
+ * store in `cloudflare-plugin` and left the count where it was. The first draft
+ * raised it to 510 and called the new diagnostics unavoidable `private-type-ref`
+ * reports; measured, all fourteen were `missing-jsdoc` (`@inheritdoc` alone and
+ * `@param`-only constructor blocks carry no description), so each was documented
+ * instead. A new package does not license a wider ratchet.
  */
 export const DOC_LINT_BASELINE = 496;
 

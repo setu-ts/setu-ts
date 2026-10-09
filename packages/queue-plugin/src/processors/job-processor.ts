@@ -313,6 +313,9 @@ export function withIngressBehaviors<T>(
         name: job.name,
         payload: job,
         attempt: job.attempts,
+        // The queue's consumer identity is its job name (M109a §3.19): one
+        // queue, one consumer, so a re-delivered job is a duplicate of itself.
+        consumer: job.name,
         // Same conditional spread, for the same reason: `IngressContext.headers`
         // documents ABSENT as "there was no channel", so a queue job that
         // carried none must leave the member off rather than present-and-

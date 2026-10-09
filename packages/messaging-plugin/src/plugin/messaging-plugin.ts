@@ -506,15 +506,20 @@ export function MessagingPlugin(
         // this plugin's own declared entries and any a later plugin makes
         // imperatively through the registered broker — so no registration's
         // timing has to change.
+        // The per-process subscription-id prefix (M109a §3.19): a queue-less
+        // subscription's consumer id is `subscription:<uuid>:<n>`, unique per
+        // subscription per process so a redelivery to another process is not
+        // mistaken for a duplicate.
+        const subscriptionIdPrefix = ctx.runtime.uuid();
         broker = behaviorFactories.length === 0
-          ? new PipelinedBroker(broker, behaviorChain)
+          ? new PipelinedBroker(broker, behaviorChain, undefined, undefined, subscriptionIdPrefix)
           : new PipelinedBroker(broker, behaviorChain, chainReady, {
             runtime: ctx.runtime,
             // exactOptionalPropertyTypes: omit the option when unset so the
             // broker applies its own default bound. The validated value is
             // resolved before any external broker is connected.
             ...(chainReadyTimeoutMs !== undefined ? { timeoutMs: chainReadyTimeoutMs } : {}),
-          });
+          }, subscriptionIdPrefix);
       }
 
       // Register the broker as IMessageBroker

@@ -65,7 +65,8 @@ const DEFAULT_REDIRECT_STATUS = 302;
  * class OrderController {
  *   @HttpCode(201)
  *   @Post('/')
- *   create(@Params(Body()) order: OrderInput): OrderView {
+ *   @Params(Body())
+ *   create(order: OrderInput): OrderView {
  *     return this.orders.create(order);
  *   }
  * }

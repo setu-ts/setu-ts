@@ -32,17 +32,20 @@ import type {
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
   : false;
 
-// Compile-time: the envelope is pinned to exactly the §3.3 members, all
-// readonly, with `attempt` and `headers` OPTIONAL (`exactOptionalPropertyTypes`
-// — `attempt?: number`, never `attempt?: number | undefined`). Adding a
-// `state` slot or a `services` member, or demoting a `readonly`, stops this
-// file compiling.
+// Compile-time: the envelope is pinned to exactly the members below, all
+// readonly, with `attempt`, `headers` and `consumer` OPTIONAL
+// (`exactOptionalPropertyTypes` — `attempt?: number`, never
+// `attempt?: number | undefined`). Adding a `state` slot or a `services`
+// member, or demoting a `readonly`, stops this file compiling. M109a added the
+// OPTIONAL `consumer` dispatch identity (§3.19) — the full member-SET pin is
+// what makes the addition deliberate rather than accidental.
 type PinnedEnvelope = {
   readonly kind: IngressKind;
   readonly name: string;
   readonly payload: unknown;
   readonly attempt?: number;
   readonly headers?: Readonly<Record<string, string>>;
+  readonly consumer?: string;
 };
 const envelopeShapePinned: Equals<IngressContext, PinnedEnvelope> = true;
 
@@ -55,7 +58,7 @@ const envelopeShapePinned: Equals<IngressContext, PinnedEnvelope> = true;
 // addition is a deliberate reversal, not an accident.
 const keySetPinned: Equals<
   keyof IngressContext,
-  'kind' | 'name' | 'payload' | 'attempt' | 'headers'
+  'kind' | 'name' | 'payload' | 'attempt' | 'headers' | 'consumer'
 > = true;
 
 // Compile-time: the kind union is pinned to exactly the four ingress paths.
@@ -148,6 +151,23 @@ describe('IngressContext contract (M86 §3.3)', () => {
     // runtime assertion keeps the file failing loudly under `deno task test`.
     expect(rejectsUndefinedAttempt.name).toBe('email.send');
     expect(admitsUndefinedAttempt.attempt).toBeUndefined();
+  });
+
+  it('carries the OPTIONAL `consumer` dispatch identity, absent until a dispatcher sets it (M109a §3.19)', () => {
+    const withoutConsumer: IngressContext = {
+      kind: 'messaging',
+      name: 'order.placed.v1',
+      payload: null,
+    };
+    const withConsumer: IngressContext = {
+      kind: 'messaging',
+      name: 'order.placed.v1',
+      payload: null,
+      consumer: 'subscription:pipelined:1',
+    };
+
+    expect('consumer' in withoutConsumer).toBe(false);
+    expect(withConsumer.consumer).toBe('subscription:pipelined:1');
   });
 });
 

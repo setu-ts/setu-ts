@@ -183,6 +183,7 @@ export const FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set([
   'grpc-plugin',
   'health-plugin',
   'http-security-plugin',
+  'idempotency-plugin',
   'kernel',
   'localization-plugin',
   'logger-plugin',

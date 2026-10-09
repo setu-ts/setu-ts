@@ -810,6 +810,18 @@ check) must be able to refuse a message without the framework parsing it first, 
 reading `envelope.correlationId` off the raw object is doing something useful. A behaviour therefore
 cannot depend on `payload` being the parsed `T`.
 
+**The dispatch consumer identity.** Every behaviour also sees `IngressContext.consumer` — the
+identity of the subscription the message was dispatched to. A subscription created with a `queue`
+carries that queue name; a queue-less subscription gets a per-process `subscription:<prefix>:<n>`.
+It is always present for a broker-delivered message, so a behaviour may key per-consumer state on it
+— the
+[`idempotentIngress()`](https://github.com/setu-ts/setu-ts/tree/main/packages/idempotency-plugin)
+behaviour uses it so two subscribers on one topic each run once. On a topic you make idempotent,
+pass `queue` to `subscribe` (together with your broker's competing-consumer configuration) so a
+redelivery reaches the SAME consumer identity; a queue-less subscription's identity is per process,
+so on a broker whose queue-less default is a shared group a redelivery to another replica is not
+de-duplicated.
+
 ### Mapping a local domain event to an integration event
 
 Mapping a fact an aggregate recorded (see

@@ -74,6 +74,7 @@ export { Permissions, Public, Roles } from './decorators/security.ts';
 
 // --- Response-shaping decorators ---
 export { HttpCode, Redirect, ResponseHeader } from './decorators/response.ts';
+export { Idempotent } from './decorators/idempotency.ts';
 
 // --- View decorators ---
 export { Render } from './decorators/view.ts';

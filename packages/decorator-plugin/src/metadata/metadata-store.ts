@@ -15,6 +15,7 @@
 import type {
   Component,
   Constructor,
+  IdempotentRouteOptions,
   IIngressBehavior,
   IMetadataStore,
   IPipelineBehavior,
@@ -273,6 +274,8 @@ export interface RouteMetadata {
   readonly redirect?: RedirectMetadata;
   /** Response headers declared by `@ResponseHeader(name, value)`. */
   readonly responseHeaders?: readonly ResponseHeaderMetadata[];
+  /** Idempotency options declared by `@Idempotent(options?)` (M109a). */
+  readonly idempotent?: IdempotentRouteOptions;
 }
 
 /**
@@ -322,6 +325,8 @@ export interface MethodMeta {
    * `register()`, leaving no header able to overwrite another.
    */
   responseHeaders?: ResponseHeaderMetadata[];
+  /** Idempotency options declared by `@Idempotent(options?)` (mutable twin, M109a). */
+  idempotent?: IdempotentRouteOptions;
 }
 
 /**
@@ -792,6 +797,7 @@ export class MetadataStore implements IMetadataStore {
       ...(meta.permissions !== undefined ? { permissions: [...meta.permissions] } : {}),
       ...(meta.view !== undefined ? { view: meta.view } : {}),
       ...(meta.httpCode !== undefined ? { httpCode: meta.httpCode } : {}),
+      ...(meta.idempotent !== undefined ? { idempotent: meta.idempotent } : {}),
       ...(meta.redirect !== undefined ? { redirect: meta.redirect } : {}),
       ...(meta.responseHeaders !== undefined ? { responseHeaders: [...meta.responseHeaders] } : {}),
     };

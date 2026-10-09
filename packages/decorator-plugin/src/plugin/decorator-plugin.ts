@@ -31,6 +31,7 @@ import type {
   ValidationTarget,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, withResponseMetadata } from '@setu-ts/common';
+import type { IIdempotencyService } from '@setu-ts/common';
 
 import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
 import { registerIngresses } from './ingress-registration.ts';
@@ -484,6 +485,39 @@ function requireViewEngine(
   return engine;
 }
 
+/**
+ * Appends the idempotency middleware LAST for a `@Idempotent` route (M109a
+ * §3.9), refusing a safe-method route and a missing provider at `register()`.
+ */
+function appendIdempotencyMiddleware(
+  target: Constructor,
+  route: RouteMetadata,
+  fullPath: string,
+  middleware: MiddlewareFunction[],
+  idempotency: IIdempotencyService | undefined,
+): void {
+  if (route.idempotent === undefined) {
+    return;
+  }
+  const method = route.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    throw new Error(
+      `${
+        routeLabel(target, route, fullPath)
+      } is decorated with @Idempotent, but ${method} is a safe ` +
+        'method; idempotency keys apply to unsafe methods only.',
+    );
+  }
+  if (idempotency === undefined) {
+    throw new Error(
+      `${routeLabel(target, route, fullPath)} is decorated with @Idempotent, but no ` +
+        'CAPABILITIES.IDEMPOTENCY provider is registered. Register IdempotencyPlugin from ' +
+        '@setu-ts/idempotency-plugin (or another provider of CAPABILITIES.IDEMPOTENCY).',
+    );
+  }
+  middleware.push(idempotency.middleware(route.idempotent));
+}
+
 /** Composes the post-authorization route middleware (class then method). */
 function composeMiddleware(
   ctrl: ControllerMetadata,
@@ -914,6 +948,7 @@ function registerController(
   enforceRoles: boolean,
   authorization: IAuthorizationService | undefined,
   viewEngine: IViewEngine | undefined,
+  idempotency: IIdempotencyService | undefined,
 ): void {
   const ctrlMeta = metadataStore.getController(target);
   if (ctrlMeta === undefined) {
@@ -937,6 +972,9 @@ function registerController(
     if (enforceSchemas) {
       appendValidationMiddleware(ctx, target, route, middleware, validation);
     }
+    // Appended AFTER the validation band whether or not `enforceSchemas` is on,
+    // so a `@ValidateBody` route always runs idempotency last (M109a §3.9).
+    appendIdempotencyMiddleware(target, route, fullPath, middleware, idempotency);
     const schema = buildRouteSchema(ctrlMeta, route, enforceRoles);
     const routeDef: RouteDefinition = {
       handler,
@@ -1008,11 +1046,17 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
     // registered at a higher priority number still lands before this plugin,
     // so the register-time resolution of all three capabilities sees it.
     optionalDependencies: ingress.length === 0
-      ? [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION, CAPABILITIES.VIEW]
+      ? [
+        CAPABILITIES.VALIDATION,
+        CAPABILITIES.AUTHORIZATION,
+        CAPABILITIES.VIEW,
+        CAPABILITIES.IDEMPOTENCY,
+      ]
       : [
         CAPABILITIES.VALIDATION,
         CAPABILITIES.AUTHORIZATION,
         CAPABILITIES.VIEW,
+        CAPABILITIES.IDEMPOTENCY,
         CAPABILITIES.QUEUE,
         CAPABILITIES.SCHEDULER,
         CAPABILITIES.EVENTS,
@@ -1043,6 +1087,10 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // exactly while none exists.
       const authorization = ctx.services.has(CAPABILITIES.AUTHORIZATION)
         ? ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION)
+        : undefined;
+      // Resolved once, beside VALIDATION and AUTHORIZATION (M109a §3.9).
+      const idempotency = ctx.services.has(CAPABILITIES.IDEMPOTENCY)
+        ? ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY)
         : undefined;
       let discoveredControllers: Constructor[] = [];
       let discoveredServices: Constructor[] = [];
@@ -1103,6 +1151,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
           enforceRoles,
           authorization,
           viewEngine,
+          idempotency,
         );
       }
       replayCustomDecorators(ctx);

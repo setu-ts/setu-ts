@@ -14,6 +14,44 @@ All notable changes to this project are documented here. The format follows
   or the DI container (and how `DiPlugin`'s `autoRegister` fallback links them), and whether a test
   should use `overrideCapability`, `overrideProvider` or `without`. Every example compiles under the
   guide fence gate.
+- **A Cloudflare Durable Object idempotency store (`@setu-ts/cloudflare-plugin`, M109a).** The
+  plugin gains `DurableObjectIdempotencyStore` (the Worker side, over a `durable_objects` binding
+  and a required `namespace`) and `IdempotencyObjectCore` (the Durable Object side, with
+  `IIdempotencyObjectState` and `IdempotencyObjectCoreOptions`), plus
+  `DurableObjectIdempotencyStoreOptions`. One object per store key, one alarm per record, and an
+  input gate that keeps each claim atomic.
+
+- **`@Idempotent()` makes a decorated route idempotent (`@setu-ts/decorator-plugin`, M109a).** The
+  decorator plugin gains `Idempotent`, which records a route's idempotency options and appends the
+  provider's middleware LAST — after guards, declarative authorization, the middleware band and the
+  validation band — so an invalid or unkeyed request never consumes a key. A safe-method route
+  (`GET`/`HEAD`/`OPTIONS`) or a missing `CAPABILITIES.IDEMPOTENCY` provider fails `register()`.
+
+- **Idempotency contracts in `@setu-ts/common` (M109a).** `CAPABILITIES.IDEMPOTENCY`
+  (`'idempotency'`) names the provider of the idempotency service. The package gains the store port
+  `IIdempotencyStore` and its `IdempotencyClaimRequest`, `IdempotencyClaimResult` and
+  `IdempotencySettleResult` types, the service contract `IIdempotencyService`, the route option type
+  `IdempotentRouteOptions` with `IdempotencyKeySource` and `IdempotencyFingerprintSource`, and the
+  ingress option types `IdempotentIngressOptions` with its shared half
+  `IdempotentIngressCommonOptions` and the `IngressIdempotencyKeySource` /
+  `IngressIdempotencyFingerprintSource` sources. `IngressContext` gains an OPTIONAL `consumer`
+  dispatch identity so per-consumer state (an idempotency record) is keyed per subscriber rather
+  than per topic. The mechanism itself ships in `@setu-ts/idempotency-plugin`.
+
+- **A repeat of a completed HTTP request, queue job or broker message is answered from its record or
+  skipped (`@setu-ts/idempotency-plugin`, M109a).** This is deduplication, not a single-execution
+  guarantee: a failure after a handler's external side effect but before `complete` lets a retry
+  repeat that effect, which only a derived key forwarded to a de-duplicating provider avoids. The
+  new package exposes `IdempotencyPlugin`, which registers an `IIdempotencyService` under
+  `CAPABILITIES.IDEMPOTENCY`; `idempotent()` for a route's `middleware` array and
+  `idempotentIngress()` for queue/broker behaviours; and `derivedIdempotencyKey()`, which a handler
+  forwards to a provider that de-duplicates. It ships an in-process store, a Redis store (atomic
+  Lua, an inject-or-lazy ioredis client, a connect-time `maxmemory-policy` warning and a required
+  `namespace`) and, from `@setu-ts/cloudflare-plugin`, a Cloudflare Durable Object store. A refusal
+  carries `IdempotencyRefusedError` with `IdempotencyRefusalReason`; a bad option carries
+  `IdempotencyConfigurationError`; `IdempotencyPluginOptions`, `IdempotencyStoreConfig`,
+  `IRedisIdempotencyClient`, `IDEMPOTENCY_KEY_HEADER` and `IDEMPOTENT_REPLAYED_HEADER` complete the
+  surface. The `idempotency` health indicator reports lifecycle truth then a bounded store probe.
 
 - **A full-stack project's `dev` task serves route edits without a restart, on Deno, Node and Bun
   (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR #426).** `setu new --template full-stack` now

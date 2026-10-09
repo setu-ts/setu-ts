@@ -67,9 +67,10 @@
 58. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
 59. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
 60. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
-61. [Localization Plugin (`@setu-ts/localization-plugin`)](#localization-plugin-setu-tslocalization-plugin)
-62. [Boundary-Type Compatibility](#boundary-type-compatibility)
-63. [Summary](#summary)
+61. [IdempotencyPlugin() (`@setu-ts/idempotency-plugin`)](#idempotencyplugin-setu-tsidempotency-plugin)
+62. [Localization Plugin (`@setu-ts/localization-plugin`)](#localization-plugin-setu-tslocalization-plugin)
+63. [Boundary-Type Compatibility](#boundary-type-compatibility)
+64. [Summary](#summary)
 
 ---
 
@@ -11081,6 +11082,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | View rendering      | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Localization        | `ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue` — the localization port (`t(key, values?)`, `locale`, `locales`, `forLocale(tag)`) served under `CAPABILITIES.LOCALIZATION`, and the catalogue shape: a string with `{name}` placeholders or a CLDR plural record with `other` required (M103)                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Outbox              | `IOutboxStore`, `IOutboxWriteScope`, `OutboxRecord`, `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, `OUTBOX_RECORD_KIND` — the transactional-outbox store port (`append`, `scanPending`, `failedKeys`, `markSent`, `markFailure`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws), the row shape (every field a JSON scalar, times as epoch ms), the conditional-transition outcome (`applied` / `missing` / `not-pending` / `not-failed`), and the `'setu-outbox'` discriminator every row carries and every read requires (M107)                                                                                                                                               |
+| Idempotency         | `IIdempotencyStore`, `IdempotencyClaimRequest`, `IdempotencyClaimResult`, `IdempotencySettleResult`, `IIdempotencyService`, `IdempotentRouteOptions`, `IdempotencyKeySource`, `IdempotencyFingerprintSource`, `IdempotentIngressOptions`, `IdempotentIngressCommonOptions`, `IngressIdempotencyKeySource`, `IngressIdempotencyFingerprintSource` — the store port, the service contract served under `CAPABILITIES.IDEMPOTENCY`, and the route/ingress option types (M109a). The record is an opaque string so every store holds identical bytes; the mechanism lives in `@setu-ts/idempotency-plugin`. `IngressContext.consumer` (below) is the dispatch identity the ingress key is scoped by.                                  |
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
@@ -11485,15 +11487,32 @@ the first consumer: its absence latches `provider-identity-unavailable` and a fa
 
 `IngressKind` is `'queue' | 'scheduler' | 'messaging' | 'websocket'`. `IngressContext<TPayload>` is
 the immutable work envelope supplied to an ingress behaviour:
-`{ kind, name, payload, attempt?, headers? }`. Queue and scheduler populate the 1-based `attempt`;
-messaging supplies transport headers when available and WebSocket frames supply neither optional
-field.
+`{ kind, name, payload, attempt?, headers?, consumer? }`. Queue and scheduler populate the 1-based
+`attempt`; messaging supplies transport headers when available and WebSocket frames supply neither
+optional field.
+
+`consumer` (M109a) is a DISPATCH identity, not a capability and not a state bag: the subscription's
+`SubscribeOptions.queue` when given, otherwise `subscription:<instance>:<n>` (unique per
+subscription per process) on `'messaging'`, and the job name on `'queue'`; it is absent on
+`'scheduler'` and `'websocket'`. It exists so per-consumer state — an idempotency record — is keyed
+per subscriber rather than per topic. The envelope's "no `state`, no `services`" rule stands: a
+behaviour still reaches a capability through its `RegistryFactory` arm.
 
 `IIngressBehavior.handle(context, next)` is the void-result contract for non-HTTP work.
 `BehaviorLike<TWork, TResult>` is the structural shape shared with CQRS, and `composeBehaviorChain`
 runs behaviours in declared order. A behaviour that does not call `next()` short-circuits the
 terminal handler; a thrown error follows that ingress's existing error path. The common composer is
 also consumed internally by CQRS; it adds no CQRS surface.
+
+### Idempotency
+
+`CAPABILITIES.IDEMPOTENCY` (`'idempotency'`) names the service an idempotency provider registers;
+the port (`IIdempotencyStore`), the service contract (`IIdempotencyService`) and the route/ingress
+option types live in `@setu-ts/common` so a store adapter (`memory`, Redis, a Cloudflare Durable
+Object) and the decorator plugin can consume them without importing one another (AI_GUIDELINES
+§2.2). The mechanism — `IdempotencyPlugin`, `idempotent()`, `idempotentIngress()`, `@Idempotent` —
+lives in `@setu-ts/idempotency-plugin`; see that package's section. The guarantee is **no duplicate
+processing within the limits of the store** — it is not a single-execution guarantee.
 
 `WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
 either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
@@ -12066,6 +12085,7 @@ carry full JSDoc.
 | `HttpCode`                                                   | function | Method decorator — the success status a handler answers with when it returns a plain value. Written to the response builder BEFORE the method runs, so a returned `HandlerResult` (`ctx.response.status(202).json(...)`) still wins and a `@Render` route composes with it. Must be an integer in `[200, 599]`, refused at `register()` otherwise; NOT narrowed to `2xx`. `204`/`205`/`304` serve bodiless. Derived into the OpenAPI document via `deriveResponseStatus` (M97b)                                                                                                                                                                                                                |
 | `ResponseHeader`                                             | function | Method decorator — one fixed response header; repeatable for DISTINCT names. The same name twice, an invalid name or value, or `Location` alongside `@Redirect` are each refused at `register()`. A multi-valued header wants `ctx.response.appendHeader(...)` through `@Params(Ctx())`. Deliberately NOT derived into the document: an OpenAPI response-header entry needs a schema and description the declaration does not carry (M97b)                                                                                                                                                                                                                                                     |
 | `Redirect`                                                   | function | Method decorator — sets the status and `Location`; `302` by default. The status must be an integer in `[300, 399]`, and the target must be non-blank and a value the runtime will carry as a `Location` header — both refused at `register()`, because an invalid header value throws while the response headers are written (`500` on every request) and a blank one serves a redirect no client can follow. It does NOT short-circuit: a decorator cannot decline to call the method, so the handler still runs and a plain return is still serialised. One handler may not carry both `@Redirect` and `@HttpCode`, since both set the status. Derived into the document as its `3xx` (M97b) |
+| `Idempotent`                                                 | function | Method decorator — marks an UNSAFE route idempotent. Its middleware is appended LAST in the route's chain, after guards, declarative authorization and the validation band, so a refused or invalid request consumes no key. Requires a `CAPABILITIES.IDEMPOTENCY` provider: without one `register()` fails naming the controller and handler, and `@Idempotent` on a safe method (`GET`/`HEAD`/`OPTIONS`) is refused too. The stored response is replayed by whichever store the provider serves (M109a)                                                                                                                                                                                      |
 | `RenderDecorator`                                            | type     | The type `Render` returns: a standard method decorator whose `value` parameter is narrowed to `(...args: never[]) => P \| HandlerResult \| Promise<P \| HandlerResult>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `ApiOperation`/`ApiResponse`                                 | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -13124,6 +13144,9 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `DistributedLockObjectCore`, `DistributedLockObjectCoreOptions`                                                                                                                                                                                                                                                                         | class + type  |
 | `DurableObjectBackplane`, `DurableObjectBackplaneOptions`                                                                                                                                                                                                                                                                               | class + type  |
 | `DurableObjectLock`, `DurableObjectLockOptions`                                                                                                                                                                                                                                                                                         | class + type  |
+| `IdempotencyObjectCore`, `IdempotencyObjectCoreOptions`                                                                                                                                                                                                                                                                                 | class + type  |
+| `DurableObjectIdempotencyStore`, `DurableObjectIdempotencyStoreOptions`                                                                                                                                                                                                                                                                 | class + type  |
+| `IIdempotencyObjectState`                                                                                                                                                                                                                                                                                                               | type          |
 | `asUpgradeResponse`, `DurableObjectUpgradeResponse`                                                                                                                                                                                                                                                                                     | fn + type     |
 | `createDefaultDurableObjectWebSocketHost`, `DurableObjectWebSocketHost`, `DurableObjectWebSocketPair`                                                                                                                                                                                                                                   | fn + types    |
 | `IDurableObjectState`, `IDurableObjectStorage`, `IDurableObjectWebSocket`, `IDurableObjectClientSocket`, `DurableObjectMessageEvent`                                                                                                                                                                                                    | types         |
@@ -13890,6 +13913,49 @@ rather than a deliberate empty render.
 - **Layouts are components.** A layout is an ordinary component taking `children`. There is no
   plugin-level `layout` option: it would wrap every render, including fragment responses where a
   full document is wrong.
+
+## IdempotencyPlugin() (`@setu-ts/idempotency-plugin`)
+
+A repeated HTTP request, queue job or broker message is recognised by its key, and a repeat of
+completed work is answered from its record or skipped instead of running again, over one
+`claim`/`complete`/`release` state machine and an in-process, Redis or Cloudflare Durable Object
+store. The guarantee is **no duplicate processing within the limits of the store** — it is not a
+single-execution guarantee. See
+[`packages/idempotency-plugin/README.md`](packages/idempotency-plugin/README.md) for placement, the
+HTTP check order, failure classification, replay rules, the ingress allow-list and the store
+guarantees.
+
+### Values (runtime exports)
+
+| Export                          | Kind     | Purpose                                                                                   |
+| ------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `IdempotencyPlugin`             | function | Registers `IIdempotencyService` under `CAPABILITIES.IDEMPOTENCY` and the health indicator |
+| `idempotent`                    | function | Builds the route-level HTTP middleware (list it LAST)                                     |
+| `idempotentIngress`             | function | Builds the ingress behaviour over a required `topics`/`jobNames` allow-list               |
+| `derivedIdempotencyKey`         | function | Reads the store key the middleware recorded, to forward to a provider                     |
+| `IdempotencyRefusedError`       | class    | An ingress refusal, carrying `reason`, `ingress` and `target`                             |
+| `IdempotencyConfigurationError` | class    | An option refusal, carrying the failing `option` path                                     |
+| `IDEMPOTENCY_KEY_HEADER`        | const    | `'Idempotency-Key'`                                                                       |
+| `IDEMPOTENT_REPLAYED_HEADER`    | const    | `'Idempotent-Replayed'`                                                                   |
+
+### Types
+
+| Export                     | Kind | Purpose                                                     |
+| -------------------------- | ---- | ----------------------------------------------------------- |
+| `IdempotencyPluginOptions` | type | The `IdempotencyPlugin` options (`store`, leases, ttl, cap) |
+| `IdempotencyStoreConfig`   | type | The store arm (`memory`, `redis` built/injected, `custom`)  |
+| `IRedisIdempotencyClient`  | type | The Redis facade an injected client must satisfy            |
+| `IdempotencyRefusalReason` | type | The union carried by `IdempotencyRefusedError.reason`       |
+
+### The queue retry span versus the lease
+
+A crashed holder's claim blocks redeliveries of its key until the lease lapses, and each redelivery
+inside the lease consumes a queue attempt. The retry span (the sum of
+`computeBackoffMs(2..maxAttempts)`) must EXCEED the lease: with the default backoff and the default
+30 s ingress lease that means `defaultMaxAttempts ≥ 6`. The queue's retry configuration is not
+readable from this plugin, so this is documented, not checked.
+
+---
 
 ## Localization Plugin (`@setu-ts/localization-plugin`)
 

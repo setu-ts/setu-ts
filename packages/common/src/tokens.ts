@@ -276,6 +276,14 @@ export const CAPABILITIES = {
    */
   OUTBOX: 'outbox',
   /**
+   * Idempotency — an `IIdempotencyService` whose `middleware` and `behavior`
+   * members build the HTTP and ingress idempotency paths over one store. The
+   * request/reply types and the entry points live in
+   * `@setu-ts/idempotency-plugin`; only the port, the service contract, the
+   * option types and this token live in `common`.
+   */
+  IDEMPOTENCY: 'idempotency',
+  /**
    * Runtime-owned local diagnostics listener — the single IPv4-loopback port
    * the RuntimePlugin can bind for the local diagnostics connector
    * (`ILocalDiagnosticsListenerFactory`). Provided by the RuntimePlugin;

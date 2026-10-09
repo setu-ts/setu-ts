@@ -5854,6 +5854,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   unparseable string, so it passed with the check moved after the parse; it now spies on
   `JSON.parse`. Round 4 passed on `f31148bf`. Not verified: workerd, Prisma, MySQL DDL, a non-`C`
   PostgreSQL collation — complete (PR #431).
+- **Milestone 109a** (`packages/idempotency-plugin` (new) + `packages/common` +
+  `packages/decorator-plugin` + `packages/cloudflare-plugin` + `packages/messaging-plugin` +
+  `packages/queue-plugin` + one `packages/cli` claim-table line — idempotency core):
+  `IdempotencyPlugin` registers an `IIdempotencyService` under the new `CAPABILITIES.IDEMPOTENCY`
+  over one claim/complete/release state machine with fencing tokens, a SHA-256 key and fingerprint
+  derived from canonical JSON, and three stores — memory (per-scope and global caps), Redis (three
+  Lua scripts on the server clock, required `namespace`, a `maxmemory-policy` warning) and a
+  Cloudflare Durable Object (input gate plus alarm). Entry points: the `idempotent()` HTTP
+  middleware, `@Idempotent()` appended after guards, authorization and validation, and an ingress
+  behaviour with a required `topics`/`jobNames` allow-list, keyed per `IngressContext.consumer`
+  (new, optional; populated by messaging and queue dispatch). A replay re-serves status, body and
+  allow-listed headers, never `Set-Cookie`, and answers `422` for a different body under one key and
+  `409` while in progress. Implemented by zoo code; verification (a 64-check probe through real
+  kernel apps and real Redis) found the planned regression tests, a missing ioredis error listener
+  and an unthrottled per-scope sweep missing. The security audit ran five fresh-context rounds,
+  fixed in turn: a per-path warning set that grew without bound (High, now capped per route), a
+  whole-store scan per refused claim (Medium, now a per-scope index), a throwing logger or an
+  unconvertible thrown value changing an outcome (`safeLog`, `describeThrown`), and three doc
+  claims. Round 6 was waived at the maintainer's direction, so the last fix (`f9e42b07`) is not
+  re-audited — complete (PR #434).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
