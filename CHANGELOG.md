@@ -9,9 +9,10 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **Conditional repository writes (M105).** Optional `updateWhere` and `deleteWhere` on
-  `IRepository` and `IDataSource`, with shared `WritePrecondition` validation, native adapter
-  conditions, bounded Cosmos version guards and Bigtable newest-cell checks. Tenant, outbox and
-  inbox bridges use conditional writes when supported and retain their fallback for other sources.
+  `IRepository` and `IDataSource`, with shared `WritePrecondition` and `writePreconditionProblem`
+  validation, native adapter conditions, bounded Cosmos version guards and Bigtable newest-cell
+  checks. Tenant, outbox and inbox bridges use conditional writes when supported and retain their
+  fallback for other sources.
 
 - **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
   questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup
