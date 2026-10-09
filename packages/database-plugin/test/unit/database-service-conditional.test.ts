@@ -1,6 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { EntityKey, WritePrecondition } from '@setu-ts/common';
+import { DuplicateKeyError } from '@setu-ts/common';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
 
@@ -20,7 +21,9 @@ describe('DatabaseService conditional members', () => {
           return inner.deleteWhere!(id, where);
         }
       }
-      const { updateWhere: _update, deleteWhere: _delete, ...plain } = inner;
+      const plain = { ...inner };
+      delete plain.updateWhere;
+      delete plain.deleteWhere;
       const source = Object.assign(new Source(), plain);
       const logs: { message: string; context: unknown }[] = [];
       const service = new DatabaseService(adapter, () => source, 'memory', { logQueries }, {
@@ -59,4 +62,27 @@ describe('DatabaseService conditional members', () => {
     await expect(repo.updateWhere!('a', { name: 'x' }, { name: 'y' })).rejects.toBe(error);
     await expect(repo.deleteWhere!('a', { name: 'x' })).rejects.toBe(error);
   });
+  for (const logQueries of [false, true]) {
+    it(`classifies native rejections with logQueries=${logQueries}`, async () => {
+      const adapter = new MemoryAdapter();
+      const source = adapter.createDataSource('User');
+      const error = Object.assign(new Error('duplicate'), { code: 'P2002' });
+      const service = new DatabaseService(
+        adapter,
+        () => ({
+          ...source,
+          updateWhere: () => Promise.reject(error),
+          deleteWhere: () => Promise.reject(error),
+        }),
+        'prisma',
+        { logQueries },
+        { debug: () => {} },
+      );
+      const repo = service.getRepository('User');
+      await expect(repo.updateWhere!('a', { name: 'x' }, { name: 'y' })).rejects.toBeInstanceOf(
+        DuplicateKeyError,
+      );
+      await expect(repo.deleteWhere!('a', { name: 'x' })).rejects.toBeInstanceOf(DuplicateKeyError);
+    });
+  }
 });

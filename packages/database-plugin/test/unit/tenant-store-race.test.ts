@@ -33,7 +33,9 @@ describe('tenant conditional write race', () => {
       const adapter = new MemoryAdapter();
       const source = adapter.createDataSource('Row');
       await source.create({ id: 'key', tenant_id: 'a', name: 'old' });
-      const { updateWhere: _update, deleteWhere: _delete, ...legacy } = source;
+      const legacy = { ...source };
+      delete legacy.updateWhere;
+      delete legacy.deleteWhere;
       let swapped = false;
       const service = new DatabaseService(adapter, () => ({
         ...legacy,

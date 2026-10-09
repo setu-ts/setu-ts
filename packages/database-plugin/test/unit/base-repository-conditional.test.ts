@@ -22,7 +22,22 @@ describe('BaseRepository conditional writes', () => {
   });
   it('rejects before I/O with distinct validation and unsupported brands', async () => {
     const source = new MemoryAdapter().createDataSource('User');
-    const { updateWhere: _u, deleteWhere: _d, ...legacy } = source;
+    const legacy = { ...source };
+    delete legacy.updateWhere;
+    delete legacy.deleteWhere;
+    let io = 0;
+    legacy.findById = () => {
+      io++;
+      return Promise.resolve(null);
+    };
+    legacy.update = () => {
+      io++;
+      return Promise.reject(new Error('unexpected write'));
+    };
+    legacy.delete = () => {
+      io++;
+      return Promise.resolve(false);
+    };
     const repo = new TestRepo(legacy);
     for (
       const call of [
@@ -44,5 +59,6 @@ describe('BaseRepository conditional writes', () => {
       expect(httpStatusHintOf(error)).toBeUndefined();
     }
     expect(await source.findById('a')).toBeNull();
+    expect(io).toBe(0);
   });
 });

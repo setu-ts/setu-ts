@@ -13,7 +13,11 @@ type DeleteOutcome = { outcome: 'applied' } | { outcome: 'not-matched' } | {
   outcome: 'unsupported';
 };
 
-/** Tries a native conditional update, exposing only the named unsupported refusal as fallback. */
+/**
+ * Tries a native conditional update, exposing only the named unsupported refusal as fallback.
+ * @internal
+ * @since 0.9.0
+ */
 export async function conditionalUpdate<Entity, Id extends EntityKey>(
   repo: IRepository<Entity, Id>,
   id: Id,
@@ -32,7 +36,11 @@ export async function conditionalUpdate<Entity, Id extends EntityKey>(
   }
 }
 
-/** Tries a native conditional delete, exposing only the named unsupported refusal as fallback. */
+/**
+ * Tries a native conditional delete, exposing only the named unsupported refusal as fallback.
+ * @internal
+ * @since 0.9.0
+ */
 export async function conditionalDelete<Entity, Id extends EntityKey>(
   repo: IRepository<Entity, Id>,
   id: Id,

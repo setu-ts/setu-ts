@@ -143,6 +143,9 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
           .toBeNull();
         expect(queries).toHaveLength(1);
         expect(await source.findById(id)).toMatchObject({ profile: { changed: true } });
+        await expect(source.updateWhere!(id, { unknownColumn: 1 }, { profile: { bad: true } }))
+          .rejects.toThrow();
+        await expect(source.deleteWhere!(id, { unknownColumn: 1 })).rejects.toThrow();
         queries.length = 0;
         expect(await source.deleteWhere!(id, { userId: 'other' })).toBe(false);
         expect(queries).toHaveLength(1);

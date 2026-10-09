@@ -390,6 +390,8 @@ function valueTest(
  * @param target - Resolved column addresses and encoding
  * @param where - Validated equality predicate
  * @returns The nested conjunction, or `null` for an unaddressable field
+ * @internal
+ * @since 0.9.0
  */
 export function preconditionTest(
   target: BigtableTarget,

@@ -22,6 +22,42 @@ class Repo extends BaseRepository<Record<string, unknown>> {
     super(source);
   }
 }
+describe('conditional adapter native error paths', () => {
+  it('DynamoDB preserves non-condition errors and refuses missing ALL_NEW attributes', async () => {
+    const fixture = dynamoFixture();
+    await fixture.source.create({ id: 'a', role: 'owner', name: 'old' });
+    await expect(fixture.source.updateWhere!('a', { role: 'owner' }, { id: 'b' })).rejects
+      .toMatchObject({ feature: 'update' });
+    expect(fixture.calls).toEqual([]);
+    const error = new Error('driver fault');
+    fixture.fail(error);
+    await expect(fixture.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })).rejects.toBe(
+      error,
+    );
+    await expect(fixture.source.deleteWhere!('a', { role: 'owner' })).rejects.toBe(error);
+    const missing = dynamoFixture();
+    await missing.source.create({ id: 'a', role: 'owner' });
+    missing.omitAttributes();
+    await expect(missing.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })).rejects
+      .toThrow(/returned no row/);
+  });
+  it('MongoDB key-only payload still checks the conjoined predicate', async () => {
+    const source = sources.find((entry) => entry.name === 'mongodb')!.make();
+    await source.create({ id: 'a', role: 'owner' });
+    expect(await source.updateWhere!('a', { role: 'owner' }, { id: 'ignored' })).toMatchObject({
+      id: 'a',
+    });
+    expect(await source.updateWhere!('a', { role: 'other' }, { id: 'ignored' })).toBeNull();
+    expect(await source.findById('ignored')).toBeNull();
+  });
+  it('memory validates before mutation and preserves key immutability', async () => {
+    const source = new MemoryAdapter().createDataSource('User');
+    await source.create({ id: 'a', role: 'owner' });
+    await expect(source.updateWhere!('a', { role: 'owner' }, { id: 'b' })).rejects.toThrow(/key/);
+    expect(await source.findById('a')).toMatchObject({ id: 'a' });
+    expect(await source.findById('b')).toBeNull();
+  });
+});
 describe('deferred transaction refuses conditional writes', () => {
   const adapters = [
     { name: 'memory', make: () => new MemoryAdapter() },

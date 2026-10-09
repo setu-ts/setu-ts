@@ -21,6 +21,7 @@ import { SqliteD1 } from '../../../cloudflare-plugin/test/d1-fakes.ts';
 
 import { dynamoFixture } from './conditional-dynamo.ts';
 
+/** The fake Drizzle expression grammar, evaluated by the recording instance. */
 export const operators: DrizzleOperators = {
   eq: (col, val) => ({ op: 'eq', col, val }),
   and: (...exprs) => ({ op: 'and', exprs }),
@@ -28,6 +29,7 @@ export const operators: DrizzleOperators = {
   desc: (col) => ({ op: 'desc', col }),
   count: () => ({ op: 'count' }),
 };
+/** Public data-source factories and their native unknown-column outcomes. */
 export const sources: readonly {
   name: string;
   unknown: 'throws' | 'not-matched';
@@ -41,8 +43,31 @@ export const sources: readonly {
   },
   {
     name: 'prisma',
-    unknown: 'not-matched',
-    make: () => createPrismaDataSource(createFakePrismaClient(), 'User'),
+    unknown: 'throws',
+    make: () => {
+      const client = createFakePrismaClient();
+      // Prisma has a schema: an unknown field is validation failure, not P2025.
+      const validate = (where: Record<string, unknown>): void => {
+        for (const [field, value] of Object.entries(where)) {
+          if (field === 'AND') {
+            for (const clause of value as Record<string, unknown>[]) validate(clause);
+          } else if (!['id', 'role', 'name'].includes(field)) {
+            throw new Error('Unknown argument in User predicate');
+          }
+        }
+      };
+      const update = client.user.update.bind(client.user);
+      const remove = client.user.delete.bind(client.user);
+      client.user.update = async (args) => {
+        validate(args.where);
+        return await update(args);
+      };
+      client.user.delete = async (args) => {
+        validate(args.where);
+        return await remove(args);
+      };
+      return createPrismaDataSource(client, 'User');
+    },
   },
   {
     name: 'drizzle',

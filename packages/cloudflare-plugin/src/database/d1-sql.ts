@@ -399,7 +399,11 @@ function withPrecondition(statement: D1Statement, where: WritePrecondition): D1S
   return { sql: statement.sql.replace(' RETURNING ', ` AND ${predicate} RETURNING `), params };
 }
 
-/** Builds one UPDATE with the key AND every equality precondition. */
+/**
+ * Builds one UPDATE with the key AND every equality precondition.
+ * @internal
+ * @since 0.9.0
+ */
 export function buildUpdateWhere(
   target: D1Target,
   id: EntityKey,
@@ -409,7 +413,11 @@ export function buildUpdateWhere(
   return withPrecondition(buildUpdate(target, id, data), where);
 }
 
-/** Builds one DELETE with the key AND every equality precondition. */
+/**
+ * Builds one DELETE with the key AND every equality precondition.
+ * @internal
+ * @since 0.9.0
+ */
 export function buildDeleteWhere(
   target: D1Target,
   id: EntityKey,
