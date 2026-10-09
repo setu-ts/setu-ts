@@ -148,6 +148,13 @@ export { createDatabaseOutboxStore } from './outbox/database-outbox-store.ts';
 export type { DatabaseOutboxStoreOptions } from './outbox/database-outbox-store.ts';
 export { OutboxStoreUnavailableError } from './outbox/errors.ts';
 
+// Consumer inbox store bridge (M108) — the shipped `IInboxStore` over
+// `IDatabaseService`, for the messaging plugin's `inbox.store` option. The
+// store class stays internal: it reaches an application only as `IInboxStore`.
+export { createDatabaseInboxStore } from './inbox/database-inbox-store.ts';
+export type { DatabaseInboxStoreOptions } from './inbox/database-inbox-store.ts';
+export { InboxStoreUnavailableError } from './inbox/errors.ts';
+
 // Typed native Drizzle query access
 export {
   createDrizzleDatabase,

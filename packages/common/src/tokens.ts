@@ -276,6 +276,16 @@ export const CAPABILITIES = {
    */
   OUTBOX: 'outbox',
   /**
+   * Consumer inbox — the `IInbox` the messaging plugin registers when its
+   * `inbox` option is set (`inbox.<name>` for a named messaging instance).
+   * Records each handled integration event in the handler's own database
+   * transaction, so a duplicate delivery is acknowledged without running the
+   * handler again.
+   *
+   * @since 0.9.0
+   */
+  INBOX: 'inbox',
+  /**
    * Idempotency — an `IIdempotencyService` whose `middleware` and `behavior`
    * members build the HTTP and ingress idempotency paths over one store. The
    * request/reply types and the entry points live in

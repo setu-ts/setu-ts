@@ -103,6 +103,28 @@ function classifiedOrOriginal(
 }
 
 /**
+ * The adapter type of every constructed {@linkcode DatabaseService}, keyed by
+ * the instance. Module-private: `_adapterType` is a TypeScript `private`
+ * member, and the inbox bridge (M108 §3.10) must refuse Cosmos and Bigtable by
+ * name without widening `IDatabaseService` or the exported class's surface.
+ */
+const ADAPTER_TYPES = new WeakMap<object, DatabaseAdapterType>();
+
+/**
+ * Reports the adapter type behind a database service.
+ *
+ * Internal — not exported from the package barrel.
+ *
+ * @internal
+ * @param service - The service a store bridge resolved
+ * @returns The adapter type, or `undefined` for an `IDatabaseService` that is
+ *   not this package's `DatabaseService` (an application's own implementation)
+ */
+export function adapterTypeOf(service: IDatabaseService): DatabaseAdapterType | undefined {
+  return ADAPTER_TYPES.get(service);
+}
+
+/**
  * Builds the {@linkcode DuplicateKeyError} for a classified driver error,
  * naming the entity when the interception site knows it.
  */
@@ -183,7 +205,9 @@ export class DatabaseService implements IDatabaseService {
     private readonly _setTimer: (fn: () => void, ms: number) => unknown = defaultSetTimer,
     /** Timer clearance arm — injected from `ctx.runtime`. */
     private readonly _clearTimer: (handle: unknown) => void = defaultClearTimer,
-  ) {}
+  ) {
+    ADAPTER_TYPES.set(this, _adapterType);
+  }
 
   /** Returns a repository bound to the named entity on the outer database scope. */
   getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id> {

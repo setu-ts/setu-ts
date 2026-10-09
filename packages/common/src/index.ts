@@ -353,6 +353,16 @@ export type {
   ITenantRepository,
   ITenantResolver,
 } from './services/tenancy.ts';
+export { INBOX_RECORD_KIND } from './services/inbox.ts';
+export type {
+  IInboxStore,
+  InboxFailureUpdate,
+  InboxIds,
+  InboxRecord,
+  InboxReleaseOutcome,
+  InboxStatus,
+  InboxStoreStats,
+} from './services/inbox.ts';
 export { OUTBOX_RECORD_KIND } from './services/outbox.ts';
 export type {
   IOutboxStore,
