@@ -289,16 +289,16 @@ describe('within-real: PostgreSQL obligation 3', { ignore: postgresUrl === undef
         }
         for (const value of Object.values(values)) expect(diagnosticText(native)).toContain(value);
         const response = await app.inject({ method: 'POST', url: 'http://127.0.0.1/probe' });
-        expect(response.statusCode).toBe(503);
-        expect(failures).toHaveLength(1);
-        expect(failures[0]).toBeInstanceOf(IdempotencyWithinError);
-        expect((failures[0] as Error).cause).toBeUndefined();
         expect(lines.length).toBeGreaterThan(0);
         for (const value of Object.values(values)) {
           expect(lines.join('\n')).not.toContain(value);
           expect(diagnosticText(failures[0])).not.toContain(value);
           expect(response.body ?? '').not.toContain(value);
         }
+        expect(response.statusCode).toBe(503);
+        expect(failures).toHaveLength(1);
+        expect(failures[0]).toBeInstanceOf(IdempotencyWithinError);
+        expect((failures[0] as Error).cause).toBeUndefined();
         const { database } = servicesOf(app);
         expect(await database.getRepository('Business').count()).toBe(0);
         expect(await database.getRepository('Idempotency').count()).toBe(0);
