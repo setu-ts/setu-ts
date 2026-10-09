@@ -5874,6 +5874,28 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   unconvertible thrown value changing an outcome (`safeLog`, `describeThrown`), and three doc
   claims. Round 6 was waived at the maintainer's direction, so the last fix (`f9e42b07`) is not
   re-audited — complete (PR #434).
+- **Milestone 108** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` +
+  one `packages/cli` claim-table line — consumer inbox): `MessagingPlugin({ inbox })` plus
+  `onIntegrationEvent(definition, handler, { inbox: { consumer } })` applies an integration event's
+  database writes once per consumer. A marker keyed by a SHA-256 of `(consumer, envelope id)` is
+  created FIRST in the same transaction as the handler's writes, and the handler receives that
+  transaction's unit of work as a fourth argument (`IntegrationEventInboxHandler`, its type inferred
+  from the annotation); with `inbox` the call returns a `RegistryFactory` resolved at `onInit` after
+  the store is verified, and every existing call keeps its type (the inbox overload is declared
+  first and the legacy options take `inbox?: never`). A duplicate is acknowledged after a pre-read;
+  after ANY rejection the marker is re-read — a commit-time `DuplicateKeyError` carries no entity
+  and a concurrent loser on a MongoDB replica set is a write conflict (measured), so the error alone
+  cannot say "already handled". The broker `queue` defaults to the consumer name, because a
+  queue-less RabbitMQ subscriber discards failures. Opt-in `maxAttempts` counts failures outside the
+  transaction and parks at the limit (NATS and Kafka have no delivery budget); `IInbox` lists and
+  releases parked deliveries without ever re-running a handler. `common` gains `IInboxStore` and
+  `CAPABILITIES.INBOX`; `database-plugin` ships `createDatabaseInboxStore`, whose `verify()` refuses
+  Cosmos DB and Bigtable by adapter arm or class and runs a two-row transactional probe that always
+  rolls back. Plan verification (one round) found one blocker and six majors, all folded in before
+  implementation. Driven against real PostgreSQL with RabbitMQ 4 and Redis Streams (duplicates, a
+  failure rolled back and redelivered, two consumer groups, an outbox row relayed twice handled
+  once), a MongoDB replica set and the Bigtable emulator; D1 at unit level. The committed-tree
+  security audit is still to run — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 

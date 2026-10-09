@@ -1,7 +1,8 @@
 # Milestone 108 — Consumer inbox (`@setu-ts/messaging-plugin`, `@setu-ts/common`, `@setu-ts/database-plugin`)
 
-> **Status:** Planning. Branch: `feat/m108-consumer-inbox`. `main` and `develop` are protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Implemented (archived at completion). Branch: `feat/m108-consumer-inbox`. `main` and
+> `develop` are protected — all work (implementation + fixes) stays on this one branch until it
+> merges via a single PR.
 
 **Decisions for the maintainer to confirm before implementation.** Each is decided below, so the
 plan lints and can be built as written; each is also a place where a different call is reasonable:

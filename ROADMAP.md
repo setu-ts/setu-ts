@@ -13301,13 +13301,14 @@ and Kafka (no per-message dead-letter) need the inbox's own `maxAttempts`.
 
 **Deliverables**
 
-- [ ] The handler-level inbox on `onIntegrationEvent`, per backend or refused by name
-- [ ] A duplicate delivery skipped and acknowledged; a handler failure rolling back both the effect
+- [x] The handler-level inbox on `onIntegrationEvent`, per backend or refused by name
+- [x] A duplicate delivery skipped and acknowledged; a handler failure rolling back both the effect
       and the inbox row, then succeeding on redelivery — on real RabbitMQ and Redis
-- [ ] Two consumer groups each processing the same event once
-- [ ] An end-to-end run with M107: a forced double publish handled once
-- [ ] Retention, README (the three non-database effect choices), PUBLIC_API.md, a design security
-      review, and a committed-tree audit
+- [x] Two consumer groups each processing the same event once
+- [x] An end-to-end run with M107: a forced double publish handled once
+- [x] Retention, README (the three non-database effect choices), PUBLIC_API.md, and a design
+      security review (plan §10)
+- [ ] A committed-tree security audit
 
 ---
 
@@ -13638,6 +13639,6 @@ patch by construction and gains nothing new here.
 | 105       | ⬜     | database-plugin + cloudflare-plugin — conditional writes on `IRepository` (closes the M101c tenant-bridge check-then-write race)                                                                                                              |
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
 | 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
-| 108       | ⬜     | messaging-plugin — consumer inbox keyed by (consumer group, envelope id), in the handler's transaction                                                                                                                                        |
+| 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, envelope id), in the handler's transaction                                                                                      |
 | 109       | ⬜     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |
