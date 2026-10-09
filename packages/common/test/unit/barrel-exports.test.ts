@@ -698,3 +698,40 @@ describe('@setu-ts/common barrel — M109a idempotency contract', () => {
     expect(claim.leaseMs).toBeLessThanOrEqual(claim.ttlMs);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M108 — the consumer inbox port
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M108 inbox port', () => {
+  it('exposes CAPABILITIES.INBOX and INBOX_RECORD_KIND', () => {
+    expect(common.CAPABILITIES.INBOX).toBe('inbox');
+    expect(common.INBOX_RECORD_KIND).toBe('setu-inbox');
+  });
+
+  it('exports the inbox types (declared against the barrel)', () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class).
+    const status: common.InboxStatus = 'parked';
+    const ids: common.InboxIds = { marker: 'm', attempts: 'm.attempts' };
+    const update: common.InboxFailureUpdate = {
+      consumer: 'c',
+      topic: 't.v1',
+      lastError: 'boom',
+      now: 1,
+    };
+    const stats: common.InboxStoreStats = { parked: 0 };
+    const record: common.InboxRecord = {
+      id: ids.marker,
+      kind: common.INBOX_RECORD_KIND,
+      consumer: update.consumer,
+      topic: update.topic,
+      status,
+      attempts: 1,
+      updatedAt: update.now,
+    };
+    const outcome: common.InboxReleaseOutcome = { outcome: 'applied', record };
+    const store: Pick<common.IInboxStore, 'stats'> = { stats: () => Promise.resolve(stats) };
+    expect(outcome.outcome).toBe('applied');
+    expect(typeof store.stats).toBe('function');
+  });
+});

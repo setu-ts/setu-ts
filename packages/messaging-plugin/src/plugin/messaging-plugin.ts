@@ -1,5 +1,6 @@
 import type {
   HealthIndicatorFn,
+  IInboxStore,
   IIngressBehavior,
   IMessageBroker,
   IMetricsService,
@@ -44,7 +45,13 @@ import type { ActiveOutboxStores } from '../outbox/outbox-service.ts';
 import { OutboxService } from '../outbox/outbox-service.ts';
 import type { ResolvedOutboxOptions } from '../outbox/options.ts';
 import { resolveOutboxOptions } from '../outbox/options.ts';
+import { InboxPurgeUnscheduledError, InboxStoreVerifyTimeoutError } from '../inbox/errors.ts';
+import { createInboxHealthIndicator } from '../inbox/inbox-health.ts';
+import { InboxService } from '../inbox/inbox-service.ts';
+import type { ResolvedInboxOptions } from '../inbox/options.ts';
+import { resolveInboxOptions } from '../inbox/options.ts';
 import type {
+  IInbox,
   IKafkaFactory,
   INatsConnection,
   IOutbox,
@@ -193,6 +200,14 @@ export function MessagingPlugin(
   const relayJobName = `outbox-relay${outboxJobSuffix}`;
   const purgeJobName = `outbox-purge${outboxJobSuffix}`;
 
+  // M108: the inbox arm, validated here like the outbox's. Absent, nothing
+  // below changes.
+  const inboxOptions = options.inbox === undefined ? undefined : resolveInboxOptions(options.inbox);
+  const inboxToken = instanceName
+    ? createCapabilityToken(`inbox.${instanceName}`)
+    : CAPABILITIES.INBOX;
+  const inboxPurgeJobName = `inbox-purge${outboxJobSuffix}`;
+
   // The registration arms are split ONCE, here at plugin construction, so
   // `register` and the `onInit` hook each read a single list (the M70d arm
   // pattern, M86 §3.5). Instance entries keep their pre-arm `register()`
@@ -257,14 +272,23 @@ export function MessagingPlugin(
   return {
     name: pluginName,
     version: denoJson.version,
-    provides: outboxOptions === undefined ? [token] : [token, outboxToken],
-    // The scheduler and metrics edges exist only with an outbox: they order
-    // SchedulerPlugin and MetricsPlugin before this one so the relay can be
-    // scheduled and its instruments created. Without an outbox the ordering
-    // is exactly the pre-M107 one.
-    optionalDependencies: outboxOptions === undefined
-      ? ['logger', CAPABILITIES.TELEMETRY]
-      : ['logger', CAPABILITIES.TELEMETRY, CAPABILITIES.SCHEDULER, CAPABILITIES.METRICS],
+    provides: [
+      token,
+      ...(outboxOptions === undefined ? [] : [outboxToken]),
+      ...(inboxOptions === undefined ? [] : [inboxToken]),
+    ],
+    // The scheduler and metrics edges exist only with an outbox or an inbox:
+    // they order SchedulerPlugin (and, for the outbox, MetricsPlugin) before
+    // this one so the jobs can be scheduled and instruments created. Without
+    // either the ordering is exactly the pre-M107 one.
+    optionalDependencies: [
+      'logger',
+      CAPABILITIES.TELEMETRY,
+      ...(outboxOptions !== undefined || inboxOptions !== undefined
+        ? [CAPABILITIES.SCHEDULER]
+        : []),
+      ...(outboxOptions === undefined ? [] : [CAPABILITIES.METRICS]),
+    ],
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
@@ -538,6 +562,14 @@ export function MessagingPlugin(
         });
       }
 
+      // M108: registered AFTER the broker's close hook, so the inbox closes
+      // only once consumption has stopped, and BEFORE the subscription hook
+      // below, so the store is verified before any inbox subscription is
+      // resolved.
+      if (inboxOptions !== undefined) {
+        registerInbox(ctx, { options: inboxOptions, inboxToken, purgeJobName: inboxPurgeJobName });
+      }
+
       // Declared subscription INSTANCES register now, exactly as an
       // imperative `broker.subscribe()` call made before this arm existed
       // (M86 §3.5) — and they coexist with imperative subscriptions.
@@ -775,6 +807,82 @@ function registerOutbox(ctx: IPluginContext, registration: OutboxRegistration): 
     scheduled.jobs.push(purgeJobName);
   });
   return runtime;
+}
+
+/**
+ * Builds the inbox at `register()` and wires its lifecycle (M108 §3.11):
+ * registers the `IInbox` and the `inbox` health indicator; at `onInit`
+ * resolves the store, runs its bounded `verify()` (a refusal fails
+ * `start()`), activates the inbox and schedules the purge. The purge job is
+ * removed in `onShutdown`; the inbox closes in an `onClose` hook registered
+ * after the broker's, so a delivery still in flight while the broker
+ * disconnects is not refused.
+ *
+ * @param ctx - The plugin context
+ * @param registration - The resolved options, the token and the job name
+ */
+function registerInbox(
+  ctx: IPluginContext,
+  registration: {
+    readonly options: ResolvedInboxOptions;
+    readonly inboxToken: string;
+    readonly purgeJobName: string;
+  },
+): void {
+  const { options, inboxToken, purgeJobName } = registration;
+  const service = new InboxService({
+    runtime: ctx.runtime,
+    options,
+    logger: () => ctx.logger,
+  });
+  ctx.services.register<IInbox>(inboxToken, service);
+  // A third derived indicator name in this package: `test/plugin-claims-gate.test.ts`
+  // lists the expression `inboxToken` beside `token` and `outboxToken`.
+  ctx.health.register(inboxToken, createInboxHealthIndicator(ctx.runtime, service));
+
+  let scheduler: IScheduler | undefined;
+  const unschedule = async (): Promise<void> => {
+    const active = scheduler;
+    scheduler = undefined;
+    if (active === undefined) return;
+    try {
+      await active.remove(purgeJobName);
+    } catch (error) {
+      ctx.logger?.warn('inbox: could not remove the purge job while stopping', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+  ctx.lifecycle.onShutdown(unschedule);
+  ctx.lifecycle.onClose(async () => {
+    service.close();
+    await unschedule();
+  });
+
+  ctx.lifecycle.onInit(async () => {
+    // Checked first, before any store I/O: a purge that can never run is a
+    // configuration error, refused by name.
+    let purgeScheduler: IScheduler | undefined;
+    if (options.schedule) {
+      if (!ctx.services.has(CAPABILITIES.SCHEDULER)) throw new InboxPurgeUnscheduledError();
+      purgeScheduler = ctx.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
+    }
+    const entry = options.store;
+    const store: IInboxStore = typeof entry === 'function'
+      ? resolveRegistryEntry(entry, ctx.services, 'MessagingPlugin({ inbox: { store } })')
+      : entry;
+    await withDeadline(() => store.verify(), {
+      timeoutMs: options.storeTimeoutMs,
+      onTimeout: () => new InboxStoreVerifyTimeoutError(options.storeTimeoutMs),
+      timing: resolveProbeTiming(ctx.runtime),
+    });
+    service.activate(store);
+    if (purgeScheduler === undefined) return;
+    await purgeScheduler.every(purgeJobName, options.purgeIntervalMs, async () => {
+      await service.purge();
+    });
+    scheduler = purgeScheduler;
+  });
 }
 
 /**

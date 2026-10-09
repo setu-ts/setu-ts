@@ -1,0 +1,426 @@
+/**
+ * The consumer inbox against REAL backends (M108 §3.6, §3.13, §6): real
+ * PostgreSQL (Drizzle over `npm:pg`, the committed DDL fixture) under a real
+ * kernel application, consuming from a REAL RabbitMQ 4 and from REAL Redis
+ * Streams.
+ *
+ * Each transport proves, through `onIntegrationEvent(..., { inbox })`:
+ *
+ * - a duplicate delivery is acknowledged without running the handler, and the
+ *   business row and the marker are written once;
+ * - a handler failure rolls back its business row AND the marker, the broker
+ *   redelivers, and the redelivery succeeds;
+ * - two consumer names each process the same event once;
+ * - one consumer name on two topics gets every event of each topic on its
+ *   own handler, and an id reused across the topics suppresses neither;
+ * - two (consumer, topic) pairs whose dotted names would join to the same
+ *   string get distinct default queues;
+ * - end to end with M107: an outbox row the relay publishes TWICE (the crash
+ *   shape — the row is still `pending` after its first publish) is handled
+ *   once.
+ *
+ * Guarded with `ignore:` on the variables (never an early return, M70c):
+ * `OUTBOX_POSTGRES_URL` + `RABBITMQ_URL`, and `OUTBOX_POSTGRES_URL` +
+ * `REDIS_URL`. A last case drives the default queue against the REAL Pub/Sub
+ * emulator (memory database), guarded on `PUBSUB_EMULATOR_HOST`.
+ *
+ * @module
+ */
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+import type { IMessageBroker } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import {
+  createDatabaseInboxStore,
+  createDatabaseOutboxStore,
+  DatabasePlugin,
+} from '@setu-ts/database-plugin';
+import type { IDatabaseService, IUnitOfWork } from '@setu-ts/database-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import {
+  drizzleInboxAdapter,
+  postgresInboxSchema,
+} from '../../../database-plugin/test/fixtures/inbox-postgres.ts';
+import type { PostgresInboxSchema } from '../../../database-plugin/test/fixtures/inbox-postgres.ts';
+
+import { defineIntegrationEvent, MessagingPlugin, onIntegrationEvent } from '../../src/index.ts';
+import type {
+  IntegrationEventDefinition,
+  IOutbox,
+  MessagingPluginOptions,
+  SubscriptionEntry,
+} from '../../src/index.ts';
+
+const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
+const rabbitUrl = Deno.env.get('RABBITMQ_URL');
+const redisUrl = Deno.env.get('REDIS_URL');
+const pubsubHost = Deno.env.get('PUBSUB_EMULATOR_HOST');
+const pubsubProject = Deno.env.get('PUBSUB_PROJECT_ID') ?? 'he-test';
+
+/** The event every case publishes. */
+interface Hired {
+  readonly personId: string;
+}
+
+/** A per-run definition on a unique topic. */
+function definitionFor(
+  transport: string,
+  type = 'people.hired',
+  topic = `m108.${transport}.${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}.people.v1`,
+): IntegrationEventDefinition<Hired> {
+  return defineIntegrationEvent<Hired>({
+    type,
+    version: 1,
+    topic,
+    parse: (value) => value as Hired,
+  });
+}
+
+/** A consumer name unique to the run, so a durable queue never outlives its test. */
+function consumerName(label: string): string {
+  return `m108-${label}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/** An envelope as a producer would publish it. */
+function envelopeOf(id: string, personId: string, type = 'people.hired'): Record<string, unknown> {
+  return {
+    id,
+    type,
+    version: 1,
+    occurredAt: '2026-10-09T00:00:00Z',
+    data: { personId },
+  };
+}
+
+/** Polls a predicate until true or the deadline, without a fixed sleep. */
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  label: string,
+  timeoutMs = 20_000,
+): Promise<void> {
+  const started = performance.now();
+  while (performance.now() - started < timeoutMs) {
+    if (await predicate()) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`timeout waiting for ${label}`);
+}
+
+/** Lets the broker deliver before an absence is asserted. */
+function settle(ms = 400): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+interface Transport {
+  readonly name: string;
+  readonly ignore: boolean;
+  readonly messaging: () => Record<string, unknown>;
+}
+
+const transports: readonly Transport[] = [
+  {
+    name: 'RabbitMQ',
+    ignore: postgresUrl === undefined || rabbitUrl === undefined,
+    messaging: () => ({
+      broker: 'rabbitmq',
+      url: rabbitUrl!,
+      consumerRetry: { maxAttempts: 5, delaysMs: [100] },
+    }),
+  },
+  {
+    name: 'Redis Streams',
+    ignore: postgresUrl === undefined || redisUrl === undefined,
+    messaging: () => ({
+      broker: 'redis-streams',
+      url: redisUrl!,
+      pollIntervalMs: 10,
+      blockSizeMs: 10,
+      reclaimIntervalMs: 20,
+      consumerRetry: { maxAttempts: 5, delaysMs: [150] },
+    }),
+  },
+];
+
+/** One process: runtime, scheduler, Drizzle over the schema, messaging + inbox + outbox. */
+function processFor(
+  pg: PostgresInboxSchema,
+  transport: Transport,
+  subscriptions: SubscriptionEntry[],
+): IKernelApplication {
+  return createApplication({
+    plugins: [
+      RuntimePlugin(),
+      SchedulerPlugin(),
+      DatabasePlugin({ type: 'custom', adapter: drizzleInboxAdapter(pg.pool) }),
+      MessagingPlugin({
+        ...transport.messaging(),
+        inbox: { store: createDatabaseInboxStore() },
+        outbox: { store: createDatabaseOutboxStore(), relay: { schedule: false } },
+        subscriptions,
+      } as MessagingPluginOptions),
+    ],
+  });
+}
+
+/** A handler writing one `Person` row through the inbox's unit of work. */
+function writer(calls: string[], fail: () => boolean = () => false) {
+  return async (payload: Hired, _e: unknown, _m: unknown, uow: IUnitOfWork) => {
+    calls.push(payload.personId);
+    await uow.getRepository<Record<string, unknown>>('Person')
+      .create({ id: payload.personId, name: 'Ada' });
+    if (fail()) throw new Error('handler failed after its write');
+  };
+}
+
+function rows(app: IKernelApplication, entity: string): Promise<Record<string, unknown>[]> {
+  return app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<Record<string, unknown>>(entity).findAll();
+}
+
+function publish(app: IKernelApplication, topic: string, envelope: unknown): Promise<void> {
+  return app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING).publish(topic, envelope);
+}
+
+for (const transport of transports) {
+  describe(`consumer inbox over real PostgreSQL ← ${transport.name}`, {
+    ignore: transport.ignore,
+  }, () => {
+    const label = transport.name.replaceAll(' ', '-').toLowerCase();
+
+    it('acknowledges a duplicate delivery without running the handler', async () => {
+      const pg = await postgresInboxSchema(postgresUrl!);
+      const definition = definitionFor(label);
+      const calls: string[] = [];
+      const app = processFor(pg, transport, [
+        onIntegrationEvent(definition, writer(calls), {
+          inbox: { consumer: consumerName('dup') },
+        }),
+      ]);
+      await app.start();
+      try {
+        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+        await waitFor(() => calls.length === 1, 'first delivery');
+        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+        await settle();
+        expect(calls).toEqual(['p-1']);
+        expect(await rows(app, 'Person')).toHaveLength(1);
+        expect((await rows(app, 'Inbox')).map((row) => row.status)).toEqual(['processed']);
+      } finally {
+        await app.stop();
+        await pg.dispose();
+      }
+    });
+
+    it('a handler failure rolls back both rows, and the redelivery succeeds', async () => {
+      const pg = await postgresInboxSchema(postgresUrl!);
+      const definition = definitionFor(label);
+      const calls: string[] = [];
+      let failures = 1;
+      const app = processFor(pg, transport, [
+        onIntegrationEvent(definition, writer(calls, () => failures-- > 0), {
+          inbox: { consumer: consumerName('retry') },
+        }),
+      ]);
+      await app.start();
+      try {
+        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+        // The broker redelivers on its own — no second publish.
+        await waitFor(() => calls.length === 2, 'the broker redelivery');
+        await waitFor(async () => (await rows(app, 'Inbox')).length === 1, 'the marker');
+        expect(await rows(app, 'Person')).toHaveLength(1);
+        await settle();
+        expect(calls).toEqual(['p-1', 'p-1']);
+      } finally {
+        await app.stop();
+        await pg.dispose();
+      }
+    });
+
+    it('two consumer names each process the same event once', async () => {
+      const pg = await postgresInboxSchema(postgresUrl!);
+      const definition = definitionFor(label);
+      const payroll: string[] = [];
+      const audit: string[] = [];
+      const app = processFor(pg, transport, [
+        onIntegrationEvent(definition, (p) => {
+          payroll.push(p.personId);
+        }, { inbox: { consumer: consumerName('payroll') } }),
+        onIntegrationEvent(definition, (p) => {
+          audit.push(p.personId);
+        }, { inbox: { consumer: consumerName('audit') } }),
+      ]);
+      await app.start();
+      try {
+        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+        await waitFor(() => payroll.length === 1 && audit.length === 1, 'both consumers');
+        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+        await settle();
+        expect([payroll, audit]).toEqual([['p-1'], ['p-1']]);
+        expect(await rows(app, 'Inbox')).toHaveLength(2);
+      } finally {
+        await app.stop();
+        await pg.dispose();
+      }
+    });
+
+    it('one consumer on two topics: each handler gets all of its topic, ids never cross', async () => {
+      const pg = await postgresInboxSchema(postgresUrl!);
+      const hiredDef = definitionFor(label);
+      // A distinct type, as two real topics carry: a message delivered to the
+      // other topic's handler is then rejected rather than silently handled.
+      const leftDef = definitionFor(label, 'people.left');
+      const consumer = consumerName('two-topics');
+      const hiredCalls: string[] = [];
+      const leftCalls: string[] = [];
+      const app = processFor(pg, transport, [
+        onIntegrationEvent(hiredDef, (p) => {
+          hiredCalls.push(p.personId);
+        }, { inbox: { consumer } }),
+        onIntegrationEvent(leftDef, (p) => {
+          leftCalls.push(p.personId);
+        }, { inbox: { consumer } }),
+      ]);
+      await app.start();
+      try {
+        // The same ids on both topics: keyed without the topic, the second
+        // topic's events would be skipped as duplicates. Published one topic
+        // at a time — alternating would match a shared queue's round-robin
+        // across its two consumers and hide the collision.
+        for (let i = 0; i < 5; i++) {
+          await publish(app, hiredDef.topic, envelopeOf(`e-${i}`, `h-${i}`));
+        }
+        for (let i = 0; i < 5; i++) {
+          await publish(app, leftDef.topic, envelopeOf(`e-${i}`, `l-${i}`, 'people.left'));
+        }
+        await waitFor(
+          () => hiredCalls.length === 5 && leftCalls.length === 5,
+          'every event on both topics',
+        );
+        await settle();
+        expect(hiredCalls.toSorted()).toEqual(['h-0', 'h-1', 'h-2', 'h-3', 'h-4']);
+        expect(leftCalls.toSorted()).toEqual(['l-0', 'l-1', 'l-2', 'l-3', 'l-4']);
+        expect(await rows(app, 'Inbox')).toHaveLength(10);
+      } finally {
+        await app.stop();
+        await pg.dispose();
+      }
+    });
+
+    it('pairs whose dotted names join alike get distinct default queues', async () => {
+      const pg = await postgresInboxSchema(postgresUrl!);
+      const tag = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
+      // `<consumer>.<topic>` would be `m108.left.${tag}.people.v1` for both.
+      const first = definitionFor(label, 'people.hired', `${tag}.people.v1`);
+      const second = definitionFor(label, 'people.left', `left.${tag}.people.v1`);
+      const firstCalls: string[] = [];
+      const secondCalls: string[] = [];
+      const app = processFor(pg, transport, [
+        onIntegrationEvent(first, (p) => {
+          firstCalls.push(p.personId);
+        }, { inbox: { consumer: 'm108.left' } }),
+        onIntegrationEvent(second, (p) => {
+          secondCalls.push(p.personId);
+        }, { inbox: { consumer: 'm108' } }),
+      ]);
+      await app.start();
+      try {
+        for (let i = 0; i < 4; i++) {
+          await publish(app, first.topic, envelopeOf(`${tag}-${i}`, `f-${i}`));
+        }
+        for (let i = 0; i < 4; i++) {
+          await publish(app, second.topic, envelopeOf(`${tag}-${i}`, `s-${i}`, 'people.left'));
+        }
+        await waitFor(
+          () => firstCalls.length === 4 && secondCalls.length === 4,
+          'every event on both topics',
+        );
+        await settle();
+        expect(firstCalls.toSorted()).toEqual(['f-0', 'f-1', 'f-2', 'f-3']);
+        expect(secondCalls.toSorted()).toEqual(['s-0', 's-1', 's-2', 's-3']);
+      } finally {
+        await app.stop();
+        await pg.dispose();
+      }
+    });
+
+    it('end to end with the outbox: a row relayed twice is handled once', async () => {
+      const pg = await postgresInboxSchema(postgresUrl!);
+      const definition = definitionFor(label);
+      const calls: string[] = [];
+      const app = processFor(pg, transport, [
+        onIntegrationEvent(definition, writer(calls), {
+          inbox: { consumer: consumerName('e2e') },
+        }),
+      ]);
+      await app.start();
+      try {
+        const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+        await db.transaction((uow) => outbox.write(uow, definition, { personId: 'p-1' }));
+        expect((await outbox.sweep()).published).toBe(1);
+        await waitFor(() => calls.length === 1, 'the first relay');
+
+        // The §3.13 crash shape: the relay published, and its `markSent` never
+        // landed, so the row is still pending and the next sweep sends it again.
+        await pg.pool.query(
+          "UPDATE setu_outbox SET status = 'pending', settled_at = NULL, sent_by = NULL",
+        );
+        expect((await outbox.sweep()).published).toBe(1);
+        await settle();
+        expect(calls).toEqual(['p-1']);
+        expect(await rows(app, 'Person')).toHaveLength(1);
+      } finally {
+        await app.stop();
+        await pg.dispose();
+      }
+    });
+  });
+}
+
+describe(
+  'consumer inbox default queue ← Pub/Sub emulator',
+  { ignore: pubsubHost === undefined },
+  () => {
+    it('a fully-qualified topic still yields a legal default subscription', async () => {
+      const mod = await import('npm:@google-cloud/pubsub@^6');
+      const admin = new mod.PubSub({ projectId: pubsubProject });
+      const topicId = `m108-${crypto.randomUUID().slice(0, 8)}.people.v1`;
+      await admin.createTopic(topicId);
+      const qualified = `projects/${pubsubProject}/topics/${topicId}`;
+      const definition = definitionFor('pubsub', 'people.hired', qualified);
+      const calls: string[] = [];
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          DatabasePlugin({ type: 'memory' }),
+          MessagingPlugin({
+            broker: 'pubsub',
+            projectId: pubsubProject,
+            inbox: { store: createDatabaseInboxStore(), purge: { schedule: false } },
+            subscriptions: [
+              onIntegrationEvent(definition, (p) => {
+                calls.push(p.personId);
+              }, { inbox: { consumer: 'm108-pubsub' } }),
+            ],
+          } as MessagingPluginOptions),
+        ],
+      });
+      // A `/` in the default name made the service refuse it: start() rejected.
+      await app.start();
+      try {
+        await publish(app, topicId, envelopeOf('e-1', 'p-1'));
+        await waitFor(() => calls.length === 1, 'the Pub/Sub delivery');
+        expect(calls).toEqual(['p-1']);
+      } finally {
+        await app.stop();
+        const [subscriptions] = await admin.topic(topicId).getSubscriptions();
+        for (const subscription of subscriptions) await subscription.delete();
+        await admin.topic(topicId).delete();
+        await admin.close();
+      }
+    });
+  },
+);

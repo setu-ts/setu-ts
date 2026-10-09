@@ -46,7 +46,7 @@ export const PLUGIN_HEALTH_INDICATORS: ReadonlyMap<string, readonly string[]> = 
   ['idempotency-plugin', ['idempotency']],
   ['localization-plugin', ['localization']],
   ['mail-plugin', ['mail']],
-  ['messaging-plugin', ['messaging', 'outbox']],
+  ['messaging-plugin', ['messaging', 'outbox', 'inbox']],
   ['multi-tenancy-plugin', ['multi-tenancy']],
   ['notification-plugin', ['notification']],
   ['queue-plugin', ['queue']],

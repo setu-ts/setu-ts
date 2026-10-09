@@ -1359,6 +1359,275 @@ It must keep the bridge's contract: `append` writes inside the caller's scope; `
 `verify` rejects when the backend cannot serve the relay; and every method rejects rather than
 throwing synchronously.
 
+## Consumer inbox
+
+At-least-once delivery means duplicates by design: an outbox relay that crashes after publishing
+sends the row again, and every broker redelivers after a lost acknowledgement. The inbox records
+each event a consumer applied, keyed by `(consumer, topic, envelope id)`, in the SAME database
+transaction as the handler's own writes. A duplicate delivery is acknowledged without running the
+handler; a handler that fails leaves no record, so the redelivery runs it again.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import {
+  createDatabaseInboxStore,
+  DatabasePlugin,
+  type IUnitOfWork,
+} from '@setu-ts/database-plugin';
+import {
+  defineIntegrationEvent,
+  MessagingPlugin,
+  onIntegrationEvent,
+} from '@setu-ts/messaging-plugin';
+
+const personHired = defineIntegrationEvent<{ personId: string }>({
+  type: 'people.hired',
+  version: 1,
+  topic: 'people.hired.v1',
+  parse: (value) => value as { personId: string },
+});
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SchedulerPlugin(), // runs the retention purge
+    DatabasePlugin({ type: 'memory' }),
+    MessagingPlugin({
+      inbox: { store: createDatabaseInboxStore() },
+      subscriptions: [
+        onIntegrationEvent(
+          personHired,
+          // The fourth argument is the inbox transaction's unit of work: write
+          // through it, and the writes commit with the inbox marker or not at all.
+          async (payload, _envelope, _metadata, uow: IUnitOfWork) => {
+            await uow.getRepository('PayrollRecord').create({ id: payload.personId });
+          },
+          { inbox: { consumer: 'payroll' } },
+        ),
+      ],
+    }),
+  ],
+});
+await app.start();
+```
+
+With `inbox`, `onIntegrationEvent` returns a `RegistryFactory` rather than a
+`SubscriptionDefinition` — still a valid `subscriptions` entry, resolved at `onInit` after the store
+is verified. A plain subscription without `inbox` is unchanged. To subscribe imperatively, call the
+factory with a registry at or after `onInit`:
+`const d = onIntegrationEvent(def, handler, { inbox })(ctx.services); await broker.subscribe(d.topic, d.handler, d.options);`.
+
+`MessagingPlugin({ inbox })` registers an `IInbox` under `CAPABILITIES.INBOX` (`inbox.<name>` for a
+named instance; an inbox subscription names it with `inbox.instance`) and an `inbox` health
+indicator. At `onInit` it resolves the store, runs its `verify()` (an unusable backend fails
+`start()` by name), and schedules the retention purge (`inbox-purge`) on `CAPABILITIES.SCHEDULER`;
+with no scheduler registered `start()` rejects `InboxPurgeUnscheduledError`, unless
+`purge: { schedule: false }` (then call `inbox.purge()` yourself — from a Cron Trigger on Workers).
+
+### The consumer name
+
+`inbox.consumer` is part of the key — with the topic and the envelope id — so it must be the SAME on
+every replica and every deployment of the consumer: a name that changes makes every redelivered
+event look new. The topic in the key keeps one consumer's topics apart, so an event on one topic
+never suppresses an event with the same id on another. Unless you set `queue`, the broker `queue` is
+`inbox.` plus 16 hex characters of a 64-bit FNV-1a hash of the consumer and the topic (one queue per
+pair, legal on every broker; set `queue` for a readable name). The hash guards against accidental
+collisions only, so build neither name from untrusted input. Service Bus creates no subscriptions:
+set `queue` explicitly there and create that subscription. A named queue matters because on RabbitMQ
+a queue-less subscriber gets a private queue whose failed messages are discarded, which would leave
+the inbox nothing to de-duplicate, and a queue shared by two topics hands each handler the other
+topic's messages. Two inbox subscriptions with the same consumer name on one topic in one
+application are refused with `InboxConsumerConflictError`, because each would skip the other's
+events. Across processes this cannot be detected: give each consumer its own name.
+
+### The promise
+
+For one consumer name, the handler's writes through the supplied unit of work are committed at most
+once per topic and envelope id while the marker is retained; a delivery after the marker is purged
+is processed again. Nothing is promised about effects outside that unit of work, about two processes
+using one consumer name with different handlers, or about a database other than the store's. The
+inbox is not authentication: anyone who can publish to the topic can still publish a new event.
+
+How it decides: it reads the marker first and acknowledges if one exists; otherwise it opens ONE
+transaction, creates the marker FIRST, runs the handler, and commits. A concurrent duplicate loses
+that race on the marker's primary key — PostgreSQL blocks the second insert until the first
+transaction ends, a MongoDB replica set rejects the loser with a write conflict, and the deferred
+backends (memory, D1, DynamoDB) refuse it at commit — and its business writes roll back with it.
+After ANY rejection the inbox reads the marker again: present means another delivery handled the
+event, so it acknowledges; absent means the handler failed (a duplicate key in your OWN writes
+included), and the failure is reported. Both race shapes are driven against real PostgreSQL and a
+real MongoDB replica set in `test/integration/inbox-backends-real.test.ts`.
+
+### Effects outside the database
+
+Sending an email or calling a provider cannot join the transaction, and the inbox runs nothing after
+the commit — so an effect performed inside the handler is AT LEAST ONCE: if the commit is refused or
+the process dies, the effect has already happened and the redelivery runs it again. Choose per
+effect:
+
+| Choice                     | How                                                                                                                                                                                                        | Guarantee                                               |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Perform it in the handler  | anywhere in the handler (the default shape)                                                                                                                                                                | at least once                                           |
+| Forward a derived key      | pass `JSON.stringify([consumer, topic, envelope.id])` (or a hash of it) as the provider's idempotency key — all three, unambiguously joined, or another topic's event reusing the id is de-duplicated away | once, where the provider de-duplicates                  |
+| Claim it before the effect | in the handler, COMMIT your own claim row for the effect in a SEPARATE transaction (not the inbox's unit of work), and skip the effect when the claim already exists                                       | at most once — a crash after the claim loses the effect |
+
+On the backends that defer writes to commit (memory, D1, DynamoDB) the handler runs BEFORE a
+concurrent duplicate can be refused, so its outside effects run for both; and DynamoDB's reads are
+eventually consistent, so a sequential duplicate inside the consistency window can do the same.
+
+### Failures and parking
+
+Without `maxAttempts` (the default) a handler failure is rethrown and the broker's own budget
+applies:
+
+| Broker        | On a handler failure                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------- |
+| RabbitMQ      | retried and then dead-lettered by `consumerRetry` (a durable named queue — the inbox's default) |
+| Redis Streams | retried and then dead-lettered by `consumerRetry`                                               |
+| Service Bus   | the platform's max delivery count and dead-letter queue                                         |
+| Pub/Sub       | the subscription's dead-letter policy                                                           |
+| NATS          | redelivered without limit — set `maxAttempts`                                                   |
+| Kafka         | the partition blocks on the message — set `maxAttempts`                                         |
+| in-memory     | reported and dropped                                                                            |
+
+With `maxAttempts`, each failure is counted on a separate row OUTSIDE the rolled-back transaction,
+and at the limit the delivery is PARKED and acknowledged: its marker becomes `parked` with the
+envelope (up to `maxParkedEnvelopeBytes`), so the partition moves on and every redelivery is
+skipped. A parse rejection parks at once — redelivery cannot fix it. The count is a lower bound (two
+concurrent failures can record one increment), so parking comes one attempt late, never early. On
+RabbitMQ and Redis Streams `consumerRetry` (default 5 attempts) also applies, and whichever budget
+runs out first wins: set `maxAttempts` at or below `consumerRetry.maxAttempts`, or set
+`consumerRetry: false`, or the broker dead-letters the delivery before it is ever parked. On a
+backend that defers writes, a concurrent delivery's park can commit while a sibling's successful
+transaction is still open; the sibling then rolls back and acknowledges, and the event ends parked —
+recoverable through `release('retry')`.
+
+```typescript
+import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';
+import type { IInbox } from '@setu-ts/messaging-plugin';
+
+const inbox = app.services.get<IInbox>(CAPABILITIES.INBOX);
+const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+
+for (const parked of await inbox.parked()) {
+  // `retry` deletes the parked marker and hands back the stored envelope.
+  const { topic, envelope } = await inbox.release(parked.rowId, 'retry');
+  // Re-publish WITHOUT a deduplicationId: NATS and Service Bus would drop it
+  // inside their de-duplication window.
+  if (envelope !== undefined) await broker.publish(topic, envelope);
+}
+```
+
+`release(rowId, 'discard')` keeps the marker as `discarded` with its envelope cleared, so
+redeliveries stay skipped. The inbox never re-runs a handler itself — that would bypass the
+messaging behaviour chain. A re-publish reaches every consumer group of the topic: groups using an
+inbox skip it, groups without one process it again. `parked()` never returns an envelope, and the
+health indicator carries a count only. Parked rows are purged by `retainMs` like every other row,
+envelope included, so a parked row does not outlive the window: release or discard a parked delivery
+within that window (the `inbox` health indicator reports `degraded` while any row is parked), and
+`discard` clears one sooner. These are operator capabilities — gate any route that calls them.
+
+### Backends
+
+Use `createDatabaseInboxStore()` from `@setu-ts/database-plugin` (any `IInboxStore` works — see
+[A custom inbox store](#a-custom-inbox-store)). Its `verify()` refuses a backend that cannot serve
+the inbox at startup with `InboxStoreUnavailableError`:
+
+| Backend  | Requirement                                                                                                                                | Driven in this repository against            |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| memory   | none — single process only                                                                                                                 | the unit and integration suites              |
+| Drizzle  | the inbox table exists and is registered in `drizzleTables`                                                                                | real PostgreSQL 16                           |
+| Prisma   | the table exists and the model is in the generated client                                                                                  | not driven (unverified)                      |
+| D1       | the table exists                                                                                                                           | real SQLite (`D1Adapter` over `node:sqlite`) |
+| MongoDB  | a replica set (`'mongodb-standalone'` otherwise); create the collections first — two transactions that each create one implicitly conflict | real MongoDB 8 replica set                   |
+| DynamoDB | the purge and the health count `Scan` without a GSI `{ partitionKey: 'status', sortKey: 'updatedAt' }`; add it for a large table           | not driven (unverified)                      |
+| Cosmos   | refused (`'cosmos-unsupported'`): a transaction is one partition, and the inbox row cannot share the business partition                    | the adapter class, unit level                |
+| Bigtable | refused (`'bigtable-unsupported'`): one row per transaction                                                                                | the Bigtable emulator                        |
+
+Every row carries `kind: 'setu-inbox'`, and every read, count, release and purge requires it, so an
+inbox sharing a table or collection with business documents never touches them. Row ids are a
+SHA-256 of `(consumer, topic, envelope id)` — 64 hex characters, or 73 for the failure-count row —
+whatever id a producer sent; the raw envelope id is stored only when it is a valid publish id (at
+most 128 UTF-8 bytes, no control or format characters). Protect the inbox table like the broker
+credentials: anyone who can write to it can mark an event handled.
+
+PostgreSQL (the exact file the real suite applies):
+
+```sql
+CREATE TABLE setu_inbox (
+  id          text    PRIMARY KEY,
+  kind        text    NOT NULL,
+  consumer    text    NOT NULL,
+  topic       text    NOT NULL,
+  envelope_id text,
+  status      text    NOT NULL,
+  attempts    integer NOT NULL,
+  updated_at  bigint  NOT NULL,
+  last_error  text,
+  envelope    text
+);
+CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updated_at);
+```
+
+SQLite and Cloudflare D1, where `D1Adapter` uses the field names as column names:
+
+```sql
+CREATE TABLE setu_inbox (
+  id          TEXT    PRIMARY KEY,
+  kind        TEXT    NOT NULL,
+  consumer    TEXT    NOT NULL,
+  topic       TEXT    NOT NULL,
+  envelopeId  TEXT,
+  status      TEXT    NOT NULL,
+  attempts    INTEGER NOT NULL,
+  updatedAt   INTEGER NOT NULL,
+  lastError   TEXT,
+  envelope    TEXT
+);
+CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updatedAt);
+```
+
+### Retention
+
+`retainMs` (default 7 days, at least 60 000) is how long a processed marker is kept. A redelivery
+older than that is processed again, so it must exceed the broker's redelivery window plus the
+outbox's re-send window (a crashed relay re-sends within its next sweep; an operator's
+`release('retry')` of a failed outbox row re-sends a row no consumer has seen). The purge deletes
+rows of every status older than the window — `processed`, `discarded` and `parked` markers and
+failure-count rows — but each run deletes at most `purge.batch` rows per status (default 100 a
+minute), so the table stays within the window only while inflow per status stays below that rate —
+raise `purge.batch` or shorten `purge.intervalMs` above it.
+
+### Options
+
+| Option                   | Default  | Meaning                                                        |
+| ------------------------ | -------- | -------------------------------------------------------------- |
+| `store`                  | required | an `IInboxStore`, or a `RegistryFactory` producing one         |
+| `maxAttempts`            | absent   | park after this many handler failures (1–1000)                 |
+| `retainMs`               | 7 days   | how long a processed marker is kept (≥ 60 000)                 |
+| `storeTimeoutMs`         | 5000     | bound on every store call except the handler's own transaction |
+| `maxParkedEnvelopeBytes` | 262 144  | largest envelope stored on a parked marker; `0` stores none    |
+| `purge.schedule`         | `true`   | schedule the purge on `CAPABILITIES.SCHEDULER`                 |
+| `purge.intervalMs`       | 60 000   | milliseconds between purge runs                                |
+| `purge.batch`            | 100      | rows deleted per status per run                                |
+
+Every numeric option must be a finite integer in its range; a violation is refused when
+`MessagingPlugin(...)` is called. The handler's transaction is NOT bounded: an abandoned transaction
+cannot be cancelled from outside, so the database's own statement and transaction timeouts govern
+it.
+
+### A custom inbox store
+
+Any `IInboxStore` from `@setu-ts/common` can back the inbox. It must keep the bridge's contract:
+`run` creates the marker FIRST inside one transaction and rolls it back with the work on any
+rejection; a second marker with the same id is refused; `find` returns `undefined` for a row of
+another `kind`; `recordFailure` writes outside any transaction; `park` answers `'exists'` when a
+marker is already present; `parked` never returns the envelope; `release` writes only from `parked`;
+`purge` never deletes a parked marker; `verify` rejects when the backend cannot serve the inbox; and
+every method rejects rather than throwing synchronously.
+
 ## Bridging in-process events
 
 `EventsMessagingBridge` forwards selected events from
@@ -1439,6 +1708,12 @@ publish — an operator who needs the signal can publish synthetically.
 | `ChainGateTimeoutError`                 | class     |
 | `CloudBrokerUnavailableError`           | class     |
 | `GcpPubSubBroker`                       | class     |
+| `InboxConsumerConflictError`            | class     |
+| `InboxNotConfiguredError`               | class     |
+| `InboxNotReadyError`                    | class     |
+| `InboxPurgeUnscheduledError`            | class     |
+| `InboxRowStateError`                    | class     |
+| `InboxStoreVerifyTimeoutError`          | class     |
 | `InMemoryBroker`                        | class     |
 | `IntegrationEventRejectedError`         | class     |
 | `JetStreamStreamError`                  | class     |
@@ -1465,11 +1740,16 @@ publish — an operator who needs the signal can publish synthetically.
 | `ConsumerRetryOptions`                  | interface |
 | `CustomMessagingOptions`                | interface |
 | `EventsMessagingBridgeOptions`          | interface |
+| `IInbox`                                | interface |
 | `IMessageBroker`                        | interface |
 | `INatsHeaders`                          | interface |
+| `InboxOptions`                          | interface |
+| `InboxPurgeOptions`                     | interface |
+| `InboxReleaseResult`                    | interface |
 | `InMemoryBrokerOptions`                 | interface |
 | `IntegrationEventDefinition`            | interface |
 | `IntegrationEventEnvelope`              | interface |
+| `IntegrationEventInboxOptions`          | interface |
 | `IntegrationEventMetadata`              | interface |
 | `IOutbox`                               | interface |
 | `IPubSubSubscription`                   | interface |
@@ -1493,6 +1773,7 @@ publish — an operator who needs the signal can publish synthetically.
 | `OutboxRelayOptions`                    | interface |
 | `OutboxSweepResult`                     | interface |
 | `OutboxWriteInput`                      | interface |
+| `ParkedInboxEntry`                      | interface |
 | `PubSubOptions`                         | interface |
 | `PubSubSdkModule`                       | interface |
 | `RabbitMqMessagingOptions`              | interface |
@@ -1505,8 +1786,11 @@ publish — an operator who needs the signal can publish synthetically.
 | `ServiceBusSdkModule`                   | interface |
 | `SubscribeOptions`                      | interface |
 | `SubscriptionDefinition`                | interface |
+| `InboxStoreEntry`                       | type      |
 | `IntegrationEventHandler`               | type      |
+| `IntegrationEventInboxHandler`          | type      |
 | `IntegrationEventRejectionReason`       | type      |
+| `IntegrationEventSubscribeOptions`      | type      |
 | `MessageHandler`                        | type      |
 | `MessagingBrokerType`                   | type      |
 | `MessagingPluginOptions`                | type      |

@@ -555,3 +555,27 @@ describe('database-plugin barrel exports — M107 outbox store bridge', () => {
     }
   });
 });
+
+describe('database-plugin barrel exports — M108 inbox store bridge', () => {
+  it('exports createDatabaseInboxStore, its options type and InboxStoreUnavailableError', () => {
+    // Pinned against the BARREL (the M56 class); the options type is checked
+    // at compile time.
+    const options: database.DatabaseInboxStoreOptions = { entity: 'Inbox', database: 'main' };
+    expect(typeof database.createDatabaseInboxStore).toBe('function');
+
+    const refusal = new database.InboxStoreUnavailableError('Inbox', 'cosmos-unsupported');
+    expect(refusal.name).toBe('InboxStoreUnavailableError');
+    expect(refusal.reason).toBe('cosmos-unsupported');
+
+    // The factory returns an IInboxStore — the port in the common barrel.
+    const services = { get: () => ({ uuid: () => 'u' }) } as unknown as common.IServiceRegistry;
+    const store: common.IInboxStore = database.createDatabaseInboxStore(options)(services);
+    expect(typeof store.verify).toBe('function');
+  });
+
+  it('keeps the store class and the adapter-type lookup internal', () => {
+    for (const name of ['DatabaseInboxStore', 'adapterInfoOf']) {
+      expect(Object.hasOwn(database, name)).toBe(false);
+    }
+  });
+});

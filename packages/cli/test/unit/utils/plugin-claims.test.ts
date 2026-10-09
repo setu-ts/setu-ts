@@ -18,10 +18,12 @@ describe('findPluginIndicatorClaim', () => {
       .toBe('database-plugin');
     expect(findPluginIndicatorClaim('static-files', new Set(['static-plugin'])))
       .toBe('static-plugin');
-    // A plugin may claim more than one name (M107: the outbox indicator).
+    // A plugin may claim more than one name (M107/M108: the outbox and inbox indicators).
     expect(findPluginIndicatorClaim('messaging', new Set(['messaging-plugin'])))
       .toBe('messaging-plugin');
     expect(findPluginIndicatorClaim('outbox', new Set(['messaging-plugin'])))
+      .toBe('messaging-plugin');
+    expect(findPluginIndicatorClaim('inbox', new Set(['messaging-plugin'])))
       .toBe('messaging-plugin');
   });
 

@@ -225,6 +225,53 @@ Map it with `drizzleTables: { Outbox: pgTable('setu_outbox', { … }) }` (JS key
 `tenantId`, `createdAt`, `availableAt`, `lastError`, `settledAt`, `sentBy` over the snake_case
 columns; the `bigint` columns in `{ mode: 'number' }`).
 
+## Consumer inbox store
+
+`createDatabaseInboxStore` is the shipped `IInboxStore` (the port in `@setu-ts/common`) over
+`IDatabaseService`. Pass it to the messaging plugin's `inbox.store` option: an
+`onIntegrationEvent(..., { inbox: { consumer } })` subscription then records each event it applied
+as a marker in the SAME transaction as the handler's writes, and hands the handler that
+transaction's unit of work.
+
+The delivery path, its promise, the failure and parking policy and the per-backend notes are
+documented in the
+[messaging-plugin README](https://github.com/setu-ts/setu-ts/tree/main/packages/messaging-plugin#consumer-inbox).
+
+The factory resolves `CAPABILITIES.DATABASE` (or `database.<name>` with `database`) in `onInit`.
+Options: `entity` (default `'Inbox'`) and `database`. The handlers must write to that database: the
+marker is created in its transaction, so a handler writing elsewhere gets no once-only guarantee.
+
+**The marker's insert is the authority.** `run` opens one transaction, creates the marker in it
+first, then runs the handler; any rejection rolls both back. Every row carries `kind: 'setu-inbox'`
+and every read requires it. The failure count and `release` are read-then-write (two calls) until
+ROADMAP Milestone 105's conditional write: two concurrent failures can record one increment.
+
+**Startup check.** `verify()` refuses Cosmos DB and Bigtable by adapter arm or class
+(`'cosmos-unsupported'`, `'bigtable-unsupported'`), runs retention's first query, and runs a
+transaction that writes two probe rows and always rolls back — which is what refuses a standalone
+MongoDB (`'mongodb-standalone'`) and an adapter bounded to one row per transaction
+(`'transaction-scope'`). Anything else is `'entity-unavailable'`. Nothing the probe writes survives.
+Create the table yourself; for PostgreSQL:
+
+```sql
+CREATE TABLE setu_inbox (
+  id          text    PRIMARY KEY,
+  kind        text    NOT NULL,
+  consumer    text    NOT NULL,
+  topic       text    NOT NULL,
+  envelope_id text,
+  status      text    NOT NULL,
+  attempts    integer NOT NULL,
+  updated_at  bigint  NOT NULL,
+  last_error  text,
+  envelope    text
+);
+CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updated_at);
+```
+
+Map it with `drizzleTables: { Inbox: pgTable('setu_inbox', { … }) }` (JS keys `envelopeId`,
+`updatedAt`, `lastError` over the snake_case columns; `updated_at` in `{ mode: 'number' }`).
+
 ## Options
 
 | Option    | Type                                                                                                 | Default     | Description                              |
@@ -976,6 +1023,7 @@ imperative begin/commit.
 
 | Export                                    | Kind      |
 | ----------------------------------------- | --------- |
+| `createDatabaseInboxStore`                | function  |
 | `createDatabaseOutboxStore`               | function  |
 | `createDatabaseTenantDataStore`           | function  |
 | `createDrizzleDatabase`                   | function  |
@@ -1004,6 +1052,7 @@ imperative begin/commit.
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
 | `DynamoAdapter`                           | class     |
+| `InboxStoreUnavailableError`              | class     |
 | `MemoryAdapter`                           | class     |
 | `MongoAdapter`                            | class     |
 | `MongoTransactionUnavailableError`        | class     |
@@ -1051,6 +1100,7 @@ imperative begin/commit.
 | `CustomDatabaseOptions`                   | interface |
 | `DatabaseAdapterOptions`                  | interface |
 | `DatabaseConnectionOptions`               | interface |
+| `DatabaseInboxStoreOptions`               | interface |
 | `DatabaseOutboxStoreOptions`              | interface |
 | `DatabasePoolCapacity`                    | interface |
 | `DrizzleAdapterOptions`                   | interface |

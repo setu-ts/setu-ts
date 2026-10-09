@@ -216,6 +216,7 @@ package fits the plugin architecture.
 | `ERROR_RESPONDER_BRAND`               | const     |
 | `ERROR_RESPONDER_STATE_KEY`           | const     |
 | `HTTP_STATUS_HINT`                    | const     |
+| `INBOX_RECORD_KIND`                   | const     |
 | `MAX_PUBLISH_HEADER_NAME_BYTES`       | const     |
 | `MAX_PUBLISH_HEADER_VALUE_BYTES`      | const     |
 | `MAX_PUBLISH_HEADERS`                 | const     |
@@ -333,6 +334,7 @@ package fits the plugin architecture.
 | `IHttpAdapter`                        | interface |
 | `IIdempotencyService`                 | interface |
 | `IIdempotencyStore`                   | interface |
+| `IInboxStore`                         | interface |
 | `IIngressBehavior`                    | interface |
 | `IJob`                                | interface |
 | `IJwtService`                         | interface |
@@ -350,6 +352,10 @@ package fits the plugin architecture.
 | `IMiddleware`                         | interface |
 | `IMiddlewareApi`                      | interface |
 | `IMultiTenancyService`                | interface |
+| `InboxFailureUpdate`                  | interface |
+| `InboxIds`                            | interface |
+| `InboxRecord`                         | interface |
+| `InboxStoreStats`                     | interface |
 | `IngressContext`                      | interface |
 | `INotifier`                           | interface |
 | `IOpenApiApi`                         | interface |
@@ -561,6 +567,8 @@ package fits the plugin architecture.
 | `IdempotencyKeySource`                | type      |
 | `IdempotencySettleResult`             | type      |
 | `IdempotentIngressOptions`            | type      |
+| `InboxReleaseOutcome`                 | type      |
+| `InboxStatus`                         | type      |
 | `IngressIdempotencyFingerprintSource` | type      |
 | `IngressIdempotencyKeySource`         | type      |
 | `IngressKind`                         | type      |
