@@ -1,0 +1,380 @@
+# Milestone 105 — Conditional writes on `IRepository` (`@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
+
+> **Status:** Planning. Branch: `feat/m105-conditional-writes`. `develop` and `main` are protected —
+> all work (implementation + fixes) stays on this one branch until it merges via a single PR into
+> `develop`.
+
+## 0. Objective & scope
+
+A write that applies only while an equality predicate still holds on the row, so a check and the
+write it guards are one operation rather than two. `IRepository` gains
+`updateWhere(id, where, data)` and `deleteWhere(id, where)`; each backend runs them as ONE native
+conditional operation, and a backend that cannot do so for a given data source omits the member, so
+the repository refuses by name. Never an emulated check-then-write: that reproduces the defect this
+milestone closes. The three first-party callers that document a check-then-write race (the M101c
+tenant bridge, the M107 outbox store's transitions, the M108 inbox store's failure count and
+release) switch over and keep their current two-call path only where the bound data source cannot
+offer the member.
+
+- **In scope:**
+  - `WritePrecondition` and `writePreconditionProblem()` in `common`; optional `updateWhere?` /
+    `deleteWhere?` on `IDataSource` (`common`) and on `IRepository` (`database-plugin`).
+  - Native implementations on every built-in data source that can express the write atomically:
+    memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable (`database-plugin`) and D1
+    (`cloudflare-plugin`), each on its non-transactional data source, plus the interactive-
+    transaction data sources (Prisma, Drizzle, MongoDB).
+  - `BaseRepository` implementations that refuse by name when the bound data source lacks the
+    member, and `DatabaseService.wrapDataSource` forwarding both members (logged and classified).
+  - One internal fallback helper used by the three stores; the tenant bridge, outbox store and inbox
+    store switched over.
+  - A per-adapter conformance table, negative controls reproducing the M101c race, and real-backend
+    cases on every backend CI runs.
+- **NOT this milestone:**
+  - **Conditional writes inside a deferred-write transaction** (memory overlay, D1 batch, DynamoDB
+    `TransactWriteItems`, Cosmos batch, Bigtable buffered row). The member is omitted there (§3.5).
+    A commit-time condition (DynamoDB's per-item `ConditionExpression`, Cosmos batch `ifMatch`) is a
+    different contract — the outcome is known only at commit, so the call cannot return it — and is
+    **unowned**; the ROADMAP M105 section records it as a follow-on (C4).
+  - **Non-equality predicates** (`FilterExpression`, `IS NULL`, ranges). Equality on scalar
+    `string`/`number` values covers every in-repo consumer; a richer predicate is **unowned** and
+    recorded the same way (C4).
+  - **The outbox relay's fencing.** This milestone makes each outbox transition conditional on its
+    expected status; it does not add a relay-instance fencing token or multi-relay sweeping, which
+    M107 leaves to "a later Postgres-only option" (`ROADMAP.md:13168`) and which stays unowned.
+  - **Making the members required.** Deferred to minor `0.10.0` (§4, ROADMAP "Versioning Policy From
+    `0.9.0`").
+
+## 1. Contracts verified from SOURCE (not names)
+
+Line numbers are against `develop` at `864adfdf`. Each external backend fact marked _probed_ was
+measured for this plan on 2026-10-10 against the local containers (PostgreSQL 16, the Bigtable
+emulator, the Cosmos vnext emulator); the probe scripts are scratch and are not committed.
+
+| Reference                                    | Source (file:line)                                                                                                                         | Verified surface / fact                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IDataSource`                                | `packages/common/src/services/database.ts:203`                                                                                             | Lives in **`common`** (M52c). Six required members; `update` (`:241`) throws on a missing key; `delete` (`:253`) answers `false`. `findPage?` (`:268`) is the precedent for an optional member whose absence means "cannot", refused by the repository.                                                                                                                                                                                               |
+| Deferred-write transactions                  | `packages/common/src/services/database.ts:194-199`                                                                                         | The contract already states a transaction-scoped source may buffer writes and apply them at commit, with reads observing committed state.                                                                                                                                                                                                                                                                                                             |
+| `EntityKey`                                  | `packages/common/src/services/database.ts:124`                                                                                             | `string \| number \| Readonly<Record<string, string \| number>>`; the key parameter type of every new member.                                                                                                                                                                                                                                                                                                                                         |
+| `IRepository`                                | `packages/database-plugin/src/interfaces/index.ts:74`                                                                                      | Lives in **`database-plugin`**, not `common`. Members: `findById`, `findAll`, `findOne`, `create`, `update` (`throws` when absent), `delete`, `exists`, `count`, `findPage` (required since 0.2.0).                                                                                                                                                                                                                                                   |
+| `BaseRepository`                             | `packages/database-plugin/src/repositories/base-repository.ts:48`, `:130-160`                                                              | Abstract class implementing `IRepository` over a `DataSource`. `findPage` refuses with `UnsupportedQueryFeatureError('cursor-pagination', …)` when `this._dataSource.findPage === undefined`, read without detaching the method.                                                                                                                                                                                                                      |
+| `UnsupportedQueryFeatureError`               | `packages/database-plugin/src/errors.ts:290`                                                                                               | `(feature, adapter, message, options?)`; `feature` is a released field. Branded `501` only when `feature` is in `QUERY_SHAPE_FEATURES` (`:99`), which already holds `'cursor-pagination'`.                                                                                                                                                                                                                                                            |
+| `DatabaseService.wrapDataSource`             | `packages/database-plugin/src/services/database-service.ts:433`, `:450`                                                                    | Wraps every data source unconditionally (classification + optional logging). Spreads own enumerable members, then overrides the six required ones; `findPage` is bound explicitly (`ds.findPage?.bind(ds)`) because a prototype member would otherwise be dropped.                                                                                                                                                                                    |
+| `DrizzleAdapter.#countingCompletions`        | `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts:562`                                                                     | Second wrapper: re-creates every member found by `Object.entries(source)`. Carries a new member only because the inner Drizzle source is an object literal (own enumerable).                                                                                                                                                                                                                                                                          |
+| `DatabaseTenantDataStore.update` / `.delete` | `packages/database-plugin/src/tenancy/database-tenant-data-store.ts:247`, `:277`                                                           | `#ownedRow` (`findById` + tenant-column compare) then `repo.update(id, stripped)` / `repo.delete(id)`; the after-check at `:268` throws but the write has landed. Class JSDoc `:28-39` names M105 as the fix.                                                                                                                                                                                                                                         |
+| Outbox store transitions                     | `packages/database-plugin/src/outbox/database-outbox-store.ts:252`, `:272`, `:295`                                                         | `markSent` / `markFailure` read the row, require `status === 'pending'`, then `update`/`delete` by id; `release` requires `'failed'`. `#find` (`:212`) treats a row of another `kind` as missing.                                                                                                                                                                                                                                                     |
+| Inbox store failure count / release          | `packages/database-plugin/src/inbox/database-inbox-store.ts:220`, `:253`, `:284`                                                           | `#increment` reads `attempts`, writes `attempts + 1` by id (two calls); `release` reads, requires `'parked'`, then deletes or updates by id.                                                                                                                                                                                                                                                                                                          |
+| Memory data source                           | `packages/database-plugin/src/adapters/memory/memory-adapter.ts:828`, `:852`, `:632`                                                       | `updateEntity` / `deleteEntity` run with **no `await`** between find and write, so a sync check + write is atomic. The transaction overlay (`:632`) buffers and applies at commit — deferred.                                                                                                                                                                                                                                                         |
+| `matchesWhere`                               | `packages/database-plugin/src/query/query-builder.ts:127`                                                                                  | `entity[key] !== expected` → `false`; strict equality, absent field never matches.                                                                                                                                                                                                                                                                                                                                                                    |
+| Prisma model delegate                        | `packages/database-plugin/src/adapters/prisma/prisma-adapter.ts:140`, `:813`, `:834`                                                       | Facade `update({ where, data })` / `delete({ where })`; `P2025` maps to not-found. _Probed_ on Prisma 7.10.0 + PostgreSQL 16: `update`/`delete` with `where: { id, userId }` emit ONE `UPDATE … WHERE (id = $2 AND "userId" = $3) RETURNING …` / `DELETE … RETURNING`; a non-matching predicate answers `P2025` and writes nothing. No facade change needed.                                                                                          |
+| Drizzle data source                          | `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts:748`, `:762`, `:960`                                                     | `update`/`delete` build `eq` key predicates and `.returning()`; `predicateFor(table, entity, where, operators)` already compiles an equality map and throws on an unknown column (`columnFor`).                                                                                                                                                                                                                                                       |
+| MongoDB data source                          | `packages/database-plugin/src/adapters/mongo/mongo-data-source.ts:126`, `:272`, `:283`                                                     | `buildIdFilter` + `findOneAndUpdate(filter, { $set }, { returnDocument: 'after' })` (null → missing); `deleteOne(filter)` → `deletedCount`. The same factory serves the session-bound transaction source (`MongoTransaction.createDataSource`, `:679`).                                                                                                                                                                                               |
+| DynamoDB data source / facade                | `…/dynamo/dynamo-data-source.ts:224-305`; `…/dynamo/dynamo-client-types.ts:126`, `:144`                                                    | `update` sends `ConditionExpression: attribute_exists(pk)` with `ReturnValues: 'ALL_NEW'`; `delete` sends no condition. `DynamoUpdateItemCommandInput` and `DynamoDeleteItemCommandInput` both extend `DynamoConditionExpression` — the facade already carries a condition.                                                                                                                                                                           |
+| Cosmos facade + replace path                 | `…/cosmos/cosmos-client-types.ts:109-128`, `:286-309`; `…/cosmos/cosmos-data-source.ts:453-474`, `:493`                                    | `replace(body, options?)` accepts `accessCondition: { type: 'IfMatch', condition: <_etag> }` and the data source already uses it; the facade's `delete()` takes **no options**. _Probed_ on the vnext emulator: `delete({ accessCondition: IfMatch })` with a stale `_etag` answers `412` and leaves the item; after delete-and-recreate under the same id, both `replace` and `delete` guarded by the original `_etag` answer `412`.                 |
+| Bigtable row write                           | `…/bigtable/bigtable-client-types.ts:132-146`, `:187-200`; `…/bigtable/bigtable-scan.ts:368`; `…/bigtable/bigtable-data-source.ts:321-381` | `conditionalMutate(test, { onMatch })` is CheckAndMutateRow; `BigtableFilter` has a `condition: { test, pass? }` arm; `valueTest(target, field, value)` (internal) builds the byte-exact family/qualifier/value chain, `null` for an unaddressable field. _Probed_ on the emulator: a nested `condition { test: A, pass: B }` matches only when both columns hold their values; a missing column and an absent row answer `false` and create nothing. |
+| D1 data source / SQL builders                | `packages/cloudflare-plugin/src/database/d1-sql.ts:340`, `:377`; `…/d1-data-source.ts:206`, `:320`                                         | `buildUpdate` → `UPDATE … SET … WHERE <key> RETURNING *`; `buildDelete` → `DELETE … WHERE <key> RETURNING <pk>`; `assertParamBudget` caps bound parameters. `createD1TransactionDataSource` buffers into a `batch()` — deferred.                                                                                                                                                                                                                      |
+| Transaction data-source factories            | `…/prisma/prisma-adapter.ts:316`; `…/drizzle/drizzle-adapter.ts:479`; `…/mongo/mongo-data-source.ts:679`                                   | Prisma, Drizzle and MongoDB build the transaction-scoped source from the SAME factory as the plain one, over the transaction client / `tx` / session — so a member added to the factory is present in their transactions with no extra code.                                                                                                                                                                                                          |
+| Versioning policy                            | `ROADMAP.md:13583`                                                                                                                         | From `0.9.0`, a member added to a published interface ships OPTIONAL with the required form deferred to a named minor; `check:plan` requires the compatibility statement in §4.                                                                                                                                                                                                                                                                       |
+
+## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
+
+| #  | Conflict                                                                                                                                                                                                                                                                       | Resolution (picked side)                                                                                                                                                                                                     | Doc deliverable (same PR)                                                                                                                                    |
+| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1 | ROADMAP M105 says `common` changes "only if a filter type must move there". `IDataSource` — the port every adapter implements — lives in `common` (`database.ts:203`), so `common` changes unconditionally.                                                                    | `common` gains the two optional `IDataSource` members, `WritePrecondition` and `writePreconditionProblem`.                                                                                                                   | ROADMAP M105 `Package(s)` line names `packages/common` without the condition.                                                                                |
+| C2 | ROADMAP M105 scope names only the tenant bridge, while the database-plugin README (`:176-178`, `:246-247`) and PUBLIC_API (`:2306`, `:2345`) promise that "Milestone 105's conditional write closes the window" for the outbox transitions and the inbox failure count.        | The docs' promise wins: the outbox and inbox stores switch over in this milestone (§3.8). It is the same mechanism through the same helper, and leaving the promise unkept would leave three published sentences false.      | ROADMAP M105 scope + deliverables list the two stores; the four README/PUBLIC_API sentences are rewritten to describe the conditional path and its fallback. |
+| C3 | ROADMAP M105 names "a Cosmos/Bigtable conditional mutation" for Cosmos. Cosmos offers no conditional delete on a predicate; its native guard is `IfMatch` on `_etag`.                                                                                                          | Cosmos uses a read followed by an `_etag`-guarded `replace`/`delete` (§3.6). This is a version compare-and-swap, not a check-then-write: the probe shows a delete-and-recreate under the same id fails the guard with `412`. | ROADMAP M105 scope bullet names `IfMatch` for Cosmos; PUBLIC_API states the per-adapter mechanism table.                                                     |
+| C4 | ROADMAP M105 says "a `WHERE key = ? AND col = ?` statement … DynamoDB `ConditionExpression`" without saying whether deferred-write transactions are covered; `IDataSource` (`database.ts:191`) says D1, DynamoDB and Cosmos transactions defer writes.                         | Deferred-write transactions omit the members (§3.5); commit-time conditions and non-equality predicates are recorded as unowned follow-ons.                                                                                  | ROADMAP M105 gains a "Not covered" bullet naming both.                                                                                                       |
+| C5 | `ROADMAP.md:13152-13168` (M107) says "The portable repository has no … conditional update (M105 adds the latter)" and "True fencing needs a conditional status write (M105)". After this milestone the status write IS conditional, but there is still no relay fencing token. | Status transitions become conditional here; relay fencing stays out of scope (§0).                                                                                                                                           | The two M107 sentences are rewritten to say M105 made transitions conditional and fencing remains unowned.                                                   |
+
+## 3. Design decisions
+
+### 3.1 The member signatures
+
+- **Decision:** on `IDataSource` (`common`):
+
+  ```ts
+  updateWhere?(
+    id: EntityKey,
+    where: WritePrecondition,
+    data: Partial<Record<string, unknown>>,
+  ): Promise<Record<string, unknown> | null>;
+  deleteWhere?(id: EntityKey, where: WritePrecondition): Promise<boolean>;
+  ```
+
+  On `IRepository<Entity, Id>` (`database-plugin`):
+  `updateWhere?(id: Id, where: WritePrecondition, data: Partial<Entity>): Promise<Entity | null>`
+  and `deleteWhere?(id: Id, where: WritePrecondition): Promise<boolean>`.
+- **Why:** `null` / `false` is "not matched", never a throw: a failed predicate is the expected
+  outcome of the race the member exists for, not an error. A missing key and a failed predicate are
+  deliberately the same answer — telling them apart needs a second read, which is itself racy and
+  which no consumer needs (each consumer that must classify re-reads, §3.8).
+- **Test home:** `conditional-write-conformance.test.ts` (both arms on every data source),
+  `base-repository-conditional.test.ts`.
+
+### 3.2 `WritePrecondition` is an equality map on scalar values
+
+- **Decision:** `type WritePrecondition = Readonly<Record<string, string | number>>`. Every field
+  must equal its value (`AND`); at least one field; no `null`, `boolean`, `Date`, object or array
+  value; no field name that is empty or starts with `$`. One pure function in `common`,
+  `writePreconditionProblem(where: unknown, data?: unknown): string | undefined`, returns the reason
+  a predicate (and, for an update, a payload with at least one own field) is refused, `undefined`
+  when acceptable. A field naming a key column is allowed and redundant.
+- **Why:** every in-repo consumer compares a string or a number (tenant id, `kind`, `status`,
+  `attempts`). `null` differs across backends (SQL `= NULL` never matches), booleans differ in
+  SQLite/D1 storage, and `$`-prefixed names are MongoDB operators (the M101c `$`-operator finding).
+  Validation lives in `common` because two packages need the identical rule and §2.2 forbids one
+  importing the other (the M47 frame-codec precedent).
+- **Test home:** `write-precondition.test.ts` (`common`), table of accepted and refused inputs.
+
+### 3.3 Optional members, absence means "cannot", the repository owns the refusal
+
+- **Decision:** both members are optional on `IDataSource` and on `IRepository`. `BaseRepository`
+  always defines them; each first validates with `writePreconditionProblem` (rejecting with
+  `UnsupportedQueryFeatureError('write-precondition', 'database-plugin', …)`, not branded), then, if
+  the bound data source lacks the member, rejects with
+  `UnsupportedQueryFeatureError('conditional-write', 'database-plugin', …)` before any I/O.
+  `'conditional-write'` joins `QUERY_SHAPE_FEATURES` (branded `501`, like `'cursor-pagination'`).
+  Every refusal is a rejection, never a synchronous throw.
+- **Why:** this is the `findPage` shape (`base-repository.ts:145`). Optional rather than required
+  per the versioning policy; the ambiguity ("absent" vs "not offered") is resolved by the
+  repository, which turns absence into one named error a caller can branch on.
+- **Test home:** `base-repository-conditional.test.ts`.
+
+### 3.4 Native mechanism per data source
+
+- **Decision:** one operation per call, the predicate evaluated by the backend:
+
+  | Data source     | `updateWhere`                                                                                                                                            | `deleteWhere`                                                              |
+  | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+  | memory (non-tx) | synchronous find + `matchesWhere` + merge, no `await` between                                                                                            | synchronous find + `matchesWhere` + splice                                 |
+  | Prisma          | `delegate.update({ where: { ...keyWhere, ...where }, data })`; `P2025` → `null`                                                                          | `delegate.delete({ where: { ...keyWhere, ...where } })`; `P2025` → `false` |
+  | Drizzle         | `update().set(data).where(and(keyPreds, predicateFor(where))).returning()`; no row → `null`                                                              | `delete().where(and(…)).returning()`; `rows.length > 0`                    |
+  | MongoDB         | `findOneAndUpdate({ ...idFilter, ...where }, { $set }, { returnDocument: 'after' })`; an empty `$set` after key stripping → `findOne` on the same filter | `deleteOne({ ...idFilter, ...where })`                                     |
+  | DynamoDB        | `UpdateItem` with `ConditionExpression: attribute_exists(pk) AND #w0 = :w0 …`, `ALL_NEW`; `ConditionalCheckFailedException` → `null`                     | `DeleteItem` with the same condition; failed check → `false`               |
+  | Cosmos DB       | read → `matchesWhere` on the read → merge → `replace` with `IfMatch: _etag` (§3.6)                                                                       | read → `matchesWhere` → `delete` with `IfMatch: _etag`                     |
+  | Bigtable        | `conditionalMutate(test, { onMatch: [insert cells] })`, test = nested `condition` over `valueTest` per field; then read the row                          | `conditionalMutate(test, { onMatch: [delete] })`                           |
+  | D1              | `UPDATE … SET … WHERE <key> AND "col" = ?N … RETURNING *`; no row → `null`                                                                               | `DELETE … WHERE <key> AND … RETURNING <pk>`                                |
+
+  Field names go through each adapter's existing translation (Mongo field mapping and `_id`,
+  DynamoDB attribute aliasing and marshalling, D1 `quoteIdentifier` and `assertParamBudget`, Drizzle
+  `columnFor`). Prisma additionally refuses predicate fields named `AND`, `OR`, `NOT` or the
+  configured compound-key field, which Prisma would read as operators. A Bigtable predicate field
+  with no addressable column makes the call answer "not matched" with no RPC, matching that
+  adapter's rule that constraining on a column that cannot exist matches nothing
+  (`bigtable-scan.ts:355`).
+- **Why:** every mechanism except Cosmos is a single statement or request whose predicate the server
+  evaluates; Prisma's was confirmed to be one SQL statement by statement logging, and Bigtable's
+  nested condition was confirmed on the emulator.
+- **Test home:** `conditional-write-conformance.test.ts`; per-adapter real suites (§6).
+
+### 3.5 Deferred-write transactions omit the members
+
+- **Decision:** the memory transaction overlay, `createD1TransactionDataSource`, the DynamoDB
+  transaction-buffer path, the Cosmos transaction source and the Bigtable buffered source do not
+  define `updateWhere`/`deleteWhere`. A Unit of Work repository over one of them therefore refuses
+  with `'conditional-write'` (§3.3). Prisma, Drizzle and MongoDB transaction sources carry the
+  members, because they come from the same factory (§1).
+- **Why:** a deferred write lands at commit, so the predicate's outcome is not known when the call
+  returns; answering "matched" at buffer time would be an emulated check-then-write, the defect
+  itself. DynamoDB and Cosmos do offer commit-time conditions, but that is a different contract (the
+  outcome surfaces as a commit failure) and is recorded as unowned (C4).
+- **Test home:** `conditional-write-conformance.test.ts` ("deferred transaction refuses" rows).
+
+### 3.6 Cosmos: a version compare-and-swap, bounded
+
+- **Decision:** read the item through the existing address resolution; if it is absent or
+  `matchesWhere` fails, answer "not matched" without writing. Otherwise write guarded by the read's
+  `_etag` (`replace` for an update, the whole merged document; `delete` with `accessCondition` for a
+  delete). On `412` start again from the read, at most 3 times, then reject with the existing
+  `CosmosConcurrentModificationError`. An update that would change a partition-key value is refused
+  as today. The internal facade's `delete()` gains an optional `options` parameter carrying
+  `accessCondition`.
+- **Why:** Cosmos has no predicate-conditioned delete, and the `_etag` guard makes the write land
+  only on the exact version checked — the probe shows a delete-and-recreate under the same id fails
+  it. Always using `replace` (not the narrow `patch` path the plain `update` takes) keeps one
+  mechanism for both arms and relies only on a guard the adapter already ships. The retry turns an
+  unrelated concurrent edit into a re-check rather than a spurious "not matched".
+- **Test home:** `cosmos-conditional-write.test.ts` (fake), `real-cosmos-adapter.test.ts` (guarded).
+
+### 3.7 `DatabaseService` forwards both members
+
+- **Decision:** `wrapDataSource` binds `ds.updateWhere?.bind(ds)` and `ds.deleteWhere?.bind(ds)`
+  beside `findPage`, and when present defines wrapped members that log the operation and classify a
+  driver rejection exactly as `update`/`delete` do. Absent on the source → absent on the wrapper.
+- **Why:** the wrapper spreads only own enumerable members, so a class-based source would lose a
+  prototype member and every conditional write would refuse exactly when `logQueries` is on — the
+  M70j `count`-filter defect class. Classification is unconditional (M90f).
+- **Test home:** `database-service-conditional.test.ts` (class-backed source, `logQueries` on and
+  off).
+
+### 3.8 One fallback helper; three stores switch over
+
+- **Decision:** an internal `repositories/conditional-write.ts` exports
+  `conditionalUpdate(repo, id,
+  where, data)` and `conditionalDelete(repo, id, where)`, each
+  answering
+  `{ outcome: 'applied', row? } | { outcome: 'not-matched' } | { outcome: 'unsupported' }`.
+  `'unsupported'` is returned when `repo.updateWhere` is absent, or when it rejects with
+  `UnsupportedQueryFeatureError` whose `feature === 'conditional-write'` (which §3.3 guarantees
+  precedes any I/O); every other rejection propagates. The consumers:
+  - **Tenant bridge.** `update` → `conditionalUpdate(repo, id, { [col]: tenantId }, stripped)`;
+    `delete` → `conditionalDelete(repo, id, { [col]: tenantId })`. No `#ownedRow` pre-read on the
+    conditional path. `'not-matched'` → `null` / `false`. `'unsupported'` → today's two-call path,
+    unchanged, including the after-check.
+  - **Outbox store.** `markSent` / `markFailure` write with
+    `{ kind: 'setu-outbox', status:
+    'pending' }`, `release` with `status: 'failed'`. On
+    `'not-matched'`, re-read with `#find` to classify into the existing outcomes (`missing`,
+    `not-pending`, `not-failed`); if the re-read still shows the expected status, retry, at most 3
+    times, then reject naming contention.
+  - **Inbox store.** `#increment` writes `attempts + 1` with
+    `{ kind: 'setu-inbox', attempts:
+    <read value> }` as a compare-and-set, re-reading and
+    retrying on `'not-matched'` (at most 5 times, then reject); a row whose `attempts` is not a safe
+    integer keeps the two-call path. `release` uses `{ kind, status: 'parked' }` for both the delete
+    and the discard update.
+- **Why:** one implementation of "try conditional, else fall back" keeps the three stores from
+  drifting on what counts as unsupported. Re-reading only after the write was refused is safe: no
+  write depends on that read.
+- **Test home:** `conditional-write-helper.test.ts`, `database-tenant-data-store.test.ts`,
+  `outbox-store-conditional.test.ts`, `inbox-store-conditional.test.ts`.
+
+### 3.9 Negative controls reproduce the M101c race deterministically
+
+- **Decision:** a test data source wraps the memory adapter and, inside the bridge's ownership read
+  (`findById`), deletes tenant A's row and creates tenant B's row under the same key. On the
+  conditional path the bridge's `update`/`delete` leave B's row untouched and answer `null`/`false`;
+  with the same wrapper and `updateWhere`/`deleteWhere` stripped (forcing the fallback), the test
+  observes the write landing on B's row — the M101c defect reproduced, proving the harness
+  discriminates. The same interleaving runs against real PostgreSQL through Drizzle using two
+  connections.
+- **Why:** a race test that never reproduces the race proves nothing; the control that fails on the
+  old path is what shows the new path fixed it.
+- **Test home:** `tenant-store-race.test.ts` (memory), `tenant-store-race-real.test.ts` (guarded,
+  `POSTGRES_URL`).
+
+## 4. Exported surface — every symbol names its consumer
+
+**Breaking for implementors:** none — both members are optional on `IDataSource` and on
+`IRepository`, so no implementor and no caller breaks. The required form is deferred to minor
+`0.10.0`, recorded as a CHANGELOG `Unreleased` entry marked for the next minor.
+
+| Exported symbol                                                                                 | Kind                         | Consumer / real code path that READS it                                                                                        |
+| ----------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `WritePrecondition` (`common`)                                                                  | type                         | Parameter type of `IDataSource.updateWhere?`/`deleteWhere?`, `IRepository` members, every adapter implementation.              |
+| `writePreconditionProblem` (`common`)                                                           | function                     | `BaseRepository.updateWhere`/`deleteWhere` (database-plugin), the D1 data source (cloudflare-plugin), the MongoDB data source. |
+| `IDataSource.updateWhere?` / `deleteWhere?`                                                     | interface members (`common`) | `BaseRepository` (reads presence and calls), `DatabaseService.wrapDataSource` (binds and forwards).                            |
+| `IRepository.updateWhere?` / `deleteWhere?`                                                     | interface members            | `conditionalUpdate` / `conditionalDelete` (tenant bridge, outbox store, inbox store); application code.                        |
+| `BaseRepository.updateWhere` / `deleteWhere`                                                    | class methods                | Every repository `DatabaseService.getRepository` and `IUnitOfWork.getRepository` return (`InternalRepo`).                      |
+| `UnsupportedQueryFeatureError` (`feature` values `'conditional-write'`, `'write-precondition'`) | existing class, new values   | `conditionalUpdate`/`conditionalDelete` branch on `'conditional-write'`; `'write-precondition'` reaches the caller.            |
+
+Not exported: `conditionalUpdate`, `conditionalDelete` (internal to `database-plugin`), the D1
+`buildUpdateWhere`/`buildDeleteWhere` builders, the Cosmos facade's widened `delete(options?)`
+signature (internal facade type). A `barrel-exports.test.ts` assertion in `common` pins the two new
+exports, and one in `database-plugin` pins that the helper is NOT exported.
+
+### 4.1 Options — every option names its consumer
+
+| Option                                                                   | Consumer | Behavior (per implementation) |
+| ------------------------------------------------------------------------ | -------- | ----------------------------- |
+| None (checked) — this milestone adds no plugin, adapter or store option. | —        | —                             |
+
+## 5. Implementation files
+
+| File                                                                                                                       | Purpose                                                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `packages/common/src/services/database.ts`                                                                                 | `WritePrecondition`; optional `updateWhere?`/`deleteWhere?` on `IDataSource` with per-arm JSDoc.          |
+| `packages/common/src/services/write-precondition.ts`                                                                       | `writePreconditionProblem`.                                                                               |
+| `packages/common/src/index.ts`                                                                                             | Barrel exports for the two new symbols.                                                                   |
+| `packages/database-plugin/src/interfaces/index.ts`                                                                         | Optional `IRepository` members.                                                                           |
+| `packages/database-plugin/src/repositories/base-repository.ts`                                                             | `updateWhere`/`deleteWhere` with validation and the `'conditional-write'` refusal.                        |
+| `packages/database-plugin/src/repositories/conditional-write.ts`                                                           | Internal `conditionalUpdate`/`conditionalDelete` fallback helper.                                         |
+| `packages/database-plugin/src/errors.ts`                                                                                   | `'conditional-write'` added to `QUERY_SHAPE_FEATURES`.                                                    |
+| `packages/database-plugin/src/services/database-service.ts`                                                                | `wrapDataSource` forwards both members.                                                                   |
+| `packages/database-plugin/src/adapters/memory/memory-adapter.ts`                                                           | Non-transactional implementation.                                                                         |
+| `packages/database-plugin/src/adapters/prisma/prisma-adapter.ts`                                                           | Implementation in `createPrismaDataSourceInner` (also reached by transactions).                           |
+| `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts`                                                         | Implementation in `createDrizzleDataSourceInner` (also reached by transactions).                          |
+| `packages/database-plugin/src/adapters/mongo/mongo-data-source.ts`                                                         | Implementation (also reached by the session-bound transaction source).                                    |
+| `packages/database-plugin/src/adapters/dynamo/dynamo-data-source.ts`                                                       | Non-transactional implementation; buffer path omits the members.                                          |
+| `packages/database-plugin/src/adapters/cosmos/cosmos-data-source.ts`, `cosmos-client-types.ts`, `cosmos-client.ts`         | Non-transactional implementation; facade `delete(options?)`.                                              |
+| `packages/database-plugin/src/adapters/bigtable/bigtable-data-source.ts`, `bigtable-scan.ts`                               | Non-transactional implementation; a `preconditionTest` built from `valueTest`.                            |
+| `packages/database-plugin/src/tenancy/database-tenant-data-store.ts`                                                       | Conditional path; class JSDoc limit narrowed to data sources lacking the member.                          |
+| `packages/database-plugin/src/outbox/database-outbox-store.ts`                                                             | Conditional transitions.                                                                                  |
+| `packages/database-plugin/src/inbox/database-inbox-store.ts`                                                               | Conditional increment and release.                                                                        |
+| `packages/cloudflare-plugin/src/database/d1-sql.ts`, `d1-data-source.ts`                                                   | `buildUpdateWhere`/`buildDeleteWhere`; non-transactional implementation; transaction source omits.        |
+| `PUBLIC_API.md`, `packages/database-plugin/README.md`, `packages/common/README.md`, `packages/cloudflare-plugin/README.md` | Members, per-adapter mechanism table, deferred-transaction refusal, C2 sentences, export tables.          |
+| `ROADMAP.md`, `CHANGELOG.md`, `CLAUDE.md`                                                                                  | C1–C5 corrections, Progress row, `Unreleased` entries (Added + the deferred-required note), status entry. |
+
+## 6. Test plan (every `src/` file mapped; per-file 90% bar)
+
+Every real-backend case is guarded with the BDD `ignore` option on its environment variable, never
+an early return (the M70c trap). Every call below type-checks against the §3.1 signatures: a
+`WritePrecondition` literal, an `EntityKey`, and a `Partial<…>` payload.
+
+| Test file                                                                                                                                                                                             | src covered                                                               | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/common/test/unit/write-precondition.test.ts`                                                                                                                                                | `write-precondition.ts`                                                   | Table of accepted inputs (one field, several fields, numbers) and refused inputs (empty, `null`, boolean, `Date`, object, array, `$`-prefixed name, empty name, non-plain object, empty update payload), asserted as data.                                                                                                                             |
+| `packages/common/test/unit/barrel-exports.test.ts` (extended)                                                                                                                                         | `index.ts`                                                                | `WritePrecondition` (compile-time) and `writePreconditionProblem` are exported.                                                                                                                                                                                                                                                                        |
+| `packages/database-plugin/test/unit/base-repository-conditional.test.ts`                                                                                                                              | `base-repository.ts`, `errors.ts`                                         | Delegates when present; `'conditional-write'` refusal when absent, before any data-source call; `'write-precondition'` refusal on a bad predicate; refusals are rejections; `'conditional-write'` carries the `501` brand and `'write-precondition'` none.                                                                                             |
+| `packages/database-plugin/test/unit/conditional-write-conformance.test.ts`                                                                                                                            | memory, Prisma, Drizzle, MongoDB, DynamoDB, Bigtable, Cosmos translations | One case table run over every data source (fakes recording the native call): matched update returns the row; predicate mismatch answers `null`/`false` and the store is unchanged; missing key answers the same; deferred-transaction sources lack both members (asserted per adapter as data); per-adapter "unknown column" outcome asserted as data. |
+| `packages/database-plugin/test/unit/cosmos-conditional-write.test.ts`                                                                                                                                 | `cosmos-data-source.ts`, `cosmos-client.ts`                               | `IfMatch` carried on `replace` and `delete`; `412` → re-read → success; three `412`s → `CosmosConcurrentModificationError`; predicate fails on the read → no write call; partition-key change refused.                                                                                                                                                 |
+| `packages/database-plugin/test/unit/bigtable-conditional-write.test.ts`                                                                                                                               | `bigtable-data-source.ts`, `bigtable-scan.ts`                             | Nested `condition` test shape for one and three fields; unaddressable field → no RPC and "not matched".                                                                                                                                                                                                                                                |
+| `packages/database-plugin/test/unit/prisma-conditional-write.test.ts`                                                                                                                                 | `prisma-adapter.ts`                                                       | `where` merged with the scalar and compound key; `AND`/`OR`/`NOT`/compound-field names refused; `P2025` mapped; other errors propagate.                                                                                                                                                                                                                |
+| `packages/database-plugin/test/unit/database-service-conditional.test.ts`                                                                                                                             | `database-service.ts`                                                     | Class-backed source: members forwarded with `logQueries` on and off; absent stays absent; a driver rejection is classified like `update`'s.                                                                                                                                                                                                            |
+| `packages/database-plugin/test/unit/conditional-write-helper.test.ts`                                                                                                                                 | `conditional-write.ts`                                                    | Absent member → `'unsupported'`; `'conditional-write'` rejection → `'unsupported'`; any other rejection (including `'write-precondition'`) propagates; matched / not-matched mapping.                                                                                                                                                                  |
+| `packages/database-plugin/test/unit/database-tenant-data-store.test.ts` (extended)                                                                                                                    | `database-tenant-data-store.ts`                                           | Conditional path takes no ownership pre-read; foreign tenant → `null`/`false`; fallback path unchanged (existing cases kept).                                                                                                                                                                                                                          |
+| `packages/database-plugin/test/unit/tenant-store-race.test.ts`                                                                                                                                        | `database-tenant-data-store.ts`                                           | §3.9: race injected inside the ownership read; conditional path leaves tenant B's row untouched; with the members stripped the write lands on B's row (negative control).                                                                                                                                                                              |
+| `packages/database-plugin/test/unit/outbox-store-conditional.test.ts`                                                                                                                                 | `database-outbox-store.ts`                                                | Each transition sends the expected predicate; not-matched is classified as `missing`/`not-pending`/`not-failed` from the re-read; contention retry bound; fallback path unchanged.                                                                                                                                                                     |
+| `packages/database-plugin/test/unit/inbox-store-conditional.test.ts`                                                                                                                                  | `database-inbox-store.ts`                                                 | Two concurrent `recordFailure` calls on memory record two increments (fails on the old path); retry bound; non-integer `attempts` keeps the two-call path; `release` predicates.                                                                                                                                                                       |
+| `packages/database-plugin/test/unit/barrel-exports.test.ts` (extended)                                                                                                                                | `index.ts`                                                                | `conditionalUpdate`/`conditionalDelete` are NOT exported.                                                                                                                                                                                                                                                                                              |
+| `packages/database-plugin/test/integration/tenant-store-race-real.test.ts`                                                                                                                            | Drizzle + tenant bridge                                                   | Guarded `POSTGRES_URL`: §3.9 interleaving over two real connections; B's row unchanged.                                                                                                                                                                                                                                                                |
+| `real-drizzle-adapter.test.ts`, `real-prisma-adapter.test.ts`, `real-mongo-adapter.test.ts`, `real-dynamo-adapter.test.ts`, `real-bigtable-adapter.test.ts`, `real-cosmos-adapter.test.ts` (extended) | each adapter                                                              | Guarded on their existing variables: matched, mismatched and missing-key rows for both members against the real backend, read back through `findById`; Prisma also in a transaction. Cosmos is local-only (2.5 GB emulator), as today.                                                                                                                 |
+| `packages/cloudflare-plugin/test/unit/d1-conditional-write.test.ts`                                                                                                                                   | `d1-sql.ts`, `d1-data-source.ts`                                          | SQL text and bound parameters; parameter-budget refusal; transaction source lacks the members.                                                                                                                                                                                                                                                         |
+| `packages/cloudflare-plugin/test/integration/d1-database.test.ts` (extended)                                                                                                                          | D1 over real `node:sqlite`                                                | Statements executed: matched, mismatched, missing key; read back.                                                                                                                                                                                                                                                                                      |
+
+Negative controls to run and revert during implementation, each observed failing: (1) the §3.9
+bridge race with the conditional path removed; (2) `wrapDataSource` without the explicit bind
+(class-backed source under `logQueries`); (3) Cosmos without `IfMatch` (the recreate case writes);
+(4) the inbox increment without the `attempts` predicate (two concurrent failures record one); (5)
+the helper treating every rejection as `'unsupported'` (a `'write-precondition'` error is swallowed
+into the fallback).
+
+## 7. Verification gates
+
+```bash
+git branch --show-current   # MUST be feat/m105-conditional-writes, never develop or main
+deno task check:plan        # this plan lints clean
+deno task fmt:check
+deno task lint
+deno task check
+deno task test              # with the full-backend env block, so the guarded suites run
+deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/function/line every src file
+deno task check:docs
+deno task publish:check     # on the committed tree
+deno task release:verify <version>
+```
+
+## 8. Risks & mitigations
+
+- **A new optional member is silently dropped by a wrapper** (the M70j class) → §3.7 binds it
+  explicitly and the class-backed test runs with logging on and off; `#countingCompletions` is
+  covered because the Drizzle conformance rows run through `DrizzleAdapter.createDataSource`.
+- **A conditional path that does not discriminate** (a test passing on the old code) → every race
+  test carries the §6 negative control observed failing before it is reverted.
+- **Encoded-value mismatch makes a predicate never match** (DynamoDB `dateAttributes`, Bigtable
+  tagged values, a column written outside the framework) → the failure mode is "not matched", which
+  writes nothing; the conformance and real suites read back to show the matched case writes, and
+  PUBLIC_API states that the predicate compares the stored representation.
+- **Retry loops masking a real contention problem** → each loop has a fixed bound and rejects with a
+  message naming the entity and the contention, never spins.
+- **A subclass of the exported `BaseRepository` already defining `updateWhere` with a different
+  signature** → judged negligible (no in-repo subclass does; the class is documented as the adapter
+  author's base); recorded in the CHANGELOG entry rather than treated as a break.
+
+## 9. Out of scope
+
+- Commit-time conditional writes inside deferred-write transactions (DynamoDB `TransactWriteItems`
+  conditions, Cosmos batch `ifMatch`, D1 batch) — unowned, recorded in ROADMAP M105 (C4).
+- Non-equality and `null` predicates — unowned, recorded in ROADMAP M105 (C4).
+- Outbox relay fencing tokens and multi-relay sweeping — unowned since M107 (C5).
+- Making `updateWhere`/`deleteWhere` required — minor `0.10.0`.
+- A `meta.changes`-style row count from `updateWhere`; the row (or `null`) is the result.
