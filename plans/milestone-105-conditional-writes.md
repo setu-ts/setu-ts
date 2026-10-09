@@ -420,17 +420,79 @@ in the PR.
 - Making `updateWhere`/`deleteWhere` required — not planned; optional permanently (§3.3).
 - A `meta.changes`-style row count from `updateWhere`; the row (or `null`) is the result.
 
-## 10. Design security review
+## 10. Design security review (recorded before implementation)
 
-Written at plan time, before implementation. The committed-tree audit (§7) re-checks each row
-against the code.
+Recorded 2026-10-10, before any implementation, after one review of this plan against source (the
+seven review fixes are already folded into §3–§7). The committed-tree audit (§7) checks the code
+against this section; it does not write the threat model after the fact.
 
-| #  | Threat                                                                                                                 | Where it could arise                                                                 | Control in this design                                                                                                                           | Negative control                                                                |
-| -- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| S1 | A tenant's write lands on another tenant's row (the M101c race)                                                        | Tenant bridge `update`/`delete`                                                      | One conditional operation keyed on `(key, tenant column)` (§3.8); fallback unchanged where unsupported                                           | §3.9 both arms                                                                  |
-| S2 | A predicate field replaces the key, so the write targets a different row                                               | Prisma and Mongo filter construction                                                 | Explicit conjunction, never a spread (§3.4)                                                                                                      | Key-override conformance row, control (6)                                       |
-| S3 | A predicate field or value becomes a query operator (`$where`, `$ne`, Prisma `AND`/`OR`/`NOT`, a dotted path)          | Mongo filter, Prisma `where`                                                         | `writePreconditionProblem` in every implementation refuses `$`, `.` and non-scalar values; Prisma refuses its operator names (§3.2, §3.4)        | Refused-input table run against every data source directly                      |
-| S4 | Another tenant's row is returned to the caller                                                                         | Bigtable read-after-write; any adapter whose returned row is not the written version | Bridge after-check on both paths (§3.8)                                                                                                          | Control (7)                                                                     |
-| S5 | An unsupported data source silently falls back to check-then-write where the caller believed the write was conditional | Repository refusal                                                                   | Absence is a named `'conditional-write'` refusal before any I/O; only the three first-party stores fall back, and each documents it (§3.3, §3.8) | Helper test: absent member and refusal both map to `'unsupported'`; control (5) |
-| S6 | Predicate values (tenant ids, statuses) reach logs                                                                     | `DatabaseService.wrapDataSource`                                                     | The wrapper logs operation and duration only, as `update` does today (`database-service.ts:540`); no predicate or payload is logged              | Logging test asserts the logged record carries no predicate value               |
-| S7 | A retry loop spins under contention                                                                                    | Cosmos `412` retry, outbox re-read retry, inbox compare-and-set                      | Fixed bounds (3, 3, 5), then a named rejection                                                                                                   | Retry-bound tests in §6                                                         |
+**Flows reviewed.**
+
+- A tenant-scoped `update`/`delete` entering `DatabaseTenantDataStore`: the caller-supplied key and
+  tenant id, the payload with the tenant column stripped, the conditional call, the read-back and
+  the after-check (§3.8).
+- A `WritePrecondition` passing through `writePreconditionProblem` into each of the eight
+  implementations, and its translation into a native filter, condition expression or statement
+  (§3.2, §3.4).
+- The fallback decision: a member absent from the bound data source, the `'conditional-write'`
+  refusal, and the helper choosing the two-call path (§3.3, §3.8).
+- The outbox store's `markSent`/`markFailure`/`release` and the inbox store's failure count and
+  `release`, each as a conditional write followed, on "not matched", by a classifying re-read.
+- The Cosmos read → `_etag`-guarded write → `412` retry loop (§3.6).
+- The log record `DatabaseService.wrapDataSource` emits for each call, leaving the process.
+
+**Assets.**
+
+- Tenant row isolation: a write made for tenant A never changes, deletes or returns a row whose
+  tenant column names B.
+- Row targeting: a conditional write changes at most the row its key names.
+- The outbox's guarantees: a `sent` row is never regressed and a transition applies at most once.
+- The inbox's failure count: every failure is counted, so `maxAttempts` parks when it says it will.
+- Log integrity: no tenant id, predicate value or payload reaches a log line.
+- Availability: no call loops, and no call grows memory with traffic.
+
+**Attackers.**
+
+- (A1) A caller acting for tenant A who chooses the key of the row being written — the M101c shape,
+  where the caller reuses a key that tenant B's row now holds.
+- (A2) Application code that forwards request input into a predicate's field names or values — the
+  source of an operator injection (`$where`, `$ne`, a Prisma `AND`, a dotted path).
+- (A3) A concurrent writer on the same key: a second request, a second relay, or a second consumer
+  replica, racing the check against the write.
+- (A4) A reader of logs.
+
+**Approved budgets.** Per call: one validation pass over the predicate (bounded by its field count)
+and ONE native write; Bigtable adds one read after the write. Cosmos: at most 3 rounds of one read
+plus one guarded write, then `CosmosConcurrentModificationError`. Outbox: at most 3 conditional
+attempts each followed by one re-read, then a named rejection. Inbox: at most 5 compare-and-set
+rounds, then a named rejection. Nothing is cached and nothing in memory grows with traffic.
+
+**Design-time findings.**
+
+| #   | Finding                                                                                                                                                                          | Disposition                                                                                                                                                                                                                                                                                                                                                                                          |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | A1 reuses a key now held by tenant B's row, and A's write lands on it (the M101c race)                                                                                           | Fixed: one conditional operation keyed on the key AND the tenant column (§3.8); proven by the §3.9 state-based arm, with the injected race on the fallback as its control                                                                                                                                                                                                                            |
+| S2  | A predicate field naming a key column replaces the key, so the write targets a different row (A1, A2)                                                                            | Fixed: the predicate is conjoined, never spread (§3.4); the key-override conformance row and control (6)                                                                                                                                                                                                                                                                                             |
+| S3  | A predicate field or value becomes a query operator (A2)                                                                                                                         | Fixed: `writePreconditionProblem`, called by every implementation, refuses `$`-prefixed and dotted names, empty names and every non-scalar value; Prisma also refuses `AND`, `OR`, `NOT` and the compound-key field (§3.2, §3.4)                                                                                                                                                                     |
+| S4  | Another tenant's row is returned to the caller after a correct write (A3)                                                                                                        | Fixed: the bridge's after-check runs on both paths (§3.8), because Bigtable reads the row back in a separate call; control (7)                                                                                                                                                                                                                                                                       |
+| S5  | A caller believes a write was conditional while it silently ran as check-then-write                                                                                              | Fixed for every caller but the three first-party stores: absence is the named `'conditional-write'` refusal, before any I/O (§3.3). The three stores fall back on purpose and say so (S8)                                                                                                                                                                                                            |
+| S6  | A tenant id, predicate value or payload reaches a log line (A4)                                                                                                                  | Fixed: the wrapper logs entity, operation and duration only, as `update` does today (`database-service.ts:540`); asserted in `database-service-conditional.test.ts`                                                                                                                                                                                                                                  |
+| S7  | A retry loop spins under contention (A3)                                                                                                                                         | Fixed: fixed bounds per the budgets above, each ending in a named rejection                                                                                                                                                                                                                                                                                                                          |
+| S8  | The three stores keep the documented check-then-write on a data source lacking the members                                                                                       | Accepted: refusing there would remove a working store from that backend. Every built-in non-transactional data source carries the members, so the fallback is reached only by an out-of-repo implementor; the bridge JSDoc and README say so                                                                                                                                                         |
+| S9  | The native ORM seams (`getDrizzleDatabase`, the application's Prisma client, the injected document-store clients) bypass the validator                                           | Accepted: they are the application's own database access, outside this contract by design (§0)                                                                                                                                                                                                                                                                                                       |
+| S10 | A predicate compares the STORED representation, so an encoding mismatch (DynamoDB `dateAttributes`, Bigtable tagged cells, a column written outside the framework) never matches | Accepted, and safe by direction: a mismatch answers "not matched" and writes nothing; PUBLIC_API states it                                                                                                                                                                                                                                                                                           |
+| S11 | A tenant id or status a caller passes as the predicate value is itself attacker-chosen (A1)                                                                                      | Accepted, and unchanged by this milestone: the bridge trusts the tenant id its caller passes — `getRepository(ctx, …)` reads the middleware-resolved tenant (`multi-tenancy-service.ts:63`), while `getRepositoryFor(tenantId, …)` takes it as trusted input from application code (`:82`). The predicate only narrows a write and never widens one, so a wrong value at worst answers "not matched" |
+
+**Obligations for the committed-tree audit.**
+
+- Probe S1, S2, S3 and S4 with a positive control each (the legitimate call is served, the hostile
+  one refused), on the memory adapter and on real PostgreSQL through Drizzle; probe S2 and S3 on the
+  Prisma and Mongo implementations specifically, since those build filters as objects.
+- Show negative controls (1), (6) and (7) failing, then restored.
+- Feed the refused-input table (S3) straight to each of the eight implementations, bypassing
+  `BaseRepository`, and show every one rejects.
+- Plant a canary tenant id, predicate value and payload field in a logged call under
+  `logQueries: true` and show none appears in the captured log (S6).
+- Drive each bounded loop to its bound and show the named rejection (S7).
+- Confirm S8–S11 are stated where the plan says they are, and that no other caller of the fallback
+  helper exists.
