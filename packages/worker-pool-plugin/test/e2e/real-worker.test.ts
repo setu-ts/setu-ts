@@ -13,14 +13,45 @@ import { CAPABILITIES } from '@setu-ts/common';
 
 import { MetricsPlugin } from '@setu-ts/metrics-plugin';
 
-import { WorkerPoolPlugin, WorkerTaskError, WorkerTaskTimeoutError } from '../../src/index.ts';
+import {
+  WorkerPoolPlugin,
+  WorkerPoolService,
+  WorkerTaskError,
+  WorkerTaskTimeoutError,
+} from '../../src/index.ts';
+import { setUnsettledErrorReporter } from '../../src/services/worker-pool-service.ts';
+import { createRuntimeServices } from '@setu-ts/runtime';
 import { WORKER_POOL_METRICS } from '../../src/metrics/metric-names.ts';
 
 const echoTaskUrl = new URL('../fixtures/echo-task.ts', import.meta.url).href;
 const errorTaskUrl = new URL('../fixtures/error-task.ts', import.meta.url).href;
 const noHandlerTaskUrl = new URL('../fixtures/no-handler-task.ts', import.meta.url).href;
+const importThrowsTaskUrl = new URL('../fixtures/import-throws-task.ts', import.meta.url).href;
+const lateThrowTaskUrl = new URL('../fixtures/late-throw-task.ts', import.meta.url).href;
 
 describe('WorkerPoolPlugin — e2e on real worker threads', () => {
+  it('completes two modules under one slot and shares SAB writes with the caller', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), WorkerPoolPlugin({ maxWorkers: 1 })],
+    });
+    await app.start();
+    try {
+      const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      const fillTaskUrl = new URL('../fixtures/fill-task.ts', import.meta.url).href;
+      const buf = new SharedArrayBuffer(64);
+      const first = pool.run(echoTaskUrl, { n: 21 });
+      const second = pool.run(fillTaskUrl, { buf });
+      expect(pool.stats().reduce((sum, stats) => sum + stats.workers, 0)).toBe(1);
+      await expect(first).resolves.toEqual({ doubled: 42, from: 'worker' });
+      await expect(second).resolves.toBe(64);
+      expect(new Uint8Array(buf).every((byte) => byte === 42)).toBe(true);
+      const copied = new ArrayBuffer(64);
+      await expect(pool.run(fillTaskUrl, { buf: copied })).resolves.toBe(64);
+      expect(new Uint8Array(copied).every((byte) => byte === 0)).toBe(true);
+    } finally {
+      await app.stop();
+    }
+  });
   it('should run a task on a real thread and return its output', async () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WorkerPoolPlugin()],
@@ -81,7 +112,7 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
 
   it('should time out (not hang) a real module that never registers a handler', async () => {
     const app = createApplication({
-      plugins: [RuntimePlugin(), WorkerPoolPlugin({ taskTimeoutMs: 300 })],
+      plugins: [RuntimePlugin(), WorkerPoolPlugin({ taskTimeoutMs: 300, maxWorkers: 1 })],
     });
     await app.start();
     try {
@@ -89,8 +120,78 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
       const stuck = pool.run(noHandlerTaskUrl, { n: 1 });
       await expect(stuck).rejects.toBeInstanceOf(WorkerTaskTimeoutError);
       await expect(stuck).rejects.toMatchObject({ timeoutMs: 300 });
+      expect(pool.stats()[0]).toMatchObject({ workers: 0, queued: 0 });
+      await expect(pool.run(echoTaskUrl, { n: 21 }, { timeoutMs: 2000 })).resolves.toEqual({
+        doubled: 42,
+        from: 'worker',
+      });
     } finally {
       await app.stop();
+    }
+  });
+
+  it('survives a task module that throws at import, and keeps serving others', async () => {
+    // Before the runtime host cancelled the worker error event, Deno re-raised
+    // it in the parent as `Unhandled error in child worker` and this test
+    // process died before reaching the second assertion.
+    const app = createApplication({
+      plugins: [RuntimePlugin(), WorkerPoolPlugin({ maxWorkers: 1, taskTimeoutMs: 3_000 })],
+    });
+    await app.start();
+    try {
+      const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      const broken = pool.run(importThrowsTaskUrl, {});
+      await expect(broken).rejects.toBeInstanceOf(WorkerTaskError);
+      await expect(broken).rejects.toThrow('fixture-import-failure');
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await expect(pool.run(echoTaskUrl, { n: 2 })).resolves.toEqual({
+        doubled: 4,
+        from: 'worker',
+      });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it("returns a never-ready worker's slot by startup deadline even with task timeouts off", async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        // 2 s, not less: a HEALTHY worker shares this deadline, and a real Deno
+        // worker under a loaded full suite measured >300 ms to start.
+        WorkerPoolPlugin({ maxWorkers: 1, taskTimeoutMs: 0, startupTimeoutMs: 2_000 }),
+      ],
+    });
+    await app.start();
+    try {
+      const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      const stuck = pool.run(noHandlerTaskUrl, {});
+      const other = pool.run(echoTaskUrl, { n: 5 });
+      await expect(stuck).rejects.toBeInstanceOf(WorkerTaskError);
+      await expect(stuck).rejects.toMatchObject({ remoteName: 'WorkerStartupTimeout' });
+      await expect(other).resolves.toEqual({ doubled: 10, from: 'worker' });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('reports a real idle worker that crashes after answering its task', async () => {
+    const reported: string[] = [];
+    const service = new WorkerPoolService({}, createRuntimeServices());
+    setUnsettledErrorReporter(service, (taskModule, error) => {
+      reported.push(`${taskModule === lateThrowTaskUrl}:${error.message}`);
+    });
+    try {
+      await expect(service.run(lateThrowTaskUrl, 7)).resolves.toBe(7);
+      for (let i = 0; i < 50 && reported.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toContain('true:');
+      expect(reported[0]).toContain('fixture-idle-crash');
+      expect(service.stats()[0]).toMatchObject({ workers: 0, failed: 0 });
+    } finally {
+      await service.shutdown();
     }
   });
 

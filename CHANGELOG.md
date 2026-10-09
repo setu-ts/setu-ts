@@ -314,6 +314,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Worker pool sizing (M45c, #433).** `WorkerPoolPluginOptions.maxWorkers` now bounds the sum of
+  module pools, defaulting to the largest of available parallelism, defaultPoolSize and the sum of
+  explicit pool sizes. Multi-module applications share the cap fairly; pass `maxWorkers: Infinity`
+  to restore the previous unbounded sum. Health reports the budget.
+
 - **A generated full-stack `setu.config.ts` takes an `ssr` parameter, and its `vite.config.ts`
   exports `frameworkPackages` and `workspaceLibraries` (`@setu-ts/cli`, PR #426).** `dev.ts` passes
   the development SSR runtime as `createApp`'s third argument, which replaces `assetsDir`; omitted,
@@ -542,6 +547,56 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **Worker lifecycle and example hardening (M45c, #433).** Expired pending tasks reclaim excess
+  starting slots; stale startup callbacks cannot reject unrelated work. Termination throws and
+  rejections are contained, and shutdown bounds its wait to one second per termination, including
+  retired workers. NaN legacy sizes no longer poison the default shared budget for valid modules.
+  The example binds loopback and uses scoped Deno permissions. The budget limits managed slots, not
+  physical worker exit when a host fails to terminate.
+
+- **Worker spawn failures (M45c, #433).** A synchronous `host.spawn` throw now rejects the oldest
+  queued task as a crash, clears its timeout and holds no budget, instead of leaving a ghost task
+  queued after its caller rejected. Remaining queued tasks continue scheduling after a failed spawn,
+  including from a budget hand-over. Hand-over continuations cannot leak the spawn error.
+
+- **Worker slots held by workers that never start (M45c, #433).** A spawned worker that does not
+  signal ready within the new `WorkerPoolPluginOptions.startupTimeoutMs` (default 10 000 ms, applied
+  even with `taskTimeoutMs: 0`, not disableable, and refused above 2 147 483 647 ms because a larger
+  timer delay overflows and fires at once) is terminated, its slot returns to the shared budget, and
+  the oldest waiting task for that module rejects with `WorkerTaskError`
+  (`remoteName: 'WorkerStartupTimeout'`). Before this, one call to a module that never became ready
+  held a shared slot until restart with task timeouts off, and under steady demand starved every
+  other module even with them on; a queued task expiring now also yields a starting worker to a
+  module with no worker. A worker whose listeners fail to attach is no longer charged a slot.
+  `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers`, because a task that
+  never settles keeps its slot. Every sizing and timeout option, including each own `pools` entry,
+  is read once into a validated snapshot that the pools use (an inherited `pools` entry is ignored;
+  a `null` entry means no overrides), a per-call `timeoutMs` is read once, refused values are
+  rendered bounded and escaped, a Symbol `maxWorkers` is refused with the documented `RangeError`,
+  and an `Infinity` legacy pool size no longer makes the derived default unbounded. **Breaking:**
+  `taskTimeoutMs` (plugin-wide and per pool) and the per-call `timeoutMs` must now be `0` or a
+  positive integer no greater than 2 147 483 647. `NaN` and negative values used to disable the
+  timeout silently and larger values timed every task out after about 1 ms; they now throw
+  `RangeError` at construction or reject that `run()`. Pass `0` for no timeout. The sizing
+  documentation now states that the bound counts slots, not threads: on Deno a timed-out CPU-bound
+  task keeps running, and can keep writing to a `SharedArrayBuffer`, after its promise rejects.
+
+- **Idle worker crashes are reported (M45c, #433).** A worker error that settles no task (an idle
+  worker crashing, or a startup crash with nothing queued) is now logged by the worker-pool plugin
+  as a warning naming the task module; before, it rejected nothing and was visible nowhere.
+
+- **Prometheus label values cannot split exposition lines (metrics-plugin, M45c, #433).** Control
+  characters the 0.0.4 text format cannot escape (carriage return, NUL, the rest of C0 and DEL) are
+  encoded in label values and HELP text as U+FFFD plus two hex digits (a lone UTF-16 surrogate as
+  U+FFFD, `u` and four hex digits), with a literal U+FFFD doubled, so distinct values never collapse
+  into one sample line. A worker-pool `task_module` label carrying a raw CR or NUL passed straight
+  through before.
+
+- **A Deno task module that throws at import no longer kills the host process (runtime, M45c,
+  #433).** The web-worker host now cancels the worker `error` event after reporting it to the pool.
+  Without that, Deno re-raised it in the parent as `Unhandled error in child worker` and the
+  application exited.
 
 - **Two JSDoc corrections (M107).** `ITelemetryService.withSpan` in `@setu-ts/common` named a
   `parentSpan` option; the option is `parentContext`. `MongoAdapter.beginTransaction` in

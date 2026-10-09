@@ -18,6 +18,7 @@ import { expect } from '@std/expect';
 
 import type { ICounter, IGauge, IMetric, IMetricsService, MetricOptions } from '@setu-ts/common';
 
+import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';
 import { WorkerPoolCollector } from '../../src/metrics/worker-pool-collector.ts';
 import { WORKER_POOL_METRICS } from '../../src/metrics/metric-names.ts';
@@ -58,9 +59,10 @@ function makePool(metrics: IMetricsService, report: (error: Error) => void): {
 } {
   const host = new FakeHost(1);
   const pool = new TaskPool(
-    { specifier: SPEC, size: 1, maxQueue: 1024, taskTimeoutMs: 0 },
+    { specifier: SPEC, size: 1, maxQueue: 1024, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
     host,
     createFakeRuntime(new FakeTimers()),
+    new WorkerBudget(Infinity),
     new WorkerPoolCollector(metrics, report),
   );
   return { pool, host };

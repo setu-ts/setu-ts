@@ -105,6 +105,23 @@ describe('createWebWorkerHost', () => {
     expect(received[0].message).toBe('eval failed');
   });
 
+  it('should cancel the worker error event so it cannot reach the host process', () => {
+    // On Deno an uncancelled worker `error` event propagates to the parent as
+    // `Unhandled error in child worker` and kills the host process — a task
+    // module that throws at import took the whole application down (measured).
+    const host = makeHost(1);
+    const handle = host.spawn('file:///x.ts');
+    const received: Error[] = [];
+    handle.onError((error) => received.push(error));
+    let prevented = 0;
+    FakeWebWorker.instances[0].onerror?.({
+      message: 'import failed',
+      preventDefault: () => prevented++,
+    });
+    expect(prevented).toBe(1);
+    expect(received[0].message).toBe('import failed');
+  });
+
   it('should normalize an event without a message to a generic Error', () => {
     const host = makeHost(1);
     const handle = host.spawn('file:///x.ts');

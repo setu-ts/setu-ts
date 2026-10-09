@@ -19,7 +19,9 @@ export interface TaskPoolOptions {
   readonly maxQueue?: number;
   /**
    * Task timeout in milliseconds for this pool; overrides the plugin
-   * `taskTimeoutMs`. `0` disables the timeout.
+   * `taskTimeoutMs`. `0` disables the timeout. Must be `0` or a positive
+   * integer no greater than 2 147 483 647; anything else throws `RangeError`
+   * at construction.
    */
   readonly taskTimeoutMs?: number;
 }
@@ -31,6 +33,23 @@ export interface TaskPoolOptions {
  */
 export interface WorkerPoolPluginOptions {
   /**
+   * Total live worker slots across all modules. Defaults to the largest of
+   * available parallelism, defaultPoolSize, and the sum of explicit pool sizes.
+   * Infinity disables the cap; otherwise a positive safe integer is required.
+   * @since 0.9.0
+   */
+  readonly maxWorkers?: number;
+  /**
+   * How long a spawned worker may take to signal ready before it is
+   * terminated, its slot returned to the shared budget, and the oldest waiting
+   * task for that module rejected with `WorkerTaskError`. Applies even when
+   * `taskTimeoutMs` is `0`. Defaults to 10 000; must be a positive integer no
+   * greater than 2 147 483 647 (the largest delay a runtime timer honours —
+   * a larger one would fire immediately). There is no way to disable it.
+   * @since 0.9.0
+   */
+  readonly startupTimeoutMs?: number;
+  /**
    * Default workers per pool. Defaults to the host's
    * `availableParallelism()`.
    */
@@ -39,7 +58,11 @@ export interface WorkerPoolPluginOptions {
   readonly maxQueue?: number;
   /**
    * Default task timeout in milliseconds. Defaults to 30 000; `0` disables.
-   * A worker whose task times out is terminated and replaced.
+   * A worker whose task times out is terminated and replaced. Must be `0` or
+   * a positive integer no greater than 2 147 483 647 (the largest delay a
+   * runtime timer honours); `NaN`, negative, fractional and larger values
+   * throw `RangeError` at construction instead of silently disabling the
+   * timeout or firing it at once.
    */
   readonly taskTimeoutMs?: number;
   /** Per-task-module overrides, keyed by the specifier passed to `run()`. */

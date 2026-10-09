@@ -12,6 +12,45 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Set `maxWorkers` to size worker pools across task modules
+
+WorkerPoolPlugin now caps the sum of worker slots across modules. The default is the largest of
+available parallelism, defaultPoolSize and the sum of explicitly configured pool sizes. Applications
+with several modules using fallback sizes share that budget; tasks may wait or cause idle workers to
+retire. Set `maxWorkers` for your container's memory budget, or pass `maxWorkers: Infinity` to
+restore the previous unbounded sum. Invalid explicit bounds throw `RangeError` at construction. Task
+timeouts include time waiting for budget. `/health` now reports `budget: { maxWorkers, workers }`
+(`null` for the unbounded limit).
+
+A worker that does not signal ready within `startupTimeoutMs` (default 10 s, applied even with
+`taskTimeoutMs: 0`) is terminated, its slot returns to the budget, and the oldest waiting task for
+that module rejects with `WorkerTaskError` (`remoteName: 'WorkerStartupTimeout'`). When a queued
+task expires while another module has work and no worker, the expiring module yields a starting
+worker to it, so a module that never becomes ready cannot starve the others under steady demand.
+Callbacks from removed slots are ignored. Termination throws/rejections are contained; shutdown
+waits at most 1,000 ms per termination, including already-retired slots. This bounds waiting, not
+physical thread exit: a failing host can leave a worker alive. Module metadata remains retained for
+the service lifetime. `NaN` or `Infinity` legacy default/pool sizes contribute zero to the derived
+budget; their per-pool behavior remains unchanged, while independently valid configured modules
+remain usable.
+
+With `taskTimeoutMs: 0` (or a per-call `run()` option of `timeoutMs: 0`) under a finite
+`maxWorkers`, a task that never settles holds its slot until restart and can starve other modules;
+keep a task timeout on modules that share the budget, or pass `maxWorkers: Infinity`. `register()`
+logs a warning when the plugin-wide or a per-pool `taskTimeoutMs` is `0`; a per-call `timeoutMs: 0`
+is not visible at registration and gets no warning. On Deno a timed-out CPU-bound task keeps running
+after its slot is released, and may keep writing to a `SharedArrayBuffer` after its promise
+rejected: do not reuse such a buffer.
+
+`taskTimeoutMs` (plugin-wide and per pool) and the per-call `timeoutMs` are now validated: each must
+be `0` or a positive integer no greater than 2147483647. `NaN` (what `Number()` returns for an unset
+environment variable), negative, fractional and larger values used to be accepted and either
+disabled the timeout or fired it after about 1 ms; they now throw `RangeError` at construction, or
+reject that `run()` call. Parse configuration explicitly and pass `0` if you mean "no timeout".
+
+The worker-pool example starts on 127.0.0.1 with scoped Deno permissions. Remote health exposure
+requires an explicit application deployment decision.
+
 ### Pass `autoRegister: false` to keep a container closed
 
 `DiPlugin()` now defaults `autoRegister` to `true`, so a token the container does not hold resolves

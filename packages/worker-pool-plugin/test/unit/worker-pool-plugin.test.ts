@@ -22,6 +22,22 @@ import { RecordingMetrics } from '../fixtures/metrics-fakes.ts';
 import manifest from '../../deno.json' with { type: 'json' };
 
 describe('WorkerPoolPlugin — metadata', () => {
+  it('refuses NaN when constructed, before register is possible', () => {
+    expect(() => WorkerPoolPlugin({ maxWorkers: NaN })).toThrow(RangeError);
+  });
+
+  it('reports Infinity as null and totals the workers across modules', async () => {
+    const host = new FakeHost();
+    const fake = createFakeContext(createFakeRuntime(new FakeTimers(), host));
+    WorkerPoolPlugin({ maxWorkers: Infinity }).register(fake.ctx);
+    const pool = fake.registered.get(CAPABILITIES.WORKER_POOL) as IWorkerPool;
+    const first = pool.run('a', 1).catch(() => undefined);
+    const second = pool.run('b', 2).catch(() => undefined);
+    const result = await fake.healthIndicators.get('worker-pool')?.();
+    expect(result?.data?.budget).toEqual({ maxWorkers: null, workers: 2 });
+    await pool.shutdown();
+    await Promise.all([first, second]);
+  });
   it('should declare name, version, provides, and priority', () => {
     const plugin = WorkerPoolPlugin();
     expect(plugin.name).toBe('worker-pool-plugin');
@@ -60,7 +76,12 @@ describe('WorkerPoolPlugin — register', () => {
     expect(result?.status).toBe('up');
     // No `reason` key when the pool IS available: the explanation exists only
     // to say why `available` is false, so an available pool carries none.
-    expect(result?.data).toEqual({ available: true, exitDetection: false, pools: [] });
+    expect(result?.data).toEqual({
+      available: true,
+      exitDetection: false,
+      pools: [],
+      budget: { maxWorkers: 2, workers: 0 },
+    });
 
     // Stats appear once a pool exists.
     const pool = fake.registered.get(CAPABILITIES.WORKER_POOL) as IWorkerPool;
@@ -84,6 +105,7 @@ describe('WorkerPoolPlugin — register', () => {
     const result = await fake.healthIndicators.get('worker-pool')?.();
     expect(result?.status).toBe('degraded');
     expect(result?.data).toEqual({
+      budget: { maxWorkers: 0, workers: 0 },
       available: false,
       exitDetection: false,
       pools: [],
@@ -227,7 +249,8 @@ describe('WorkerPoolPlugin — the undetectable-death warning (X8-7)', () => {
 
   /** Reads the pools named by the warning, or `undefined` when none was sent. */
   function warnedPools(logged: LoggedMessage[]): unknown {
-    return logged.find((entry) => entry.message.includes('taskTimeoutMs is 0'))?.metadata?.pools;
+    return logged.find((entry) => entry.message.includes('cannot report a worker exit'))?.metadata
+      ?.pools;
   }
 
   it('should warn for the plugin-wide default on a host that cannot report exits', async () => {
@@ -266,6 +289,32 @@ describe('WorkerPoolPlugin — the undetectable-death warning (X8-7)', () => {
     const logged = await register({ host: new FakeHost(2, undefined, true), taskTimeoutMs: 0 });
 
     expect(warnedPools(logged)).toBeUndefined();
+  });
+
+  it('should warn that an untimed task can hold a slot under a finite maxWorkers', async () => {
+    const logged = await register({
+      host: new FakeHost(2, undefined, true),
+      taskTimeoutMs: 0,
+      maxWorkers: 3,
+    });
+    const warning = logged.find((entry) => entry.message.includes('under a finite maxWorkers'));
+    expect(warning?.metadata).toEqual({ pools: ['*'], maxWorkers: 3 });
+  });
+
+  it('should not send the untimed-task warning with maxWorkers: Infinity', async () => {
+    const logged = await register({
+      host: new FakeHost(2, undefined, true),
+      taskTimeoutMs: 0,
+      maxWorkers: Infinity,
+    });
+    expect(logged.some((entry) => entry.message.includes('under a finite maxWorkers'))).toBe(false);
+  });
+
+  it('should not send the untimed-task warning when no worker host exists', async () => {
+    const timers = new FakeTimers();
+    const { ctx, logged } = createFakeContext(createFakeRuntime(timers));
+    await WorkerPoolPlugin({ taskTimeoutMs: 0, maxWorkers: 2 }).register!(ctx);
+    expect(logged.some((entry) => entry.message.includes('under a finite maxWorkers'))).toBe(false);
   });
 
   it('should stay silent when a timeout is configured', async () => {

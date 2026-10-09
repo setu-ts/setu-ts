@@ -2690,6 +2690,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   labels. Writing the coverage test for the reporter surfaced a fixture bug the type checker caught:
   `{ ...base }` on a class copies fields and DROPS every prototype method. All `src` files at 100%
   branch/function/line except `task-pool.ts` (98.8/100/100)) — complete (PR #170)
+- **Milestone 45c** (`packages/worker-pool-plugin` — service-wide worker pool sizing) — complete (PR
+  #433). `maxWorkers` bounds the sum of lazy module pools, with reserved asynchronous hand-over,
+  idle eviction and priority for modules without a slot. Both construction paths validate the bound;
+  health reports it. Synchronous spawn failures settle their oldest task without a ghost queue entry
+  and continue scheduling the remaining queue, and shutdown refuses new work before closing the
+  budget. Security follow-up reclaims excess startup slots, contains termination failures with a
+  one-second cleanup deadline, ignores stale callbacks and isolates NaN legacy sizing contributions.
+  The example now binds loopback with scoped permissions. A second independent audit failed the
+  branch on five findings; the fix adds `startupTimeoutMs` (a never-ready worker no longer holds a
+  shared slot, even with task timeouts off), yields a starting worker to a starved module, charges a
+  slot only after listeners attach, documents that the bound counts slots rather than threads on
+  Deno, and stops a Deno task module that throws at import from killing the host process
+  (pre-existing, folded in at the maintainer's direction). The `apps/worker-pool` smoke proves
+  event-loop progress, fairness under one slot, shared-buffer writes and health data. All ten
+  negative controls failed and were reverted; full tests and coverage passed, with every measured
+  plugin source file above 90% on branch, function and line. Sizing and migration docs ship with the
+  archived plan at `plans/archive/milestone-45c-worker-pool-sizing.md`.
+
 - **Milestone 70c** (`messaging-plugin` + `realtime-backplane-plugin` + `storage-plugin` +
   `mail-plugin` + `queue-plugin` + `service-discovery-plugin` + `grpc-plugin` — health signals that
   describe lifecycle, not reachability). Six packages answered `up` with their backends stopped and

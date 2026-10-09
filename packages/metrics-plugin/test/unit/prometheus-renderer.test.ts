@@ -131,6 +131,80 @@ describe('renderPrometheus', () => {
     expect(result.includes('_count')).toEqual(true);
   });
 
+  it('replaces control characters the format cannot escape, in labels and HELP', () => {
+    // An application-supplied label value (a worker-pool task_module specifier)
+    // can carry CR, NUL or other controls; 0.0.4 escapes only \\, " and LF.
+    const snapshot: MetricSnapshot = {
+      name: 'tasks_total',
+      type: 'counter',
+      help: 'help\rwith\u0000controls\nand a line feed',
+      labels: ['task_module'],
+      values: new Map([
+        ['task_module=x', {
+          value: 1,
+          labels: { task_module: 'file:///a\r\n# FAKE 1\u0000\u007f.ts' },
+        }],
+      ]),
+    };
+    const result = renderPrometheus([snapshot]);
+    // No raw control character other than the separating line feeds survives.
+    // deno-lint-ignore no-control-regex
+    expect(/[\u0000-\u0009\u000b-\u001f\u007f]/.test(result)).toBe(false);
+    expect(result).toContain('task_module="file:///a\ufffd0d\\n# FAKE 1\ufffd00\ufffd7f.ts"');
+    expect(result).toContain(
+      '# HELP tasks_total help\ufffd0dwith\ufffd00controls\\nand a line feed',
+    );
+    // Exactly the three expected lines: HELP, TYPE and the one sample.
+    expect(result.trimEnd().split('\n')).toHaveLength(3);
+  });
+
+  it('encodes controls injectively, so distinct label values never render as one line', () => {
+    // Each pair collapsed to one sample line under a plain U+FFFD replacement.
+    const values = ['a\u0000', 'a\u0001', 'a\ufffd', 'a\ufffd00', 'a\ufffd\ufffd', 'a'];
+    const snapshot: MetricSnapshot = {
+      name: 'tasks_total',
+      type: 'counter',
+      help: 'help',
+      labels: ['task_module'],
+      values: new Map(values.map((v, i) => [`k${i}`, { value: i, labels: { task_module: v } }])),
+    };
+    const samples = renderPrometheus([snapshot])
+      .trimEnd()
+      .split('\n')
+      .filter((line) => line.startsWith('tasks_total{'))
+      .map((line) => line.slice(0, line.lastIndexOf(' ')));
+    expect(samples).toHaveLength(values.length);
+    expect(new Set(samples).size).toBe(values.length);
+    expect(samples).toContain('tasks_total{task_module="a\ufffd\ufffd"}');
+    expect(samples).toContain('tasks_total{task_module="a"}');
+  });
+
+  it('encodes lone surrogates so values stay distinct after UTF-8 encoding', () => {
+    // UTF-8 turns a lone surrogate into U+FFFD, so unencoded it would collide
+    // with the marker: 'a\uD800' + '00' would reach the wire as the encoding of 'a\0'.
+    const values = ['a\u0000', 'a\ud80000', 'a\udc00', 'a\ud800', 'a\ufffdud800', 'a\ud83d\ude00'];
+    const snapshot: MetricSnapshot = {
+      name: 'tasks_total',
+      type: 'counter',
+      help: 'help',
+      labels: ['task_module'],
+      values: new Map(values.map((v, i) => [`k${i}`, { value: i, labels: { task_module: v } }])),
+    };
+    const text = renderPrometheus([snapshot]);
+    // What a scraper receives: the UTF-8 bytes, decoded back.
+    const wire = new TextDecoder().decode(new TextEncoder().encode(text));
+    const samples = wire
+      .trimEnd()
+      .split('\n')
+      .filter((line) => line.startsWith('tasks_total{'))
+      .map((line) => line.slice(0, line.lastIndexOf(' ')));
+    expect(samples).toHaveLength(values.length);
+    expect(new Set(samples).size).toBe(values.length);
+    expect(wire).toBe(text);
+    expect(samples).toContain('tasks_total{task_module="a\ufffdud80000"}');
+    expect(samples).toContain('tasks_total{task_module="a\ud83d\ude00"}');
+  });
+
   it('label escaping handles backslash and newline', () => {
     const snapshot: MetricSnapshot = {
       name: 'test_counter',

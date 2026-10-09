@@ -77,6 +77,7 @@ try {
 | [cloudflare](../apps/cloudflare)                 | KV, a cron trigger, and queue-backed messaging work on real workerd                             | Wrangler                  |
 | [compiled-binary](../apps/compiled-binary)       | `deno compile` produces a binary that serves `/health`                                          | —                         |
 | [full-stack](../apps/full-stack)                 | A server-rendered React Router page shows rows read through the database capability             | — (builds with Deno)      |
+| [worker-pool](../apps/worker-pool)               | CPU work off the event loop, fair sharing of one worker slot, and shared-buffer writes          | —                         |
 | [static-site](../apps/static-site)               | Static files are served with cache headers, ETags, conditional requests, and byte ranges        | —                         |
 
 ## Example deep dives
@@ -393,3 +394,14 @@ skip fails the job unless the app is in the `ALLOW_SKIP` list; see
 - [Plugin Architecture](./plugin-architecture.md) - Deep dive into plugins
 - [Runtime Deployment](./runtime-deployment.md) - Deploy to production
 - [Docker and Kubernetes](./deployment.md) - Containerize and orchestrate an example
+
+### worker-pool
+
+Run `deno task smoke` in `apps/worker-pool`. Run `deno task start` for a loopback-only health
+listener at `http://127.0.0.1:3000/health` (PORT overrides the port). Tasks grant read access to the
+example sources/framework packages, sys hostname/cpus, and environment access required by
+RuntimePlugin (which snapshots the environment). Only start grants loopback network access; neither
+task grants writes, subprocess execution, external network, or blanket permissions. The app shares
+one worker between CPU-bound spins and buffer fills, proves main-thread timers keep running, and
+reads the budget through `/health`. Read: [`src/app.ts`](../apps/worker-pool/src/app.ts),
+[`smoke.ts`](../apps/worker-pool/smoke.ts).

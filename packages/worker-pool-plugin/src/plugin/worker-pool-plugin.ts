@@ -15,7 +15,12 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
-import { WorkerPoolService } from '../services/worker-pool-service.ts';
+import {
+  budgetLimitOf,
+  setUnsettledErrorReporter,
+  WorkerPoolService,
+} from '../services/worker-pool-service.ts';
+import { validateSizingOptions } from '../services/sizing.ts';
 import { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -38,9 +43,11 @@ const PLUGIN_NAME = 'worker-pool-plugin';
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
+ * @throws {RangeError} When maxWorkers is neither Infinity nor a positive safe integer
  * @since 0.1.0
  */
 export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
+  validateSizingOptions(options);
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
@@ -68,6 +75,16 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
         )
         : undefined;
       const service = new WorkerPoolService(options, ctx.runtime, collector);
+      // A worker error that settles no task (an idle worker crashing) rejects
+      // nothing, so it is reported here or nowhere. `ctx.logger` is read at
+      // call time, never captured (the M52b lesson).
+      setUnsettledErrorReporter(service, (taskModule, error) => {
+        ctx.logger?.warn(
+          'worker-pool: a worker failed with no task to settle; it was removed and is replaced ' +
+            'on demand',
+          { taskModule, error: error.message },
+        );
+      });
       ctx.services.register<IWorkerPool>(CAPABILITIES.WORKER_POOL, service);
 
       const host = options?.host ?? ctx.runtime.workers;
@@ -78,6 +95,7 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
       const exitDetection = host?.reportsExit?.() ?? false;
 
       warnIfDeathUndetectable(ctx, options, exitDetection, available);
+      warnIfUntimedTasksCanHoldBudget(ctx, options, budgetLimitOf(service), available);
 
       // H-70c-5: this hardcoded `status: 'up'` beside a live `available`
       // field that could read `false` — a pool with no `IWorkerHost` throws
@@ -98,16 +116,23 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
       // saturation is published, never judged).
       ctx.health.register(
         'worker-pool',
-        (): Promise<HealthCheckResult> =>
-          Promise.resolve({
+        (): Promise<HealthCheckResult> => {
+          const pools = service.stats();
+          const limit = budgetLimitOf(service);
+          return Promise.resolve({
             status: available ? 'up' : 'degraded',
             data: {
               available,
               exitDetection,
-              pools: service.stats(),
+              pools,
+              budget: {
+                maxWorkers: limit === Infinity ? null : limit,
+                workers: pools.reduce((sum, pool) => sum + pool.workers, 0),
+              },
               ...(available ? {} : { reason: WORKERS_UNSUPPORTED_REASON }),
             },
-          }),
+          });
+        },
       );
 
       ctx.lifecycle.onClose(async () => {
@@ -164,6 +189,44 @@ function warnIfDeathUndetectable(
     'worker-pool: taskTimeoutMs is 0 on a runtime that cannot report a worker exit — ' +
       'a worker that ends itself will never settle its task and its pool slot leaks',
     { pools: disabled, runtime: ctx.runtime.platform() },
+  );
+}
+
+/**
+ * Warns ONCE, at registration, when a pool runs with no task timeout under a
+ * finite shared budget.
+ *
+ * The budget keeps a bound on live workers, and a task that never settles keeps
+ * its worker — so once every slot is held by such tasks, every other task
+ * module waits (until its own timeout, or forever) until the process restarts.
+ * That is the price of the bound, not something the pool can reclaim: killing
+ * a task the application said may run indefinitely would be worse. Workers that
+ * never START are handled separately by `startupTimeoutMs`. The remedy is a
+ * task timeout, or `maxWorkers: Infinity` to opt out of the shared bound.
+ *
+ * @param ctx - The plugin context supplying the logger
+ * @param options - The plugin's configuration, if any
+ * @param maxWorkers - The resolved shared bound
+ * @param available - Whether a worker host exists at all
+ */
+function warnIfUntimedTasksCanHoldBudget(
+  ctx: IPluginContext,
+  options: WorkerPoolPluginOptions | undefined,
+  maxWorkers: number,
+  available: boolean,
+): void {
+  if (!available || maxWorkers === Infinity) {
+    return;
+  }
+  const untimed = collectDisabledTimeoutPools(options);
+  if (untimed.length === 0) {
+    return;
+  }
+  ctx.logger?.warn(
+    'worker-pool: taskTimeoutMs is 0 under a finite maxWorkers — a task that never settles ' +
+      'keeps its worker slot, and once every slot is held other task modules wait until restart ' +
+      '(a per-call run() timeoutMs of 0 does the same and is not detectable here)',
+    { pools: untimed, maxWorkers },
   );
 }
 

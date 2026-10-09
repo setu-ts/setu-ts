@@ -4624,6 +4624,78 @@ omitted on Deno, whose web `Worker` emits nothing at all when a worker ends itse
 
 ---
 
+## Milestone 45c: Worker Pool Sizing — a Global Worker Budget and a Runnable Example ✅ COMPLETE
+
+**Objective:** Bound the total number of worker threads an application can hold, across every task
+module, and give the worker pool its first runnable example. Every worker is a full JavaScript
+isolate: measured on this repository's development machine with a trivial task module, about 12 MB
+of resident memory per worker on Deno, about 13.5 MB on Node (both V8), and about 1.5 MB on Bun
+(JavaScriptCore). A real task module costs more, because each worker loads its own copy of the
+module's imports.
+
+> **Why this is a milestone and not a tuning note.** One pool exists per task-module specifier, and
+> each pool's size defaults to the host's `availableParallelism()`
+> (`services/worker-pool-service.ts:117`). Nothing bounds the sum, so an application with three task
+> modules on a 32-core host can grow to 96 isolates. A container's CPU limit does lower the default
+> (measured: `--cpus=2` makes both Deno and Node report 2), but a Kubernetes pod deployed without a
+> CPU limit sees the node's full core count, and a burst can then exceed the pod's memory limit.
+> Workers spawn on demand and are never terminated while the pool lives, so whatever a burst creates
+> stays resident.
+
+### Package: `@setu-ts/worker-pool-plugin` (no new package)
+
+- **`WorkerPoolPluginOptions.maxWorkers`** — a plugin-wide bound on live workers across every task
+  module. The default is the largest of `availableParallelism()`, `defaultPoolSize`, and the SUM of
+  every explicitly listed `pools[*].size`, so an application with one task module keeps today's
+  behaviour and every pool it sized itself can be at that size at once. Modules that fall back to
+  the default size share what remains. `Infinity` restores the unbounded behaviour. `NaN`, zero,
+  negative and fractional values are refused when the plugin is constructed, because every
+  comparison against `NaN` is false and an unvalidated bound would fail open (the M90a precedent).
+- **Sharing the budget without starving a module.** A cap alone deadlocks: with no idle reaping,
+  module A's idle workers would hold the whole budget and module B could never spawn. The budget
+  therefore evicts an idle worker from another pool when a pool needs one and the budget is full,
+  and a worker that becomes idle while another pool is waiting is retired rather than kept. A pool
+  waiting with no worker at all is served first, so every module with queued work eventually gets at
+  least one worker. No timer is involved; this is not idle reaping.
+- **`worker-pool` health payload** gains `budget: { maxWorkers, workers }`.
+- **A spawn that throws no longer leaves a ghost task.** Today a synchronous `host.spawn` failure
+  rejects `run()` but leaves the task queued with its timeout armed; the budget makes `pump()`
+  reachable from another pool, where that throw would escape as an unhandled rejection, so the
+  failure now settles the task inside `pump()`.
+
+### Not this milestone
+
+- **Timed idle reaping and prewarming** (`idleTimeoutMs`, `minWorkers`). Reaping frees memory
+  between bursts, but a container's memory limit must fit the peak anyway, and the global budget is
+  what lowers the peak. Deferred until an application reports memory pressure between bursts.
+- **Workers that run several task modules**, and an `IWorkerHandle.postMessage` transfer list. Both
+  are larger changes; the second is a `common` widening.
+- **A native (Rust) or bare-isolate backend.** Researched and rejected for now: a native thread
+  cannot be killed on timeout and a crash takes the process down, and a bare-isolate backend is
+  Node-only with no imports inside tasks.
+
+### Example application: `apps/worker-pool`
+
+The worker pool has had no runnable example; its only end-to-end proof was an exercise outside the
+repository, run against published versions. The smoke check proves three things: a CPU-bound task
+runs off the event loop (main-thread timers keep firing while it runs), two task modules sharing
+`maxWorkers: 1` both complete without one starving the other, and a `SharedArrayBuffer` in a task's
+input is written by the worker and read back by the caller without a copy.
+
+### Doc Deliverables (to ship in this milestone's PR)
+
+- [x] **PUBLIC_API.md** — `maxWorkers` in the Worker pool options table; the budget in the health
+      payload; the `SharedArrayBuffer` notes.
+- [x] **README** — `packages/worker-pool-plugin/README.md`: sizing in containers, measured
+      per-worker memory, `SharedArrayBuffer` usage and its caveats, task granularity.
+- [x] **apps/README.md** and **docs/examples.md** — the new example.
+- [x] **CHANGELOG.md** and **docs/upgrading.md** — the behaviour change for applications with
+      several task modules, and how `maxWorkers: Infinity` restores the old behaviour.
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `45c`.
+- [x] **CLAUDE.md** — Current status `45c` entry.
+
+---
+
 ## Milestone 46: WebSocket Plugin — Bidirectional Real-Time Across All Four Runtimes ✅ COMPLETE
 
 **Objective:** Give applications full-duplex, bidirectional real-time messaging, completing the
@@ -13413,6 +13485,7 @@ patch by construction and gains nothing new here.
 | 44        | ✅     | react-router-plugin                                                                                                                                                                                                                           |
 | 45        | ✅     | worker-pool-plugin                                                                                                                                                                                                                            |
 | 45b       | ✅     | worker-pool-plugin (metrics)                                                                                                                                                                                                                  |
+| 45c       | ✅     | worker-pool-plugin (sizing)                                                                                                                                                                                                                   |
 | 46        | ✅     | websocket-plugin                                                                                                                                                                                                                              |
 | 47        | ✅     | alpha-3 limitations                                                                                                                                                                                                                           |
 | 48        | ✅     | session-plugin                                                                                                                                                                                                                                |

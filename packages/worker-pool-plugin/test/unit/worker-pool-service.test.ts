@@ -6,11 +6,79 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { WorkerPoolService } from '../../src/services/worker-pool-service.ts';
+import { budgetLimitOf } from '../../src/services/worker-pool-service.ts';
 import { WorkerPoolUnavailableError } from '../../src/errors.ts';
 import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
 
 const SPEC_A = 'file:///tasks/a.ts';
 const SPEC_B = 'file:///tasks/b.ts';
+
+describe('WorkerPoolService — global sizing', () => {
+  it('rejects an unseen module after shutdown without creating a pool or timer', async () => {
+    const timers = new FakeTimers();
+    const host = new FakeHost();
+    const service = new WorkerPoolService({ host, taskTimeoutMs: 0 }, createFakeRuntime(timers));
+    await service.shutdown();
+    await expect(service.run(SPEC_B, 1)).rejects.toBeInstanceOf(WorkerPoolUnavailableError);
+    expect(service.stats()).toEqual([]);
+    expect(host.handles).toHaveLength(0);
+    expect(timers.armed).toBe(0);
+  });
+  it('resolves defaults from parallelism, global size and SUM of explicit sizes', () => {
+    const runtime = createFakeRuntime(new FakeTimers(), new FakeHost(3));
+    for (
+      const [options, limit] of [
+        [undefined, 3],
+        [{ defaultPoolSize: 7 }, 7],
+        [{ pools: { a: { size: 6 }, b: { size: 7 } } }, 13],
+        [{ maxWorkers: 1, defaultPoolSize: 7 }, 1],
+      ] as const
+    ) {
+      expect(budgetLimitOf(new WorkerPoolService(options, runtime))).toBe(limit);
+    }
+  });
+  it('keeps two services budgets independent', async () => {
+    const host = new FakeHost();
+    const runtime = createFakeRuntime(new FakeTimers(), host);
+    const a = new WorkerPoolService({ maxWorkers: 1 }, runtime);
+    const b = new WorkerPoolService({ maxWorkers: 1 }, runtime);
+    const first = a.run(SPEC_A, 1).catch(() => undefined);
+    const second = b.run(SPEC_B, 2).catch(() => undefined);
+    expect(host.handles).toHaveLength(2);
+    await Promise.all([a.shutdown(), b.shutdown(), first, second]);
+  });
+  it('closes before shutting pools down so a waiter cannot spawn during shutdown', async () => {
+    const host = new FakeHost();
+    const service = new WorkerPoolService(
+      { host, maxWorkers: 1 },
+      createFakeRuntime(new FakeTimers()),
+    );
+    const first = service.run(SPEC_A, 1).catch(() => undefined);
+    host.handles[0].emitReady();
+    const second = service.run(SPEC_B, 2).catch(() => undefined);
+    // Termination may wait for an OS thread: exercise an asynchronous close
+    // barrier while the sibling is still open, not only immediately resolved fakes.
+    const original = host.handles[0].terminate.bind(host.handles[0]);
+    let refused = false;
+    let spawnedDuringClose: readonly string[] = [];
+    host.handles[0].terminate = async () => {
+      await Promise.resolve();
+      refused = await service.run('new-module', 3, { timeoutMs: 0 }).then(
+        () => false,
+        (error: Error) => error.message.includes('shut down'),
+      );
+      spawnedDuringClose = [...host.spawnedSpecifiers];
+      await original();
+    };
+    await service.shutdown();
+    // Assert outside the termination dependency: its failures are contained.
+    expect(refused).toBe(true);
+    expect(spawnedDuringClose).toEqual([SPEC_A]);
+    await Promise.all([first, second]);
+    expect(service.stats().every((pool) => pool.workers === 0 && pool.queued === 0)).toBe(true);
+    await service.shutdown();
+  });
+});
 
 describe('WorkerPoolService — host resolution', () => {
   it('should use the runtime workers host when no host option is given', () => {

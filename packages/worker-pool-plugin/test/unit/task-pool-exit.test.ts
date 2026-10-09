@@ -15,6 +15,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';
 import { WorkerExitError } from '../../src/errors.ts';
 import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
@@ -28,9 +29,10 @@ const SPEC = 'file:///tasks/heavy.ts';
 function makeReportingPool(size = 1, maxQueue = 1024): { pool: TaskPool; host: FakeHost } {
   const host = new FakeHost(2, undefined, true);
   const pool = new TaskPool(
-    { specifier: SPEC, size, maxQueue, taskTimeoutMs: 0 },
+    { specifier: SPEC, size, maxQueue, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
     host,
     createFakeRuntime(new FakeTimers()),
+    new WorkerBudget(Infinity),
   );
   return { pool, host };
 }
@@ -153,9 +155,10 @@ describe('TaskPool — an exit the pool asked for', () => {
     const timers = new FakeTimers();
     const host = new FakeHost(2, undefined, true);
     const pool = new TaskPool(
-      { specifier: SPEC, size: 1, maxQueue: 10, taskTimeoutMs: 50 },
+      { specifier: SPEC, size: 1, maxQueue: 10, taskTimeoutMs: 50, startupTimeoutMs: 60_000 },
       host,
       createFakeRuntime(timers),
+      new WorkerBudget(Infinity),
     );
 
     const promise = pool.run({ n: 1 });
@@ -173,9 +176,10 @@ describe('TaskPool — a host that cannot report exits (Deno)', () => {
   it('should register no exit listener and behave exactly as before', async () => {
     const host = new FakeHost(2, undefined, false);
     const pool = new TaskPool(
-      { specifier: SPEC, size: 1, maxQueue: 10, taskTimeoutMs: 0 },
+      { specifier: SPEC, size: 1, maxQueue: 10, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
       host,
       createFakeRuntime(new FakeTimers()),
+      new WorkerBudget(Infinity),
     );
 
     const promise = pool.run({ n: 1 });
@@ -201,9 +205,10 @@ describe('TaskPool — shutdown ordering the exit path depends on', () => {
     // them; reporting a worker exit would name the wrong cause.
     const host = new FakeHost(2, undefined, true);
     const pool = new TaskPool(
-      { specifier: SPEC, size: 2, maxQueue: 10, taskTimeoutMs: 0 },
+      { specifier: SPEC, size: 2, maxQueue: 10, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
       host,
       createFakeRuntime(new FakeTimers()),
+      new WorkerBudget(Infinity),
     );
 
     const first = pool.run({ n: 1 });
