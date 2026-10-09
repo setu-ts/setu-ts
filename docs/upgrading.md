@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Implement both new idempotency service members
+### Implement both new `IIdempotencyService` members
 
 Custom `IIdempotencyService` implementations must add the required
 `within<R, S = unknown>(options, fn): Promise<IdempotentWithinResult<R>>` and
