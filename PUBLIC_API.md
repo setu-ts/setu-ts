@@ -11701,10 +11701,11 @@ which returns `{ result: string, value: R }`. `find` returns a `TransactionalIde
 `IdempotentWithinOptions` requires `key`, `namespace` and `scope`; it accepts optional
 `fingerprint: unknown` and `ttlMs: number`. Keys are 1–255 printable non-space ASCII characters,
 excluding `"`; namespace is 1–256 printable ASCII characters, and scope is 0–512. Scope must come
-from authenticated identity; `''` deliberately makes the key global. The default TTL is 86,400,000
-ms, bounded to an integer from 60,000 to 2,592,000,000 ms. `IdempotentWithinResult<R>` carries
-`value: R` and `replayed: boolean`; value is the JSON round trip on both paths, so dates become
-strings and JSON-omitted members are absent.
+from authenticated identity, typically `JSON.stringify([tenantId, principalId])`; `''` deliberately
+makes the key global. Do not join parts with a separator that can appear inside them: distinct
+identities can collide. The default TTL is 86,400,000 ms, bounded to an integer from 60,000 to
+2,592,000,000 ms. `IdempotentWithinResult<R>` carries `value: R` and `replayed: boolean`; value is
+the JSON round trip on both paths, so dates become strings and JSON-omitted members are absent.
 
 `IIdempotencyService` gains two **required** members, breaking custom implementations:
 

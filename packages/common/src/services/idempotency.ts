@@ -363,7 +363,9 @@ export interface IdempotentWithinOptions {
   readonly namespace: string;
   /**
    * REQUIRED isolation segment, built ONLY from authenticated identity —
-   * typically `` `${tenantId}:${principalId}` ``. `''` declares the record
+   * typically `JSON.stringify([tenantId, principalId])`. Do not join parts with
+   * a separator that can appear inside them: distinct identities can collide.
+   * `''` declares the record
    * global on purpose. Never derived for the caller: `within` has no request
    * context.
    */

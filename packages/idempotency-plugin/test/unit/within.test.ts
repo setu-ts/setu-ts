@@ -78,6 +78,23 @@ function statefulStore(): {
 }
 
 describe('runWithin first call and replay (M109b §3.3)', () => {
+  it('isolates colon-bearing tenant and principal pairs with the recommended scope recipe', async () => {
+    const { store } = statefulStore();
+    const dependencies = deps({ store });
+    const pairs = [['acme', 'x:y'], ['acme:x', 'y']];
+    for (const [tenantId, principalId] of pairs) {
+      const scope = JSON.stringify([tenantId, principalId]);
+      const value = JSON.stringify([tenantId, principalId]);
+      expect(await runWithin(dependencies, options({ scope }), () => Promise.resolve(value)))
+        .toEqual({ value, replayed: false });
+    }
+    for (const [tenantId, principalId] of pairs) {
+      const scope = JSON.stringify([tenantId, principalId]);
+      expect(await runWithin(dependencies, options({ scope }), () => Promise.resolve('unexpected')))
+        .toEqual({ value: JSON.stringify([tenantId, principalId]), replayed: true });
+    }
+  });
+
   it('returns the same ISO string for a Date on the first call and replay', async () => {
     const { store } = statefulStore();
     const dependencies = deps({ store });

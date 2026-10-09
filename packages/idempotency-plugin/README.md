@@ -147,8 +147,9 @@ becomes an ISO string, `undefined` object members are absent, and nested `toJSON
 determine their stored representation. A `void` result remains `undefined`.
 
 `scope` is REQUIRED and must be built ONLY from authenticated identity (typically
-`` `${tenantId}:${principalId}` ``); `''` declares the record global on purpose. The raw key, scope
-and namespace are never stored — only their derived hashes.
+`JSON.stringify([tenantId, principalId])`); `''` declares the record global on purpose. Do not join
+parts with a separator that can appear inside them: distinct identities can collide. The raw key,
+scope and namespace are never stored — only their derived hashes.
 
 Configure it with `IdempotencyPlugin({ transactional: { store } })`, where `store` is
 `createDatabaseIdempotencyStore()` from `@setu-ts/database-plugin` (or any
