@@ -5877,18 +5877,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 108** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` +
   one `packages/cli` claim-table line — consumer inbox): `MessagingPlugin({ inbox })` plus
   `onIntegrationEvent(definition, handler, { inbox: { consumer } })` applies an integration event's
-  database writes once per consumer. A marker keyed by a SHA-256 of `(consumer, envelope id)` is
-  created FIRST in the same transaction as the handler's writes, and the handler receives that
+  database writes once per consumer. A marker keyed by a SHA-256 of `(consumer, topic, envelope id)`
+  is created FIRST in the same transaction as the handler's writes, and the handler receives that
   transaction's unit of work as a fourth argument (`IntegrationEventInboxHandler`, its type inferred
   from the annotation); with `inbox` the call returns a `RegistryFactory` resolved at `onInit` after
   the store is verified, and every existing call keeps its type (the inbox overload is declared
   first and the legacy options take `inbox?: never`). A duplicate is acknowledged after a pre-read;
   after ANY rejection the marker is re-read — a commit-time `DuplicateKeyError` carries no entity
   and a concurrent loser on a MongoDB replica set is a write conflict (measured), so the error alone
-  cannot say "already handled". The broker `queue` defaults to the consumer name, because a
-  queue-less RabbitMQ subscriber discards failures. Opt-in `maxAttempts` counts failures outside the
-  transaction and parks at the limit (NATS and Kafka have no delivery budget); `IInbox` lists and
-  releases parked deliveries without ever re-running a handler. `common` gains `IInboxStore` and
+  cannot say "already handled". The broker `queue` defaults to `inbox.` plus a 16-hex-character hash
+  of the consumer and topic, because a queue-less RabbitMQ subscriber discards failures and a queue
+  shared by two topics splits them. Opt-in `maxAttempts` counts failures outside the transaction and
+  parks at the limit (NATS and Kafka have no delivery budget); `IInbox` lists and releases parked
+  deliveries without ever re-running a handler. `common` gains `IInboxStore` and
   `CAPABILITIES.INBOX`; `database-plugin` ships `createDatabaseInboxStore`, whose `verify()` refuses
   Cosmos DB and Bigtable by adapter arm or class and runs a two-row transactional probe that always
   rolls back. Plan verification (one round) found one blocker and six majors, all folded in before

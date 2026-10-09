@@ -13301,8 +13301,9 @@ hand-rolls the same check, usually against the wrong key.
 **Depends on** broker redelivery being real, which #419 and #421 fixed — an inbox on a broker that
 discards failed messages has nothing to de-duplicate. **Corrected by the plan (C6):** that holds for
 a durable NAMED RabbitMQ queue and for Redis Streams; a queue-less RabbitMQ subscriber discards a
-failure, so the inbox defaults the broker `queue` to the consumer name, and NATS (no `max_deliver`)
-and Kafka (no per-message dead-letter) need the inbox's own `maxAttempts`.
+failure, so the inbox defaults the broker `queue` to a named one (as shipped, `inbox.` plus a hash
+of the consumer and topic — the security audit found a per-consumer queue split two topics), and
+NATS (no `max_deliver`) and Kafka (no per-message dead-letter) need the inbox's own `maxAttempts`.
 
 **Deliverables**
 

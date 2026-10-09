@@ -6451,9 +6451,11 @@ the store's.
   ids are a SHA-256 of `(consumer, topic, envelope id)`, so any string id is keyable and one
   consumer's topics never suppress each other; the raw id is stored only when it is a valid publish
   id.
-- **Queue.** The broker `queue` defaults to `inbox.` plus 16 hex characters of a hash of the
-  consumer and the topic — injective and legal on every broker — so the subscription is a durable
-  consumer group that redelivers, one per topic.
+- **Queue.** The broker `queue` defaults to `inbox.` plus 16 hex characters of a 64-bit FNV-1a hash
+  of the consumer and the topic — legal on every broker, and one per pair barring an accidental
+  64-bit collision (both names are application configuration; build neither from untrusted input) —
+  so the subscription is a durable consumer group that redelivers. Service Bus creates no
+  subscriptions, so set `queue` explicitly there and create that subscription.
 - **Retention.** `purge()` deletes rows of every status older than `retainMs`, parked markers and
   their envelopes included, at most `purge.batch` per status per run — so the table stays within the
   window only while inflow per status stays below that rate.

@@ -736,3 +736,7 @@ sections above are left as the design record.
   `purge.batch` per interval (round 2).
 - **Round 2.** The provider idempotency-key recipe in the README carries the topic too, and the
   remaining docs that said "once per envelope id" say "per topic and envelope id".
+- **Round 3.** The provider-key recipe joins its parts with `JSON.stringify` (a `:` join is not
+  injective), the docs no longer call the FNV queue name injective and say neither name may come
+  from untrusted input, and Service Bus users set `queue` explicitly, since that broker creates no
+  subscription.

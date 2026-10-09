@@ -1432,13 +1432,15 @@ with no scheduler registered `start()` rejects `InboxPurgeUnscheduledError`, unl
 every replica and every deployment of the consumer: a name that changes makes every redelivered
 event look new. The topic in the key keeps one consumer's topics apart, so an event on one topic
 never suppresses an event with the same id on another. Unless you set `queue`, the broker `queue` is
-`inbox.` plus 16 hex characters of a hash of the consumer and the topic (one queue per pair, legal
-on every broker; set `queue` for a readable name): on RabbitMQ a queue-less subscriber gets a
-private queue whose failed messages are discarded, which would leave the inbox nothing to
-de-duplicate, and a queue shared by two topics hands each handler the other topic's messages. Two
-inbox subscriptions with the same consumer name on one topic in one application are refused with
-`InboxConsumerConflictError`, because each would skip the other's events. Across processes this
-cannot be detected: give each consumer its own name.
+`inbox.` plus 16 hex characters of a 64-bit FNV-1a hash of the consumer and the topic (one queue per
+pair, legal on every broker; set `queue` for a readable name). The hash guards against accidental
+collisions only, so build neither name from untrusted input. Service Bus creates no subscriptions:
+set `queue` explicitly there and create that subscription. A named queue matters because on RabbitMQ
+a queue-less subscriber gets a private queue whose failed messages are discarded, which would leave
+the inbox nothing to de-duplicate, and a queue shared by two topics hands each handler the other
+topic's messages. Two inbox subscriptions with the same consumer name on one topic in one
+application are refused with `InboxConsumerConflictError`, because each would skip the other's
+events. Across processes this cannot be detected: give each consumer its own name.
 
 ### The promise
 
@@ -1465,11 +1467,11 @@ the commit — so an effect performed inside the handler is AT LEAST ONCE: if th
 the process dies, the effect has already happened and the redelivery runs it again. Choose per
 effect:
 
-| Choice                     | How                                                                                                                                                                  | Guarantee                                               |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Perform it in the handler  | anywhere in the handler (the default shape)                                                                                                                          | at least once                                           |
-| Forward a derived key      | pass `${consumer}:${topic}:${envelope.id}` as the provider's idempotency key — the topic too, or an event on another topic reusing the id is de-duplicated away      | once, where the provider de-duplicates                  |
-| Claim it before the effect | in the handler, COMMIT your own claim row for the effect in a SEPARATE transaction (not the inbox's unit of work), and skip the effect when the claim already exists | at most once — a crash after the claim loses the effect |
+| Choice                     | How                                                                                                                                                                                                        | Guarantee                                               |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Perform it in the handler  | anywhere in the handler (the default shape)                                                                                                                                                                | at least once                                           |
+| Forward a derived key      | pass `JSON.stringify([consumer, topic, envelope.id])` (or a hash of it) as the provider's idempotency key — all three, unambiguously joined, or another topic's event reusing the id is de-duplicated away | once, where the provider de-duplicates                  |
+| Claim it before the effect | in the handler, COMMIT your own claim row for the effect in a SEPARATE transaction (not the inbox's unit of work), and skip the effect when the claim already exists                                       | at most once — a crash after the claim loses the effect |
 
 On the backends that defer writes to commit (memory, D1, DynamoDB) the handler runs BEFORE a
 concurrent duplicate can be refused, so its outside effects run for both; and DynamoDB's reads are
