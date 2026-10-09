@@ -200,6 +200,43 @@ function diagnosticText(value: unknown): string {
   return JSON.stringify(value) ?? '';
 }
 
+describe('within-real: PostgreSQL interrupted purge', { ignore: postgresUrl === undefined }, () => {
+  let pg: Awaited<ReturnType<typeof postgresHarness>>;
+  beforeAll(async () => {
+    pg = await postgresHarness(postgresUrl!);
+  });
+  afterAll(async () => {
+    await pg?.dispose();
+  });
+  it('keeps both rows and replays when PostgreSQL refuses the second purge delete', async () => {
+    const app = withinApp(pg.adapter());
+    await app.start();
+    try {
+      const { idempotency, database, store } = servicesOf(app);
+      const options = withinOptions('interrupted-purge');
+      await idempotency.within(options, () => Promise.resolve('winner'));
+      const repo = database.getRepository('Idempotency');
+      const before = await repo.findAll();
+      await pg.pool.query(`CREATE FUNCTION refuse_result_delete() RETURNS trigger AS $$
+        BEGIN IF OLD.role = 'result' THEN RAISE EXCEPTION 'result delete refused'; END IF;
+        RETURN OLD; END $$ LANGUAGE plpgsql`);
+      await pg.pool.query(`CREATE TRIGGER refuse_result_delete BEFORE DELETE ON setu_idempotency
+        FOR EACH ROW EXECUTE FUNCTION refuse_result_delete()`);
+      try {
+        await expect(store.purge(Number.MAX_SAFE_INTEGER, 100)).rejects.toThrow();
+        expect(await repo.findAll()).toEqual(before);
+        expect(await idempotency.within(options, () => Promise.resolve('unexpected')))
+          .toEqual({ value: 'winner', replayed: true });
+      } finally {
+        await pg.pool.query('DROP TRIGGER refuse_result_delete ON setu_idempotency');
+        await pg.pool.query('DROP FUNCTION refuse_result_delete()');
+      }
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
 describe('within-real: PostgreSQL obligation 3', { ignore: postgresUrl === undefined }, () => {
   let pg: Awaited<ReturnType<typeof postgresHarness>>;
   beforeAll(async () => {

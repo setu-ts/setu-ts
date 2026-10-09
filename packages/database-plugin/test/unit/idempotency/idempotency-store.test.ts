@@ -8,9 +8,17 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { EntityKey, IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
+import type {
+  EntityKey,
+  IIdempotencyService,
+  IRuntimeServices,
+  IServiceRegistry,
+} from '@setu-ts/common';
 import { CAPABILITIES, IDEMPOTENCY_RECORD_KIND } from '@setu-ts/common';
-import type { IDatabaseService } from '../../../src/interfaces/index.ts';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { IdempotencyPlugin } from '@setu-ts/idempotency-plugin';
+import type { IDatabaseService, IRepository } from '../../../src/interfaces/index.ts';
 import { createDatabaseIdempotencyStore } from '../../../src/idempotency/database-idempotency-store.ts';
 import { TransactionalStoreUnavailableError } from '../../../src/idempotency/errors.ts';
 import {
@@ -169,6 +177,60 @@ describe('DatabaseIdempotencyStore.find (M109b §3.1)', () => {
 });
 
 describe('DatabaseIdempotencyStore.purge (M109b §3.10)', () => {
+  it('keeps both rows and replays when the second purge delete fails', async () => {
+    const inner = await memoryService();
+    const failResultDelete = <E, Id extends EntityKey>(repo: IRepository<E, Id>) =>
+      new Proxy(repo, {
+        get(target, property) {
+          if (property === 'delete') {
+            return (id: Id) =>
+              String(id).endsWith('.r')
+                ? Promise.reject(new Error('result delete refused'))
+                : repo.delete(id);
+          }
+          const member: unknown = Reflect.get(target, property);
+          return typeof member === 'function' ? member.bind(target) : member;
+        },
+      });
+    const service: IDatabaseService = {
+      ...inner,
+      getRepository: <E, Id extends EntityKey = string>(entity: string) =>
+        failResultDelete(inner.getRepository<E, Id>(entity)),
+      transaction: (work) =>
+        inner.transaction((uow) =>
+          work({
+            getRepository: <E, Id extends EntityKey = string>(entity: string) =>
+              failResultDelete(uow.getRepository<E, Id>(entity)),
+          })
+        ),
+    };
+    const store = storeOver(service);
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        IdempotencyPlugin({
+          transactional: { store, purge: { schedule: false } },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const idempotency = app.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY);
+      const options = { key: 'interrupted-purge', scope: 'scope', namespace: 'namespace' };
+      expect(await idempotency.within(options, () => Promise.resolve('winner')))
+        .toEqual({ value: 'winner', replayed: false });
+      const before = await allRows(inner);
+      await expect(store.purge(Number.MAX_SAFE_INTEGER, 10)).rejects.toThrow(
+        'result delete refused',
+      );
+      expect(await allRows(inner)).toEqual(before);
+      expect(await idempotency.within(options, () => Promise.resolve('unexpected')))
+        .toEqual({ value: 'winner', replayed: true });
+    } finally {
+      await app.stop();
+    }
+  });
+
   for (const result of ['not JSON', 'null', '1', '[]', '{"wrong":1}', '{"v":1,"extra":2}']) {
     it(`preserves a record with invalid envelope ${result}`, async () => {
       const service = await memoryService();
