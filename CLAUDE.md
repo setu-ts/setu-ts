@@ -5904,7 +5904,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   carry the error class only, the default queue is `inbox.` plus a hash of the pair, and purge
   covers parked rows. Round 2 found five Low, chiefly that a dotted-join queue name collided and
   broke a qualified Pub/Sub topic; round 3 found two Low documentation findings, fixed in docs
-  afterwards and NOT re-audited, at the maintainer's direction — complete (PR pending).
+  afterwards and NOT re-audited, at the maintainer's direction — complete (PR #436).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
