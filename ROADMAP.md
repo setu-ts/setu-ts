@@ -13325,8 +13325,10 @@ NATS (no `max_deliver`) and Kafka (no per-message dead-letter) need the inbox's 
 service contract and a capability token, because §2.2 forbids a plugin importing a plugin);
 `packages/decorator-plugin` (`@Idempotent`); `packages/cloudflare-plugin` (the Durable Object
 store); `packages/messaging-plugin` and `packages/queue-plugin` (the `IngressContext.consumer`
-dispatch identity); `packages/cli` (the health-indicator claim table). 109b: `packages/sdk` (the
-`idempotencyKey` request option) and tier C.
+dispatch identity); `packages/cli` (the health-indicator claim table). 109b: `packages/common` (the
+tier-C port and its option types), `packages/idempotency-plugin` (`within`),
+`packages/database-plugin` (the store bridge) and `packages/sdk` (the `idempotencyKey` request
+option).
 
 **Objective:** one configurable mechanism that makes a repeated request, message, job or outbound
 call do its work once, reachable from HTTP routes, ingress, plain code and the SDK.
@@ -13354,10 +13356,14 @@ key to a provider that de-duplicates.
     `topics`/`jobNames` allow-list so unrelated and internal traffic (the realtime backplane) is
     untouched; its key includes the consumer identity, so two subscribers on one topic each run once
     (C9, §3.7, §3.19).
-  - Code: `within(uow, key, fn)`, for the transactional tier.
-  - SDK: an `idempotencyKey` request option, generated once per logical call and reused on every
-    attempt, which is also what makes a POST or PATCH retryable (the SDK retries only
-    GET/HEAD/OPTIONS/PUT/DELETE today).
+  - Code: `within(options, fn)`, for the transactional tier. The STORE opens the transaction — a
+    caller-owned unit of work would surface a lost race OUTSIDE `within` (a PostgreSQL insert aborts
+    the caller's transaction, so no re-read is possible inside it), and the winner's result could
+    never be returned (C1).
+  - SDK: `ClientRequest.idempotencyKey` (the caller's own key) AND client-level
+    `ClientOptions.idempotency` (generated keys, since a generated client's operations take no
+    per-call options beyond their document's header parameters). One key per logical call, reused on
+    every attempt, which is also what makes a POST or PATCH retryable (C5).
 - **Configurable, with safe defaults:** key source (header, body field, a message's
   `x-setu-deduplication-id` header, a job id) with a bounded length and character set; scope of
   tenant + principal + route or topic — principal scope is a SECURITY requirement, since without it
@@ -13373,8 +13379,10 @@ key to a provider that de-duplicates.
   read the server clock with `TIME`) or a Cloudflare Durable Object — across replicas, but not
   atomic with the business write. C: a record written inside the business transaction — the work
   happens once — which cannot be plain middleware, so it is `within()` only, built on the same
-  transaction seam as M108's inbox. Tier C per backend: SQL, MongoDB and DynamoDB yes; D1 for
-  database-only effects; Cosmos only within one partition; Bigtable no.
+  transaction seam as M108's inbox. Tier C per backend: SQL (PostgreSQL, SQLite), MongoDB (replica
+  set) and DynamoDB yes; D1 through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })` with
+  the deferred-write caveat; **Cosmos DB is REFUSED**, like M108's inbox — a Cosmos transaction is
+  one partition, and the record cannot share the business partition; Bigtable refused (C2).
 - **Not this mechanism:** business uniqueness ("one payroll run per company and period") is a unique
   constraint, and a scheduled tick is already de-duplicated by M70l's slot locks. The README says
   so.
@@ -13818,5 +13826,6 @@ patch by construction and gains nothing new here.
 | 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, topic, envelope id), in the handler's transaction                                                                               |
 | 109       | ⬜     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |
+| 109b      | ⬜     | common + idempotency-plugin + database-plugin + sdk — idempotency tier C (`within`) and the SDK idempotency key; in progress on `feat/m109b-idempotency-tier-c-sdk`                                                                           |
 | 110a      | ⬜     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
 | 110b      | ⬜     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |

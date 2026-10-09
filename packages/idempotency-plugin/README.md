@@ -121,14 +121,54 @@ after its attempts, and a broker redelivers per its own policy.
 
 ## Store guarantees
 
-| Tier | Store          | Claim atomicity                | Across replicas | Crash mid-work                                | Clock               |
-| ---- | -------------- | ------------------------------ | --------------- | --------------------------------------------- | ------------------- |
-| A    | memory         | one event-loop turn            | No              | the record dies with the process              | `runtime.hrtime()`  |
-| B    | Redis (Lua)    | one `EVAL`                     | Yes             | the record survives; takeover after the lease | Redis server `TIME` |
-| B    | Durable Object | one object per key; input gate | Yes             | the record survives; takeover after the lease | DO `now()`          |
+| Tier | Store                    | Claim atomicity                      | Across replicas | Crash mid-work                                | Clock               |
+| ---- | ------------------------ | ------------------------------------ | --------------- | --------------------------------------------- | ------------------- |
+| A    | memory                   | one event-loop turn                  | No              | the record dies with the process              | `runtime.hrtime()`  |
+| B    | Redis (Lua)              | one `EVAL`                           | Yes             | the record survives; takeover after the lease | Redis server `TIME` |
+| B    | Durable Object           | one object per key; input gate       | Yes             | the record survives; takeover after the lease | DO `now()`          |
+| C    | the application database | one transaction, claim created first | Yes             | the record and the work commit together       | `runtime.now()`     |
 
 Tier A on Cloudflare Workers is per isolate — use the Durable Object store there. The ingress entry
 point is not available on Workers in this release.
+
+### Tier C: the work and its record commit together
+
+`within(options, fn)` is tier C, for a handler that owns a database transaction. It opens ONE
+transaction, creates a claim row in it FIRST, runs `fn` with that transaction's unit of work,
+creates a result row holding `fn`'s JSON result, and commits — so the work and its idempotency
+record are all-or-nothing. A repeated key whose record is committed returns the stored result
+without running `fn` (`replayed: true`); a concurrent duplicate loses the race on the claim's
+primary key and its business writes roll back with it, then it replays the winner's result — or,
+where it failed before the winner committed, rejects with a retryable `409` (which `@setu-ts/sdk`'s
+keyed client retries).
+
+`scope` is REQUIRED and must be built ONLY from authenticated identity (typically
+`` `${tenantId}:${principalId}` ``); `''` declares the record global on purpose. The raw key, scope
+and namespace are never stored — only their derived hashes.
+
+Configure it with `IdempotencyPlugin({ transactional: { store } })`, where `store` is
+`createDatabaseIdempotencyStore()` from `@setu-ts/database-plugin` (or any
+`ITransactionalIdempotencyStore`). The store is resolved and `verify()`d at `onInit`.
+
+| Backend                         | Behaviour                                                                                                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| memory                          | Supported, single process.                                                                                                                                                                                        |
+| PostgreSQL (Drizzle)            | Supported; a loser's claim insert blocks on the primary key until the winner commits, then replays. Each blocked loser holds a pooled connection for the length of `fn`.                                          |
+| PostgreSQL (Prisma)             | As Drizzle, but a loser waiting past Prisma's interactive-transaction timeout rejects `'conflict'`.                                                                                                               |
+| SQLite (Drizzle, `node:sqlite`) | Supported; one writer at a time.                                                                                                                                                                                  |
+| D1                              | Supported through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })`; writes are deferred to one batch at commit, so `fn` runs before a concurrent duplicate is refused — its outside effects run for both. |
+| MongoDB replica set             | Supported; a loser is an immediate write conflict.                                                                                                                                                                |
+| MongoDB standalone              | Refused, `'mongodb-standalone'`.                                                                                                                                                                                  |
+| DynamoDB                        | Supported (deferred, `TransactWriteItems`); a loser is a transaction conflict. Reads are eventually consistent, so a sequential repeat inside the consistency window can run `fn` again.                          |
+| Cosmos DB                       | Refused, `'cosmos-unsupported'`.                                                                                                                                                                                  |
+| Bigtable                        | Refused, `'bigtable-unsupported'`.                                                                                                                                                                                |
+
+**Expiry and retention.** A record is authoritative from commit until the scheduled purge deletes
+it; `expiresAt` (from `within`'s `ttlMs`, default 86,400,000 ms) only makes it ELIGIBLE. The purge
+deletes up to `purge.batch` (default 100) eligible records every `purge.intervalMs` (default
+60,000), so **the table stays bounded only while inflow stays below that rate**. A key reused after
+`ttlMs` replays until the purge runs. On Workers, set `purge: { schedule: false }` and call
+`service.purgeTransactional()` from a Cron Trigger.
 
 ### Memory store capacity
 

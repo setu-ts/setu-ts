@@ -14059,10 +14059,11 @@ A repeated HTTP request, queue job or broker message is recognised by its key, a
 completed work is answered from its record or skipped instead of running again, over one
 `claim`/`complete`/`release` state machine and an in-process, Redis or Cloudflare Durable Object
 store. The guarantee is **no duplicate processing within the limits of the store** — it is not a
-single-execution guarantee. See
-[`packages/idempotency-plugin/README.md`](packages/idempotency-plugin/README.md) for placement, the
-HTTP check order, failure classification, replay rules, the ingress allow-list and the store
-guarantees.
+single-execution guarantee. Tier C (`within`, M109b) extends this to plain code: the work and its
+record commit in ONE database transaction, so a lost race rolls the business writes back with the
+claim. See [`packages/idempotency-plugin/README.md`](packages/idempotency-plugin/README.md) for
+placement, the HTTP check order, failure classification, replay rules, the ingress allow-list, the
+tier-C backend table and the store guarantees.
 
 ### Values (runtime exports)
 
@@ -14074,17 +14075,22 @@ guarantees.
 | `derivedIdempotencyKey`         | function | Reads the store key the middleware recorded, to forward to a provider                     |
 | `IdempotencyRefusedError`       | class    | An ingress refusal, carrying `reason`, `ingress` and `target`                             |
 | `IdempotencyConfigurationError` | class    | An option refusal, carrying the failing `option` path                                     |
+| `IdempotencyWithinError`        | class    | A tier-C refusal or failure, carrying `reason` and a status hint (M109b)                  |
+| `IdempotencyVerifyTimeoutError` | class    | `start()` rejects with it when a store's `verify()` outlives `storeTimeoutMs` (M109b)     |
 | `IDEMPOTENCY_KEY_HEADER`        | const    | `'Idempotency-Key'`                                                                       |
 | `IDEMPOTENT_REPLAYED_HEADER`    | const    | `'Idempotent-Replayed'`                                                                   |
 
 ### Types
 
-| Export                     | Kind | Purpose                                                     |
-| -------------------------- | ---- | ----------------------------------------------------------- |
-| `IdempotencyPluginOptions` | type | The `IdempotencyPlugin` options (`store`, leases, ttl, cap) |
-| `IdempotencyStoreConfig`   | type | The store arm (`memory`, `redis` built/injected, `custom`)  |
-| `IRedisIdempotencyClient`  | type | The Redis facade an injected client must satisfy            |
-| `IdempotencyRefusalReason` | type | The union carried by `IdempotencyRefusedError.reason`       |
+| Export                                 | Kind | Purpose                                                                                           |
+| -------------------------------------- | ---- | ------------------------------------------------------------------------------------------------- |
+| `IdempotencyPluginOptions`             | type | The `IdempotencyPlugin` options (`store`, leases, ttl, cap, `transactional`)                      |
+| `IdempotencyStoreConfig`               | type | The store arm (`memory`, `redis` built/injected, `custom`)                                        |
+| `IRedisIdempotencyClient`              | type | The Redis facade an injected client must satisfy                                                  |
+| `IdempotencyRefusalReason`             | type | The union carried by `IdempotencyRefusedError.reason`                                             |
+| `IdempotencyWithinErrorReason`         | type | The union carried by `IdempotencyWithinError.reason` (M109b)                                      |
+| `TransactionalIdempotencyOptions`      | type | The `transactional` option: `store`, `ttlMs`, `storeTimeoutMs`, `maxResultBytes`, `purge` (M109b) |
+| `TransactionalIdempotencyPurgeOptions` | type | The retention purge's `schedule`, `intervalMs` and `batch` (M109b)                                |
 
 ### The queue retry span versus the lease
 
