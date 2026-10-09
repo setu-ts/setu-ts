@@ -205,6 +205,7 @@ package fits the plugin architecture.
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
+| `writePreconditionProblem`            | function  |
 | `DuplicateKeyError`                   | class     |
 | `MalformedRequestBodyError`           | class     |
 | `UnsupportedFormEncodingError`        | class     |
@@ -647,6 +648,7 @@ package fits the plugin architecture.
 | `WebSocketUpgradeDecision`            | type      |
 | `WebSocketUpgradeGuard`               | type      |
 | `WebSocketUpgradeRouter`              | type      |
+| `WritePrecondition`                   | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

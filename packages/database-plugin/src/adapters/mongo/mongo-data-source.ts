@@ -26,6 +26,7 @@ import {
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
+  writePreconditionProblem,
 } from '@setu-ts/common';
 import {
   fromDriverDocument,
@@ -284,6 +285,44 @@ export function createMongoDataSource(
       return (result.deletedCount ?? 0) > 0;
     },
 
+    async updateWhere(id, where, data) {
+      const problem = writePreconditionProblem(where, data);
+      if (problem !== undefined) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'mongodb', problem);
+      }
+      const mapped = mapQueryToDriver(
+        { where, orderBy: {}, limit: -1, offset: 0, select: [] },
+        target,
+      );
+      const whereFilter = mapMongoIdValues(mapped.where, target, objectIdCtor);
+      const idFilter = await buildIdFilter(id, 'update');
+      const filter = { $and: [idFilter, whereFilter] };
+      const patch = { ...data };
+      for (const column of target.primaryKey) delete patch[column];
+      delete patch._id;
+      const result = Object.keys(patch).length === 0
+        ? await collection.findOne(filter, options())
+        : await collection.findOneAndUpdate(filter, { $set: patch }, {
+          returnDocument: 'after',
+          ...options(),
+        });
+      return result == null ? null : fromDriverDocument(result, target);
+    },
+    async deleteWhere(id, where) {
+      const problem = writePreconditionProblem(where);
+      if (problem !== undefined) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'mongodb', problem);
+      }
+      const mapped = mapQueryToDriver(
+        { where, orderBy: {}, limit: -1, offset: 0, select: [] },
+        target,
+      );
+      const whereFilter = mapMongoIdValues(mapped.where, target, objectIdCtor);
+      const idFilter = await buildIdFilter(id, 'delete');
+      const filter = { $and: [idFilter, whereFilter] };
+      const result = await collection.deleteOne(filter, options());
+      return (result.deletedCount ?? 0) > 0;
+    },
     count: async (
       where: Record<string, unknown>,
       filter?: FilterExpression,

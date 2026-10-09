@@ -28,6 +28,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import { expect } from '@std/expect';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
@@ -62,6 +63,7 @@ interface ModelDelegate {
 
 /** The structural surface of the generated client this suite drives. */
 interface GeneratedPrismaClient {
+  $on(event: 'query', listener: (event: { query: string }) => void): void;
   tenantMember: ModelDelegate;
   enrollment: ModelDelegate;
   auditEvent: ModelDelegate;
@@ -71,7 +73,9 @@ interface GeneratedPrismaClient {
 
 /** The generated module's export this suite constructs. */
 interface GeneratedClientModule {
-  PrismaClient: new (options: { adapter: unknown }) => GeneratedPrismaClient;
+  PrismaClient: new (
+    options: { adapter: unknown; log?: { emit: 'event'; level: 'query' }[] },
+  ) => GeneratedPrismaClient;
 }
 
 /** A per-run discriminator keeping rows of one run out of another's asserts. */
@@ -94,19 +98,89 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
  * Called inside each guarded body so a fresh clone (no generated client, no
  * container) never loads either import.
  */
-async function connectPrisma(): Promise<GeneratedPrismaClient> {
+async function connectPrisma(queries?: string[]): Promise<GeneratedPrismaClient> {
   const [{ PrismaPg }, generated] = await Promise.all([
     import('npm:@prisma/adapter-pg@^7.10.0'),
     import(GENERATED_CLIENT_URL.href) as Promise<GeneratedClientModule>,
   ]);
   const client = new generated.PrismaClient({
     adapter: new PrismaPg({ connectionString: url }),
+    ...(queries === undefined
+      ? {}
+      : { log: [{ emit: 'event' as const, level: 'query' as const }] }),
   });
+  if (queries !== undefined) client.$on('query', (event) => queries.push(event.query));
   await client.$connect();
   return client;
 }
 
 describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
+  it(
+    'M105 emits one conjoined UPDATE or DELETE and carries conditionals into interactive transactions',
+    { ignore: skipReal },
+    async () => {
+      const queries: string[] = [];
+      const client = await connectPrisma(queries);
+      const adapter = new PrismaAdapter({ prismaClient: client });
+      await adapter.connect();
+      try {
+        const source = adapter.createDataSource('AuditEvent');
+        const id = `m105-${suffix}`;
+        await source.create({
+          id,
+          run: suffix,
+          userId: 'owner',
+          createdAt: new Date(0),
+          profile: {},
+        });
+        queries.length = 0;
+        expect(await source.updateWhere!(id, { userId: 'owner' }, { profile: { changed: true } }))
+          .toMatchObject({ profile: { changed: true } });
+        expect(queries).toHaveLength(1);
+        expect(queries[0]).toMatch(/^UPDATE .* WHERE .*"id".* AND .*"userId".* RETURNING /);
+        queries.length = 0;
+        expect(await source.updateWhere!(id, { userId: 'other' }, { profile: { bad: true } }))
+          .toBeNull();
+        expect(queries).toHaveLength(1);
+        expect(await source.findById(id)).toMatchObject({ profile: { changed: true } });
+        queries.length = 0;
+        expect(await source.deleteWhere!(id, { userId: 'other' })).toBe(false);
+        expect(queries).toHaveLength(1);
+        expect(await source.findById(id)).not.toBeNull();
+        queries.length = 0;
+        expect(await source.deleteWhere!(id, { userId: 'owner' })).toBe(true);
+        expect(queries).toHaveLength(1);
+        expect(queries[0]).toMatch(/^DELETE .* WHERE .*"id".* AND .*"userId".* RETURNING /);
+        expect(await source.findById(id)).toBeNull();
+        await conditionalContract(
+          source,
+          `${id}-second`,
+          `${id}-missing`,
+          { id: `${id}-second`, run: suffix, userId: 'owner', createdAt: new Date(0), profile: {} },
+          { userId: 'owner' },
+          { profile: { changed: true } },
+        );
+        const tx = await adapter.beginTransaction();
+        try {
+          await conditionalContract(
+            tx.createDataSource('AuditEvent'),
+            `${id}-tx`,
+            `${id}-missing`,
+            { id: `${id}-tx`, run: suffix, userId: 'owner', createdAt: new Date(0), profile: {} },
+            { userId: 'owner' },
+            { profile: { changed: true } },
+          );
+          await tx.commit();
+        } catch (error) {
+          await tx.rollback();
+          throw error;
+        }
+      } finally {
+        await adapter.disconnect();
+        await client.$disconnect();
+      }
+    },
+  );
   it(
     'round-trips a composite key through the repository surface on the unnamed-@@id model (P1/P6)',
     {

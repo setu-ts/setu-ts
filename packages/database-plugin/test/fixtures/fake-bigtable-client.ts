@@ -224,8 +224,9 @@ function applyFilter(row: MutableRow, filter: BigtableFilter): MutableRow {
       const inner = new Map<string, BigtableCell[]>();
       for (const [qualifier, versions] of qualifiers) {
         if (remaining <= 0) break;
-        inner.set(qualifier, [...versions]);
-        remaining -= 1;
+        const keptVersions = versions.slice(0, remaining);
+        inner.set(qualifier, keptVersions);
+        remaining -= keptVersions.length;
       }
       if (inner.size > 0) kept.set(family, inner);
     }

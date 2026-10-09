@@ -19,10 +19,9 @@
  * `kind: 'setu-inbox'`, every read conjoins it to its `where`, and a lookup
  * by id treats a row whose `kind` differs as missing.
  *
- * **The failure count and the release are read-then-write.** `IRepository`
- * has no conditional write, so two concurrent failures can record one
- * increment and two concurrent releases can both report `applied`. Closing
- * the window needs the conditional write ROADMAP Milestone 105 owns.
+ * **Failure increments use a compare-and-set on attempts.** Release guards
+ * kind and parked status. Sources lacking the members keep the read-then-write
+ * fallback, as does an invalid stored failure count.
  *
  * **Absent optional columns are written as `null`** and read back as absent
  * (the M107 rule: a SQL column has no "absent" state, and the memory adapter
@@ -50,6 +49,7 @@ import type { IDatabaseService, IRepository } from '../interfaces/index.ts';
 import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
 import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
 import { adapterInfoOf } from '../services/database-service.ts';
+import { conditionalDelete, conditionalUpdate } from '../repositories/conditional-write.ts';
 import { InboxStoreUnavailableError } from './errors.ts';
 
 /**
@@ -251,12 +251,36 @@ export class DatabaseInboxStore implements IInboxStore {
 
   /** Writes `attempts + 1` with the new error line, returning the new count. */
   async #increment(id: string, row: Row, changes: Row): Promise<number> {
-    const current = typeof row.attempts === 'number' && Number.isSafeInteger(row.attempts)
-      ? row.attempts
-      : 0;
-    const attempts = current + 1;
-    await this.#repo().update(id, { ...changes, attempts });
-    return attempts;
+    const repo = this.#repo();
+    for (let round = 0; round < 5; round += 1) {
+      const valid = typeof row.attempts === 'number' && Number.isSafeInteger(row.attempts);
+      const current = valid ? row.attempts as number : 0;
+      const attempts = current + 1;
+      const data = { ...changes, attempts };
+      if (!valid) {
+        await repo.update(id, data);
+        return attempts;
+      }
+      const result = await conditionalUpdate(repo, id, {
+        kind: INBOX_RECORD_KIND,
+        attempts: current,
+      }, data);
+      if (result.outcome === 'applied') return attempts;
+      if (result.outcome === 'unsupported') {
+        await repo.update(id, data);
+        return attempts;
+      }
+      const latest = await this.#find(id);
+      if (latest === null) {
+        throw new Error(
+          `Inbox entity '${this.#entity}' failure count disappeared during contention.`,
+        );
+      }
+      row = latest;
+    }
+    throw new Error(
+      `Inbox entity '${this.#entity}' increment encountered contention in all 5 rounds.`,
+    );
   }
 
   /** @inheritdoc */
@@ -292,14 +316,25 @@ export class DatabaseInboxStore implements IInboxStore {
     if (record.status !== 'parked') {
       return { outcome: 'not-parked', status: record.status };
     }
-    if (action === 'retry') {
-      if (!(await this.#repo().delete(ids.marker))) return { outcome: 'missing' };
-    } else {
-      await this.#repo().update(ids.marker, {
-        status: 'discarded',
-        envelope: null,
-        updatedAt: now,
-      });
+    const repo = this.#repo();
+    const where = { kind: INBOX_RECORD_KIND, status: 'parked' };
+    const changes = { status: 'discarded', envelope: null, updatedAt: now };
+    const result = action === 'retry'
+      ? await conditionalDelete(repo, ids.marker, where)
+      : await conditionalUpdate(repo, ids.marker, where, changes);
+    if (result.outcome === 'not-matched') {
+      const latest = await this.#find(ids.marker);
+      if (latest === null) return { outcome: 'missing' };
+      const status = fromRow(latest).status;
+      if (status !== 'parked') return { outcome: 'not-parked', status };
+      throw new Error(`Inbox entity '${this.#entity}' release encountered contention.`);
+    }
+    if (result.outcome === 'unsupported') {
+      if (action === 'retry') {
+        if (!(await repo.delete(ids.marker))) return { outcome: 'missing' };
+      } else {
+        await repo.update(ids.marker, changes);
+      }
     }
     // The failure-count row may already be gone (purged by age); either way
     // nothing of this delivery's count remains.

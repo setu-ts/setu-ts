@@ -23,6 +23,7 @@ import {
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
+  writePreconditionProblem,
 } from '@setu-ts/common';
 import type { ID1Database, ID1PreparedStatement } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
@@ -30,10 +31,12 @@ import type { D1Statement, D1Target } from './d1-sql.ts';
 import {
   buildCount,
   buildDelete,
+  buildDeleteWhere,
   buildInsert,
   buildSelect,
   buildSelectById,
   buildUpdate,
+  buildUpdateWhere,
   D1_COUNT_ALIAS,
 } from './d1-sql.ts';
 
@@ -238,6 +241,18 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
 
     async delete(id: EntityKey): Promise<boolean> {
       const result = await prepareStatement(db, buildDelete(target, id)).all();
+      return result.results.length > 0;
+    },
+
+    async updateWhere(id, where, data) {
+      const problem = writePreconditionProblem(where, data);
+      if (problem !== undefined) throw new CloudflareUnsupportedError(problem);
+      return await prepareStatement(db, buildUpdateWhere(target, id, where, data)).first();
+    },
+    async deleteWhere(id, where) {
+      const problem = writePreconditionProblem(where);
+      if (problem !== undefined) throw new CloudflareUnsupportedError(problem);
+      const result = await prepareStatement(db, buildDeleteWhere(target, id, where)).all();
       return result.results.length > 0;
     },
 

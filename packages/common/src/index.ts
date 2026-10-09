@@ -653,3 +653,6 @@ export {
 } from './services/worker-pool.ts';
 
 export { hasForbiddenAliasCharacter } from './diagnostics/alias.ts';
+
+export type { WritePrecondition } from './services/write-precondition.ts';
+export { writePreconditionProblem } from './services/write-precondition.ts';

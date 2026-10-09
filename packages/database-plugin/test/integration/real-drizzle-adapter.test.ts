@@ -8,6 +8,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import { expect } from '@std/expect';
 import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
 import { integer, pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
@@ -835,6 +836,57 @@ const pgMembers = pgTable(pgMembersTable, {
 });
 
 describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
+  it(
+    'M105 conditional writes persist matches and leave misses unchanged, including in transactions',
+    { ignore: skipLivePg },
+    async () => {
+      const tableName = `m105_${crypto.randomUUID().replaceAll('-', '')}`;
+      const table = pgTable(tableName, {
+        id: text('id').primaryKey(),
+        name: text('name'),
+        role: text('role'),
+      });
+      const pool = new Pool({ connectionString: livePgUrl! });
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(
+          nodePostgresDrizzle(pool),
+          (db, work) => db.transaction(work),
+        ),
+        drizzleTables: { Row: table },
+      });
+      await pool.query(`CREATE TABLE "${tableName}" (id text primary key, name text, role text)`);
+      await adapter.connect();
+      try {
+        await conditionalContract(
+          adapter.createDataSource('Row'),
+          'a',
+          'missing',
+          { id: 'a', role: 'owner', name: 'old' },
+          { role: 'owner' },
+          { name: 'new' },
+        );
+        const tx = await adapter.beginTransaction();
+        try {
+          await conditionalContract(
+            tx.createDataSource('Row'),
+            'tx',
+            'missing',
+            { id: 'tx', role: 'owner', name: 'old' },
+            { role: 'owner' },
+            { name: 'new' },
+          );
+          await tx.commit();
+        } catch (error) {
+          await tx.rollback();
+          throw error;
+        }
+      } finally {
+        await adapter.disconnect();
+        await pool.query(`DROP TABLE "${tableName}"`);
+        await pool.end();
+      }
+    },
+  );
   it('a duplicate primary key or unique column reaches the caller as DuplicateKeyError', {
     ignore: skipLivePg,
   }, async () => {

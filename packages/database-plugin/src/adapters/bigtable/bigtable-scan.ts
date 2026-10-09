@@ -31,6 +31,7 @@ import type {
   FilterExpression,
   NormalizedQuery,
   OrderDirection,
+  WritePrecondition,
 } from '@setu-ts/common';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import type {
@@ -380,6 +381,34 @@ function valueTest(
     // form is a regex and matched a value it should not have.
     { value: { start: encoded, end: encoded } },
   ];
+}
+
+/**
+ * Builds a write predicate against each column's newest retained cell.
+ * Unlike read push-down, a write cannot match a historical value (§11 I1).
+ *
+ * @param target - Resolved column addresses and encoding
+ * @param where - Validated equality predicate
+ * @returns The nested conjunction, or `null` for an unaddressable field
+ */
+export function preconditionTest(
+  target: BigtableTarget,
+  where: WritePrecondition,
+): BigtableFilter[] | null {
+  let pass: BigtableFilter[] = [{ all: true }];
+  for (const [field, value] of Object.entries(where).reverse()) {
+    const address = tryColumnAddress(target, field);
+    if (address === null) return null;
+    const encoded = encodeCellValue(value, target.valueEncoding);
+    const test: BigtableFilter[] = [
+      { family: address.family },
+      { column: [address.qualifier] },
+      { row: { cellLimit: 1 } },
+      { value: { start: encoded, end: encoded } },
+    ];
+    pass = [{ condition: { test, pass } }];
+  }
+  return pass;
 }
 
 /**

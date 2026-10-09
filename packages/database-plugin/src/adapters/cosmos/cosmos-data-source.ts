@@ -22,6 +22,7 @@ import type {
   IDataSource,
   NormalizedQuery,
   PageResult,
+  WritePrecondition,
 } from '@setu-ts/common';
 import {
   decodeCursor,
@@ -29,6 +30,7 @@ import {
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
+  writePreconditionProblem,
 } from '@setu-ts/common';
 import type {
   CosmosItemResponse,
@@ -45,6 +47,7 @@ import { buildCountQuery, buildIdLookupQuery, buildQuery } from './cosmos-query.
 import { BatchBuffer } from './cosmos-transaction.ts';
 import { CosmosConcurrentModificationError, UnsupportedQueryFeatureError } from '../../errors.ts';
 import {
+  matchesWhere,
   normalizePageQuery,
   PageNormalizationError,
   projectFields,
@@ -330,6 +333,77 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     return response.resource ?? null;
   };
 
+  /** Preserve the partition/key update rules on both write entry points. */
+  const updatePayload = (
+    address: DocumentAddress,
+    resolved: ResolvedPartitionKey,
+    data: Partial<Record<string, unknown>>,
+  ): Record<string, unknown> => {
+    const payload = { ...data } as Record<string, unknown>;
+    delete payload[target.primaryKey];
+    delete payload[DOCUMENT_ID_FIELD];
+    for (const [index, path] of resolved.paths.entries()) {
+      const head = path[0] as string;
+      if (!Object.prototype.hasOwnProperty.call(payload, head)) continue;
+      const supplied = readPath(payload, path);
+      const current = Array.isArray(address.partitionKey)
+        ? address.partitionKey[index]
+        : address.partitionKey;
+      if (supplied !== current) {
+        throw new Error(
+          `CosmosAdapter.update: the payload would change the partition key ` +
+            `${renderPaths([path])} of '${address.id}' in '${target.container}'. Cosmos cannot ` +
+            'move an item between partitions — delete it and create it under the new key.',
+        );
+      }
+      // A single-segment path IS the partition-key field, so restating it is
+      // dropped. A nested one is left in place: its parent object carries
+      // other fields the caller may legitimately be updating, and setting the
+      // same partition-key value inside it changes nothing.
+      if (path.length === 1) delete payload[head];
+    }
+
+    return payload;
+  };
+
+  /** Re-check after contention, guarding every write against the exact version read. */
+  const guardedWrite = async (
+    id: EntityKey,
+    where: WritePrecondition,
+    data?: Partial<Record<string, unknown>>,
+  ): Promise<Record<string, unknown> | null> => {
+    for (let round = 0; round < 3; round += 1) {
+      const address = await addressOf(id, 'conditional-write');
+      if (address === null) return null;
+      const existing = await readDocument(address);
+      if (existing === null || !matchesWhere(fromDocument(existing, target), where)) return null;
+      const etag = existing[ETAG_PROPERTY];
+      if (typeof etag !== 'string') {
+        throw new Error(
+          `Cosmos conditional write on '${target.container}' requires the read document's _etag.`,
+        );
+      }
+      const item = container().item(address.id, address.partitionKey);
+      const options = { accessCondition: { type: 'IfMatch' as const, condition: etag } };
+      try {
+        if (data === undefined) {
+          await item.delete(options);
+          return fromDocument(existing, target);
+        }
+        const resolved = await partitionKeys.resolve(target);
+        const merged = { ...existing, ...updatePayload(address, resolved, data) };
+        const replaced = await item.replace(merged, options);
+        return fromDocument(replaced.resource ?? merged, target);
+      } catch (error) {
+        if (statusOf(error) === 404) return null;
+        if (statusOf(error) !== 412) throw error;
+      }
+    }
+    throw new CosmosConcurrentModificationError(
+      `Cosmos conditional write on '${target.container}' encountered contention in all 3 rounds.`,
+    );
+  };
+
   return {
     findAll: (query: NormalizedQuery): Promise<Record<string, unknown>[]> => runQuery(query),
 
@@ -376,29 +450,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       // partition-key field is different — a `replace` that changes one
       // answers 404 rather than moving the item, so a genuine change is
       // refused by name while a restatement of the current value is dropped.
-      const payload = { ...data } as Record<string, unknown>;
-      delete payload[target.primaryKey];
-      delete payload[DOCUMENT_ID_FIELD];
-      for (const [index, path] of resolved.paths.entries()) {
-        const head = path[0] as string;
-        if (!Object.prototype.hasOwnProperty.call(payload, head)) continue;
-        const supplied = readPath(payload, path);
-        const current = Array.isArray(address.partitionKey)
-          ? address.partitionKey[index]
-          : address.partitionKey;
-        if (supplied !== current) {
-          throw new Error(
-            `CosmosAdapter.update: the payload would change the partition key ` +
-              `${renderPaths([path])} of '${address.id}' in '${target.container}'. Cosmos cannot ` +
-              'move an item between partitions — delete it and create it under the new key.',
-          );
-        }
-        // A single-segment path IS the partition-key field, so restating it is
-        // dropped. A nested one is left in place: its parent object carries
-        // other fields the caller may legitimately be updating, and setting the
-        // same partition-key value inside it changes nothing.
-        if (path.length === 1) delete payload[head];
-      }
+      const payload = updatePayload(address, resolved, data);
 
       if (buffer !== undefined) {
         // The row is read to honour the contract's missing-row throw, NOT to
@@ -500,6 +552,22 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       }
     },
 
+    ...(buffer !== undefined ? {} : {
+      async updateWhere(id, where, data) {
+        const problem = writePreconditionProblem(where, data);
+        if (problem !== undefined) {
+          throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', problem);
+        }
+        return await guardedWrite(id, where, data);
+      },
+      async deleteWhere(id, where) {
+        const problem = writePreconditionProblem(where);
+        if (problem !== undefined) {
+          throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', problem);
+        }
+        return (await guardedWrite(id, where)) !== null;
+      },
+    } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>),
     count: async (
       where: Record<string, unknown>,
       filter?: FilterExpression,

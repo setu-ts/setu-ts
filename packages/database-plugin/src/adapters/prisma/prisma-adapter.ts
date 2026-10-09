@@ -32,6 +32,7 @@ import {
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
+  writePreconditionProblem,
 } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import {
@@ -779,6 +780,20 @@ function createPrismaDataSourceInner(
     );
   }
 
+  const assertPreconditionFields = (where: Readonly<Record<string, string | number>>): void => {
+    if (
+      Object.keys(where).some((field) =>
+        field === 'AND' || field === 'OR' || field === 'NOT' || field === compoundKeyField
+      )
+    ) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'prisma',
+        'Prisma write preconditions may not name operators or the compound-key field.',
+      );
+    }
+  };
+
   return {
     async findById(id) {
       if (typeof id === 'object' && compoundKeyField === undefined) {
@@ -854,6 +869,44 @@ function createPrismaDataSourceInner(
       }
     },
 
+    async updateWhere(id, where, data) {
+      const problem = writePreconditionProblem(where, data);
+      if (problem !== undefined) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'prisma', problem);
+      }
+      assertPreconditionFields(where);
+      try {
+        return await delegate.update({
+          where: {
+            ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'updateWhere'),
+            AND: [where],
+          },
+          data,
+        });
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code === 'P2025') return null;
+        throw error;
+      }
+    },
+    async deleteWhere(id, where) {
+      const problem = writePreconditionProblem(where);
+      if (problem !== undefined) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'prisma', problem);
+      }
+      assertPreconditionFields(where);
+      try {
+        await delegate.delete({
+          where: {
+            ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'deleteWhere'),
+            AND: [where],
+          },
+        });
+        return true;
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code === 'P2025') return false;
+        throw error;
+      }
+    },
     count: (where, filter) => {
       const predicate = prismaWhere(where, filter, provider);
       return delegate.count(predicate === undefined ? {} : { where: predicate });

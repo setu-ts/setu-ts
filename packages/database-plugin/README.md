@@ -171,12 +171,11 @@ by id treats a row of another `kind` as missing. An outbox sharing an entity wit
 Cosmos container is queried as a whole) never reads, counts, transitions or deletes a business
 document that happens to carry `status: 'pending'` or `'sent'`.
 
-**Transitions are conditional.** `markSent`, `markFailure` and `release` read the row and write only
-from the expected status, so a late failure never regresses a `sent` row. `IRepository` has no
-conditional write, so the read and the write are two calls; the worst outcome of a race between them
-is one stale overwrite — a duplicate publish, never a lost row — until ROADMAP Milestone 105's
-conditional write closes the window. Absent optional columns are written as `NULL` and read back as
-absent.
+**Transitions are conditional.** `markSent`, `markFailure` and `release` check the discriminator and
+expected status within `updateWhere`/`deleteWhere`, so a late failure cannot regress a `sent` row. A
+miss is re-read for classification; unexplained misses retry at most three rounds. When the source
+lacks conditional support, the two-call fallback retains the stale-overwrite race. Absent optional
+columns are written as `NULL` and read back as absent.
 
 **Startup check.** `verify()`, run by the outbox before it schedules the relay or accepts a write,
 runs the relay's first query and a transactional read of the outbox entity, and rejects with
@@ -243,8 +242,10 @@ marker is created in its transaction, so a handler writing elsewhere gets no onc
 
 **The marker's insert is the authority.** `run` opens one transaction, creates the marker in it
 first, then runs the handler; any rejection rolls both back. Every row carries `kind: 'setu-inbox'`
-and every read requires it. The failure count and `release` are read-then-write (two calls) until
-ROADMAP Milestone 105's conditional write: two concurrent failures can record one increment.
+and every read requires it. The failure count compares `kind` and the read `attempts` value in the
+write, retrying at most five rounds; `release` requires `kind` and `status: 'parked'`. Without
+conditional support, or for a non-safe-integer stored count, the two-call fallback can lose an
+increment under concurrent failures.
 
 **Startup check.** `verify()` refuses Cosmos DB and Bigtable by adapter arm or class
 (`'cosmos-unsupported'`, `'bigtable-unsupported'`), runs retention's first query, and runs a

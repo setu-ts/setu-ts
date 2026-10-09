@@ -32,6 +32,7 @@ import {
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
+  writePreconditionProblem,
 } from '@setu-ts/common';
 import {
   DATABASE_POOL_CAPACITY,
@@ -773,6 +774,46 @@ function createDrizzleDataSourceInner(
       return rows.length > 0;
     },
 
+    async updateWhere(id, where, data) {
+      const problem = writePreconditionProblem(where, data);
+      if (problem !== undefined) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', problem);
+      }
+      const values = keyValues(id, keyColumns, `updateWhere on '${entity}'`);
+      const keyPredicates = keyColumns.map((col, index) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+      );
+      const predicate = operators.and(
+        ...keyPredicates,
+        predicateFor(drizzleTable, entity, where, operators),
+      );
+      const rows = await returningRows(
+        instance.update(drizzleTable).set(data).where!(predicate),
+        entity,
+        'update',
+      );
+      return rows[0] ?? null;
+    },
+    async deleteWhere(id, where) {
+      const problem = writePreconditionProblem(where);
+      if (problem !== undefined) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', problem);
+      }
+      const values = keyValues(id, keyColumns, `deleteWhere on '${entity}'`);
+      const keyPredicates = keyColumns.map((col, index) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+      );
+      const predicate = operators.and(
+        ...keyPredicates,
+        predicateFor(drizzleTable, entity, where, operators),
+      );
+      const rows = await returningRows(
+        instance.delete(drizzleTable).where(predicate),
+        entity,
+        'delete',
+      );
+      return rows.length > 0;
+    },
     async count(where, filter) {
       // `count(*)` is selected so the database returns one aggregate row. A
       // bare `select()` would stream every matching row back just to measure

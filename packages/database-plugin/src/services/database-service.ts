@@ -448,6 +448,8 @@ export class DatabaseService implements IDatabaseService {
     // the underlying source has no `findPage`, the wrapper fabricates none, so
     // absence still means "cannot page by cursor", never "no more rows".
     const findPageImpl = ds.findPage?.bind(ds);
+    const updateWhereImpl = ds.updateWhere?.bind(ds);
+    const deleteWhereImpl = ds.deleteWhere?.bind(ds);
 
     return {
       // Spread FIRST, so an OWN ENUMERABLE member `IDataSource` does not
@@ -482,6 +484,40 @@ export class DatabaseService implements IDatabaseService {
                 operation: 'findPage',
                 durationMs: now() - start,
                 ...(accessPath === undefined ? {} : { accessPath }),
+              });
+            }
+            return result;
+          } catch (error) {
+            throw classifiedOrOriginal(error, adapterType, entity);
+          }
+        },
+      }),
+      ...(updateWhereImpl === undefined ? {} : {
+        async updateWhere(id, where, data) {
+          const start = now();
+          try {
+            const result = await updateWhereImpl(id, where, data);
+            if (enabled && logger !== undefined) {
+              logger.debug(`[${entity}] updateWhere`, {
+                operation: 'updateWhere',
+                durationMs: now() - start,
+              });
+            }
+            return result;
+          } catch (error) {
+            throw classifiedOrOriginal(error, adapterType, entity);
+          }
+        },
+      }),
+      ...(deleteWhereImpl === undefined ? {} : {
+        async deleteWhere(id, where) {
+          const start = now();
+          try {
+            const result = await deleteWhereImpl(id, where);
+            if (enabled && logger !== undefined) {
+              logger.debug(`[${entity}] deleteWhere`, {
+                operation: 'deleteWhere',
+                durationMs: now() - start,
               });
             }
             return result;

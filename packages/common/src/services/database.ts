@@ -11,6 +11,8 @@
  * @module
  */
 
+import type { WritePrecondition } from './write-precondition.ts';
+
 /**
  * A database transaction handle.
  *
@@ -251,6 +253,36 @@ export interface IDataSource {
    * and the delete itself lands at commit.
    */
   delete(id: EntityKey): Promise<boolean>;
+
+  /**
+   * Update a row only while every precondition field equals its value.
+   * Optional permanently: absence means this source cannot write conditionally.
+   * Deferred-write transaction sources omit this member.
+   *
+   * @param id - Primary key, conjoined with the precondition
+   * @param where - Non-empty string/number equality map on stored values
+   * @param data - Non-empty update payload
+   * @returns The updated row, or `null` for a missing key or failed predicate
+   * @throws {Error} When validation or the backend refuses the write
+   * @since 0.9.0
+   */
+  updateWhere?(
+    id: EntityKey,
+    where: WritePrecondition,
+    data: Partial<Record<string, unknown>>,
+  ): Promise<Record<string, unknown> | null>;
+  /**
+   * Delete a row only while every precondition field equals its value.
+   * Optional permanently; deferred-write transaction sources omit this member.
+   *
+   * @param id - Primary key, conjoined with the precondition
+   * @param where - Non-empty string/number equality map on stored values
+   * @returns `true` when deleted, `false` for a missing key or failed predicate
+   * @throws {Error} When validation or the backend refuses the write
+   * @since 0.9.0
+   */
+  deleteWhere?(id: EntityKey, where: WritePrecondition): Promise<boolean>;
+
   /**
    * Find a page of entities by cursor pagination.
    *

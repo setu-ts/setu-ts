@@ -19,7 +19,12 @@
  * @module
  */
 
-import type { EntityKey, FilterExpression, NormalizedQuery } from '@setu-ts/common';
+import type {
+  EntityKey,
+  FilterExpression,
+  NormalizedQuery,
+  WritePrecondition,
+} from '@setu-ts/common';
 import { CloudflareUnsupportedError } from '../errors.ts';
 
 /**
@@ -381,6 +386,36 @@ export function buildDelete(target: D1Target, id: EntityKey): D1Statement {
   const sql = `DELETE FROM ${quoteIdentifier(target.table, 'table name')}` +
     `${keyPred} RETURNING ${returningCols}`;
   return { sql, params };
+}
+
+/** Conjoins a validated predicate without replacing any key condition. */
+function withPrecondition(statement: D1Statement, where: WritePrecondition): D1Statement {
+  const params = [...statement.params];
+  const predicate = Object.entries(where).map(([field, value]) => {
+    params.push(value);
+    return `${quoteIdentifier(field, 'write precondition column')} = ?${params.length}`;
+  }).join(' AND ');
+  assertParamBudget(params, 'conditional write');
+  return { sql: statement.sql.replace(' RETURNING ', ` AND ${predicate} RETURNING `), params };
+}
+
+/** Builds one UPDATE with the key AND every equality precondition. */
+export function buildUpdateWhere(
+  target: D1Target,
+  id: EntityKey,
+  where: WritePrecondition,
+  data: Partial<Record<string, unknown>>,
+): D1Statement {
+  return withPrecondition(buildUpdate(target, id, data), where);
+}
+
+/** Builds one DELETE with the key AND every equality precondition. */
+export function buildDeleteWhere(
+  target: D1Target,
+  id: EntityKey,
+  where: WritePrecondition,
+): D1Statement {
+  return withPrecondition(buildDelete(target, id), where);
 }
 
 /** The column alias the count query projects into. */

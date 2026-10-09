@@ -7,6 +7,7 @@
  * @module
  */
 import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import { expect } from '@std/expect';
 import {
   CreateTableCommand,
@@ -208,6 +209,25 @@ function loggerPlugin(logger: ILogger): IPlugin {
 }
 
 describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
+  it(
+    'M105 conditional writes persist matches and leave misses unchanged',
+    { ignore: skipReal },
+    async () => {
+      const { adapter, source } = await connectedSource('Crud', mapping(tables.crud, 'id'));
+      try {
+        await conditionalContract(
+          source,
+          'conditional',
+          'missing',
+          { id: 'conditional', role: 'owner', name: 'old' },
+          { role: 'owner' },
+          { name: 'new' },
+        );
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
   beforeAll(async () => {
     if (skipReal) return;
     admin = new DynamoDBClient({ endpoint, region, credentials });

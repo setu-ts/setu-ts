@@ -52,6 +52,26 @@ async function bootApp(): Promise<{
 }
 
 describe('D1 through DatabasePlugin — the repository surface', () => {
+  it('conditional writes persist matches and leave misses unchanged through the repository', async () => {
+    const { app, db } = await bootApp();
+    try {
+      const repo = db.getRepository<User>('User');
+      await repo.create({ id: 'a', name: 'old', age: 1 });
+      expect(await repo.updateWhere!('a', { age: 2 }, { name: 'bad' })).toBeNull();
+      expect(await repo.deleteWhere!('a', { age: 2 })).toBe(false);
+      expect(await repo.updateWhere!('missing', { age: 1 }, { name: 'bad' })).toBeNull();
+      expect(await repo.deleteWhere!('missing', { age: 1 })).toBe(false);
+      expect(await repo.findById('a')).toEqual({ id: 'a', name: 'old', age: 1 });
+      expect(await repo.updateWhere!('a', { age: 1 }, { name: 'new' })).toMatchObject({
+        name: 'new',
+      });
+      expect(await repo.findById('a')).toMatchObject({ name: 'new' });
+      expect(await repo.deleteWhere!('a', { age: 1, name: 'new' })).toBe(true);
+      expect(await repo.findById('a')).toBeNull();
+    } finally {
+      await app.stop();
+    }
+  });
   it('creates a user and reads it back through findById', async () => {
     const { app, db } = await bootApp();
     const users = db.getRepository<User>('User');

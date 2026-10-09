@@ -14,12 +14,9 @@
  * reads, counts, transitions or deletes a business document that happens to
  * carry `status: 'pending'` or `'sent'`.
  *
- * **Transitions are conditional, as two calls.** Each reads the row and writes
- * only from the expected status, so a late failure can never regress a `sent`
- * row. `IRepository` has no conditional write, so between the read and the
- * write another relay can change the row; the worst outcome is one stale
- * overwrite (a duplicate publish, never a loss). Closing the window needs the
- * conditional write ROADMAP Milestone 105 owns.
+ * **Transitions use native conditional writes.** The expected kind and status
+ * guard each write, preventing a stale failure from regressing a sent row.
+ * Sources lacking the member keep the read-then-write fallback and its race.
  *
  * **Absent optional columns are written as `null`** and read back as absent.
  * A SQL column has no "absent" state, and the memory adapter refuses a
@@ -45,6 +42,7 @@ import { CAPABILITIES, createCapabilityToken, OUTBOX_RECORD_KIND } from '@setu-t
 import { UnsupportedQueryFeatureError } from '../errors.ts';
 import { causeChain } from '../errors/classify.ts';
 import type { IDatabaseService, IRepository } from '../interfaces/index.ts';
+import { conditionalDelete, conditionalUpdate } from '../repositories/conditional-write.ts';
 import { OutboxStoreUnavailableError } from './errors.ts';
 
 /**
@@ -253,19 +251,15 @@ export class DatabaseOutboxStore implements IOutboxStore {
     id: string,
     update: { readonly settledAt: number; readonly sentBy: string; readonly deleteNow: boolean },
   ): Promise<OutboxTransition> {
-    const row = await this.#find(id);
-    if (row === null) return { outcome: 'missing' };
-    const status = statusOf(row, id);
-    if (status !== 'pending') return notPending(status, row);
-    if (update.deleteNow) {
-      return (await this.#repo().delete(id)) ? { outcome: 'applied' } : { outcome: 'missing' };
-    }
-    await this.#repo().update(id, {
-      status: 'sent',
-      settledAt: update.settledAt,
-      sentBy: update.sentBy,
-    });
-    return { outcome: 'applied' };
+    return await this.#transition(
+      id,
+      'pending',
+      update.deleteNow ? undefined : {
+        status: 'sent',
+        settledAt: update.settledAt,
+        sentBy: update.sentBy,
+      },
+    );
   }
 
   /** @inheritdoc */
@@ -278,32 +272,49 @@ export class DatabaseOutboxStore implements IOutboxStore {
       readonly status: 'pending' | 'failed';
     },
   ): Promise<OutboxTransition> {
-    const row = await this.#find(id);
-    if (row === null) return { outcome: 'missing' };
-    const status = statusOf(row, id);
-    if (status !== 'pending') return notPending(status, row);
-    await this.#repo().update(id, {
-      attempts: update.attempts,
-      lastError: update.lastError,
-      availableAt: update.availableAt,
-      status: update.status,
-    });
-    return { outcome: 'applied' };
+    return await this.#transition(id, 'pending', { ...update });
   }
 
   /** @inheritdoc */
   async release(id: string, action: 'retry' | 'discard', now: number): Promise<OutboxTransition> {
-    const row = await this.#find(id);
-    if (row === null) return { outcome: 'missing' };
-    const status = statusOf(row, id);
-    if (status !== 'failed') return { outcome: 'not-failed', status };
-    await this.#repo().update(
+    return await this.#transition(
       id,
+      'failed',
       action === 'retry'
         ? { status: 'pending', attempts: 0, availableAt: now }
         : { status: 'discarded', settledAt: now },
     );
-    return { outcome: 'applied' };
+  }
+
+  /** Native transition, with bounded classifying re-reads and the legacy fallback. */
+  async #transition(
+    id: string,
+    expected: 'pending' | 'failed',
+    data?: Row,
+  ): Promise<OutboxTransition> {
+    const repo = this.#repo();
+    const where = { kind: OUTBOX_RECORD_KIND, status: expected };
+    for (let round = 0; round < 3; round += 1) {
+      const result = data === undefined
+        ? await conditionalDelete(repo, id, where)
+        : await conditionalUpdate(repo, id, where, data);
+      if (result.outcome === 'applied') return { outcome: 'applied' };
+      const row = await this.#find(id);
+      if (row === null) return { outcome: 'missing' };
+      const status = statusOf(row, id);
+      if (expected === 'pending' && status !== 'pending') return notPending(status, row);
+      if (expected === 'failed' && status !== 'failed') return { outcome: 'not-failed', status };
+      if (result.outcome === 'unsupported') {
+        if (data === undefined) {
+          return (await repo.delete(id)) ? { outcome: 'applied' } : { outcome: 'missing' };
+        }
+        await repo.update(id, data);
+        return { outcome: 'applied' };
+      }
+    }
+    throw new Error(
+      `Outbox entity '${this.#entity}' transition encountered contention in all 3 rounds.`,
+    );
   }
 
   /** @inheritdoc */
