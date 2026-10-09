@@ -1182,6 +1182,37 @@ MongoDB route; the `'mongodb'` provider string on the Prisma union is retained o
 it is a published export (AI_GUIDELINES §9.2), and the `contains`-to-`$regex` reasoning behind
 `PASSTHROUGH_PROVIDERS` stays correct for any future Prisma-Mongo client.
 
+### Transactional idempotency store (M109b)
+
+`createDatabaseIdempotencyStore(options?: DatabaseIdempotencyStoreOptions)` returns a
+`RegistryFactory<ITransactionalIdempotencyStore>` for `IdempotencyPlugin`'s `transactional.store`.
+`entity` defaults to `'Idempotency'`; `database` selects `database.<name>`, or the default
+`CAPABILITIES.DATABASE` when omitted or `'default'`. The factory resolves the database and runtime
+services at initialization. The record and business work must use the same database.
+
+`run` creates a claim (`id`), executes business work through that transaction's `IUnitOfWork`,
+creates the encoded result (`${id}.r`), and commits. It uses two creates, with no update or delete.
+`find` requires both rows with the idempotency kind and their correct roles. `purge` preserves
+incomplete, foreign-kind and invalid-envelope records; it deletes complete expired records only.
+`verify` runs the two-create pattern and rolls it back before the first call.
+
+`TransactionalStoreUnavailableError` carries `entity` and `reason`: `'cosmos-unsupported'`,
+`'bigtable-unsupported'`, `'mongodb-standalone'` or `'entity-unavailable'`. An adapter refusal can
+be retained as its `cause`. A missing/unreadable entity fails startup.
+
+| Backend              | Tier-C behavior                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Memory               | Supported in one process; a loser is refused at commit and replays.                                                                                                                                                                                                                                                                                                                         |
+| PostgreSQL / Drizzle | Supported; the claim insert blocks the loser until the winner commits, then the loser replays. Each blocked call holds a connection.                                                                                                                                                                                                                                                        |
+| PostgreSQL / Prisma  | Supported; a loser waiting beyond its transaction timeout can reject with `conflict`.                                                                                                                                                                                                                                                                                                       |
+| SQLite / Drizzle     | Supported with a Promise-aware transaction bridge; one writer at a time, with replay or busy/locked conflict depending on timing.                                                                                                                                                                                                                                                           |
+| D1                   | Supported via the custom adapter arm; deferred batch commits one business write, but concurrent calls execute `fn` twice and its outside effects run twice.                                                                                                                                                                                                                                 |
+| MongoDB replica set  | Supported with pre-existing collections; the concurrent loser gets `conflict`, then replays on retry.                                                                                                                                                                                                                                                                                       |
+| DynamoDB             | Supported with deferred `TransactWriteItems`; a concurrent loser replays or gets `conflict`. Both calls execute `fn`; database work commits once, outside effects run twice. `TransactionConflictException` is documented-unverified on DynamoDB Local (M90f). Eventually consistent reads can also miss a just-committed record; commit uniqueness still prevents a second business write. |
+| MongoDB standalone   | Refused with `mongodb-standalone`.                                                                                                                                                                                                                                                                                                                                                          |
+| Cosmos DB            | Refused with `cosmos-unsupported`: the record cannot share the business partition.                                                                                                                                                                                                                                                                                                          |
+| Bigtable             | Refused with `bigtable-unsupported`.                                                                                                                                                                                                                                                                                                                                                        |
+
 ### Repository Pattern
 
 ```typescript
@@ -11653,6 +11684,38 @@ Object) and the decorator plugin can consume them without importing one another 
 lives in `@setu-ts/idempotency-plugin`; see that package's section. The guarantee is **no duplicate
 processing within the limits of the store** — it is not a single-execution guarantee.
 
+Tier C adds `ITransactionalIdempotencyStore`, with `find(id)`, `run(claim, work)`,
+`purge(before, limit)` and `verify()`. `run` owns the transaction and passes its scope to `work`,
+which returns `{ result: string, value: R }`. `find` returns a `TransactionalIdempotencyRecord` or
+`undefined` when either row is missing or foreign. `IDEMPOTENCY_RECORD_KIND` is the exported value
+`'setu-idempotency'`.
+
+`TransactionalIdempotencyClaim` carries `id`, `fingerprint`, `createdAt` and `expiresAt`.
+`TransactionalIdempotencyRecord` adds the encoded `result`. The timestamps are epoch milliseconds;
+`expiresAt` makes a record eligible for purge, and it remains authoritative until purged.
+
+`IdempotentWithinOptions` requires `key`, `namespace` and `scope`; it accepts optional
+`fingerprint: unknown` and `ttlMs: number`. Keys are 1–255 printable non-space ASCII characters,
+excluding `"`; namespace is 1–256 printable ASCII characters, and scope is 0–512. Scope must come
+from authenticated identity; `''` deliberately makes the key global. The default TTL is 86,400,000
+ms, bounded to an integer from 60,000 to 2,592,000,000 ms. `IdempotentWithinResult<R>` carries
+`value: R` and `replayed: boolean`; value is the JSON round trip on both paths, so dates become
+strings and JSON-omitted members are absent.
+
+`IIdempotencyService` gains two **required** members, breaking custom implementations:
+
+```typescript
+within<R, S = unknown>(
+  options: IdempotentWithinOptions,
+  fn: (scope: S) => Promise<R>,
+): Promise<IdempotentWithinResult<R>>;
+purgeTransactional(): Promise<number>;
+```
+
+`S` is the caller's unchecked annotation of the store scope, normally `IUnitOfWork`. Without a
+configured transactional store, both members reject with
+`IdempotencyConfigurationError('transactional', …)`. A replacement provider must implement both.
+
 `WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
 either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
 is an optional readonly array of those guards; the matched route runs them in declared order before
@@ -12720,6 +12783,7 @@ interface ClientOptions {
   retry?: ClientRetryPolicy;
   circuitBreaker?: CircuitBreakerPolicy;
   rateLimit?: ClientRateLimitPolicy;
+  idempotency?: ClientIdempotencyOptions;
   requestInterceptors?: ClientRequestInterceptor[];
   responseInterceptors?: ClientResponseInterceptor[];
 }
@@ -12761,9 +12825,26 @@ interface ClientRequest<TBody = unknown> {
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   json?: TBody;
+  idempotencyKey?: string;
   signal?: AbortSignal;
 }
 ```
+
+`ClientRequest.idempotencyKey` supplies a caller-owned key. `ClientOptions.idempotency` enables
+generated keys through `ClientIdempotencyOptions`: `methods?: readonly string[]` defaults to
+`['POST', 'PATCH']`, `header?: string` defaults to `'Idempotency-Key'`, and
+`generateKey?: () => string` defaults to 32 lowercase hex characters from 16 random bytes. Methods
+must be 1–16 HTTP tokens and the header must be an HTTP token. Default key generation requires
+`crypto.getRandomValues` at construction. Both supplied and generated keys are validated before
+network I/O: 1–255 characters from `0x21`–`0x7E`, excluding `"`.
+
+One key is set before request interceptors and reused for every retry attempt. A static default key
+header is refused when `idempotency` is configured, as is a supplied key conflicting with a merged
+request header. Merely setting a header does not opt into keyed retries. With a retry policy, a
+keyed request can retry any method, including `409`, as well as the existing 408/425/429/5xx and
+transport failures. A keyed request outside the safe method set (for example, POST or PATCH) never
+retries a parsing or interceptor failure after a `2xx` arrives. Safe methods retain their existing
+retry behavior. Without either idempotency option, retry behavior is unchanged.
 
 ### ClientResponse
 

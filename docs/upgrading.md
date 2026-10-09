@@ -12,6 +12,18 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Implement both new idempotency service members
+
+Custom `IIdempotencyService` implementations must add the required
+`within<R, S = unknown>(options, fn): Promise<IdempotentWithinResult<R>>` and
+`purgeTransactional(): Promise<number>` members. Import the option and result types from
+`@setu-ts/common`. A provider supporting tier C must commit the claim, business work and encoded
+result together, and return the JSON round trip of `fn`'s result on both first execution and replay.
+A provider without tier C should reject both methods with
+`IdempotencyConfigurationError('transactional', …)` from `@setu-ts/idempotency-plugin`. Applications
+already using `IdempotencyPlugin` need no service implementation changes; configure its
+`transactional` option to enable tier C.
+
 ### Set `maxWorkers` to size worker pools across task modules
 
 WorkerPoolPlugin now caps the sum of worker slots across modules. The default is the largest of
