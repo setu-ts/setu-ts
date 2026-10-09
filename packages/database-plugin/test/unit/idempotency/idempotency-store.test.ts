@@ -169,6 +169,31 @@ describe('DatabaseIdempotencyStore.find (M109b §3.1)', () => {
 });
 
 describe('DatabaseIdempotencyStore.purge (M109b §3.10)', () => {
+  for (const result of ['not JSON', 'null', '1', '[]', '{"wrong":1}', '{"v":1,"extra":2}']) {
+    it(`preserves a record with invalid envelope ${result}`, async () => {
+      const service = await memoryService();
+      const store = storeOver(service);
+      await store.run(claim('invalid'), () => Promise.resolve({ result, value: undefined }));
+      const before = await allRows(service);
+      expect(await store.purge(3_000, 10)).toBe(0);
+      expect(await allRows(service)).toEqual(before);
+    });
+  }
+  it('preserves incomplete and foreign-result records while purging valid values', async () => {
+    const service = await memoryService();
+    const store = storeOver(service);
+    for (const label of ['orphan', 'foreign', 'valid']) {
+      await store.run(claim(label), () => Promise.resolve({ result: '{"v":1}', value: 1 }));
+    }
+    const repo = service.getRepository<Row>(ENTITY);
+    await repo.delete(`${claim('orphan').id}.r`);
+    await repo.update(`${claim('foreign').id}.r`, { kind: 'foreign' });
+    expect(await store.purge(3_000, 10)).toBe(1);
+    expect((await allRows(service)).map((r) => r.id).sort()).toEqual(
+      [claim('orphan').id, claim('foreign').id, `${claim('foreign').id}.r`].sort(),
+    );
+  });
+
   it('deletes both rows of an expired record', async () => {
     const service = await memoryService();
     const store = storeOver(service);

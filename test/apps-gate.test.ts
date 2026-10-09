@@ -446,6 +446,16 @@ describe('real-backend CI wiring', () => {
           '127.0.0.1:8086',
           '127.0.0.1:8082',
         ]);
+      } else if (pkg === 'idempotency-plugin') {
+        expect(config.test?.permissions?.net).toEqual([
+          '127.0.0.1:6379',
+          'localhost:6379',
+          '127.0.0.1:5433',
+          '127.0.0.1:27017',
+          '127.0.0.1:27018',
+          '127.0.0.1:8000',
+          '127.0.0.1:8086',
+        ]);
       } else if (pkg === 'auth-plugin') {
         // M100b §6: plus the real-provider Keycloak suite, endpoint-scoped.
         expect(config.test?.permissions?.net).toEqual([

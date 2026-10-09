@@ -78,6 +78,19 @@ const RESULT_SUFFIX = '.r';
 /** A row as the adapter hands it back. */
 type Row = Record<string, unknown>;
 
+/** A retention purge owns only complete records with the tier-C JSON envelope. */
+function isResultEnvelope(text: string): boolean {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === 0 || (keys.length === 1 && keys[0] === 'v');
+}
+
 /** The claim row for a claim. */
 function claimRow(claim: TransactionalIdempotencyClaim): Row {
   return {
@@ -192,6 +205,9 @@ export class DatabaseIdempotencyStore implements ITransactionalIdempotencyStore 
     let deleted = 0;
     for (const row of rows) {
       const id = String(row.id);
+      // An orphan or tampered result is not a record the purge owns (§10 O4).
+      const record = await this.find(id);
+      if (record === undefined || !isResultEnvelope(record.result)) continue;
       await repo.delete(id as EntityKey);
       await repo.delete(`${id}${RESULT_SUFFIX}` as EntityKey);
       deleted += 1;
