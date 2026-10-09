@@ -12849,11 +12849,14 @@ network I/O: 1–255 characters from `0x21`–`0x7E`, excluding `"`.
 
 One key is set before request interceptors and reused for every retry attempt. A static default key
 header is refused when `idempotency` is configured, as is a supplied key conflicting with a merged
-request header. Merely setting a header does not opt into keyed retries. With a retry policy, a
-keyed request can retry any method, including `409`, as well as the existing 408/425/429/5xx and
-transport failures. A keyed request outside the safe method set (for example, POST or PATCH) never
-retries a parsing or interceptor failure after a `2xx` arrives. Safe methods retain their existing
-retry behavior. Without either idempotency option, retry behavior is unchanged.
+request header. When `idempotency` is configured and a request in one of its methods already carries
+the configured header, that header's value is validated and used as the key, and no key is generated
+— the path a generated operation takes when its document declares the header. Without `idempotency`,
+merely setting the header does not opt into keyed retries. With a retry policy, a keyed request can
+retry any method, including `409`, as well as the existing 408/425/429/5xx and transport failures. A
+keyed request outside the safe method set (for example, POST or PATCH) never retries a parsing or
+interceptor failure after a `2xx` arrives. Safe methods retain their existing retry behavior.
+Without either idempotency option, retry behavior is unchanged.
 
 Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
 with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.

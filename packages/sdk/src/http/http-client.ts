@@ -218,11 +218,18 @@ export class HttpClient implements IHttpClient {
       );
     } else if (idempotency !== undefined && idempotency.methods.has(req.method.toUpperCase())) {
       keyed = true;
-      setIdempotencyHeader(
-        headers,
-        idempotency.header,
-        validateIdempotencyKey(idempotency.generateKey(), 'idempotency.generateKey()'),
-      );
+      // A caller's own header is the key — a generated operation whose document
+      // declares the header passes it this way — so nothing is generated.
+      const supplied = headers.get(idempotency.header);
+      if (supplied !== null) {
+        validateIdempotencyKey(supplied, `ClientRequest.headers['${idempotency.header}']`);
+      } else {
+        setIdempotencyHeader(
+          headers,
+          idempotency.header,
+          validateIdempotencyKey(idempotency.generateKey(), 'idempotency.generateKey()'),
+        );
+      }
     }
 
     // Run request interceptors.

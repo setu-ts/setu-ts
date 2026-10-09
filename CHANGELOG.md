@@ -24,15 +24,16 @@ All notable changes to this project are documented here. The format follows
   gains `createDatabaseIdempotencyStore` (with `DatabaseIdempotencyStoreOptions`) and
   `TransactionalStoreUnavailableError`; and `@setu-ts/sdk` gains `ClientOptions.idempotency`
   (`ClientIdempotencyOptions`) and `ClientRequest.idempotencyKey`, so a keyed request keeps ONE key
-  across every retry attempt and may retry any method and `409`, but keyed `POST`/`PATCH` requests
-  are never retried after a `2xx` response arrives, including a body-read failure or a throwing
-  response interceptor; the original thrown value reaches the caller unchanged. On both the first
-  call and a replay, `within` returns the JSON round trip of what `fn` returned: dates become ISO
-  strings, `undefined` object members are absent, and nested `toJSON()` output is respected. The
-  service also exposes `purgeTransactional()` for retention cleanup. On PostgreSQL (Prisma), a
-  concurrent loser blocks on the winner's claim insert, which the adapter's `transactionTimeout`
-  does not interrupt, and then replays; a loser whose own work exceeds that timeout answers
-  `'store-failed'` (`503`), with no timeout-to-`409` mapping.
+  across every retry attempt (a request that already carries the configured header uses it as the
+  key) and may retry any method and `409`, but keyed `POST`/`PATCH` requests are never retried after
+  a `2xx` response arrives, including a body-read failure or a throwing response interceptor; the
+  original thrown value reaches the caller unchanged. On both the first call and a replay, `within`
+  returns the JSON round trip of what `fn` returned: dates become ISO strings, `undefined` object
+  members are absent, and nested `toJSON()` output is respected. The service also exposes
+  `purgeTransactional()` for retention cleanup. On PostgreSQL (Prisma), a concurrent loser blocks on
+  the winner's claim insert, which the adapter's `transactionTimeout` does not interrupt, and then
+  replays; a loser whose own work exceeds that timeout answers `'store-failed'` (`503`), with no
+  timeout-to-`409` mapping.
 
 - **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
   questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup

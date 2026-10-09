@@ -208,6 +208,42 @@ describe('createClient idempotency wiring (M109b §3.8)', () => {
     expect(calls()).toBe(0);
   });
 
+  it('uses a caller\u2019s own key header as the key instead of generating one', async () => {
+    const { fetch, keys, calls } = recordingFetch([500, 200]);
+    let generated = 0;
+    const client = createClient({
+      baseUrl: 'http://x',
+      fetch,
+      timing: timing(),
+      retry: { limit: 2, delay: 1, backoff: 'fixed' },
+      idempotency: { generateKey: () => `gen-${++generated}` },
+    });
+    await client.request({
+      method: 'POST',
+      path: 'orders',
+      json: {},
+      headers: { 'Idempotency-Key': 'from-header' },
+    });
+    // Keyed: the POST was retried, with the caller's key on both attempts.
+    expect(calls()).toBe(2);
+    expect(keys).toEqual(['from-header', 'from-header']);
+    expect(generated).toBe(0);
+  });
+
+  it('refuses an unusable caller key header before any network call', async () => {
+    const { fetch, calls } = recordingFetch([200]);
+    const client = createClient({ baseUrl: 'http://x', fetch, timing: timing(), idempotency: {} });
+    await expect(
+      client.request({
+        method: 'POST',
+        path: 'orders',
+        json: {},
+        headers: { 'Idempotency-Key': 'has space' },
+      }),
+    ).rejects.toThrow(/ClientRequest\.headers\['Idempotency-Key'\] must be 1 to 255/);
+    expect(calls()).toBe(0);
+  });
+
   it('validates a generated key\u2019s output on every call, before any network call', async () => {
     const { fetch, calls } = recordingFetch([200]);
     const client = createClient({
