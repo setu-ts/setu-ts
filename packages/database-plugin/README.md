@@ -126,9 +126,15 @@ that strategy — `'tenant_id'` by default, `database: new ColumnPerTenant('org_
 there is one place to name it. Lookups by key go through the repository's own `findById`, so an
 entity whose primary key is not `id` (a MongoDB `primaryKey: 'user_id'`, a composite key) is
 addressed the way its adapter is configured; the tenant column is then checked on the row that comes
-back. `DatabaseTenantDataStore` is also exported for an application that holds its own
-`IDatabaseService` and constructs the store directly; its optional second constructor argument names
-the column for a store used outside the multi-tenancy plugin.
+back. `update` and `delete` guard the tenant column in the write itself through `updateWhere` /
+`deleteWhere`, which every built-in non-transactional data source offers. A custom data source
+without them falls back to an ownership read followed by a key-addressed write: if the row is
+deleted and a row from another tenant is created under the same caller-supplied key in between, the
+write lands on that row (a `delete` still reports `true`; an `update` refuses to return the foreign
+row, but has already written it). Generated keys never reuse a key, so let the backend generate
+them, or implement the two members. `DatabaseTenantDataStore` is also exported for an application
+that holds its own `IDatabaseService` and constructs the store directly; its optional second
+constructor argument names the column for a store used outside the multi-tenancy plugin.
 
 ## Transactional outbox store
 

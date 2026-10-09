@@ -1603,8 +1603,10 @@ Deferred transaction sources (memory overlay, D1 batch, DynamoDB buffer, Cosmos 
 omit both members: the result is unknown until commit, so the repository refuses
 `'conditional-write'`. Prisma, Drizzle and MongoDB transaction sources carry them. The tenant,
 outbox and inbox bridges use the conditional path when offered and fall back only on absence or that
-named refusal. Other errors propagate. Bigtable reads an updated row back separately; the tenant
-bridge checks the returned tenant on both paths before returning it.
+named refusal. Other errors propagate. On that fallback the tenant bridge reads ownership and then
+writes by key, so a delete-and-recreate under a reused caller-supplied key in between can move the
+write onto another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back
+separately; the tenant bridge checks the returned tenant on both paths before returning it.
 
 **Stored representation.** Predicate scalars compare with the stored representation. DynamoDB date
 attributes encoded as ISO strings require the ISO string; Bigtable's typed/json codecs use their
