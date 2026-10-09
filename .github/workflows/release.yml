@@ -63,6 +63,8 @@ jobs:
       # lesson). Absent here until v0.2.0, so both suites skipped silently on
       # every tag run while passing on every PR.
       DYNAMODB_ENDPOINT: http://127.0.0.1:8000
+      # M109b within-real uses this separate guard for the same emulator.
+      DYNAMODB_ENDPOINT_URL: http://127.0.0.1:8000
       BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086
       # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on this
       # exact base URL, which is also the host:port the manifest's net grant scopes.

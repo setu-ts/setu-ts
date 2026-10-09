@@ -20,6 +20,21 @@ async function readJson<T>(path: string): Promise<T> {
 }
 
 describe('application gate configuration', () => {
+  it('supplies the M109b within-real backend guards in every suite workflow', async () => {
+    for (const path of ['ci', 'drift', 'release']) {
+      const workflow = await Deno.readTextFile(`.github/workflows/${path}.yml`);
+      expect(workflow).toContain('DYNAMODB_ENDPOINT_URL: http://127.0.0.1:8000');
+      expect(workflow).toContain(
+        'OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      );
+      expect(workflow).toContain(
+        'MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
+      );
+      expect(workflow).toContain('MONGODB_URI: mongodb://127.0.0.1:27017');
+      expect(workflow).toContain('BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086');
+    }
+  });
+
   it('fails CI when the example gate changes tracked application files', async () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     const start = workflow.indexOf('\n  deno:');
@@ -445,6 +460,16 @@ describe('real-backend CI wiring', () => {
           '127.0.0.1:8000',
           '127.0.0.1:8086',
           '127.0.0.1:8082',
+        ]);
+      } else if (pkg === 'idempotency-plugin') {
+        expect(config.test?.permissions?.net).toEqual([
+          '127.0.0.1:6379',
+          'localhost:6379',
+          '127.0.0.1:5433',
+          '127.0.0.1:27017',
+          '127.0.0.1:27018',
+          '127.0.0.1:8000',
+          '127.0.0.1:8086',
         ]);
       } else if (pkg === 'auth-plugin') {
         // M100b §6: plus the real-provider Keycloak suite, endpoint-scoped.

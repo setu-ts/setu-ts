@@ -1182,6 +1182,45 @@ MongoDB route; the `'mongodb'` provider string on the Prisma union is retained o
 it is a published export (AI_GUIDELINES §9.2), and the `contains`-to-`$regex` reasoning behind
 `PASSTHROUGH_PROVIDERS` stays correct for any future Prisma-Mongo client.
 
+### Transactional idempotency store (M109b)
+
+`createDatabaseIdempotencyStore(options?: DatabaseIdempotencyStoreOptions)` returns a
+`RegistryFactory<ITransactionalIdempotencyStore>` for `IdempotencyPlugin`'s `transactional.store`.
+`entity` defaults to `'Idempotency'`; `database` selects `database.<name>`, or the default
+`CAPABILITIES.DATABASE` when omitted or `'default'`. The factory resolves the database and runtime
+services at initialization. The record and business work must use the same database.
+
+`run` creates a claim (`id`), executes business work through that transaction's `IUnitOfWork`,
+creates the encoded result (`${id}.r`), and commits. It uses two creates, with no update or delete.
+`find` requires both rows with the idempotency kind and their correct roles. `purge` preserves
+incomplete, foreign-kind and invalid-envelope records, and deletes a complete record only when an
+in-transaction re-read still finds it expired. That re-read narrows but does not close one race: two
+concurrent purges can delete a record a client re-created between them (closed on MongoDB; about one
+round trip on PostgreSQL READ COMMITTED; the deferred commit on DynamoDB and D1). A conditional
+delete (M105) would close it. `verify` runs the two-create pattern and rolls it back before the
+first call.
+
+`TransactionalStoreUnavailableError` carries `entity` and `reason`: `'cosmos-unsupported'`,
+`'bigtable-unsupported'`, `'mongodb-standalone'` or `'entity-unavailable'`. An adapter refusal can
+be retained as its `cause`. A missing/unreadable entity fails startup.
+
+| Backend              | Tier-C behavior                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Memory               | Supported in one process; a loser is refused at commit and replays.                                                                                                                                                                                                                                                                                                                          |
+| PostgreSQL / Drizzle | Supported; the claim insert blocks the loser until the winner commits, then the loser replays. Each blocked call holds a connection.                                                                                                                                                                                                                                                         |
+| PostgreSQL / Prisma  | As Drizzle: a concurrent loser blocks on the winner's claim insert before running `fn`, then replays. Prisma's `transactionTimeout` does not interrupt that wait (measured with a 1 s loser timeout against a winner holding the key 8 s: the loser waited and replayed). A loser whose own work exceeds its timeout answers `'store-failed'` (`503`); there is no timeout-to-`409` mapping. |
+| SQLite / Drizzle     | Supported with a Promise-aware transaction bridge; one writer at a time, with replay or busy/locked conflict depending on timing.                                                                                                                                                                                                                                                            |
+| D1                   | Supported via the custom adapter arm; deferred batch commits one business write, but concurrent calls execute `fn` twice and its outside effects run twice.                                                                                                                                                                                                                                  |
+| MongoDB replica set  | Supported with pre-existing collections; the concurrent loser gets `conflict`, then replays on retry.                                                                                                                                                                                                                                                                                        |
+| DynamoDB             | Supported with deferred `TransactWriteItems`; a concurrent loser replays or gets `conflict`. Both calls execute `fn`; database work commits once, outside effects run twice. `TransactionConflictException` is documented-unverified on DynamoDB Local (M90f). Eventually consistent reads can also miss a just-committed record; commit uniqueness still prevents a second business write.  |
+| MongoDB standalone   | Refused with `mongodb-standalone`.                                                                                                                                                                                                                                                                                                                                                           |
+| Cosmos DB            | Refused with `cosmos-unsupported`: the record cannot share the business partition.                                                                                                                                                                                                                                                                                                           |
+| Bigtable             | Refused with `bigtable-unsupported`.                                                                                                                                                                                                                                                                                                                                                         |
+
+**Not verified:** DynamoDB's overlapping-service `TransactionConflictException` outcome on DynamoDB
+Local (M90f). Tier C was driven against a real Prisma 7.10 client on PostgreSQL once, by hand; the
+committed real-backend suite uses Drizzle.
+
 ### Repository Pattern
 
 ```typescript
@@ -11653,6 +11692,39 @@ Object) and the decorator plugin can consume them without importing one another 
 lives in `@setu-ts/idempotency-plugin`; see that package's section. The guarantee is **no duplicate
 processing within the limits of the store** — it is not a single-execution guarantee.
 
+Tier C adds `ITransactionalIdempotencyStore`, with `find(id)`, `run(claim, work)`,
+`purge(before, limit)` and `verify()`. `run` owns the transaction and passes its scope to `work`,
+which returns `{ result: string, value: R }`. `find` returns a `TransactionalIdempotencyRecord` or
+`undefined` when either row is missing or foreign. `IDEMPOTENCY_RECORD_KIND` is the exported value
+`'setu-idempotency'`.
+
+`TransactionalIdempotencyClaim` carries `id`, `fingerprint`, `createdAt` and `expiresAt`.
+`TransactionalIdempotencyRecord` adds the encoded `result`. The timestamps are epoch milliseconds;
+`expiresAt` makes a record eligible for purge, and it remains authoritative until purged.
+
+`IdempotentWithinOptions` requires `key`, `namespace` and `scope`; it accepts optional
+`fingerprint: unknown` and `ttlMs: number`. Keys are 1–255 printable non-space ASCII characters,
+excluding `"`; namespace is 1–256 printable ASCII characters, and scope is 0–512. Scope must come
+from authenticated identity, typically `JSON.stringify([tenantId, principalId])`; `''` deliberately
+makes the key global. Do not join parts with a separator that can appear inside them: distinct
+identities can collide. The default TTL is 86,400,000 ms, bounded to an integer from 60,000 to
+2,592,000,000 ms. `IdempotentWithinResult<R>` carries `value: R` and `replayed: boolean`; value is
+the JSON round trip on both paths, so dates become strings and JSON-omitted members are absent.
+
+The new `IIdempotencyService` contract includes two **required** tier-C members:
+
+```typescript
+within<R, S = unknown>(
+  options: IdempotentWithinOptions,
+  fn: (scope: S) => Promise<R>,
+): Promise<IdempotentWithinResult<R>>;
+purgeTransactional(): Promise<number>;
+```
+
+`S` is the caller's unchecked annotation of the store scope, normally `IUnitOfWork`. Without a
+configured transactional store, both members reject with
+`IdempotencyConfigurationError('transactional', …)`. A replacement provider must implement both.
+
 `WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
 either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
 is an optional readonly array of those guards; the matched route runs them in declared order before
@@ -12720,6 +12792,7 @@ interface ClientOptions {
   retry?: ClientRetryPolicy;
   circuitBreaker?: CircuitBreakerPolicy;
   rateLimit?: ClientRateLimitPolicy;
+  idempotency?: ClientIdempotencyOptions;
   requestInterceptors?: ClientRequestInterceptor[];
   responseInterceptors?: ClientResponseInterceptor[];
 }
@@ -12761,9 +12834,35 @@ interface ClientRequest<TBody = unknown> {
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   json?: TBody;
+  idempotencyKey?: string;
   signal?: AbortSignal;
 }
 ```
+
+`ClientRequest.idempotencyKey` supplies a caller-owned key. `ClientOptions.idempotency` enables
+generated keys through `ClientIdempotencyOptions`: `methods?: readonly string[]` defaults to
+`['POST', 'PATCH']`, `header?: string` defaults to `'Idempotency-Key'`, and
+`generateKey?: () => string` defaults to 32 lowercase hex characters from 16 random bytes. Methods
+must be 1–16 HTTP tokens and the header must be an HTTP token. Default key generation requires
+`crypto.getRandomValues` at construction. Both supplied and generated keys are validated before
+network I/O: 1–255 characters from `0x21`–`0x7E`, excluding `"`.
+
+One key is set before request interceptors and reused for every retry attempt. A static default key
+header is refused when `idempotency` is configured, as is a supplied key conflicting with a merged
+request header. When `idempotency` is configured and a request in one of its methods already carries
+the configured header, that header's value is validated and used as the key, and no key is generated
+— the path a generated operation takes when its document declares the header. Without `idempotency`,
+merely setting the header does not opt into keyed retries. With a retry policy, a keyed request can
+retry any method, including `409`, as well as the existing 408/425/429/5xx and transport failures. A
+keyed request outside the safe method set (for example, POST or PATCH) never retries a parsing or
+interceptor failure after a `2xx` arrives. Safe methods retain their existing retry behavior.
+Without either idempotency option, retry behavior is unchanged.
+
+Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
+with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.
+A keyed request carries a non-safelisted header, so a cross-origin browser call triggers a CORS
+preflight; the server must list the configured header (default `Idempotency-Key`) in
+`Access-Control-Allow-Headers`.
 
 ### ClientResponse
 
@@ -14059,10 +14158,15 @@ A repeated HTTP request, queue job or broker message is recognised by its key, a
 completed work is answered from its record or skipped instead of running again, over one
 `claim`/`complete`/`release` state machine and an in-process, Redis or Cloudflare Durable Object
 store. The guarantee is **no duplicate processing within the limits of the store** — it is not a
-single-execution guarantee. See
-[`packages/idempotency-plugin/README.md`](packages/idempotency-plugin/README.md) for placement, the
-HTTP check order, failure classification, replay rules, the ingress allow-list and the store
-guarantees.
+single-execution guarantee. Tier C (`within`, M109b) extends this to plain code: the work and its
+record commit in ONE database transaction, so a lost race rolls the business writes back with the
+claim. See [`packages/idempotency-plugin/README.md`](packages/idempotency-plugin/README.md) for
+placement, the HTTP check order, failure classification, replay rules, the ingress allow-list, the
+tier-C backend table and the store guarantees.
+
+`within` returns the JSON round trip of what `fn` returned on both the first call and a replay.
+Dates become ISO strings, `undefined` object members are absent, and nested `toJSON()` output
+determines the stored value. A `void` result returns `undefined` on both paths.
 
 ### Values (runtime exports)
 
@@ -14074,17 +14178,22 @@ guarantees.
 | `derivedIdempotencyKey`         | function | Reads the store key the middleware recorded, to forward to a provider                     |
 | `IdempotencyRefusedError`       | class    | An ingress refusal, carrying `reason`, `ingress` and `target`                             |
 | `IdempotencyConfigurationError` | class    | An option refusal, carrying the failing `option` path                                     |
+| `IdempotencyWithinError`        | class    | A tier-C refusal or failure, carrying `reason` and a status hint (M109b)                  |
+| `IdempotencyVerifyTimeoutError` | class    | `start()` rejects with it when a store's `verify()` outlives `storeTimeoutMs` (M109b)     |
 | `IDEMPOTENCY_KEY_HEADER`        | const    | `'Idempotency-Key'`                                                                       |
 | `IDEMPOTENT_REPLAYED_HEADER`    | const    | `'Idempotent-Replayed'`                                                                   |
 
 ### Types
 
-| Export                     | Kind | Purpose                                                     |
-| -------------------------- | ---- | ----------------------------------------------------------- |
-| `IdempotencyPluginOptions` | type | The `IdempotencyPlugin` options (`store`, leases, ttl, cap) |
-| `IdempotencyStoreConfig`   | type | The store arm (`memory`, `redis` built/injected, `custom`)  |
-| `IRedisIdempotencyClient`  | type | The Redis facade an injected client must satisfy            |
-| `IdempotencyRefusalReason` | type | The union carried by `IdempotencyRefusedError.reason`       |
+| Export                                 | Kind | Purpose                                                                                           |
+| -------------------------------------- | ---- | ------------------------------------------------------------------------------------------------- |
+| `IdempotencyPluginOptions`             | type | The `IdempotencyPlugin` options (`store`, leases, ttl, cap, `transactional`)                      |
+| `IdempotencyStoreConfig`               | type | The store arm (`memory`, `redis` built/injected, `custom`)                                        |
+| `IRedisIdempotencyClient`              | type | The Redis facade an injected client must satisfy                                                  |
+| `IdempotencyRefusalReason`             | type | The union carried by `IdempotencyRefusedError.reason`                                             |
+| `IdempotencyWithinErrorReason`         | type | The union carried by `IdempotencyWithinError.reason` (M109b)                                      |
+| `TransactionalIdempotencyOptions`      | type | The `transactional` option: `store`, `ttlMs`, `storeTimeoutMs`, `maxResultBytes`, `purge` (M109b) |
+| `TransactionalIdempotencyPurgeOptions` | type | The retention purge's `schedule`, `intervalMs` and `batch` (M109b)                                |
 
 ### The queue retry span versus the lease
 

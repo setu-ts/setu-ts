@@ -6,6 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type {
+  IdempotentWithinResult,
   IIdempotencyService,
   ILogger,
   IRequestContext,
@@ -40,6 +41,10 @@ function serviceReturning(
       return middleware;
     },
     behavior: () => ({ handle: (_ctx, next) => next() }),
+    within: <R>(): Promise<IdempotentWithinResult<R>> =>
+      Promise.reject(new Error('tier C not configured in this double')),
+    purgeTransactional: (): Promise<number> =>
+      Promise.reject(new Error('tier C not configured in this double')),
   };
 }
 
@@ -80,6 +85,10 @@ describe('idempotent (M109a §3.9)', () => {
         throw error;
       },
       behavior: () => ({ handle: (_ctx, next) => next() }),
+      within: <R>(): Promise<IdempotentWithinResult<R>> =>
+        Promise.reject(new Error('tier C not configured in this double')),
+      purgeTransactional: (): Promise<number> =>
+        Promise.reject(new Error('tier C not configured in this double')),
     };
     const middleware = idempotent({ leaseMs: 10_000, ttlMs: 1_000 });
     const ctx = context(service, logger);
@@ -104,6 +113,10 @@ describe('idempotent (M109a §3.9)', () => {
         throw error;
       },
       behavior: () => ({ handle: (_ctx, next) => next() }),
+      within: <R>(): Promise<IdempotentWithinResult<R>> =>
+        Promise.reject(new Error('tier C not configured in this double')),
+      purgeTransactional: (): Promise<number> =>
+        Promise.reject(new Error('tier C not configured in this double')),
     };
     const middleware = idempotent({ leaseMs: 10_000, ttlMs: 1_000 });
     let result: unknown;
@@ -129,6 +142,10 @@ describe('idempotent (M109a §3.9)', () => {
         throw boom;
       },
       behavior: () => ({ handle: (_ctx, next) => next() }),
+      within: <R>(): Promise<IdempotentWithinResult<R>> =>
+        Promise.reject(new Error('tier C not configured in this double')),
+      purgeTransactional: (): Promise<number> =>
+        Promise.reject(new Error('tier C not configured in this double')),
     };
     const middleware = idempotent();
     await expect(middleware(context(service), () => Promise.resolve())).rejects.toBe(boom);

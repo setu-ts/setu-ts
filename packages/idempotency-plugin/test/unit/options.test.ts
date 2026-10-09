@@ -1,5 +1,6 @@
 /**
- * Unit tests for option shape validation and resolution (plan §3.9, §3.13).
+ * Unit tests for option shape validation and resolution (plan §3.9, §3.13;
+ * M109b §3.5, §3.13).
  *
  * @module
  */
@@ -273,6 +274,97 @@ describe('plugin options (M109a §3.13, §4.1)', () => {
   it('resolveDefaults refuses ttlMs below a lease', () => {
     const options: IdempotencyPluginOptions = { leaseMs: 5_000, ttlMs: 1_000 };
     expect(optionOf(() => resolveDefaults(options))).toBe('ttlMs');
+  });
+});
+
+/** A store shape only `validatePluginOptionShape` inspects (typeof functions). */
+const TRANSACTIONAL_STORE = {
+  find: () => Promise.resolve(undefined),
+  run: () => Promise.resolve(1),
+  purge: () => Promise.resolve(0),
+  verify: () => Promise.resolve(),
+};
+
+/** A plugin option set carrying an untrusted `transactional` value. */
+function withTransactional(transactional: unknown): IdempotencyPluginOptions {
+  return { transactional } as IdempotencyPluginOptions;
+}
+
+describe('validatePluginOptionShape transactional (M109b §3.5, §3.13)', () => {
+  it('accepts a store instance, a factory, and the range endpoints', () => {
+    expect(() => validatePluginOptionShape(withTransactional({ store: TRANSACTIONAL_STORE })))
+      .not.toThrow();
+    expect(() => validatePluginOptionShape(withTransactional({ store: () => TRANSACTIONAL_STORE })))
+      .not.toThrow();
+    expect(() =>
+      validatePluginOptionShape(withTransactional({
+        store: TRANSACTIONAL_STORE,
+        ttlMs: 60_000,
+        storeTimeoutMs: 1,
+        maxResultBytes: 2,
+        purge: { schedule: true, intervalMs: 1, batch: 1 },
+      }))
+    ).not.toThrow();
+    expect(() =>
+      validatePluginOptionShape(withTransactional({
+        store: TRANSACTIONAL_STORE,
+        ttlMs: 2_592_000_000,
+        storeTimeoutMs: 2_147_483_647,
+        maxResultBytes: 262_144,
+        purge: { batch: 100_000 },
+      }))
+    ).not.toThrow();
+  });
+
+  it('refuses a non-object transactional, and a missing or unusable store', () => {
+    expect(optionOf(() => validatePluginOptionShape(withTransactional(1)))).toBe('transactional');
+    expect(optionOf(() => validatePluginOptionShape(withTransactional({})))).toBe(
+      'transactional.store',
+    );
+    expect(optionOf(() => validatePluginOptionShape(withTransactional({ store: null })))).toBe(
+      'transactional.store',
+    );
+    expect(
+      optionOf(() =>
+        validatePluginOptionShape(withTransactional({
+          store: { find: () => Promise.resolve(), run: () => Promise.resolve() },
+        }))
+      ),
+    ).toBe('transactional.store');
+  });
+
+  it('refuses every out-of-range transactional number', () => {
+    const cases: readonly (readonly [string, number, string])[] = [
+      ['ttlMs', 59_999, 'transactional.ttlMs'],
+      ['ttlMs', 2_592_000_001, 'transactional.ttlMs'],
+      ['ttlMs', Number.NaN, 'transactional.ttlMs'],
+      ['storeTimeoutMs', 0, 'transactional.storeTimeoutMs'],
+      ['storeTimeoutMs', 2_147_483_648, 'transactional.storeTimeoutMs'],
+      ['maxResultBytes', 1, 'transactional.maxResultBytes'],
+      ['maxResultBytes', 262_145, 'transactional.maxResultBytes'],
+    ];
+    for (const [field, value, option] of cases) {
+      expect(
+        optionOf(() =>
+          validatePluginOptionShape(
+            withTransactional({ store: TRANSACTIONAL_STORE, [field]: value }),
+          )
+        ),
+      ).toBe(option);
+    }
+  });
+
+  it('refuses a malformed purge', () => {
+    const withPurge = (purge: unknown) => () =>
+      validatePluginOptionShape(withTransactional({ store: TRANSACTIONAL_STORE, purge }));
+    expect(optionOf(withPurge(1))).toBe('transactional.purge');
+    expect(optionOf(withPurge({ schedule: 'yes' }))).toBe('transactional.purge.schedule');
+    expect(optionOf(withPurge({ intervalMs: 0 }))).toBe('transactional.purge.intervalMs');
+    expect(optionOf(withPurge({ intervalMs: 2_147_483_648 }))).toBe(
+      'transactional.purge.intervalMs',
+    );
+    expect(optionOf(withPurge({ batch: 0 }))).toBe('transactional.purge.batch');
+    expect(optionOf(withPurge({ batch: 100_001 }))).toBe('transactional.purge.batch');
   });
 });
 

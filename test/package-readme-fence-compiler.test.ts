@@ -126,7 +126,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/http-security-plugin/README.md': 2,
   // M109a: the new package's README is born gated — the usage example and the
   // derived-key forwarding example.
-  'packages/idempotency-plugin/README.md': 2,
+  'packages/idempotency-plugin/README.md': 3,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 3,

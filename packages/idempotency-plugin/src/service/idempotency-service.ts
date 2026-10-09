@@ -7,6 +7,8 @@
 import type {
   IdempotentIngressOptions,
   IdempotentRouteOptions,
+  IdempotentWithinOptions,
+  IdempotentWithinResult,
   IIdempotencyService,
   IIdempotencyStore,
   IIngressBehavior,
@@ -16,8 +18,13 @@ import type {
 } from '@setu-ts/common';
 import type { IdempotencyDefaults } from '../core/options.ts';
 import { resolveIngressOptions, resolveRouteOptions } from '../core/options.ts';
+import { IdempotencyConfigurationError } from '../errors.ts';
 import { createIngressBehavior } from '../ingress/ingress-behavior.ts';
 import { createHttpMiddleware } from '../middleware/http-middleware.ts';
+import type { TransactionalRuntimeState } from '../within/transactional-runtime.ts';
+import { purgeOnce } from '../within/transactional-runtime.ts';
+import type { WithinDeps } from '../within/within.ts';
+import { runWithin } from '../within/within.ts';
 
 /** Everything the service needs, resolved once at `register()`. */
 export interface ServiceDeps {
@@ -29,6 +36,20 @@ export interface ServiceDeps {
   readonly logger: () => ILogger | undefined;
   /** The plugin-level defaults. */
   readonly defaults: IdempotencyDefaults;
+  /** The active tier-C state, or `undefined` until the plugin's `onInit` set it. */
+  readonly transactional?: () => TransactionalRuntimeState | undefined;
+}
+
+/** The `within` dependencies derived from the service's own. */
+function withinDeps(deps: ServiceDeps, state: TransactionalRuntimeState): WithinDeps {
+  return {
+    store: state.store,
+    runtime: deps.runtime,
+    logger: deps.logger,
+    ttlMs: state.ttlMs,
+    storeTimeoutMs: state.storeTimeoutMs,
+    maxResultBytes: state.maxResultBytes,
+  };
 }
 
 /**
@@ -56,5 +77,36 @@ export class IdempotencyService implements IIdempotencyService {
   behavior(options: IdempotentIngressOptions): IIngressBehavior {
     const resolved = resolveIngressOptions(options, this.#deps.defaults);
     return createIngressBehavior(this.#deps, resolved);
+  }
+
+  /** @inheritdoc */
+  within<R, S = unknown>(
+    options: IdempotentWithinOptions,
+    fn: (scope: S) => Promise<R>,
+  ): Promise<IdempotentWithinResult<R>> {
+    const state = this.#deps.transactional?.();
+    if (state === undefined) {
+      return Promise.reject(
+        new IdempotencyConfigurationError(
+          'transactional',
+          'idempotency: within requires the transactional option',
+        ),
+      );
+    }
+    return runWithin<R, S>(withinDeps(this.#deps, state), options, fn);
+  }
+
+  /** @inheritdoc */
+  purgeTransactional(): Promise<number> {
+    const state = this.#deps.transactional?.();
+    if (state === undefined) {
+      return Promise.reject(
+        new IdempotencyConfigurationError(
+          'transactional',
+          'idempotency: purgeTransactional requires the transactional option',
+        ),
+      );
+    }
+    return purgeOnce(state, this.#deps.logger, this.#deps.runtime);
   }
 }

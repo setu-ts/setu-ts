@@ -24,7 +24,7 @@ import type { ILogger } from '@setu-ts/common';
  */
 export function safeLog(
   logger: () => ILogger | undefined,
-  level: 'warn' | 'error',
+  level: 'debug' | 'warn' | 'error',
   message: string,
   meta: Record<string, unknown>,
 ): void {

@@ -82,6 +82,8 @@ jobs:
       # this exact endpoint, which is also the host:port the package manifest's
       # net grant scopes.
       DYNAMODB_ENDPOINT: http://127.0.0.1:8000
+      # M109b within-real uses this separate guard for the same emulator.
+      DYNAMODB_ENDPOINT_URL: http://127.0.0.1:8000
       # M82 §3.13: the real-emulator Bigtable suite (database-plugin) guards on
       # this exact endpoint, which is also the host:port the package manifest's
       # net grant scopes. `127.0.0.1` rather than `localhost` deliberately: the

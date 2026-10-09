@@ -6,12 +6,17 @@
 import type { IIdempotencyService, ILogger, IPlugin } from '@setu-ts/common';
 import { CAPABILITIES, createConnectionErrorReporter, PLUGIN_PRIORITY } from '@setu-ts/common';
 import denoJson from '../../deno.json' with { type: 'json' };
+import { PURGE_JOB_NAME } from '../constants.ts';
 import { resolveDefaults, validatePluginOptionShape } from '../core/options.ts';
 import { createIdempotencyIndicator } from '../health/indicator.ts';
 import type { IdempotencyLifecycleState } from '../health/indicator.ts';
 import type { IdempotencyPluginOptions } from '../interfaces/index.ts';
 import { IdempotencyService } from '../service/idempotency-service.ts';
 import { resolveStore } from '../stores/resolve-store.ts';
+import {
+  resolveTransactionalOptions,
+  setupTransactional,
+} from '../within/transactional-runtime.ts';
 
 /**
  * Creates the idempotency plugin, which registers an `IIdempotencyService`
@@ -30,6 +35,9 @@ import { resolveStore } from '../stores/resolve-store.ts';
 export function IdempotencyPlugin(options?: IdempotencyPluginOptions): IPlugin {
   validatePluginOptionShape(options ?? {});
   const defaults = resolveDefaults(options);
+  const transactional = options?.transactional === undefined
+    ? undefined
+    : resolveTransactionalOptions(options.transactional);
   let state: IdempotencyLifecycleState = 'pending';
 
   return {
@@ -37,6 +45,9 @@ export function IdempotencyPlugin(options?: IdempotencyPluginOptions): IPlugin {
     version: denoJson.version,
     provides: [CAPABILITIES.IDEMPOTENCY],
     priority: PLUGIN_PRIORITY.NORMAL,
+    ...(transactional === undefined ? {} : {
+      optionalDependencies: [CAPABILITIES.SCHEDULER, CAPABILITIES.DATABASE],
+    }),
     async register(ctx) {
       const logger = (): ILogger | undefined => ctx.logger;
       // A built ioredis client's connection errors go to the logger instead of
@@ -65,7 +76,16 @@ export function IdempotencyPlugin(options?: IdempotencyPluginOptions): IPlugin {
         state = 'closed';
         await store.disconnect?.();
       });
-      const service = new IdempotencyService({ store, runtime: ctx.runtime, logger, defaults });
+      const runtime = transactional === undefined
+        ? { state: (): undefined => undefined }
+        : setupTransactional(ctx, transactional, logger, PURGE_JOB_NAME);
+      const service = new IdempotencyService({
+        store,
+        runtime: ctx.runtime,
+        logger,
+        defaults,
+        transactional: runtime.state,
+      });
       ctx.services.register<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY, service);
       ctx.health.register(
         'idempotency',

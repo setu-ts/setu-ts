@@ -47,9 +47,13 @@ import { CAPABILITIES, createCapabilityToken, INBOX_RECORD_KIND } from '@setu-ts
 import { BigtableTransactionScopeError } from '../errors.ts';
 import { causeChain } from '../errors/classify.ts';
 import type { IDatabaseService, IRepository } from '../interfaces/index.ts';
-import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
-import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
-import { adapterInfoOf } from '../services/database-service.ts';
+import {
+  isBigtableBackend,
+  isCosmosBackend,
+  isMongoReplicaSetRefusal,
+  ProbeRollback,
+  probeTwoCreateTransaction,
+} from '../transactional/backend-probe.ts';
 import { InboxStoreUnavailableError } from './errors.ts';
 
 /**
@@ -98,16 +102,8 @@ const PARKED_COLUMNS = [...REQUIRED_FIELDS, 'envelopeId', 'lastError'];
  */
 const PURGED_STATUSES: readonly InboxStatus[] = ['processed', 'discarded', 'attempting', 'parked'];
 
-/** MongoDB's server code for "transactions need a replica set". */
-const MONGO_ILLEGAL_OPERATION = 20;
-
 /** A row as the adapter hands it back. */
 type Row = Record<string, unknown>;
-
-/** Thrown inside the startup probe so its transaction always rolls back. */
-class ProbeRollback extends Error {
-  override readonly name = 'InboxProbeRollback';
-}
 
 /** The row an inbox record is written as: every field, each absent optional as `null`. */
 function toRow(record: InboxRecord): Row {
@@ -146,20 +142,6 @@ function unavailableReason(error: unknown): InboxStoreUnavailableError['reason']
     if (isMongoReplicaSetRefusal(member)) return 'mongodb-standalone';
   }
   return 'entity-unavailable';
-}
-
-/**
- * Whether one error is the server's measured standalone refusal: code `20`,
- * `codeName: 'IllegalOperation'`. Read guarded, since a cause is foreign.
- */
-function isMongoReplicaSetRefusal(member: object): boolean {
-  try {
-    const candidate = member as { code?: unknown; codeName?: unknown };
-    return candidate.code === MONGO_ILLEGAL_OPERATION &&
-      candidate.codeName === 'IllegalOperation';
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -344,21 +326,21 @@ export class DatabaseInboxStore implements IInboxStore {
    */
   async verify(): Promise<void> {
     // By arm, and by class for a shipped adapter handed to the `'custom'` arm.
-    const info = adapterInfoOf(this.#service);
-    if (info?.type === 'cosmos' || info?.adapter instanceof CosmosAdapter) {
+    if (isCosmosBackend(this.#service)) {
       throw new InboxStoreUnavailableError(this.#entity, 'cosmos-unsupported');
     }
-    if (info?.type === 'bigtable' || info?.adapter instanceof BigtableAdapter) {
+    if (isBigtableBackend(this.#service)) {
       throw new InboxStoreUnavailableError(this.#entity, 'bigtable-unsupported');
     }
     const rollback = new ProbeRollback('inbox startup probe');
     try {
       await this.purge(0, 1);
       const id = `setu-inbox-probe-${this.#uuid()}`;
-      await this.#service.transaction(async (uow) => {
-        const repo = uow.getRepository<Row, EntityKey>(this.#entity);
-        for (const rowId of [id, `${id}.attempts`]) {
-          await repo.create(toRow({
+      await probeTwoCreateTransaction(
+        this.#service,
+        this.#entity,
+        [id, `${id}.attempts`].map((rowId) =>
+          toRow({
             id: rowId,
             kind: INBOX_RECORD_KIND,
             consumer: 'setu-inbox-probe',
@@ -366,10 +348,10 @@ export class DatabaseInboxStore implements IInboxStore {
             status: 'attempting',
             attempts: 0,
             updatedAt: 0,
-          }));
-        }
-        throw rollback;
-      });
+          })
+        ),
+        rollback,
+      );
     } catch (error) {
       if (error === rollback) return;
       throw new InboxStoreUnavailableError(this.#entity, unavailableReason(error), {
