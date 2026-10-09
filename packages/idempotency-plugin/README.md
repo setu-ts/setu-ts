@@ -155,6 +155,53 @@ Configure it with `IdempotencyPlugin({ transactional: { store } })`, where `stor
 `createDatabaseIdempotencyStore()` from `@setu-ts/database-plugin` (or any
 `ITransactionalIdempotencyStore`). The store is resolved and `verify()`d at `onInit`.
 
+A handler that creates an order calls `within` itself, because middleware cannot own the handler's
+transaction. The scope comes from the authenticated principal and tenant only — never from the
+request body — and is encoded with `JSON.stringify`, so no tenant or user id can be crafted to
+collide with another's:
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IIdempotencyService } from '@setu-ts/common';
+import { createDatabaseIdempotencyStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IUnitOfWork } from '@setu-ts/database-plugin';
+import { IdempotencyPlugin } from '@setu-ts/idempotency-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DatabasePlugin(),
+    IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore() } }),
+  ],
+});
+
+app.router.post('/orders', async (ctx) => {
+  const key = ctx.request.headers.get('Idempotency-Key');
+  const principal = ctx.request.user?.id;
+  if (key === null || principal === undefined) {
+    return ctx.response.status(400).json({ error: 'an authenticated, keyed request is required' });
+  }
+  const body = await ctx.request.json<{ item: string }>();
+  const idempotency = ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY);
+  const { value, replayed } = await idempotency.within<{ id: string }, IUnitOfWork>(
+    {
+      key,
+      namespace: 'orders.create',
+      scope: JSON.stringify([ctx.request.tenant?.id ?? null, principal]),
+      fingerprint: body,
+    },
+    async (uow) => {
+      const order = { id: crypto.randomUUID(), item: body.item };
+      await uow.getRepository('Order').create(order);
+      return { id: order.id };
+    },
+  );
+  return ctx.response.status(replayed ? 200 : 201).json(value);
+});
+```
+
 | Backend                         | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | memory                          | Supported, single process.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
