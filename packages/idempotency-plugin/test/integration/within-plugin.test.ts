@@ -179,14 +179,65 @@ describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
       expect((failure as { reason: string }).reason).toBe('store-failed');
       for (let i = 0; i < 3; i++) await job();
       expect(calls).toBe(1);
-      expect(logger.lines.filter((line) => line.level === 'debug')).toHaveLength(3);
+      // Past its deadline the first purge is stuck: every skip says so at warn (R2-2).
+      expect(logger.lines.filter((line) => line.level === 'debug')).toEqual([]);
       expect(logger.lines.filter((line) => line.level === 'warn')).toEqual([
         { level: 'warn', message: 'idempotency: the transactional purge timed out' },
+        ...Array.from({ length: 3 }, () => ({
+          level: 'warn',
+          message: 'idempotency: skipped the transactional purge; an earlier purge has not settled',
+        })),
       ]);
       release.resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
       await job();
       expect(calls).toBe(2);
+    } finally {
+      release.resolve();
+      await app.stop();
+    }
+  });
+
+  it('logs a skip at debug while the running purge is still within its deadline', async () => {
+    const scheduler = fakeSchedulerPlugin();
+    const logger = purgeLogger();
+    const release = deferred();
+    let calls = 0;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        scheduler.plugin,
+        logger.plugin,
+        IdempotencyPlugin({
+          transactional: {
+            store: fakeTransactionalStore({
+              purge: async () => {
+                calls++;
+                await release.promise;
+                return 1;
+              },
+            }),
+            storeTimeoutMs: 60_000,
+          },
+        }),
+      ],
+    });
+    await app.start();
+    const job = scheduler.jobs.get('idempotency-purge')!;
+    try {
+      const first = Promise.resolve(job());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await job();
+      expect(calls).toBe(1);
+      expect(logger.lines).toEqual([
+        {
+          level: 'debug',
+          message: 'idempotency: skipped the transactional purge while one is running',
+        },
+      ]);
+      release.resolve();
+      await first;
+      expect(logger.lines.filter((line) => line.level === 'warn')).toEqual([]);
     } finally {
       release.resolve();
       await app.stop();

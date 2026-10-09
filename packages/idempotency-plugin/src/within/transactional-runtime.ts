@@ -167,6 +167,8 @@ export function setupTransactional(
   let state: TransactionalRuntimeState | undefined;
   let scheduler: IScheduler | undefined;
   let inFlight: Promise<number> | undefined;
+  /** When the in-flight purge started, on the monotonic clock. */
+  let inFlightStartedAt = 0;
   let stopping = false;
 
   const unschedule = async (): Promise<void> => {
@@ -245,10 +247,15 @@ export function setupTransactional(
       const active = state;
       if (active === undefined || stopping) return;
       if (inFlight !== undefined) {
+        // Past its deadline the earlier purge is stuck, and retention has
+        // stopped until it settles: say so at `warn`, every skipped run (R2-2).
+        const stuck = ctx.runtime.hrtime() - inFlightStartedAt > active.storeTimeoutMs;
         safeLog(
           logger,
-          'debug',
-          'idempotency: skipped the transactional purge while one is running',
+          stuck ? 'warn' : 'debug',
+          stuck
+            ? 'idempotency: skipped the transactional purge; an earlier purge has not settled'
+            : 'idempotency: skipped the transactional purge while one is running',
           {},
         );
         return;
@@ -257,6 +264,7 @@ export function setupTransactional(
         active.store.purge(ctx.runtime.now(), active.purgeBatch)
       );
       inFlight = pending;
+      inFlightStartedAt = ctx.runtime.hrtime();
       const finished = () => {
         inFlight = undefined;
       };
