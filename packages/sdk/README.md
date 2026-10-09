@@ -212,16 +212,27 @@ const client = createClient({
 });
 ```
 
-Retries transport rejections and statuses 408, 425, 429, 500-599. Only retries safe methods (GET,
-HEAD, OPTIONS, PUT, DELETE). When a retryable response carries a `Retry-After` header with
-delta-seconds, that delay replaces the computed backoff only when it is within the policy cap. Set
-`maxRetryAfterMs` explicitly, or omit it to use the policy's largest fixed/exponential backoff. A
-larger hint surfaces the original `HttpClientError` immediately, with its headers intact.
+Retries transport rejections and statuses 408, 425, 429, 500-599. By default, only retries safe
+methods (GET, HEAD, OPTIONS, PUT, DELETE). When a retryable response carries a `Retry-After` header
+with delta-seconds, that delay replaces the computed backoff only when it is within the policy cap.
+Set `maxRetryAfterMs` explicitly, or omit it to use the policy's largest fixed/exponential backoff.
+A larger hint surfaces the original `HttpClientError` immediately, with its headers intact.
 
 At construction, `limit` must be a positive safe integer, `delay` must be finite and non-negative,
 and every explicit or derived delay must be at most `2_147_483_647` ms, the portable JavaScript
 timer maximum. Runtime strings, non-finite values, and timer-overflowing delays are rejected so they
 cannot disable the cap or be clamped into an immediate retry.
+
+### Keyed retries
+
+`ClientRequest.idempotencyKey` supplies a key; `ClientOptions.idempotency` generates one by default
+for `POST` and `PATCH`. The default header is `Idempotency-Key`; configure `idempotency.header` to
+match the server. The same key is reused across retry attempts, including a retryable `409`.
+
+Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
+with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.
+A keyed request carries a non-safelisted header, so a cross-origin browser call triggers a CORS
+preflight; the server must list that header in `Access-Control-Allow-Headers`.
 
 ### Circuit Breaker
 

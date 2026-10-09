@@ -12851,6 +12851,12 @@ transport failures. A keyed request outside the safe method set (for example, PO
 retries a parsing or interceptor failure after a `2xx` arrives. Safe methods retain their existing
 retry behavior. Without either idempotency option, retry behavior is unchanged.
 
+Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
+with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.
+A keyed request carries a non-safelisted header, so a cross-origin browser call triggers a CORS
+preflight; the server must list the configured header (default `Idempotency-Key`) in
+`Access-Control-Allow-Headers`.
+
 ### ClientResponse
 
 ```typescript
