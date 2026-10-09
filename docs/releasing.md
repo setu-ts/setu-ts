@@ -334,13 +334,15 @@ module JSDoc opens with `@module` so the package's README is what renders on jsr
 
 ### 3. Merge, then publish
 
-Open the PR from `release/vX.Y.Z` into **`main`** (not `develop`, the default base, so pass
-`--base main` to `gh pr create`), let CI pass, and merge it **with a merge commit**. The `main`
-ruleset refuses squash and rebase: either would give `main` a commit `develop` does not have, and
-every later release and back-merge would conflict on it. Merging into `main` also redeploys the
-public website — Cloudflare Workers Builds watches `main` — which is why only a release reaches it.
-Then switch to `main` and bring it up to the merge commit, so verification, publishing and the tag
-all run on what `main` now holds — staying on `release/vX.Y.Z` would tag its pre-merge commit:
+Open the PR from `release/vX.Y.Z` into **`main`** (pass `--base main` to `gh pr create` explicitly
+even though `main` is the default branch — every PR names its base), request the review with
+`gh pr comment <pr> --body '@coderabbitai review'` (AI_GUIDELINES §16.7), let CI pass, and merge it
+**with a merge commit**. The `main` ruleset refuses squash and rebase: either would give `main` a
+commit `develop` does not have, and every later release and back-merge would conflict on it. Merging
+into `main` also redeploys the public website — Cloudflare Workers Builds watches `main` — which is
+why only a release reaches it. Then switch to `main` and bring it up to the merge commit, so
+verification, publishing and the tag all run on what `main` now holds — staying on `release/vX.Y.Z`
+would tag its pre-merge commit:
 
 ```fish
 git switch main
@@ -369,13 +371,14 @@ from pre-release manifests:
 
 ```fish
 gh pr create --base develop --head main --title 'chore(release): back-merge v0.3.0 into develop' \
-  --body 'Brings the v0.3.0 release commits onto develop.' --label maintainer-review
+  --body 'Brings the v0.3.0 release commits onto develop.'
 ```
 
-Merge it with a **merge commit** as well: a squash would leave `develop` without `main`'s history,
-so the next release PR would re-apply this one's changes and conflict. A defect in a published
-release that cannot wait for the next one follows the same shape from a `hotfix/…` branch cut from
-`main`: PR into `main`, patch release, back-merge.
+No review is requested on a back-merge: it carries only commits already reviewed on their way into
+`main` (AI_GUIDELINES §16.7). Merge it with a **merge commit** as well: a squash would leave
+`develop` without `main`'s history, so the next release PR would re-apply this one's changes and
+conflict. A defect in a published release that cannot wait for the next one follows the same shape
+from a `hotfix/…` branch cut from `main`: PR into `main`, patch release, back-merge.
 
 ### 4. Set the page metadata — every release, not only a first publish
 

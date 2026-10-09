@@ -10,21 +10,27 @@ never appears in any JSR-published package's dependency graph (see AI_GUIDELINES
 
 ## Starting a new milestone — READ THESE FIRST (mandatory)
 
-**Step 0 — be on the milestone's feature branch before you touch anything.** `develop` and `main`
-are both protected; never work on either and never commit to either directly (AI_GUIDELINES §15.3).
-`develop` is the default branch and the integration branch every PR targets except release and
-hotfix PRs; `main` holds only the last release and changes only through a release or hotfix PR (see
+**Step 0 — be on the milestone's feature branch, in its own worktree, before you touch anything.**
+`develop` and `main` are both protected; never work on either and never commit to either directly
+(AI_GUIDELINES §15.3). `develop` is the integration branch every PR targets except release and
+hotfix PRs; `main` holds only the last release, is the repository's default branch (so
+`gh pr create` needs `--base develop`), and changes only through a release or hotfix PR (see
 "Branches" under Key conventions). A milestone gets exactly ONE feature branch —
 `feat/[milestone]-[description]` (e.g. `feat/m4-logger-plugin`) — and ALL work for that milestone
 lives on it: the initial implementation AND every follow-up fix, review change, or bug repair, right
-up until the branch is merged. Your FIRST action is:
+up until the branch is merged. Every new task — milestone or not — starts in a NEW git worktree at
+`.claude/worktrees/<name>`, never in the main checkout, which stays on `develop` (AI_GUIDELINES
+§15.4). Your FIRST action is:
 
 ```bash
-git branch --show-current            # what am I on?
-# If it already prints the milestone's feat/… branch (work in progress) → continue on it.
-# If it prints "develop" or "main":
-git switch feat/[milestone]-[description]     # resume the existing branch if it exists, else:
-git fetch origin && git switch -c feat/[milestone]-[description] origin/develop   # start it fresh
+git worktree list                    # does the branch already have a worktree?
+# If it does (work in progress) → cd into it and continue there.
+# If the branch exists but has no worktree:
+git worktree add .claude/worktrees/[milestone]-[description] feat/[milestone]-[description]
+# If it does not exist yet, start it fresh in a new worktree:
+git fetch origin && git worktree add -b feat/[milestone]-[description] \
+  .claude/worktrees/[milestone]-[description] origin/develop
+cd .claude/worktrees/[milestone]-[description] && git branch --show-current
 ```
 
 Do NOT open a new `fix/…` branch for defects in a milestone that is not yet merged — those fixes
@@ -6401,17 +6407,27 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).
 - **Two long-lived branches; PRs target `develop` except release and hotfix PRs, which target
-  `main`.** `develop` is the default branch, where milestones, fixes and docs integrate. `main`
-  means "the last release": it moves only when a release PR merges, and each merge to `main`
-  redeploys the public website (Cloudflare Workers Builds watches `main`). Both are protected by
-  rulesets ("protect develop", "protect main"), which name each branch explicitly — never point one
-  at `~DEFAULT_BRANCH`, since that silently moves protection when the default changes. The release
-  flow is `docs/releasing.md`'s: cut `release/vX.Y.Z` from `develop`, PR it into `main` with a MERGE
-  COMMIT (the `main` ruleset refuses squash and rebase, because either rewrites the history
-  `develop` must share), tag that merge commit, then open a back-merge PR `main` → `develop`, also
-  as a merge commit, so the release's version-bump commits reach `develop`. A defect in a PUBLISHED
-  release that cannot wait for the next one goes on `hotfix/[issue]-[description]` cut from `main`,
-  PRs into `main`, ships as a patch release, and back-merges the same way.
+  `main`.** `develop` is where milestones, fixes and docs integrate. `main` is the repository's
+  DEFAULT branch, so a `gh pr create` without `--base` targets it — always pass `--base develop` (or
+  `--base main` for a release or hotfix PR). `main` means "the last release": it moves only when a
+  release PR merges, and each merge to `main` redeploys the public website (Cloudflare Workers
+  Builds watches `main`). Both are protected by rulesets ("protect develop", "protect main"), which
+  name each branch explicitly — never point one at `~DEFAULT_BRANCH`, since that silently moves
+  protection when the default changes. The release flow is `docs/releasing.md`'s: cut
+  `release/vX.Y.Z` from `develop`, PR it into `main` with a MERGE COMMIT (the `main` ruleset refuses
+  squash and rebase, because either rewrites the history `develop` must share), tag that merge
+  commit, then open a back-merge PR `main` → `develop`, also as a merge commit, so the release's
+  version-bump commits reach `develop`. A defect in a PUBLISHED release that cannot wait for the
+  next one goes on `hotfix/[issue]-[description]` cut from `main`, PRs into `main`, ships as a patch
+  release, and back-merges the same way.
+- **Every new task starts in a new worktree** —
+  `git worktree add -b <branch>
+  .claude/worktrees/<name> origin/develop` (`origin/main` for a
+  hotfix), then work only inside it. The main checkout stays on `develop` and is never edited; a
+  resumed task continues in the worktree that already holds its branch (`git worktree list`).
+  `.claude/` is gitignored and invisible to `deno fmt`/`deno lint`; never put a worktree in `/tmp`
+  or beside the repository. Remove it with `git worktree remove` once its PR merges. AI_GUIDELINES
+  §15.4 is canonical.
 - Branches: one `feat/[milestone]-[description]` per milestone — all of that milestone's work and
   fixes stay on it until it merges; `fix/[issue]-[description]` is only for defects in
   already-merged `develop`; `docs/[description]` is for a documentation-only change that is not a
@@ -6434,27 +6450,20 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   opened this way. Do not push or open a PR unprompted, though: finish the milestone, report the
   evidence, and wait for the human to ask. Publishing a branch is outward-facing and their call to
   time.
-- **A new PR carries the `maintainer-review` label** — `gh pr create --label maintainer-review`, or
-  `gh pr edit <pr> --add-label maintainer-review` for one already open. `.coderabbit.yaml` sets
-  `auto_review.enabled: true` with `labels: [maintainer-review]`, and a positive `labels` list
-  RESTRICTS automatic review to PRs carrying one of them, so an unlabelled PR is never reviewed.
-  **The failure is silent**: the same file sets `review_status: false`, so there is no "review
-  skipped" notice and an unlabelled PR looks exactly like one whose review has not arrived. Check
-  the label landed rather than trusting the flag. The label buys the FIRST review only —
-  `auto_incremental_review: false` sits beside it, so a re-review after pushing fixes still needs
-  `@coderabbitai review`. The file read `enabled: false` from 2026-09-16 to 2026-09-22, and labelled
-  PRs went unreviewed in that window (#344, #353) — but that is an observation, not a rule about
-  `enabled`: CodeRabbit's contract is that a positive label opts a PR in even while automatic review
-  is disabled, so the old form should have worked. **The cause was never established**, and
-  `enabled: true` is the form that does not depend on that path rather than a diagnosed fix. If a
-  labelled PR still is not reviewed, ask by hand and record it — do not flip the flag again on a
-  guess. Suspending automatic review deliberately means `enabled: false` AND removing the positive
-  `labels` entry, since a positive label would otherwise keep opting PRs in. The repo file also
-  overrides the CodeRabbit dashboard (YAML > repo UI > org UI), so the web toggle changes nothing
-  while the file sets the same key. The maintainer's gate on EXTERNAL contributions is untouched,
-  and does not depend on this rule being obeyed: applying a label needs the Triage role or above on
-  this repository, so from a fork `--label` fails with a 403 and nothing is applied — that is the
-  gate working, not something to retry around. AI_GUIDELINES §16.7 is canonical.
+- **A new non-`docs/…` PR requests its CodeRabbit review with a comment, straight after it is
+  opened** — `gh pr comment <pr> --body '@coderabbitai review'`. `.coderabbit.yaml` sets
+  `auto_review.enabled: false` with no `labels` or `description_keyword`, so CodeRabbit never
+  reviews on its own. Applies to `feat/…`, `fix/…`, `hotfix/…`, `release/…` and `chore/…` PRs;
+  **`docs/…` PRs are excluded** (the review is for code) and so is a `main` → `develop` back-merge
+  (already-reviewed commits). Automatic review was dropped when `main` became the default branch: it
+  covers the default branch plus `base_branches`, so it would have to be re-scoped to `develop` and
+  would then fire on `docs/…` PRs too — nothing in CodeRabbit's config excludes by HEAD branch.
+  **The failure is silent**: `review_status: false` suppresses the "review skipped" notice, so a PR
+  nobody asked to review looks exactly like one whose review has not arrived — check the comment was
+  posted. A re-review after pushing fixes is another `@coderabbitai review`. The `maintainer-review`
+  label is retired and triggers nothing. The repo file overrides the CodeRabbit dashboard, so the
+  web toggle changes nothing. Fork PRs are proposals and are not reviewed (CONTRIBUTING.md).
+  AI_GUIDELINES §16.7 is canonical.
 - **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
   the code-quality bot anchor findings to lines; answer in the thread
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with

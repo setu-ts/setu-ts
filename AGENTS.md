@@ -30,13 +30,23 @@ Do NOT add or duplicate project rules in this file — put them in `CLAUDE.md` o
 
 ## Step 0 — be on the milestone's feature branch
 
-`develop` and `main` are both protected. `develop` is the default branch and the target of every PR
-except release and hotfix PRs, which go into `main`; `main` holds only the last release (CLAUDE.md
-"Branches"). Being on the wrong branch is the single most common way work goes wrong here, so
-confirm it before reading docs or writing code:
+`develop` and `main` are both protected. `develop` is the integration branch and the target of every
+PR except release and hotfix PRs, which go into `main`; `main` holds only the last release and is
+the repository's default branch, so pass `--base develop` to `gh pr create` (CLAUDE.md "Branches").
+Being on the wrong branch is the single most common way work goes wrong here, so confirm it before
+reading docs or writing code:
 
 ```bash
+git worktree list                    # the task's branch may already have a worktree — use it
 git branch --show-current
+```
+
+Every new task starts in a NEW worktree at `.claude/worktrees/<name>`, never in the main checkout,
+which stays on `develop` (AI_GUIDELINES §15.4):
+
+```bash
+git fetch origin
+git worktree add -b <branch> .claude/worktrees/<name> origin/develop   # origin/main for a hotfix
 ```
 
 One `feat/[milestone]-[description]` branch holds ALL of a milestone's work **and its fixes** until

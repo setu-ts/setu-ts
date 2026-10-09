@@ -28,8 +28,9 @@ focused on the behaviour, documentation, or proposal at hand.
 3. Wait for a maintainer to mark the issue as accepted for contribution before opening a code PR.
    Small documentation corrections may skip the discussion when their expected wording is clear.
 4. Fork the repository, create one branch for the agreed change from `develop`, and open a PR
-   against `develop` (the default branch). `main` holds only the last release and accepts release
-   PRs alone. Do not push to either, and do not request write access solely to contribute.
+   against `develop`. GitHub proposes `main`, the default branch, as the base — change it to
+   `develop`: `main` holds only the last release and accepts release PRs alone. Do not push to
+   either, and do not request write access solely to contribute.
 5. Keep the PR scoped to its linked issue. Include tests and documentation when the change requires
    them, and explain any intentional trade-off in the PR description.
 
@@ -39,8 +40,8 @@ Maintainers decide the public API, architecture, and release scope.
 ## Pull-request validation
 
 Setu-TS runs a substantial validation suite. Pull requests from forks deliberately do **not** start
-the repository's validation jobs, service containers, website build, or automatic CodeRabbit review.
-GitHub requires maintainer approval before any outside contributor's fork workflow can begin. If a
+the repository's validation jobs, service containers, website build, or a CodeRabbit review. GitHub
+requires maintainer approval before any outside contributor's fork workflow can begin. If a
 maintainer explicitly approves one, it receives only a small policy check that does not check out
 contributor code and prevents skipped checks from satisfying merge protection. This prevents
 untriaged, untrusted changes from consuming project resources or being merged as if they had been
