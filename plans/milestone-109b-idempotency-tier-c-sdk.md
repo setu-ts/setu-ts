@@ -609,6 +609,9 @@ request.
 
 ## 11. Review dispositions (plan verification, one round)
 
+- M108's inbox purge has the same overlap and shutdown pattern; its correction belongs to a separate
+  `fix/…` branch and is outside M109b.
+
 - Implementation deviation: §3.3 and §3.7 assumed a Prisma timeout meant `'conflict'` with a 5 s
   default. Verification found the existing adapter uses `transactionTimeout ?? 30_000`
   (`prisma-adapter.ts:293`), while `classify.ts` maps `P2034`, not timeout `P2028`, to a write

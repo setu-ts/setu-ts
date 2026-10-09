@@ -1,7 +1,7 @@
 /**
  * The tier-C plugin wiring (M109b §3.5): resolve the store at `onInit`,
  * `verify()` it under the store timeout, schedule the retention purge, and
- * remove the job at shutdown. The M108 `inbox` shape, already audited.
+ * remove the job and await the in-flight scheduled purge at shutdown.
  *
  * @module
  */
@@ -99,20 +99,42 @@ export async function purgeOnce(
   logger: () => ILogger | undefined,
   runtime: IPluginContext['runtime'],
 ): Promise<number> {
+  return await awaitPurge(
+    () => state.store.purge(runtime.now(), state.purgeBatch),
+    state,
+    logger,
+    runtime,
+  );
+}
+
+/** Bounds the wait without mistaking a deadline for a store rejection. */
+async function awaitPurge(
+  purge: () => Promise<number>,
+  state: TransactionalRuntimeState,
+  logger: () => ILogger | undefined,
+  runtime: IPluginContext['runtime'],
+): Promise<number> {
+  const timeout = new IdempotencyWithinError(
+    'store-failed',
+    'idempotency: the transactional purge timed out',
+  );
   try {
-    return await withDeadline(() => state.store.purge(runtime.now(), state.purgeBatch), {
+    return await withDeadline(purge, {
       timeoutMs: state.storeTimeoutMs,
-      onTimeout: () =>
-        new IdempotencyWithinError(
-          'store-failed',
-          'idempotency: the transactional store did not answer while purging',
-        ),
+      onTimeout: () => timeout,
       timing: resolveProbeTiming(runtime),
     });
   } catch (error) {
-    safeLog(logger, 'warn', 'idempotency: the transactional purge failed', {
-      errorKind: errorKind(error),
-    });
+    safeLog(
+      logger,
+      'warn',
+      error === timeout
+        ? 'idempotency: the transactional purge timed out'
+        : 'idempotency: the transactional purge failed',
+      {
+        errorKind: errorKind(error),
+      },
+    );
     if (error instanceof IdempotencyWithinError) throw error;
     throw new IdempotencyWithinError(
       'store-failed',
@@ -126,7 +148,9 @@ export async function purgeOnce(
  *
  * At `onInit` it reads the scheduler capability (refusing by name when a
  * scheduled purge has no scheduler), resolves and verifies the store, activates
- * it, and schedules the purge. `onShutdown` and `onClose` remove the job.
+ * it, and schedules the purge without overlap. `onShutdown` removes the job
+ * and waits for the underlying purge, bounded by `storeTimeoutMs`;
+ * `onClose` also removes the job.
  *
  * @param ctx - The plugin context
  * @param options - The resolved tier-C options
@@ -142,6 +166,8 @@ export function setupTransactional(
 ): TransactionalRuntime {
   let state: TransactionalRuntimeState | undefined;
   let scheduler: IScheduler | undefined;
+  let inFlight: Promise<number> | undefined;
+  let stopping = false;
 
   const unschedule = async (): Promise<void> => {
     const active = scheduler;
@@ -155,7 +181,28 @@ export function setupTransactional(
       });
     }
   };
-  ctx.lifecycle.onShutdown(unschedule);
+  ctx.lifecycle.onShutdown(async () => {
+    stopping = true;
+    await unschedule();
+    const pending = inFlight;
+    const active = state;
+    if (pending === undefined || active === undefined) return;
+    // The deadline only bounds shutdown's wait; the store operation continues.
+    const timeout = new IdempotencyWithinError(
+      'store-failed',
+      'idempotency: the transactional purge timed out',
+    );
+    try {
+      await withDeadline(() => pending, {
+        timeoutMs: active.storeTimeoutMs,
+        onTimeout: () => timeout,
+        timing: resolveProbeTiming(ctx.runtime),
+      });
+    } catch (error) {
+      if (error === timeout) safeLog(logger, 'warn', timeout.message, {});
+      // A store rejection is already logged by the scheduled run.
+    }
+  });
   ctx.lifecycle.onClose(unschedule);
 
   ctx.lifecycle.onInit(async () => {
@@ -196,8 +243,25 @@ export function setupTransactional(
     if (purgeScheduler === undefined) return;
     await purgeScheduler.every(purgeJobName, options.intervalMs, async () => {
       const active = state;
-      if (active === undefined) return;
-      await purgeOnce(active, logger, ctx.runtime);
+      if (active === undefined || stopping) return;
+      if (inFlight !== undefined) {
+        safeLog(
+          logger,
+          'debug',
+          'idempotency: skipped the transactional purge while one is running',
+          {},
+        );
+        return;
+      }
+      const pending = Promise.resolve().then(() =>
+        active.store.purge(ctx.runtime.now(), active.purgeBatch)
+      );
+      inFlight = pending;
+      const finished = () => {
+        inFlight = undefined;
+      };
+      void pending.then(finished, finished);
+      await awaitPurge(() => pending, active, logger, ctx.runtime);
     });
     scheduler = purgeScheduler;
   });

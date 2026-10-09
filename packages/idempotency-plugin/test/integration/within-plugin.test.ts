@@ -8,7 +8,13 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IIdempotencyService, IPlugin, IPluginContext, IScheduler } from '@setu-ts/common';
+import type {
+  IIdempotencyService,
+  ILogger,
+  IPlugin,
+  IPluginContext,
+  IScheduler,
+} from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createDatabaseIdempotencyStore, DatabasePlugin } from '@setu-ts/database-plugin';
 import { createApplication } from '@setu-ts/kernel';
@@ -16,6 +22,32 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { IdempotencyConfigurationError, IdempotencyPlugin } from '../../src/index.ts';
 import type { IdempotencyVerifyTimeoutError } from '../../src/index.ts';
 import { fakeTransactionalStore } from '../fixtures/fake-transactional-store.ts';
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => resolve = r);
+  return { promise, resolve };
+}
+
+function purgeLogger() {
+  const lines: { level: string; message: string }[] = [];
+  const logger = {
+    level: 'debug',
+    debug: (message: string) => lines.push({ level: 'debug', message }),
+    info: () => {},
+    warn: (message: string) => lines.push({ level: 'warn', message }),
+    error: () => {},
+  } as unknown as ILogger;
+  const plugin: IPlugin = {
+    name: 'purge-test-logger',
+    version: '1.0.0',
+    provides: [CAPABILITIES.LOGGER],
+    register(ctx) {
+      ctx.services.register(CAPABILITIES.LOGGER, logger);
+    },
+  };
+  return { plugin, lines };
+}
 
 /** A fake scheduler recording every job, so the purge is driven at once. */
 function fakeSchedulerPlugin(): {
@@ -78,6 +110,171 @@ function capturePlugin(): {
 }
 
 describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
+  it('logs a store rejection separately and releases the scheduled purge guard', async () => {
+    const scheduler = fakeSchedulerPlugin();
+    const logger = purgeLogger();
+    let calls = 0;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        scheduler.plugin,
+        logger.plugin,
+        IdempotencyPlugin({
+          transactional: {
+            store: fakeTransactionalStore({
+              purge: () => {
+                calls++;
+                return calls === 1
+                  ? Promise.reject(new Error('PRIVATE STORE DATA'))
+                  : Promise.resolve(1);
+              },
+            }),
+          },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const job = scheduler.jobs.get('idempotency-purge')!;
+      const failure = await Promise.resolve(job()).catch((error: unknown) => error);
+      expect((failure as Error).message).not.toContain('PRIVATE STORE DATA');
+      expect(logger.lines).toEqual([
+        { level: 'warn', message: 'idempotency: the transactional purge failed' },
+      ]);
+      await job();
+      expect(calls).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('skips overlapping scheduled purges even after the first deadline expires', async () => {
+    const scheduler = fakeSchedulerPlugin();
+    const logger = purgeLogger();
+    const release = deferred();
+    let calls = 0;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        scheduler.plugin,
+        logger.plugin,
+        IdempotencyPlugin({
+          transactional: {
+            store: fakeTransactionalStore({
+              purge: async () => {
+                calls++;
+                if (calls === 1) await release.promise;
+                return 1;
+              },
+            }),
+            storeTimeoutMs: 20,
+          },
+        }),
+      ],
+    });
+    await app.start();
+    const job = scheduler.jobs.get('idempotency-purge')!;
+    try {
+      const failure = await Promise.resolve(job()).catch((error: unknown) => error);
+      expect((failure as { reason: string }).reason).toBe('store-failed');
+      for (let i = 0; i < 3; i++) await job();
+      expect(calls).toBe(1);
+      expect(logger.lines.filter((line) => line.level === 'debug')).toHaveLength(3);
+      expect(logger.lines.filter((line) => line.level === 'warn')).toEqual([
+        { level: 'warn', message: 'idempotency: the transactional purge timed out' },
+      ]);
+      release.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await job();
+      expect(calls).toBe(2);
+    } finally {
+      release.resolve();
+      await app.stop();
+    }
+  });
+
+  it('shutdown awaits the in-flight scheduled purge before closing', async () => {
+    const scheduler = fakeSchedulerPlugin();
+    const started = deferred();
+    const release = deferred();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        scheduler.plugin,
+        IdempotencyPlugin({
+          transactional: {
+            store: fakeTransactionalStore({
+              purge: async () => {
+                started.resolve();
+                await release.promise;
+                return 1;
+              },
+            }),
+            storeTimeoutMs: 1_000,
+          },
+        }),
+      ],
+    });
+    await app.start();
+    const running = Promise.resolve(scheduler.jobs.get('idempotency-purge')!());
+    await started.promise;
+    let stopped = false;
+    const stopping = app.stop().then(() => {
+      stopped = true;
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(stopped).toBe(false);
+    } finally {
+      release.resolve();
+      await running;
+      await stopping;
+    }
+    expect(stopped).toBe(true);
+  });
+
+  it('bounds shutdown waiting when an in-flight purge never answers', async () => {
+    const scheduler = fakeSchedulerPlugin();
+    const logger = purgeLogger();
+    const started = deferred();
+    const release = deferred();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        scheduler.plugin,
+        logger.plugin,
+        IdempotencyPlugin({
+          transactional: {
+            store: fakeTransactionalStore({
+              purge: async () => {
+                started.resolve();
+                await release.promise;
+                return 1;
+              },
+            }),
+            storeTimeoutMs: 20,
+          },
+        }),
+      ],
+    });
+    await app.start();
+    const job = scheduler.jobs.get('idempotency-purge')!;
+    const running = Promise.resolve(job()).catch((error: unknown) => error);
+    await started.promise;
+    try {
+      await app.stop();
+      expect(scheduler.removed).toContain('idempotency-purge');
+      expect(logger.lines.some((line) =>
+        line.message ===
+          'idempotency: the transactional purge timed out'
+      )).toBe(true);
+      await job();
+    } finally {
+      release.resolve();
+      await running;
+    }
+  });
+
   it('resolves the store factory with DatabasePlugin registered AFTER the plugin', async () => {
     const capture = capturePlugin();
     const app = createApplication({
