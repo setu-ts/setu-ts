@@ -6,6 +6,7 @@
 
 import type {
   ConnectionErrorReporter,
+  IInboxStore,
   IIngressBehavior,
   IOutboxStore,
   IOutboxWriteScope,
@@ -339,6 +340,26 @@ export interface MessagingCommonOptions {
    * @since 0.9.0
    */
   readonly outbox?: OutboxOptions;
+  /**
+   * The consumer inbox (M108). When set, the plugin registers an
+   * {@linkcode IInbox} under `CAPABILITIES.INBOX` (`inbox.<name>` for a named
+   * instance) and an `inbox` health indicator, so that
+   * `onIntegrationEvent(definition, handler, { inbox: { consumer } })`
+   * subscriptions apply each event's database writes once per consumer. At
+   * `onInit` it resolves the store, runs its `verify()` — a refusal fails
+   * `start()` — and, unless `purge.schedule` is `false`, schedules the
+   * retention purge (`inbox-purge[.<name>]`) on `CAPABILITIES.SCHEDULER`;
+   * with no scheduler registered `start()` rejects
+   * `InboxPurgeUnscheduledError`. The inbox closes after the broker
+   * disconnects, so no in-flight delivery is refused during a stop.
+   *
+   * Every numeric option is validated when `MessagingPlugin(...)` is called.
+   * Absent, nothing changes: no capability, hook, indicator or ordering edge
+   * is added.
+   *
+   * @since 0.9.0
+   */
+  readonly inbox?: InboxOptions;
 }
 
 /**
@@ -1212,4 +1233,159 @@ export interface IOutbox {
     action: 'retry' | 'discard',
     options?: { readonly tenantId?: string },
   ): Promise<void>;
+}
+
+/**
+ * One inbox store: an {@linkcode IInboxStore} instance, or a
+ * {@linkcode RegistryFactory} producing one (for example
+ * `createDatabaseInboxStore()` from `@setu-ts/database-plugin`), resolved in
+ * the plugin's `onInit`.
+ *
+ * @since 0.9.0
+ */
+export type InboxStoreEntry = IInboxStore | RegistryFactory<IInboxStore>;
+
+/**
+ * The inbox's retention purge schedule (M108 §3.11).
+ *
+ * @since 0.9.0
+ */
+export interface InboxPurgeOptions {
+  /**
+   * Register the purge on `CAPABILITIES.SCHEDULER` at `onInit`. Set `false` on
+   * Cloudflare Workers and call `inbox.purge()` from a Cron Trigger. Default
+   * `true`.
+   */
+  readonly schedule?: boolean;
+  /** Milliseconds between purge runs. Default `60000`. */
+  readonly intervalMs?: number;
+  /** Rows deleted per status per purge run, 1–100 000. Default `100`. */
+  readonly batch?: number;
+}
+
+/**
+ * The inbox option arm (M108 §3.11). Every numeric option must be a finite
+ * integer in its range; a violation is refused at construction, naming the
+ * option.
+ *
+ * @since 0.9.0
+ */
+export interface InboxOptions {
+  /** The store every inbox subscription records deliveries through. */
+  readonly store: InboxStoreEntry;
+  /**
+   * Park a delivery after this many handler failures (1–1000), acknowledging
+   * it so a Kafka partition or a NATS consumer is no longer blocked. Absent
+   * (the default), a failure is rethrown and the broker's own retry budget
+   * applies — RabbitMQ and Redis Streams retry and dead-letter, while NATS
+   * redelivers without limit and Kafka blocks the partition, so set it there.
+   */
+  readonly maxAttempts?: number;
+  /**
+   * How long a processed marker is kept, in milliseconds (at least 60 000).
+   * A redelivery older than this is processed again, so it must exceed the
+   * broker's redelivery window plus the outbox's re-send window. Default 7
+   * days. Parked markers are never purged.
+   */
+  readonly retainMs?: number;
+  /**
+   * Bound on every store call the inbox makes except the handler's own
+   * transaction, in milliseconds. Default `5000`.
+   */
+  readonly storeTimeoutMs?: number;
+  /**
+   * Largest envelope, in UTF-8 bytes, stored on a parked marker for
+   * `release('retry')`; a larger one is parked without it. `0` stores none.
+   * Default `262144`.
+   */
+  readonly maxParkedEnvelopeBytes?: number;
+  /** The retention purge schedule. */
+  readonly purge?: InboxPurgeOptions;
+}
+
+/**
+ * One parked delivery, as {@linkcode IInbox.parked} lists it — never with its
+ * envelope.
+ *
+ * @since 0.9.0
+ */
+export interface ParkedInboxEntry {
+  /** The marker id, for {@linkcode IInbox.release}. */
+  readonly rowId: string;
+  /** The consumer name. */
+  readonly consumer: string;
+  /** The subscription topic. */
+  readonly topic: string;
+  /** The envelope id, when it was stored (a valid publish id). */
+  readonly envelopeId?: string;
+  /** Handler failures recorded before the delivery was parked. */
+  readonly attempts: number;
+  /** Epoch milliseconds the delivery was parked. */
+  readonly updatedAt: number;
+  /** The last handler failure, one bounded line. */
+  readonly lastError?: string;
+}
+
+/**
+ * What {@linkcode IInbox.release} answers.
+ *
+ * @since 0.9.0
+ */
+export interface InboxReleaseResult {
+  /** The topic the parked delivery arrived on. */
+  readonly topic: string;
+  /**
+   * The parked envelope, parsed, for `retry` — absent for `discard`, and when
+   * it was larger than `maxParkedEnvelopeBytes` or unreadable.
+   */
+  readonly envelope?: unknown;
+}
+
+/**
+ * The consumer inbox, registered under `CAPABILITIES.INBOX`
+ * (`inbox.<name>` for a named messaging instance).
+ *
+ * **The promise.** For one consumer name, the handler's writes through the
+ * supplied unit of work are committed at most once per envelope id while the
+ * marker is retained; a delivery after the marker is purged is processed
+ * again. Nothing is promised about effects outside that unit of work, about
+ * two processes using one consumer name with different handlers, or about a
+ * database other than the store's.
+ *
+ * The delivery path is internal; these are the operator's methods. Each is an
+ * operator capability: the application gates any route that calls it.
+ *
+ * @since 0.9.0
+ */
+export interface IInbox {
+  /**
+   * Lists parked deliveries, never their envelopes.
+   *
+   * @param limit - At most this many, 1–1000. Default `100`
+   * @returns The parked deliveries
+   */
+  parked(limit?: number): Promise<readonly ParkedInboxEntry[]>;
+
+  /**
+   * Releases a parked delivery. `retry` deletes the parked marker and answers
+   * the stored envelope; re-publish it with `broker.publish(topic, envelope)`
+   * — WITHOUT a `deduplicationId`, which NATS and Service Bus would use to
+   * drop the re-publish — and the next delivery runs the handler. `discard`
+   * keeps the marker as `discarded` with its envelope cleared, so redeliveries
+   * stay skipped. The inbox never re-runs a handler itself: that would bypass
+   * the messaging behaviour chain.
+   *
+   * @param rowId - A marker id from {@linkcode IInbox.parked}
+   * @param action - `retry` or `discard`
+   * @returns The topic, and for `retry` the envelope
+   */
+  release(rowId: string, action: 'retry' | 'discard'): Promise<InboxReleaseResult>;
+
+  /**
+   * Deletes processed and discarded markers and failure-count rows last
+   * written before `retainMs` ago, at most `purge.batch` per status.
+   *
+   * @returns The number of rows deleted
+   */
+  purge(): Promise<number>;
 }

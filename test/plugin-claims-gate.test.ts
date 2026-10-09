@@ -39,8 +39,8 @@ interface DerivedSite {
  * Each entry names the expression as it appears in source and the DEFAULT name it
  * evaluates to, so a plugin that starts deriving its name — or a new one that does —
  * fails this gate instead of quietly leaving a hole in the refusal. A package may
- * register several derived names (M107: `messaging-plugin` registers the broker's
- * `token` and the outbox's `outboxToken`), so each package maps to a LIST.
+ * register several derived names (M107/M108: `messaging-plugin` registers the broker's
+ * `token`, the outbox's `outboxToken` and the inbox's `inboxToken`), so each package maps to a LIST.
  */
 const DERIVED_SITES: ReadonlyMap<string, readonly DerivedSite[]> = new Map([
   ['cache-plugin', [{ expression: '`${token}`', name: 'cache' }]],
@@ -49,6 +49,7 @@ const DERIVED_SITES: ReadonlyMap<string, readonly DerivedSite[]> = new Map([
   ['messaging-plugin', [
     { expression: 'token', name: 'messaging' },
     { expression: 'outboxToken', name: 'outbox' },
+    { expression: 'inboxToken', name: 'inbox' },
   ]],
   ['queue-plugin', [{ expression: 'token', name: 'queue' }]],
   ['secrets-plugin', [{ expression: 'CAPABILITIES.SECRETS', name: 'secrets' }]],
