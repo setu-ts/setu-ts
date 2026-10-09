@@ -252,6 +252,20 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
     expect(updated).toMatchObject({ id: '1', name: 'renamed' });
   });
 
+  it('update with nothing left after stripping answers the owned row and writes nothing', async () => {
+    for (const payload of [{}, { tenant_id: 'b' }]) {
+      const { store, repo } = storeWith();
+      expect(await store.update('a', 'Patient', '1', payload)).toEqual({
+        id: '1',
+        name: 'alpha',
+        tenant_id: 'a',
+      });
+      expect(await store.update('b', 'Patient', '1', payload)).toBeNull();
+      expect(repo().calls.map((c) => c.method)).toEqual(['findById', 'findById']);
+      expect(repo().rows.get('1')).toEqual({ id: '1', name: 'alpha', tenant_id: 'a' });
+    }
+  });
+
   it('update returns null when the id is unknown under the tenant (no write)', async () => {
     const { store, repo } = storeWith();
     expect(await store.update('a', 'Patient', '2', { name: 'x' })).toBeNull();

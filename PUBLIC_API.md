@@ -1580,9 +1580,13 @@ predicate names a key field.
 `writePreconditionProblem(where, data?)` returns a reason or `undefined`; it requires a non-empty
 plain equality object, non-empty field names without a `$` prefix or `.`, string/number values, and,
 when supplied, a non-empty plain update payload. Every implementation validates direct calls as well
-as repository calls. Invalid inputs reject with `'write-precondition'` (unbranded); `BaseRepository`
-rejects missing support with `UnsupportedQueryFeatureError` feature `'conditional-write'` (HTTP hint
-501), before any I/O. Both members stay optional for implementors.
+as repository calls. Invalid inputs reject with `UnsupportedQueryFeatureError` feature
+`'write-precondition'` (unbranded) — except a direct call to the D1 data source, which rejects with
+`CloudflareUnsupportedError`, since `cloudflare-plugin` cannot import `database-plugin`'s error.
+Through a repository the check runs in `BaseRepository` first, so every backend answers
+`'write-precondition'` there. `BaseRepository` rejects missing support with
+`UnsupportedQueryFeatureError` feature `'conditional-write'` (HTTP hint 501), before any I/O. Both
+members stay optional for implementors.
 
 | Data source                  | Write mechanism                                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------------------------------- |

@@ -253,6 +253,11 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     for (const [key, value] of Object.entries(data)) {
       if (key !== col) stripped[key] = value;
     }
+    // Nothing left to write: answer the owned row unchanged, as the reference
+    // memory store does, rather than sending a write with an empty payload.
+    if (Object.keys(stripped).length === 0) {
+      return await this.#ownedRow(tenantId, entity, id as EntityKey) as unknown as (E | null);
+    }
     const result = await conditionalUpdate(repo, id as EntityKey, { [col]: tenantId }, stripped);
     if (result.outcome === 'not-matched') return null;
     let updated: Record<string, unknown>;
