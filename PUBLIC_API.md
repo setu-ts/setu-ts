@@ -11707,7 +11707,7 @@ identities can collide. The default TTL is 86,400,000 ms, bounded to an integer 
 2,592,000,000 ms. `IdempotentWithinResult<R>` carries `value: R` and `replayed: boolean`; value is
 the JSON round trip on both paths, so dates become strings and JSON-omitted members are absent.
 
-`IIdempotencyService` gains two **required** members, breaking custom implementations:
+The new `IIdempotencyService` contract includes two **required** tier-C members:
 
 ```typescript
 within<R, S = unknown>(
