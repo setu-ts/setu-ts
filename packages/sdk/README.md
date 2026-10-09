@@ -230,8 +230,12 @@ cannot disable the cap or be clamped into an immediate retry.
 
 `ClientRequest.idempotencyKey` supplies a key; `ClientOptions.idempotency` generates one by default
 for `POST` and `PATCH`. The default header is `Idempotency-Key`; configure `idempotency.header` to
-match the server. A request that already carries that header uses its value as the key. The same key
-is reused across retry attempts, including a retryable `409`.
+match the server. When `ClientOptions.idempotency` applies to the request's method and
+`ClientRequest.idempotencyKey` is absent, a request that already carries the configured header uses
+its value as the key. Without matching configuration the header is sent but does not make the
+request keyed, and a request carrying both `idempotencyKey` and that header is refused rather than
+either value replacing the other. The same key is reused across retry attempts, including a
+retryable `409`.
 
 Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
 with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.
