@@ -179,6 +179,14 @@ deletes up to `purge.batch` (default 100) eligible records every `purge.interval
 `ttlMs` replays until the purge runs. On Workers, set `purge: { schedule: false }` and call
 `service.purgeTransactional()` from a Cron Trigger.
 
+**Known purge race.** Two purges running at once (two replicas, or a manual `purgeTransactional()`
+beside the scheduled one) can delete a record that a client re-created in the moment between them,
+so a retry of that request runs `fn` again. The purge re-reads each record inside its delete
+transaction, which closes the window on MongoDB and narrows it elsewhere to about one round trip on
+PostgreSQL (READ COMMITTED) and to the commit of the deferred batch on DynamoDB and D1. Closing it
+fully needs a conditional delete, which the portable repository does not offer yet (M105). Run the
+scheduled purge on one replica if a key can be reused right after it expires.
+
 ### Memory store capacity
 
 The memory store caps each scope at `maxEntriesPerScope` (default 1,000) and the whole store at its

@@ -1193,8 +1193,12 @@ services at initialization. The record and business work must use the same datab
 `run` creates a claim (`id`), executes business work through that transaction's `IUnitOfWork`,
 creates the encoded result (`${id}.r`), and commits. It uses two creates, with no update or delete.
 `find` requires both rows with the idempotency kind and their correct roles. `purge` preserves
-incomplete, foreign-kind and invalid-envelope records; it deletes complete expired records only.
-`verify` runs the two-create pattern and rolls it back before the first call.
+incomplete, foreign-kind and invalid-envelope records, and deletes a complete record only when an
+in-transaction re-read still finds it expired. That re-read narrows but does not close one race: two
+concurrent purges can delete a record a client re-created between them (closed on MongoDB; about one
+round trip on PostgreSQL READ COMMITTED; the deferred commit on DynamoDB and D1). A conditional
+delete (M105) would close it. `verify` runs the two-create pattern and rolls it back before the
+first call.
 
 `TransactionalStoreUnavailableError` carries `entity` and `reason`: `'cosmos-unsupported'`,
 `'bigtable-unsupported'`, `'mongodb-standalone'` or `'entity-unavailable'`. An adapter refusal can
