@@ -53,8 +53,8 @@ export class ProbeRollback extends Error {
  *
  * @internal
  * @param service - The database service a store bridge resolved
- * @returns `true` when the backend is Cosmos DB (or an `IDatabaseService` this
- *   package did not build, which reports no adapter)
+ * @returns `true` when the backend is Cosmos DB; `false` when the service was
+ *   not built by this package and reports no adapter information
  */
 export function isCosmosBackend(service: IDatabaseService): boolean {
   const info = adapterInfoOf(service);
