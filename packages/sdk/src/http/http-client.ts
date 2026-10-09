@@ -21,7 +21,13 @@ import type { CircuitBreakerPolicy } from 'jsr:@setu-ts/common@^0.8.0';
 
 import { HttpClientError } from '../errors.ts';
 import { createCircuitBreaker } from '../circuit-breaker/circuit-breaker.ts';
-import { runWithRetry, validateRetryPolicy } from '../retry/retry-strategy.ts';
+import { markExecuted, runWithRetry, validateRetryPolicy } from '../retry/retry-strategy.ts';
+import type { ResolvedClientIdempotencyOptions } from './idempotency-key.ts';
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  resolveClientIdempotencyOptions,
+  validateIdempotencyKey,
+} from './idempotency-key.ts';
 import { createRateLimiter } from './rate-limiter.ts';
 import { createDefaultFetch } from './default-fetch.ts';
 
@@ -118,6 +124,7 @@ export class HttpClient implements IHttpClient {
     response: ClientResponse<unknown>,
     request: ClientRequestContext,
   ) => ClientResponse<unknown> | Promise<ClientResponse<unknown>>)[];
+  #idempotency: ResolvedClientIdempotencyOptions | undefined;
 
   #breakers = new Map<string, OriginBreaker>();
   #limiters = new Map<string, OriginLimiter>();
@@ -133,6 +140,16 @@ export class HttpClient implements IHttpClient {
     this.#windowMs = options.rateLimit?.windowMs;
     this.#requestInterceptors = options.requestInterceptors ?? [];
     this.#responseInterceptors = options.responseInterceptors ?? [];
+    if (options.idempotency !== undefined) {
+      this.#idempotency = resolveClientIdempotencyOptions(options.idempotency);
+      // A static default would key every request identically (M109b D20).
+      if (new Headers(options.headers).has(this.#idempotency.header)) {
+        throw new Error(
+          `ClientOptions.headers must not set '${this.#idempotency.header}' while ` +
+            'ClientOptions.idempotency is configured',
+        );
+      }
+    }
   }
 
   async request<TResponse, TBody = unknown>(
@@ -185,6 +202,27 @@ export class HttpClient implements IHttpClient {
     if (req.json !== undefined) {
       body = JSON.stringify(req.json);
       headers.set('Content-Type', 'application/json');
+    }
+
+    // Idempotency: set ONE key now, before the interceptors and the retry
+    // loop, so every attempt re-sends the same header (M109b §3.8).
+    let keyed = false;
+    const idempotency = this.#idempotency;
+    if (req.idempotencyKey !== undefined) {
+      keyed = true;
+      const headerName = idempotency?.header ?? IDEMPOTENCY_KEY_HEADER;
+      setIdempotencyHeader(
+        headers,
+        headerName,
+        validateIdempotencyKey(req.idempotencyKey, 'ClientRequest.idempotencyKey'),
+      );
+    } else if (idempotency !== undefined && idempotency.methods.has(req.method.toUpperCase())) {
+      keyed = true;
+      setIdempotencyHeader(
+        headers,
+        idempotency.header,
+        validateIdempotencyKey(idempotency.generateKey(), 'idempotency.generateKey()'),
+      );
     }
 
     // Run request interceptors.
@@ -270,7 +308,8 @@ export class HttpClient implements IHttpClient {
             try {
               data = JSON.parse(text) as TResponse;
             } catch {
-              throw new Error('Failed to parse JSON response body.');
+              // The server executed; a keyed non-safe method must not repeat it.
+              throw markExecuted(new Error('Failed to parse JSON response body.'));
             }
           }
         }
@@ -285,10 +324,15 @@ export class HttpClient implements IHttpClient {
       // Run response interceptors (only on success).
       let result: ClientResponse<TResponse> = clientResponse as ClientResponse<TResponse>;
       for (const interceptor of this.#responseInterceptors) {
-        result = await interceptor(
-          result as ClientResponse<unknown>,
-          requestContext,
-        ) as ClientResponse<TResponse>;
+        try {
+          result = await interceptor(
+            result as ClientResponse<unknown>,
+            requestContext,
+          ) as ClientResponse<TResponse>;
+        } catch (error) {
+          // The server executed; a keyed non-safe method must not repeat it.
+          throw markExecuted(error);
+        }
       }
 
       return result;
@@ -308,7 +352,7 @@ export class HttpClient implements IHttpClient {
       const timing = this.#timing;
       const signal = req.signal;
       const base = inner;
-      inner = () => runWithRetry(base, retry, method, timing, signal);
+      inner = () => runWithRetry(base, retry, method, timing, signal, keyed);
     }
 
     // Wrap with circuit breaker (breaker calls `inner`, which includes retry).
@@ -320,4 +364,14 @@ export class HttpClient implements IHttpClient {
 
     return inner();
   }
+}
+
+/** Sets the key header, refusing a request that already carries it. */
+function setIdempotencyHeader(headers: Headers, headerName: string, key: string): void {
+  if (headers.has(headerName)) {
+    throw new Error(
+      `ClientRequest must not set both idempotencyKey and the '${headerName}' header.`,
+    );
+  }
+  headers.set(headerName, key);
 }

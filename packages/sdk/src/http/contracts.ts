@@ -14,8 +14,10 @@ import type {
   CircuitBreakerPolicy,
   RetryPolicy,
 } from 'jsr:@setu-ts/common@^0.8.0';
+import type { ClientIdempotencyOptions } from './idempotency-key.ts';
 
 export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy };
+export type { ClientIdempotencyOptions };
 
 /**
  * Retry policy for the HTTP client.
@@ -58,6 +60,13 @@ export interface ClientRequest<TBody = unknown> {
 
   /** JSON body. When present, `Content-Type: application/json` is set automatically. */
   readonly json?: TBody;
+
+  /**
+   * The caller's own idempotency key: 1–255 characters of `0x21`–`0x7E`
+   * without `"`, validated before any network call. Its presence makes the
+   * request retryable on any method and on `409`.
+   */
+  readonly idempotencyKey?: string;
 
   /** Abort signal that cancels fetches and queued waits. */
   readonly signal?: AbortSignal;
@@ -182,6 +191,15 @@ export interface ClientOptions {
 
   /** Rate-limit policy. Non-positive `maxRequests` or `windowMs` throws. */
   readonly rateLimit?: ClientRateLimitPolicy;
+
+  /**
+   * Generated idempotency keys. Every request whose method is listed and that
+   * has no `ClientRequest.idempotencyKey` gets ONE generated key, reused by
+   * every retry attempt — which is how a GENERATED client gets one, since its
+   * operations take no per-call options. Omitted: only
+   * `ClientRequest.idempotencyKey` sets the header.
+   */
+  readonly idempotency?: ClientIdempotencyOptions;
 
   /** Request interceptors executed once before resilient execution. */
   readonly requestInterceptors?: ClientRequestInterceptor[];

@@ -64,7 +64,32 @@ export function validateRetryPolicy(policy: ClientRetryPolicy): Readonly<ClientR
 // Idempotent/safe methods that may be automatically retried.
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
 
-/** Retryable status codes: 408, 425, 429, and 500–599. */
+/**
+ * Errors raised AFTER a response arrived (a JSON parse failure, a response
+ * interceptor). The server executed, so a keyed request outside the safe set
+ * must not repeat it (M109b §3.9).
+ */
+const EXECUTED = new WeakSet<object>();
+
+/**
+ * Tags an error as raised after the server executed. Mutates nothing the
+ * caller can see: the tag lives in this module's `WeakSet`.
+ *
+ * @internal
+ * @param error - Whatever was thrown after a response arrived
+ * @returns The same error, tagged
+ */
+export function markExecuted<T>(error: T): T {
+  if (typeof error === 'object' && error !== null) EXECUTED.add(error);
+  return error;
+}
+
+/** True when an error was raised after a response arrived. */
+function isExecuted(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && EXECUTED.has(error);
+}
+
+/** Retryable status codes: 408, 425, 429, and 500–599 — plus `409` when keyed. */
 function isRetryableStatus(status: number): boolean {
   return (
     status === 408 ||
@@ -107,9 +132,12 @@ export async function runWithRetry<T>(
   method: string,
   timing: IClientTiming,
   signal?: AbortSignal,
+  keyed = false,
 ): Promise<T> {
   let lastError: unknown;
-  const canRetry = SAFE_METHODS.has(method.toUpperCase());
+  const safeMethod = SAFE_METHODS.has(method.toUpperCase());
+  // A keyed request may be repeated on ANY method (M109b §3.9).
+  const canRetry = keyed || safeMethod;
   const maxRetryAfterMs = policy.maxRetryAfterMs ??
     (policy.backoff === 'exponential' ? policy.delay * 2 ** (policy.limit - 1) : policy.delay);
 
@@ -123,12 +151,17 @@ export async function runWithRetry<T>(
       // Never retry aborted requests.
       if (signal?.aborted) throw error;
 
+      // A keyed, non-safe method whose response already arrived is never
+      // repeated: the server executed (M109b §3.9).
+      if (keyed && !safeMethod && isExecuted(error)) throw error;
+
       let isRetryable = false;
       let retryAfter: number | null = null;
 
       if (error instanceof HttpClientError) {
-        // HTTP response error — classify on the real error type.
-        isRetryable = isRetryableStatus(error.status);
+        // HTTP response error — classify on the real error type. A keyed
+        // request also retries 109a's and tier C's `409` (M109b §3.9).
+        isRetryable = isRetryableStatus(error.status) || (keyed && error.status === 409);
         retryAfter = parseRetryAfterDelta(error.headers);
       } else {
         // Transport rejection (non-HttpClientError throw) — retryable on
