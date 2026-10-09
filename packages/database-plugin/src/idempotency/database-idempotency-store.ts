@@ -208,12 +208,23 @@ export class DatabaseIdempotencyStore implements ITransactionalIdempotencyStore 
       // An orphan or tampered result is not a record the purge owns (§10 O4).
       const record = await this.find(id);
       if (record === undefined || !isResultEnvelope(record.result)) continue;
-      await this.#service.transaction(async (uow) => {
+      const removed = await this.#service.transaction(async (uow) => {
         const transactionalRepo = uow.getRepository<Row, EntityKey>(this.#entity);
+        // Re-read inside the transaction: a concurrent purge may already have
+        // deleted this record and a client re-created the key, and that fresh
+        // record must survive (R2-1).
+        const claim = await transactionalRepo.findById(id as EntityKey);
+        if (
+          claim === null || claim.kind !== IDEMPOTENCY_RECORD_KIND || claim.role !== CLAIM_ROLE ||
+          Number(claim.createdAt) !== record.createdAt || !(Number(claim.expiresAt) < before)
+        ) {
+          return false;
+        }
         await transactionalRepo.delete(id as EntityKey);
         await transactionalRepo.delete(`${id}${RESULT_SUFFIX}` as EntityKey);
+        return true;
       });
-      deleted += 1;
+      if (removed) deleted += 1;
     }
     return deleted;
   }

@@ -256,6 +256,44 @@ describe('DatabaseIdempotencyStore.purge (M109b §3.10)', () => {
     );
   });
 
+  it('spares a record re-created after a concurrent purge removed the one it listed', async () => {
+    const inner = await memoryService();
+    const store = storeOver(inner);
+    await store.run(claim('reused'), () => Promise.resolve({ result: '{"v":"old"}', value: 1 }));
+    let interleaved = false;
+    // Between this purge's listing and its delete, another replica's purge
+    // removes the expired record and a client re-creates the key (R2-1).
+    const interleave: IDatabaseService['transaction'] = async (work, options) => {
+      if (!interleaved) {
+        interleaved = true;
+        const repo = inner.getRepository<Row>(ENTITY);
+        await repo.delete(claim('reused').id);
+        await repo.delete(`${claim('reused').id}.r`);
+        await store.run(
+          claim('reused', { createdAt: 5_000, expiresAt: 90_000 }),
+          () => Promise.resolve({ result: '{"v":"fresh"}', value: 2 }),
+        );
+      }
+      return await inner.transaction(work, options);
+    };
+    const service = new Proxy(inner, {
+      get(target, property) {
+        if (property === 'transaction') return interleave;
+        const member: unknown = Reflect.get(target, property);
+        return typeof member === 'function' ? member.bind(target) : member;
+      },
+    });
+
+    expect(await storeOver(service).purge(3_000, 10)).toBe(0);
+    expect(await store.find(claim('reused').id)).toEqual({
+      id: claim('reused').id,
+      fingerprint: 'f'.repeat(64),
+      result: '{"v":"fresh"}',
+      createdAt: 5_000,
+      expiresAt: 90_000,
+    });
+  });
+
   it('deletes both rows of an expired record', async () => {
     const service = await memoryService();
     const store = storeOver(service);
