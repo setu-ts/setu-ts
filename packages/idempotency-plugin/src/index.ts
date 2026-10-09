@@ -22,9 +22,16 @@ export type {
   IdempotencyPluginOptions,
   IdempotencyStoreConfig,
   IRedisIdempotencyClient,
+  TransactionalIdempotencyOptions,
+  TransactionalIdempotencyPurgeOptions,
 } from './interfaces/index.ts';
 export { derivedIdempotencyKey, idempotent } from './middleware/idempotent.ts';
 export { idempotentIngress } from './ingress/idempotent-ingress.ts';
-export { IdempotencyConfigurationError, IdempotencyRefusedError } from './errors.ts';
-export type { IdempotencyRefusalReason } from './errors.ts';
+export {
+  IdempotencyConfigurationError,
+  IdempotencyRefusedError,
+  IdempotencyVerifyTimeoutError,
+  IdempotencyWithinError,
+} from './errors.ts';
+export type { IdempotencyRefusalReason, IdempotencyWithinErrorReason } from './errors.ts';
 export { IDEMPOTENCY_KEY_HEADER, IDEMPOTENT_REPLAYED_HEADER } from './constants.ts';
