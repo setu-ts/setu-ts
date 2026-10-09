@@ -5896,7 +5896,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   implementation. Driven against real PostgreSQL with RabbitMQ 4 and Redis Streams (duplicates, a
   failure rolled back and redelivered, two consumer groups, an outbox row relayed twice handled
   once), a MongoDB replica set and the Bigtable emulator; D1 at unit level. The committed-tree
-  security audit is still to run — complete (PR pending).
+  security audit ran three fresh-context rounds. Round 1 failed on three Medium findings (a store
+  write's warn log quoting Drizzle's bound parameters, envelope included; a key without the topic,
+  so one topic's event id could suppress another's; one consumer on two topics sharing a RabbitMQ
+  queue, measured dead-lettering half of each) and two Low (a stored status quoted into an error,
+  parked rows never purged). All five were fixed: the key is `(consumer, topic, envelope id)`, logs
+  carry the error class only, the default queue is `inbox.` plus a hash of the pair, and purge
+  covers parked rows. Round 2 found five Low, chiefly that a dotted-join queue name collided and
+  broke a qualified Pub/Sub topic; round 3 found two Low documentation findings, fixed in docs
+  afterwards and NOT re-audited, at the maintainer's direction — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 

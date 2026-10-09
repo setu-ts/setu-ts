@@ -13314,7 +13314,8 @@ NATS (no `max_deliver`) and Kafka (no per-message dead-letter) need the inbox's 
 - [x] An end-to-end run with M107: a forced double publish handled once
 - [x] Retention, README (the three non-database effect choices), PUBLIC_API.md, and a design
       security review (plan §10)
-- [ ] A committed-tree security audit
+- [x] A committed-tree security audit (three rounds; round 3's two Low doc findings fixed after it,
+      not re-audited, at the maintainer's direction)
 
 ---
 
