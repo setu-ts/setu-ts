@@ -20,6 +20,21 @@ async function readJson<T>(path: string): Promise<T> {
 }
 
 describe('application gate configuration', () => {
+  it('supplies the M109b within-real backend guards in every suite workflow', async () => {
+    for (const path of ['ci', 'drift', 'release']) {
+      const workflow = await Deno.readTextFile(`.github/workflows/${path}.yml`);
+      expect(workflow).toContain('DYNAMODB_ENDPOINT_URL: http://127.0.0.1:8000');
+      expect(workflow).toContain(
+        'OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      );
+      expect(workflow).toContain(
+        'MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
+      );
+      expect(workflow).toContain('MONGODB_URI: mongodb://127.0.0.1:27017');
+      expect(workflow).toContain('BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086');
+    }
+  });
+
   it('fails CI when the example gate changes tracked application files', async () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     const start = workflow.indexOf('\n  deno:');
