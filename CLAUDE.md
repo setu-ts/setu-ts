@@ -5911,6 +5911,31 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   covers parked rows. Round 2 found five Low, chiefly that a dotted-join queue name collided and
   broke a qualified Pub/Sub topic; round 3 found two Low documentation findings, fixed in docs
   afterwards and NOT re-audited, at the maintainer's direction — complete (PR #436).
+- **Milestone 109b** (`packages/idempotency-plugin` + `packages/common` + `packages/database-plugin`
+  - `packages/sdk` — idempotency tier C and the SDK key): `service.within(options, fn)` runs `fn`
+    and its idempotency record in ONE database transaction — a claim row `id` created first, then a
+    result row `${id}.r` (two creates, never an update or a delete, because DynamoDB and D1 have no
+    read-your-own-writes). A committed record replays the JSON round trip of what `fn` returned, the
+    same value on the first call and on a replay; a concurrent duplicate loses on the claim's key
+    and replays, or answers a retryable `conflict` (`409`) where the backend refuses before the
+    winner commits. `fn`'s own errors are rethrown unchanged; store errors become a value-free
+    `store-failed` (`503`) logged by class only. `createDatabaseIdempotencyStore` refuses Cosmos DB,
+    Bigtable and a standalone MongoDB at `start()`, through a backend probe now shared with the M107
+    outbox and M108 inbox stores. The SDK gains `ClientRequest.idempotencyKey` and
+    `ClientOptions.idempotency`: one key across every retry, retries on any method and on `409`, and
+    never after a `2xx`. Implemented by a local agent and then Codex, with measurement overturning
+    two plan claims: DynamoDB's concurrent loser replays rather than conflicting, and Prisma times
+    out at 30 s into `store-failed`, not `conflict`. Verification found a first call returning a
+    `Date` while its replay returned a string, a keyed `POST` retried after a `2xx` whose body could
+    not be read, and a purge that deleted a record's two rows separately — an interruption left the
+    key answering `conflict` for ever. The committed-tree security audit ran three fresh-context
+    rounds: round 1 failed on four Low findings (an ambiguous `${tenantId}:${principalId}` scope
+    recipe, now `JSON.stringify([tenantId, principalId])`; missing SDK CORS and server-dedupe notes;
+    overlapping purges outliving `stop()`; a wrong JSDoc); round 2 on two Low (a purge deleting a
+    key re-created after another replica purged it; a hung purge stalling retention silently); round
+    3 on one Low, the narrower purge race plan §3.10 accepts — documented afterwards and NOT
+    re-audited. Not verified: Prisma, a standalone MongoDB locally (CI runs it), a browser —
+    complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 

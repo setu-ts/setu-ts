@@ -13408,14 +13408,16 @@ and Brandur Leach's Postgres idempotency article.
 
 **Deliverables**
 
-- [ ] The store port and token in `common`; tiers A and B; memory, Redis and Durable Object stores
-- [ ] Route middleware and decorator; `@Idempotent` on a safe method is refused at registration, and
+- [x] The store port and token in `common`; tiers A and B; memory, Redis and Durable Object stores
+- [x] Route middleware and decorator; `@Idempotent` on a safe method is refused at registration, and
       a streaming response is recorded status-only at request time (no registration-time signal
       exists for it — plan §2 C3)
-- [ ] The ingress behaviour, releasing on a failed job or message
-- [ ] `within()` tier C per backend, or refused by name
-- [ ] The SDK `idempotencyKey` option, with a test that every retry carries the same key
-- [ ] A design security review in each plan, and a committed-tree audit
+- [x] The ingress behaviour, releasing on a failed job or message
+- [x] `within()` tier C per backend, or refused by name
+- [x] The SDK `idempotencyKey` option, with a test that every retry carries the same key
+- [x] A design security review in each plan, and a committed-tree audit (109b: three rounds; round
+      3's one Low finding is the purge race plan §3.10 accepts, documented afterwards, not
+      re-audited)
 
 ---
 
@@ -13824,8 +13826,8 @@ patch by construction and gains nothing new here.
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
 | 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
 | 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, topic, envelope id), in the handler's transaction                                                                               |
-| 109       | ⬜     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
+| 109       | ✅     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |
-| 109b      | ⬜     | common + idempotency-plugin + database-plugin + sdk — idempotency tier C (`within`) and the SDK idempotency key; in progress on `feat/m109b-idempotency-tier-c-sdk`                                                                           |
+| 109b      | ✅     | common + idempotency-plugin + database-plugin + sdk — idempotency tier C (`within`) and the SDK idempotency key (PR pending)                                                                                                                  |
 | 110a      | ⬜     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
 | 110b      | ⬜     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |
