@@ -98,6 +98,55 @@ describe('resolveClientIdempotencyOptions (M109b §3.8, §3.13)', () => {
 });
 
 describe('createClient idempotency wiring (M109b §3.8)', () => {
+  it('never repeats a keyed POST after a 2xx interceptor throws a non-object', async () => {
+    for (const thrown of ['interceptor failed', null, undefined, 7, () => 'thrown function']) {
+      const { fetch, calls } = recordingFetch([200]);
+      const client = createClient({
+        baseUrl: 'http://x',
+        fetch,
+        timing: timing(),
+        retry: { limit: 3, delay: 1, backoff: 'fixed' },
+        responseInterceptors: [() => {
+          throw thrown;
+        }],
+      });
+      let caught: unknown = Symbol('not thrown');
+      try {
+        await client.request({ method: 'POST', path: 'orders', idempotencyKey: 'mine' });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(thrown);
+      expect(calls()).toBe(1);
+    }
+  });
+
+  it('never repeats a keyed POST when reading a 2xx response body fails', async () => {
+    const failure = new Error('response stream failed');
+    let calls = 0;
+    const client = createClient({
+      baseUrl: 'http://x',
+      fetch: () => {
+        calls++;
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(failure);
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      },
+      timing: timing(),
+      retry: { limit: 3, delay: 1, backoff: 'fixed' },
+    });
+    await expect(client.request({ method: 'POST', path: 'orders', idempotencyKey: 'mine' }))
+      .rejects.toBe(failure);
+    expect(calls).toBe(1);
+  });
+
   it('sets ONE key across every keyed attempt', async () => {
     const { fetch, keys, calls } = recordingFetch([500, 500, 200]);
     const client = createClient({

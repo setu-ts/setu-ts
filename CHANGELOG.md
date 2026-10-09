@@ -648,6 +648,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Keyed SDK requests after a successful response (`@setu-ts/sdk`, M109b).** A keyed POST is never
+  retried when reading a `2xx` response body fails or a response interceptor throws a primitive or
+  function. The original thrown value still reaches the caller unchanged.
+
 - **Worker lifecycle and example hardening (M45c, #433).** Expired pending tasks reclaim excess
   starting slots; stale startup callbacks cannot reject unrelated work. Termination throws and
   rejections are contained, and shutdown bounds its wait to one second per termination, including

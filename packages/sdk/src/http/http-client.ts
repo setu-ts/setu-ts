@@ -260,6 +260,9 @@ export class HttpClient implements IHttpClient {
       this.#limiters.set(origin, limiter);
     }
 
+    // Track the response on this logical request, independently of the thrown
+    // value: interceptors may throw primitives and reading the body may fail.
+    let successfulResponseReceived = false;
     const execute = async (): Promise<ClientResponse<TResponse>> => {
       // Rate-limit gate. Each retry attempt is a real outbound HTTP request,
       // so acquiring the token here means every attempt consumes one slot.
@@ -297,6 +300,8 @@ export class HttpClient implements IHttpClient {
           errorBody,
         );
       }
+
+      successfulResponseReceived = true;
 
       // Parse response body.
       let data: TResponse | undefined;
@@ -352,7 +357,8 @@ export class HttpClient implements IHttpClient {
       const timing = this.#timing;
       const signal = req.signal;
       const base = inner;
-      inner = () => runWithRetry(base, retry, method, timing, signal, keyed);
+      inner = () =>
+        runWithRetry(base, retry, method, timing, signal, keyed, () => successfulResponseReceived);
     }
 
     // Wrap with circuit breaker (breaker calls `inner`, which includes retry).

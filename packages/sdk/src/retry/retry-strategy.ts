@@ -133,6 +133,7 @@ export async function runWithRetry<T>(
   timing: IClientTiming,
   signal?: AbortSignal,
   keyed = false,
+  successfulResponseReceived?: () => boolean,
 ): Promise<T> {
   let lastError: unknown;
   const safeMethod = SAFE_METHODS.has(method.toUpperCase());
@@ -153,7 +154,9 @@ export async function runWithRetry<T>(
 
       // A keyed, non-safe method whose response already arrived is never
       // repeated: the server executed (M109b §3.9).
-      if (keyed && !safeMethod && isExecuted(error)) throw error;
+      if (keyed && !safeMethod && (successfulResponseReceived?.() || isExecuted(error))) {
+        throw error;
+      }
 
       let isRetryable = false;
       let retryAfter: number | null = null;
