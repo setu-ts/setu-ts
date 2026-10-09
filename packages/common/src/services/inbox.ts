@@ -2,7 +2,7 @@
  * Consumer inbox contract — the store port the messaging plugin's inbox
  * records handled deliveries through.
  *
- * The inbox inserts a marker keyed by `(consumer, envelope id)` in the SAME
+ * The inbox inserts a marker keyed by `(consumer, topic, envelope id)` in the SAME
  * database transaction as a subscription handler's own writes, so a duplicate
  * delivery is acknowledged without running the handler and a failed handler
  * leaves no marker behind. The delivery path lives in
@@ -221,8 +221,9 @@ export interface IInboxStore {
   stats(): Promise<InboxStoreStats>;
 
   /**
-   * Deletes `processed`, `discarded` and `attempting` rows last written before
-   * `before`. Parked markers are never purged.
+   * Deletes rows of every status — `processed`, `discarded`, `attempting` and
+   * `parked` — last written before `before`. A parked marker is purged like
+   * any other, so the table stays bounded by the retention window.
    *
    * @param before - Epoch milliseconds; rows with `updatedAt < before` are deleted
    * @param limit - Maximum rows deleted per status

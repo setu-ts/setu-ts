@@ -94,13 +94,16 @@ export function describeInboxStoreContract(
       expect(await store.release(ids, 'retry', 8)).toEqual({ outcome: 'missing' });
     });
 
-    it('purges old processed rows and never a parked one', async () => {
+    it('purges old rows of every status, parked included, and keeps recent ones', async () => {
       const store = await make();
       await store.run(marker('e', { updatedAt: 10 }), () => Promise.resolve());
-      await store.park(marker('f', { status: 'parked', updatedAt: 10 }));
-      expect(await store.purge(100, 10)).toBe(1);
+      await store.park(marker('f', { status: 'parked', updatedAt: 10, envelope: '{"x":1}' }));
+      await store.park(marker('g', { status: 'parked', updatedAt: 500 }));
+      expect(await store.purge(100, 10)).toBe(2);
       expect(await store.find(idsFor('e').marker)).toBeUndefined();
-      expect((await store.find(idsFor('f').marker))?.status).toBe('parked');
+      // An old parked marker goes with its envelope, so the table stays bounded.
+      expect(await store.find(idsFor('f').marker)).toBeUndefined();
+      expect((await store.find(idsFor('g').marker))?.status).toBe('parked');
     });
 
     it('verify passes on a usable backend', async () => {

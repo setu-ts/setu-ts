@@ -125,6 +125,17 @@ describe('IInbox.release', () => {
     expect((done as Error).message).toContain('processed');
   });
 
+  it('never quotes a stored status it does not recognize', async () => {
+    const { store, service } = harness();
+    store.rows.set(ROW, parked({ status: 'evil\r\nFORGED level=info' as never }));
+    const error = await service.release(ROW, 'retry').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InboxRowStateError);
+    expect((error as InboxRowStateError).outcome).toBe('not-parked');
+    expect('status' in (error as object)).toBe(false);
+    expect((error as Error).message).not.toContain('FORGED');
+    expect((error as Error).message).not.toMatch(/[\r\n]/);
+  });
+
   it('refuses an unknown action', async () => {
     const { service } = harness();
     await expect(service.release(ROW, 'delete' as never)).rejects.toBeInstanceOf(TypeError);

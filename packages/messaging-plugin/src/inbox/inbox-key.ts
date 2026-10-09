@@ -3,11 +3,15 @@
  * store never re-derives them.
  *
  * The marker id is the lowercase hex SHA-256 of
- * `JSON.stringify(['setu-inbox/1', consumer, envelopeId])`: fixed length and
- * alphabet on every backend, whatever the producer sent as an id. The JSON
- * array keeps the hashed input injective (no consumer or id containing a
- * separator can collide with another pair), and `setu-inbox/1` versions the
- * derivation.
+ * `JSON.stringify(['setu-inbox/1', consumer, topic, envelopeId])`: fixed length
+ * and alphabet on every backend, whatever the producer sent as an id. The JSON
+ * array keeps the hashed input injective (no consumer, topic or id containing
+ * a separator can collide with another triple), and `setu-inbox/1` versions
+ * the derivation.
+ *
+ * The topic is part of the key because one consumer name may read several
+ * topics: keyed by consumer and id alone, a publisher on topic B could
+ * suppress a topic-A event it never saw by reusing its id.
  *
  * @module
  */
@@ -37,15 +41,17 @@ function hex(bytes: ArrayBuffer): string {
  * @internal
  * @param subtle - The runtime's `SubtleCrypto`
  * @param consumer - The consumer name
+ * @param topic - The subscription topic
  * @param envelopeId - The envelope id, as delivered
  * @returns The marker and failure-count row ids
  */
 export async function deriveInboxIds(
   subtle: SubtleCrypto,
   consumer: string,
+  topic: string,
   envelopeId: string,
 ): Promise<InboxIds> {
-  const input = JSON.stringify([DERIVATION, consumer, envelopeId.toWellFormed()]);
+  const input = JSON.stringify([DERIVATION, consumer, topic, envelopeId.toWellFormed()]);
   const digest = await subtle.digest('SHA-256', new TextEncoder().encode(input));
   return idsFromMarker(hex(digest));
 }

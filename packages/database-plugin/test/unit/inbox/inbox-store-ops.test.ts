@@ -218,7 +218,7 @@ describe('DatabaseInboxStore operations', () => {
       .toEqual({ outcome: 'missing' });
   });
 
-  it('purge deletes processed, discarded and attempting rows older than the bound', async () => {
+  it('purge deletes rows of every status older than the bound, parked included', async () => {
     const service = await memoryService();
     const store = storeOver(service);
     await store.run(marker('a', { updatedAt: 10 }), () => Promise.resolve());
@@ -227,10 +227,11 @@ describe('DatabaseInboxStore operations', () => {
     await store.park(marker('d', { status: 'parked', updatedAt: 10 }));
     await store.park(marker('e', { status: 'parked', updatedAt: 10 }));
     await store.release(idsFor('e'), 'discard', 10);
+    await store.park(marker('f', { status: 'parked', updatedAt: 500 }));
 
-    expect(await store.purge(100, 10)).toBe(3);
+    expect(await store.purge(100, 10)).toBe(4);
     const left = (await allRows(service)).map((row) => row.id).sort();
-    expect(left).toEqual([idsFor('b').marker, idsFor('d').marker].sort());
+    expect(left).toEqual([idsFor('b').marker, idsFor('f').marker].sort());
   });
 
   it('purge honours the per-status limit', async () => {

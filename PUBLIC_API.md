@@ -6401,9 +6401,9 @@ value out of range, `NaN` or a fraction throws a `RangeError` naming the option,
 ### Consumer inbox (M108)
 
 `MessagingPlugin({ inbox })` plus `onIntegrationEvent(definition, handler, { inbox: { consumer } })`
-records each event a consumer applied, keyed by `(consumer, envelope id)`, in the SAME transaction
-as the handler's writes. The store is reached through the `IInboxStore` port in `@setu-ts/common` —
-normally `createDatabaseInboxStore()` from `@setu-ts/database-plugin`.
+records each event a consumer applied, keyed by `(consumer, topic, envelope id)`, in the SAME
+transaction as the handler's writes. The store is reached through the `IInboxStore` port in
+`@setu-ts/common` — normally `createDatabaseInboxStore()` from `@setu-ts/database-plugin`.
 
 ```typescript
 import { createDatabaseInboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
@@ -6448,10 +6448,15 @@ store's.
 - **Delivery.** Validate the envelope; read the marker (present → acknowledge); parse; then ONE
   transaction that creates the marker first and runs the handler. After ANY rejection the marker is
   read again: present → acknowledge (another delivery handled it); absent → the handler failed. Row
-  ids are a SHA-256 of `(consumer, envelope id)`, so any string id is keyable; the raw id is stored
-  only when it is a valid publish id.
-- **Queue.** The broker `queue` defaults to `consumer`, so the subscription is a durable consumer
-  group that redelivers.
+  ids are a SHA-256 of `(consumer, topic, envelope id)`, so any string id is keyable and one
+  consumer's topics never suppress each other; the raw id is stored only when it is a valid publish
+  id.
+- **Queue.** The broker `queue` defaults to `<consumer>.<topic>`, so the subscription is a durable
+  consumer group that redelivers, one per topic.
+- **Retention.** `purge()` deletes rows of every status older than `retainMs`, parked markers and
+  their envelopes included, so the table is bounded by the window.
+- **Logs.** A failed store call is logged with the error's class name only (the `errorKind` log
+  field), never its message, which a driver may fill with the statement's bound parameters.
 - **Failures.** Without `maxAttempts` a failure is rethrown and the broker's budget applies (NATS
   redelivers without limit and Kafka blocks the partition). With it, failures are counted outside
   the transaction and at the limit the delivery is parked and acknowledged; a parse rejection parks

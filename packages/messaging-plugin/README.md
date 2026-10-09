@@ -1363,9 +1363,9 @@ throwing synchronously.
 
 At-least-once delivery means duplicates by design: an outbox relay that crashes after publishing
 sends the row again, and every broker redelivers after a lost acknowledgement. The inbox records
-each event a consumer applied, keyed by `(consumer, envelope id)`, in the SAME database transaction
-as the handler's own writes. A duplicate delivery is acknowledged without running the handler; a
-handler that fails leaves no record, so the redelivery runs it again.
+each event a consumer applied, keyed by `(consumer, topic, envelope id)`, in the SAME database
+transaction as the handler's own writes. A duplicate delivery is acknowledged without running the
+handler; a handler that fails leaves no record, so the redelivery runs it again.
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -1428,13 +1428,15 @@ with no scheduler registered `start()` rejects `InboxPurgeUnscheduledError`, unl
 
 ### The consumer name
 
-`inbox.consumer` is one half of the key, so it must be the SAME on every replica and every
-deployment of the consumer — a name that changes makes every redelivered event look new. It is also
-the broker `queue` unless you set `queue`: on RabbitMQ a queue-less subscriber gets a private queue
-whose failed messages are discarded, which would leave the inbox nothing to de-duplicate. Two inbox
-subscriptions with the same consumer name on one topic in one application are refused with
-`InboxConsumerConflictError`, because each would skip the other's events. Across processes this
-cannot be detected: give each consumer its own name.
+`inbox.consumer` is part of the key — with the topic and the envelope id — so it must be the SAME on
+every replica and every deployment of the consumer: a name that changes makes every redelivered
+event look new. The topic in the key keeps one consumer's topics apart, so an event on one topic
+never suppresses an event with the same id on another. Unless you set `queue`, the broker `queue` is
+`<consumer>.<topic>`: on RabbitMQ a queue-less subscriber gets a private queue whose failed messages
+are discarded, which would leave the inbox nothing to de-duplicate, and a queue shared by two topics
+hands each handler the other topic's messages. Two inbox subscriptions with the same consumer name
+on one topic in one application are refused with `InboxConsumerConflictError`, because each would
+skip the other's events. Across processes this cannot be detected: give each consumer its own name.
 
 ### The promise
 
@@ -1518,9 +1520,11 @@ for (const parked of await inbox.parked()) {
 redeliveries stay skipped. The inbox never re-runs a handler itself — that would bypass the
 messaging behaviour chain. A re-publish reaches every consumer group of the topic: groups using an
 inbox skip it, groups without one process it again. `parked()` never returns an envelope, and the
-health indicator carries a count only. Parked rows are never purged: they may hold personal data,
-count toward erasure, and `discard` is how to clear one. These are operator capabilities — gate any
-route that calls them.
+health indicator carries a count only. Parked rows are purged by `retainMs` like every other row,
+envelope included, so the table stays bounded however many deliveries park: release or discard a
+parked delivery within that window (the `inbox` health indicator reports `degraded` while any row is
+parked), and `discard` clears one sooner. These are operator capabilities — gate any route that
+calls them.
 
 ### Backends
 
@@ -1541,10 +1545,10 @@ the inbox at startup with `InboxStoreUnavailableError`:
 
 Every row carries `kind: 'setu-inbox'`, and every read, count, release and purge requires it, so an
 inbox sharing a table or collection with business documents never touches them. Row ids are a
-SHA-256 of `(consumer, envelope id)` — 64 hex characters, or 73 for the failure-count row — whatever
-id a producer sent; the raw envelope id is stored only when it is a valid publish id (at most 128
-UTF-8 bytes, no control or format characters). Protect the inbox table like the broker credentials:
-anyone who can write to it can mark an event handled.
+SHA-256 of `(consumer, topic, envelope id)` — 64 hex characters, or 73 for the failure-count row —
+whatever id a producer sent; the raw envelope id is stored only when it is a valid publish id (at
+most 128 UTF-8 bytes, no control or format characters). Protect the inbox table like the broker
+credentials: anyone who can write to it can mark an event handled.
 
 PostgreSQL (the exact file the real suite applies):
 

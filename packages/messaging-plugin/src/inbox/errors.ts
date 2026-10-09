@@ -141,9 +141,15 @@ export class InboxStoreVerifyTimeoutError extends Error {
   }
 }
 
+/** The statuses a not-parked marker may legitimately report. */
+const KNOWN_STATUSES = ['processed', 'discarded', 'attempting'] as const;
+
 /**
  * Rejected by `IInbox.release` when the row id is malformed, or the marker is
- * missing or not parked. Names the outcome, never the row's contents.
+ * missing or not parked. Names the outcome and, for `not-parked`, the
+ * marker's status only when it is one of the three known values — a row
+ * edited to carry anything else (line breaks included) is reported as not
+ * parked with no `status`, so no stored text reaches the message.
  *
  * @since 0.9.0
  */
@@ -151,7 +157,8 @@ export class InboxRowStateError extends Error {
   /** Why nothing was written. */
   readonly outcome: 'invalid-id' | 'missing' | 'not-parked';
   /**
-   * The marker's actual status, for `not-parked`; absent otherwise.
+   * The marker's actual status, for `not-parked` when it is a known status;
+   * absent otherwise.
    * Declared, not initialized, so the other outcomes carry no `status` key.
    */
   declare readonly status?: 'processed' | 'discarded' | 'attempting';
@@ -160,12 +167,15 @@ export class InboxRowStateError extends Error {
    * Builds the refusal from the store's outcome.
    *
    * @param outcome - `invalid-id`, `missing` or `not-parked`
-   * @param status - The marker's actual status, for `not-parked`
+   * @param stored - The marker's status as read, for `not-parked`; kept
+   *   only when it is a known status
    */
   constructor(
     outcome: 'invalid-id' | 'missing' | 'not-parked',
-    status?: 'processed' | 'discarded' | 'attempting',
+    stored?: 'processed' | 'discarded' | 'attempting',
   ) {
+    // The status comes from a stored row, so it is checked, not trusted.
+    const status = (KNOWN_STATUSES as readonly unknown[]).includes(stored) ? stored : undefined;
     super(
       outcome === 'invalid-id'
         ? 'inbox: a row id is 64 lowercase hexadecimal characters, as IInbox.parked() lists it'

@@ -1,6 +1,6 @@
 /**
  * Inbox row ids (M108 §3.5): fixed length and alphabet whatever the producer
- * sent, injective over separator-bearing pairs, and an attempts id that never
+ * sent, injective over separator-bearing triples, distinct per topic, and an attempts id that never
  * equals a marker id.
  *
  * @module
@@ -13,44 +13,50 @@ const subtle = crypto.subtle;
 
 describe('inbox row ids', () => {
   it('a marker id is 64 lowercase hex characters and its attempts id adds a suffix', async () => {
-    const ids = await deriveInboxIds(subtle, 'payroll', 'e-1');
+    const ids = await deriveInboxIds(subtle, 'payroll', 't', 'e-1');
     expect(ids.marker).toMatch(/^[0-9a-f]{64}$/);
     expect(ids.attempts).toBe(`${ids.marker}.attempts`);
     expect(isMarkerId(ids.marker)).toBe(true);
     expect(isMarkerId(ids.attempts)).toBe(false);
   });
 
-  it('is deterministic, and differs per consumer and per envelope id', async () => {
-    const a = await deriveInboxIds(subtle, 'payroll', 'e-1');
-    expect(await deriveInboxIds(subtle, 'payroll', 'e-1')).toEqual(a);
-    expect((await deriveInboxIds(subtle, 'billing', 'e-1')).marker).not.toBe(a.marker);
-    expect((await deriveInboxIds(subtle, 'payroll', 'e-2')).marker).not.toBe(a.marker);
+  it('is deterministic, and differs per consumer, per topic and per envelope id', async () => {
+    const a = await deriveInboxIds(subtle, 'payroll', 't', 'e-1');
+    expect(await deriveInboxIds(subtle, 'payroll', 't', 'e-1')).toEqual(a);
+    expect((await deriveInboxIds(subtle, 'billing', 't', 'e-1')).marker).not.toBe(a.marker);
+    expect((await deriveInboxIds(subtle, 'payroll', 't', 'e-2')).marker).not.toBe(a.marker);
+    // The audit finding: one consumer reading two topics must not let topic
+    // B's event with topic A's id suppress topic A's event.
+    expect((await deriveInboxIds(subtle, 'payroll', 'u', 'e-1')).marker).not.toBe(a.marker);
   });
 
-  it('keeps separator-bearing pairs apart', async () => {
-    const pairs: [string, string][] = [
-      ['a|b', 'c'],
-      ['a', 'b|c'],
-      ['a","b', 'c'],
-      ['a', '","b'],
-      ['a\\', '"b'],
+  it('keeps separator-bearing triples apart', async () => {
+    const triples: [string, string, string][] = [
+      ['a|b', 't', 'c'],
+      ['a', 't', 'b|c'],
+      ['a","b', 't', 'c'],
+      ['a', 't', '","b'],
+      ['a\\', 't', '"b'],
+      ['a', 'b|t', 'c'],
+      ['a|b', 't', 'c|d'],
+      ['a', 'b","t', 'c'],
     ];
     const markers = new Set<string>();
-    for (const [consumer, id] of pairs) {
-      markers.add((await deriveInboxIds(subtle, consumer, id)).marker);
+    for (const [consumer, topic, id] of triples) {
+      markers.add((await deriveInboxIds(subtle, consumer, topic, id)).marker);
     }
-    expect(markers.size).toBe(pairs.length);
+    expect(markers.size).toBe(triples.length);
   });
 
   it('keys an oversized id, and an id carrying control and forbidden characters', async () => {
     for (const id of ['x'.repeat(10_240), 'a\u0000b‮c"\\/?#', ' padded ']) {
-      expect(isMarkerId((await deriveInboxIds(subtle, 'payroll', id)).marker)).toBe(true);
+      expect(isMarkerId((await deriveInboxIds(subtle, 'payroll', 't', id)).marker)).toBe(true);
     }
   });
 
   it('an ill-formed id keys as its well-formed replacement', async () => {
-    expect((await deriveInboxIds(subtle, 'c', 'a\ud800')).marker)
-      .toBe((await deriveInboxIds(subtle, 'c', 'a�')).marker);
+    expect((await deriveInboxIds(subtle, 'c', 't', 'a\ud800')).marker)
+      .toBe((await deriveInboxIds(subtle, 'c', 't', 'a�')).marker);
   });
 
   it('idsFromMarker and isMarkerId', () => {

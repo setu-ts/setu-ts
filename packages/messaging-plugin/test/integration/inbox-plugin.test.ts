@@ -221,27 +221,29 @@ describe('inbox through a real kernel app', () => {
     expect(await inbox.parked()).toEqual([]);
   });
 
-  it('the scheduled purge removes markers older than retainMs and keeps parked ones', async () => {
+  it('the scheduled purge removes markers older than retainMs, parked ones included', async () => {
     const app = buildApp({ inbox: { retainMs: 60_000, purge: { intervalMs: 20 } } });
     await app.start();
     const repo = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
       .getRepository<Record<string, unknown>>('Inbox');
-    const row = (id: string, status: string) => ({
+    const row = (id: string, status: string, updatedAt: number) => ({
       id,
       kind: INBOX_RECORD_KIND,
       consumer: 'payroll',
       topic: hired.topic,
       status,
       attempts: 0,
-      updatedAt: 1,
+      updatedAt,
       envelopeId: null,
       lastError: null,
-      envelope: null,
+      envelope: status === 'parked' ? '{"personal":"data"}' : null,
     });
-    await repo.create(row('a'.repeat(64), 'processed'));
-    await repo.create(row('b'.repeat(64), 'parked'));
+    await repo.create(row('a'.repeat(64), 'processed', 1));
+    await repo.create(row('b'.repeat(64), 'parked', 1));
+    // Inside the window: kept, so an operator can still release it.
+    await repo.create(row('c'.repeat(64), 'parked', Date.now()));
     await settle(150);
-    expect((await repo.findAll()).map((r) => r.status)).toEqual(['parked']);
+    expect((await repo.findAll()).map((r) => r.id)).toEqual(['c'.repeat(64)]);
   });
 
   it('refuses start() without a scheduler unless the purge is unscheduled', async () => {

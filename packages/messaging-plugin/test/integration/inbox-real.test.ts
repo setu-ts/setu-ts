@@ -11,6 +11,8 @@
  * - a handler failure rolls back its business row AND the marker, the broker
  *   redelivers, and the redelivery succeeds;
  * - two consumer names each process the same event once;
+ * - one consumer name on two topics gets every event of each topic on its
+ *   own handler, and an id reused across the topics suppresses neither;
  * - end to end with M107: an outbox row the relay publishes TWICE (the crash
  *   shape — the row is still `pending` after its first publish) is handled
  *   once.
@@ -59,10 +61,13 @@ interface Hired {
 }
 
 /** A per-run definition on a unique topic. */
-function definitionFor(transport: string): IntegrationEventDefinition<Hired> {
+function definitionFor(
+  transport: string,
+  type = 'people.hired',
+): IntegrationEventDefinition<Hired> {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
   return defineIntegrationEvent<Hired>({
-    type: 'people.hired',
+    type,
     version: 1,
     topic: `m108.${transport}.${suffix}.people.v1`,
     parse: (value) => value as Hired,
@@ -75,10 +80,10 @@ function consumerName(label: string): string {
 }
 
 /** An envelope as a producer would publish it. */
-function envelopeOf(id: string, personId: string): Record<string, unknown> {
+function envelopeOf(id: string, personId: string, type = 'people.hired'): Record<string, unknown> {
   return {
     id,
-    type: 'people.hired',
+    type,
     version: 1,
     occurredAt: '2026-10-09T00:00:00Z',
     data: { personId },
@@ -250,6 +255,49 @@ for (const transport of transports) {
         await settle();
         expect([payroll, audit]).toEqual([['p-1'], ['p-1']]);
         expect(await rows(app, 'Inbox')).toHaveLength(2);
+      } finally {
+        await app.stop();
+        await pg.dispose();
+      }
+    });
+
+    it('one consumer on two topics: each handler gets all of its topic, ids never cross', async () => {
+      const pg = await postgresInboxSchema(postgresUrl!);
+      const hiredDef = definitionFor(label);
+      // A distinct type, as two real topics carry: a message delivered to the
+      // other topic's handler is then rejected rather than silently handled.
+      const leftDef = definitionFor(label, 'people.left');
+      const consumer = consumerName('two-topics');
+      const hiredCalls: string[] = [];
+      const leftCalls: string[] = [];
+      const app = processFor(pg, transport, [
+        onIntegrationEvent(hiredDef, (p) => {
+          hiredCalls.push(p.personId);
+        }, { inbox: { consumer } }),
+        onIntegrationEvent(leftDef, (p) => {
+          leftCalls.push(p.personId);
+        }, { inbox: { consumer } }),
+      ]);
+      await app.start();
+      try {
+        // The same ids on both topics: keyed without the topic, the second
+        // topic's events would be skipped as duplicates. Published one topic
+        // at a time — alternating would match a shared queue's round-robin
+        // across its two consumers and hide the collision.
+        for (let i = 0; i < 5; i++) {
+          await publish(app, hiredDef.topic, envelopeOf(`e-${i}`, `h-${i}`));
+        }
+        for (let i = 0; i < 5; i++) {
+          await publish(app, leftDef.topic, envelopeOf(`e-${i}`, `l-${i}`, 'people.left'));
+        }
+        await waitFor(
+          () => hiredCalls.length === 5 && leftCalls.length === 5,
+          'every event on both topics',
+        );
+        await settle();
+        expect(hiredCalls.toSorted()).toEqual(['h-0', 'h-1', 'h-2', 'h-3', 'h-4']);
+        expect(leftCalls.toSorted()).toEqual(['l-0', 'l-1', 'l-2', 'l-3', 'l-4']);
+        expect(await rows(app, 'Inbox')).toHaveLength(10);
       } finally {
         await app.stop();
         await pg.dispose();

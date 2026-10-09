@@ -37,13 +37,23 @@ function activeService(): InboxService {
 }
 
 describe('inbox subscription resolution', () => {
-  it('resolves to a definition on the topic, defaulting the queue to the consumer', () => {
+  it('resolves to a definition on the topic, defaulting the queue to consumer.topic', () => {
     const definition = onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'payroll' } })(
       registry({ inbox: activeService() }),
     );
     expect(definition.topic).toBe('people.hired.v1');
-    expect(definition.options).toEqual({ queue: 'payroll' });
+    expect(definition.options).toEqual({ queue: 'payroll.people.hired.v1' });
     expect(Object.keys(definition.options ?? {})).toEqual(['queue']);
+  });
+
+  it('gives one consumer a distinct default queue per topic', () => {
+    const services = registry({ inbox: activeService() });
+    const a = onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'payroll' } })(services);
+    const b = onIntegrationEvent({ ...hired, topic: 'people.left.v1' }, () => {}, {
+      inbox: { consumer: 'payroll' },
+    })(services);
+    expect(a.options?.queue).not.toBe(b.options?.queue);
+    expect(b.options).toEqual({ queue: 'payroll.people.left.v1' });
   });
 
   it('keeps an explicit queue', () => {

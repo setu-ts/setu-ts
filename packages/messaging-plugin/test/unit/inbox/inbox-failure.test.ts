@@ -8,7 +8,11 @@ import { expect } from '@std/expect';
 import type { ILogger, MessageMetadata } from '@setu-ts/common';
 import { IntegrationEventRejectedError } from '../../../src/index.ts';
 import { deriveInboxIds } from '../../../src/inbox/inbox-key.ts';
-import { InboxService, type InboxSubscription } from '../../../src/inbox/inbox-service.ts';
+import {
+  errorKind,
+  InboxService,
+  type InboxSubscription,
+} from '../../../src/inbox/inbox-service.ts';
 import type { Hired } from '../../fixtures/inbox.ts';
 import {
   envelope,
@@ -25,7 +29,13 @@ const metadata: MessageMetadata = { topic: 'people.hired.v1' };
 function failing(overrides: Parameters<typeof options>[0] = {}) {
   const store = new FakeInboxStore();
   const warnings: string[] = [];
-  const logger = { warn: (message: string) => warnings.push(message) } as unknown as ILogger;
+  const logged: Record<string, unknown>[] = [];
+  const logger = {
+    warn: (message: string, meta?: Record<string, unknown>) => {
+      warnings.push(message);
+      logged.push(meta ?? {});
+    },
+  } as unknown as ILogger;
   const service = new InboxService({
     runtime: inboxRuntime(),
     options: options(overrides),
@@ -40,11 +50,11 @@ function failing(overrides: Parameters<typeof options>[0] = {}) {
       throw boom;
     },
   };
-  return { store, service, boom, subscription, warnings };
+  return { store, service, boom, subscription, warnings, logged };
 }
 
 async function idsOf(envelopeId: string) {
-  return await deriveInboxIds(crypto.subtle, 'payroll', envelopeId);
+  return await deriveInboxIds(crypto.subtle, 'payroll', 'people.hired.v1', envelopeId);
 }
 
 describe('inbox failures', () => {
@@ -119,6 +129,28 @@ describe('inbox failures', () => {
     expect(warnings).toEqual(['inbox: parking a delivery failed']);
   });
 
+  it('logs a failed store write by its error class only, never the driver message', async () => {
+    // A driver error quoting its bound parameters (Drizzle's shape): the
+    // envelope id, the handler's error text and the parked payload.
+    class DrizzleQueryError extends Error {
+      override readonly name = 'DrizzleQueryError';
+    }
+    const leak = 'params: e-1,handler failed,{"personId":"secret-person"}';
+    const { store, service, subscription, logged } = failing({ maxAttempts: 1 });
+    store.park$ = () => Promise.reject(new DrizzleQueryError(leak));
+    await expect(service.deliver(subscription, envelope('e-1'), metadata)).rejects.toThrow();
+    const second = failing({ maxAttempts: 2 });
+    second.store.recordFailure$ = () => Promise.reject(new DrizzleQueryError(leak));
+    await expect(second.service.deliver(second.subscription, envelope('e-1'), metadata)).rejects
+      .toThrow();
+    for (const meta of [...logged, ...second.logged]) {
+      expect(meta.errorKind).toBe('DrizzleQueryError');
+      expect(JSON.stringify(meta)).not.toContain('secret-person');
+      expect(JSON.stringify(meta)).not.toContain('params:');
+    }
+    expect(logged.length + second.logged.length).toBe(2);
+  });
+
   it('acknowledges when park finds a marker already present', async () => {
     const { store, service, subscription, warnings } = failing({ maxAttempts: 1 });
     store.park$ = () => Promise.resolve('exists');
@@ -164,5 +196,37 @@ describe('inbox failures', () => {
     expect(store.rows.get((await idsOf('e-1')).marker)?.lastError?.length).toBeLessThanOrEqual(
       1024,
     );
+  });
+});
+
+describe('errorKind', () => {
+  it('names an Error by its identifier-shaped name, and nothing else', () => {
+    expect(errorKind(new TypeError('quoted data'))).toBe('TypeError');
+    const forged = new Error('x');
+    forged.name = 'Evil\r\nFORGED level=info';
+    expect(errorKind(forged)).toBe('Error');
+    const long = new Error('x');
+    long.name = 'A'.repeat(65);
+    expect(errorKind(long)).toBe('Error');
+    const throwing = new Error('x');
+    Object.defineProperty(throwing, 'name', {
+      get() {
+        throw new Error('hostile');
+      },
+    });
+    expect(errorKind(throwing)).toBe('Error');
+    const hostileProto = new Proxy({}, {
+      getPrototypeOf() {
+        throw new Error('hostile');
+      },
+    });
+    expect(errorKind(hostileProto)).toBe('Error');
+  });
+
+  it('names a non-Error by its type', () => {
+    expect(errorKind('secret text')).toBe('string');
+    expect(errorKind(null)).toBe('null');
+    expect(errorKind(undefined)).toBe('undefined');
+    expect(errorKind({ message: 'secret' })).toBe('object');
   });
 });

@@ -47,7 +47,7 @@ function harness(overrides: Parameters<typeof options>[0] = {}) {
 
 /** The marker id `harness` deliveries use for an envelope id. */
 async function markerOf(envelopeId: string): Promise<string> {
-  return (await deriveInboxIds(crypto.subtle, 'payroll', envelopeId)).marker;
+  return (await deriveInboxIds(crypto.subtle, 'payroll', 'people.hired.v1', envelopeId)).marker;
 }
 
 describe('inbox delivery', () => {
@@ -67,6 +67,19 @@ describe('inbox delivery', () => {
       updatedAt: 1_000_000,
     });
     expect(store.calls).toEqual(['find', 'run']);
+  });
+
+  it('one consumer on two topics: an event on topic B never suppresses topic A', async () => {
+    const { service, handled, subscription } = harness();
+    // Same type and payload, another topic: the publisher of `audit.v1`
+    // reuses an id it saw nowhere — topic A's event must still be handled.
+    const other: InboxSubscription<Hired> = {
+      ...subscription,
+      definition: { ...hired, topic: 'people.audit.v1' },
+    };
+    await service.deliver(other, envelope('e-1', { personId: 'p-b' }), metadata);
+    await service.deliver(subscription, envelope('e-1', { personId: 'p-a' }), metadata);
+    expect(handled.map((h) => h.payload.personId)).toEqual(['p-b', 'p-a']);
   });
 
   it('acknowledges a duplicate after the pre-read, without running the handler', async () => {

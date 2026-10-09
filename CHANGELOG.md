@@ -153,21 +153,22 @@ All notable changes to this project are documented here. The format follows
 
 - **Consumer inbox (M108, `@setu-ts/messaging-plugin`).** `MessagingPlugin({ inbox })` plus
   `onIntegrationEvent(definition, handler, { inbox: { consumer } })` applies an integration event's
-  database writes once per consumer: a marker keyed by `(consumer, envelope id)` is created in the
-  SAME transaction as the handler's writes, and the handler receives that transaction's unit of work
-  as a fourth argument (`IntegrationEventInboxHandler`, its type inferred from the annotation). A
-  duplicate delivery is acknowledged without running the handler; a failed handler leaves no marker,
-  so the redelivery runs it again; after any rejection the marker is re-read to tell a lost race
-  from a real failure. The broker `queue` defaults to the consumer name. With the `inbox` option the
-  call returns a `RegistryFactory<SubscriptionDefinition>` resolved at `onInit` after the store is
-  verified; without it nothing changes. Optional `maxAttempts` counts failures outside the
-  transaction and parks a delivery at the limit (so a Kafka partition or a NATS consumer moves on);
-  `IInbox` lists parked deliveries and releases them (`retry` hands back the envelope to re-publish,
-  `discard` keeps them skipped). A scheduled purge (`inbox-purge`, `retainMs`) and an `inbox` health
-  indicator ship with it. Refusals: `InboxNotConfiguredError`, `InboxConsumerConflictError` (two
-  handlers sharing a consumer name on one topic), `InboxNotReadyError`,
-  `InboxPurgeUnscheduledError`, `InboxStoreVerifyTimeoutError`, `InboxRowStateError`. The types are
-  `InboxOptions` (with `InboxPurgeOptions` and `InboxStoreEntry`), `IntegrationEventInboxOptions`,
+  database writes once per consumer: a marker keyed by `(consumer, topic, envelope id)` is created
+  in the SAME transaction as the handler's writes, and the handler receives that transaction's unit
+  of work as a fourth argument (`IntegrationEventInboxHandler`, its type inferred from the
+  annotation). A duplicate delivery is acknowledged without running the handler; a failed handler
+  leaves no marker, so the redelivery runs it again; after any rejection the marker is re-read to
+  tell a lost race from a real failure. The broker `queue` defaults to `<consumer>.<topic>`. With
+  the `inbox` option the call returns a `RegistryFactory<SubscriptionDefinition>` resolved at
+  `onInit` after the store is verified; without it nothing changes. Optional `maxAttempts` counts
+  failures outside the transaction and parks a delivery at the limit (so a Kafka partition or a NATS
+  consumer moves on); `IInbox` lists parked deliveries and releases them (`retry` hands back the
+  envelope to re-publish, `discard` keeps them skipped). A scheduled purge (`inbox-purge`,
+  `retainMs`) — which deletes parked markers past the window too — and an `inbox` health indicator
+  ship with it. Refusals: `InboxNotConfiguredError`, `InboxConsumerConflictError` (two handlers
+  sharing a consumer name on one topic), `InboxNotReadyError`, `InboxPurgeUnscheduledError`,
+  `InboxStoreVerifyTimeoutError`, `InboxRowStateError`. The types are `InboxOptions` (with
+  `InboxPurgeOptions` and `InboxStoreEntry`), `IntegrationEventInboxOptions`,
   `IntegrationEventSubscribeOptions`, `ParkedInboxEntry` and `InboxReleaseResult`. Driven against
   real PostgreSQL with real RabbitMQ 4 and Redis Streams (duplicates, a failure rolled back and
   redelivered, two consumer groups, and an outbox row relayed twice handled once), a MongoDB replica

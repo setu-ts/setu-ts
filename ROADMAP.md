@@ -13260,7 +13260,9 @@ hand-rolls the same check, usually against the wrong key.
 - **The key is `(consumer group, envelope id)`.** Not the envelope id alone — two consumer groups
   must each process the same `hired` event — and not `MessageMetadata.messageId`, which the broker
   assigns and which changes on a re-send. `IntegrationEventEnvelope.id` is producer-assigned (M93b)
-  and stable through the outbox, which is why it is the key.
+  and stable through the outbox, which is why it is the key. As shipped the topic is part of the key
+  too, `(consumer, topic, envelope id)`: the committed-tree security audit showed one consumer name
+  reading two topics let a publisher on one suppress the other's events by reusing an id.
 - **Handler-level, in the consumer's transaction.** `IngressContext` is readonly with no state bag,
   and handlers take `(message, metadata)`, so an ingress behaviour cannot hand a transaction to the
   handler. The API is on `onIntegrationEvent`, whose released shape is
@@ -13642,6 +13644,6 @@ patch by construction and gains nothing new here.
 | 105       | ⬜     | database-plugin + cloudflare-plugin — conditional writes on `IRepository` (closes the M101c tenant-bridge check-then-write race)                                                                                                              |
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
 | 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
-| 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, envelope id), in the handler's transaction                                                                                      |
+| 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, topic, envelope id), in the handler's transaction                                                                               |
 | 109       | ⬜     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |

@@ -90,8 +90,13 @@ const OPTIONAL_FIELDS = ['envelopeId', 'lastError', 'envelope'] as const;
 /** Every column `parked()` reads — all but the envelope. */
 const PARKED_COLUMNS = [...REQUIRED_FIELDS, 'envelopeId', 'lastError'];
 
-/** The statuses retention deletes. Parked markers are the operator's and never purged. */
-const PURGED_STATUSES: readonly InboxStatus[] = ['processed', 'discarded', 'attempting'];
+/**
+ * The statuses retention deletes — every status. A parked marker is purged
+ * too, once older than the window: otherwise a stream of events whose payload
+ * never parses would keep every envelope for ever, an unbounded table that
+ * may also hold personal data.
+ */
+const PURGED_STATUSES: readonly InboxStatus[] = ['processed', 'discarded', 'attempting', 'parked'];
 
 /** MongoDB's server code for "transactions need a replica set". */
 const MONGO_ILLEGAL_OPERATION = 20;

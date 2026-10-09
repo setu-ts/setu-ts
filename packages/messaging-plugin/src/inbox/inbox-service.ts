@@ -176,7 +176,14 @@ export class InboxService implements IInbox {
     });
   }
 
-  /** Logs at `warn`, never letting a broken logger change an outcome. */
+  /**
+   * Logs at `warn`, never letting a broken logger change an outcome.
+   *
+   * A store failure is logged by its error CLASS only ({@linkcode errorKind}),
+   * never its message: a driver error can quote the statement's bound
+   * parameters (Drizzle does), which here are the envelope id, the handler's
+   * error text and, when parking, the whole envelope payload.
+   */
   #warn(message: string, metadata: Record<string, unknown>): void {
     try {
       this.#deps.logger()?.warn(message, metadata);
@@ -202,7 +209,12 @@ export class InboxService implements IInbox {
     const { consumer, definition, handler } = subscription;
     const envelope = validateEnvelope(raw, definition);
     const store = this.#active();
-    const ids = await deriveInboxIds(this.#deps.runtime.subtle, consumer, envelope.id);
+    const ids = await deriveInboxIds(
+      this.#deps.runtime.subtle,
+      consumer,
+      definition.topic,
+      envelope.id,
+    );
     if ((await this.#bounded(() => store.find(ids.marker))) !== undefined) return;
 
     const base = this.#baseRecord(consumer, definition.topic, envelope.id);
@@ -263,7 +275,7 @@ export class InboxService implements IInbox {
       return (await this.#bounded(() => store.find(markerId))) !== undefined;
     } catch (error) {
       this.#warn('inbox: re-reading a marker after a failed delivery failed', {
-        error: describeError(error),
+        errorKind: errorKind(error),
       });
       return false;
     }
@@ -297,7 +309,7 @@ export class InboxService implements IInbox {
       this.#warn('inbox: recording a delivery failure failed', {
         consumer: base.consumer,
         topic: base.topic,
-        error: describeError(recordError),
+        errorKind: errorKind(recordError),
       });
       throw error;
     }
@@ -333,7 +345,7 @@ export class InboxService implements IInbox {
       this.#warn('inbox: parking a delivery failed', {
         consumer: base.consumer,
         topic: base.topic,
-        error: describeError(parkError),
+        errorKind: errorKind(parkError),
       });
       throw error;
     }
@@ -417,4 +429,33 @@ export class InboxService implements IInbox {
 function errorLine(error: unknown): string {
   const line = describeError(error);
   return line.length > MAX_ERROR_LENGTH ? line.slice(0, MAX_ERROR_LENGTH) : line;
+}
+
+/** The longest error class name logged. */
+const MAX_ERROR_KIND_LENGTH = 64;
+
+/** An identifier-shaped error class name. */
+const ERROR_KIND = /^[A-Za-z_$][\w$.]*$/;
+
+/**
+ * The class of a thrown value, for a log line: an `Error`'s identifier-shaped
+ * `name` (read guarded, bounded), `'Error'` for any other `Error`, and the
+ * value's `typeof` otherwise. Never the message, which may quote stored data.
+ *
+ * @internal
+ * @param value - The thrown value
+ * @returns A short, printable class name
+ */
+export function errorKind(value: unknown): string {
+  let name: unknown;
+  try {
+    // Both reads are guarded: a hostile value's prototype or `name` may throw.
+    if (!(value instanceof Error)) return value === null ? 'null' : typeof value;
+    name = value.name;
+  } catch {
+    return 'Error';
+  }
+  return typeof name === 'string' && name.length <= MAX_ERROR_KIND_LENGTH && ERROR_KIND.test(name)
+    ? name
+    : 'Error';
 }

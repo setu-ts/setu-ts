@@ -710,3 +710,24 @@ Each is an obligation for implementation, measured before the code relies on it.
 - **DynamoDB purge as a `Scan` with `limit`.** Whether `findAll` fills `limit` across scan pages
   when the filter discards rows; read, not measured.
 - **D1 and Workers.** Not driven on workerd (§9).
+
+## 13. Corrections from the committed-tree security audit (round 1, `4888cd8b`)
+
+The audit failed on five findings. Each correction below supersedes the section it names; the
+sections above are left as the design record.
+
+- **§3.5 key.** The derivation hashes `['setu-inbox/1', consumer, topic, envelopeId]`. Keyed by
+  consumer and id alone, one consumer reading two topics let a publisher on topic B suppress a
+  topic-A event by reusing its id, which is wider than D2's "anyone who can publish to the topic".
+- **§3.4 queue default.** The broker queue defaults to `<consumer>.<topic>`. One consumer on two
+  topics shared one RabbitMQ queue under the old default, so each handler received the other topic's
+  messages and rejected them into the dead-letter queue (5 of 10 per topic, measured).
+- **D7 logs.** A failed store call is logged with the error's class name (`errorKind`) and never its
+  message: Drizzle's error quotes the bound parameters, which are the envelope id, the handler's
+  error text and, when parking, the envelope.
+- **`InboxRowStateError`.** The stored status is quoted only when it is one of the three known
+  values; a row edited to carry anything else is reported without a `status`.
+- **D8 retention.** `purge()` deletes parked markers past `retainMs` too, envelope included. A
+  stream of unparseable payloads otherwise grew the table without bound (200 rows, 40 MB, measured).
+  An operator releases or discards a parked delivery within the window; the health indicator reports
+  `degraded` while any row is parked.

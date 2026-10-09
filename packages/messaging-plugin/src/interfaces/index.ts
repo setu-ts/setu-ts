@@ -1285,10 +1285,11 @@ export interface InboxOptions {
    */
   readonly maxAttempts?: number;
   /**
-   * How long a processed marker is kept, in milliseconds (at least 60 000).
-   * A redelivery older than this is processed again, so it must exceed the
+   * How long a marker is kept, in milliseconds (at least 60 000). A
+   * redelivery older than this is processed again, so it must exceed the
    * broker's redelivery window plus the outbox's re-send window. Default 7
-   * days. Parked markers are never purged.
+   * days. Parked markers are purged by the same window, envelope included:
+   * release or discard a parked delivery before it ages out.
    */
   readonly retainMs?: number;
   /**

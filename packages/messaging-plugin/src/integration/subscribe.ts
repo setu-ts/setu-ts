@@ -271,10 +271,12 @@ function inboxSubscription<T>(
       topic,
       handler: (raw: unknown, metadata: MessageMetadata) =>
         service.deliver(subscription, raw, metadata),
-      // The consumer name is the group by default: a queue-less subscriber on
-      // RabbitMQ gets a private queue whose failures are discarded, which
-      // would leave the inbox nothing to de-duplicate (§3.4).
-      options: { queue: queue ?? consumer },
+      // A named group by default: a queue-less subscriber on RabbitMQ gets a
+      // private queue whose failures are discarded, which would leave the
+      // inbox nothing to de-duplicate (§3.4). Per topic, because one consumer
+      // may read several topics, and a RabbitMQ queue bound to two of them
+      // hands each handler the other's messages, which it then rejects.
+      options: { queue: queue ?? `${consumer}.${topic}` },
     };
   };
 }
