@@ -30,10 +30,9 @@ All notable changes to this project are documented here. The format follows
   call and a replay, `within` returns the JSON round trip of what `fn` returned: dates become ISO
   strings, `undefined` object members are absent, and nested `toJSON()` output is respected. The
   service also exposes `purgeTransactional()` for retention cleanup. On PostgreSQL (Prisma), a
-  concurrent loser normally waits on the winner's unique-key lock and replays; if it exceeds the
-  adapter's `transactionTimeout` (default 30 s), timeout `P2028` replays when the re-read finds the
-  winner's committed record, otherwise answers `'store-failed'` (`503`), with no timeout-to-`409`
-  mapping. Tier C is not verified against a real Prisma client.
+  concurrent loser blocks on the winner's claim insert, which the adapter's `transactionTimeout`
+  does not interrupt, and then replays; a loser whose own work exceeds that timeout answers
+  `'store-failed'` (`503`), with no timeout-to-`409` mapping.
 
 - **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
   questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup
