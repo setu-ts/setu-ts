@@ -928,14 +928,40 @@ Closes #123
 
 ### 15.3 No Direct Commits to Main or Develop
 
-- All changes go through pull requests. PRs target `develop`, the default branch, except release and
-  hotfix PRs, which target `main`.
+- All changes go through pull requests. PRs target `develop`, the integration branch, except release
+  and hotfix PRs, which target `main`. `main` is the repository's default branch, so `gh pr create`
+  without `--base` targets it — always pass `--base develop` (or `--base main` for a release or
+  hotfix PR).
 - `main` holds only the last release: it changes only through a release or hotfix PR, merged with a
   merge commit, and every merge into it is followed by a back-merge PR from `main` into `develop`.
 - No direct commits to `develop`, `main` or `master`.
 - All PRs require review and CI to pass.
 
-### 15.4 Atomic Commits
+### 15.4 Every New Task Starts in a New Worktree
+
+**Applies to every AI agent working this repository — Claude Code, ChatGPT/Codex, Roo Code, and any
+future one.** A new task — a milestone, a fix, a docs change, a release — starts on its own branch
+in its own git worktree at `.claude/worktrees/<name>`, never in the main checkout. The main checkout
+stays on `develop` and is never edited, so two tasks running at once cannot share a working tree,
+and switching branches can never carry one task's uncommitted changes into another.
+
+```bash
+git fetch origin
+git worktree add -b <branch> .claude/worktrees/<name> origin/develop   # origin/main for a hotfix
+cd .claude/worktrees/<name>
+```
+
+`<name>` is the branch name without its type prefix (`feat/m4-logger-plugin` → `m4-logger-plugin`).
+Resuming a task means working in the worktree that already holds its branch — `git worktree list`
+shows it; if the branch exists but has no worktree, attach one with
+`git worktree add .claude/worktrees/<name> <branch>`. One branch, one worktree: git refuses to check
+the same branch out twice.
+
+`.claude/` is gitignored, so a worktree there is invisible to `git status` in the main checkout and
+to `deno fmt`/`deno lint`. Never put one in `/tmp` or beside the repository. Remove it with
+`git worktree remove .claude/worktrees/<name>` once its PR has merged.
+
+### 15.5 Atomic Commits
 
 - Each commit should represent a single logical change.
 - Do not mix unrelated changes in a single commit.
@@ -1046,69 +1072,61 @@ Reviewers must verify:
 
 ---
 
-### 16.7 A New Pull Request Carries the `maintainer-review` Label
+### 16.7 A New Pull Request Requests Its CodeRabbit Review
 
 **Applies to every AI agent working this repository — Claude Code, ChatGPT/Codex, Roo Code, and any
-future one.** Automatic CodeRabbit review is restricted to one label. `.coderabbit.yaml`:
+future one.** CodeRabbit never reviews a pull request automatically. `.coderabbit.yaml`:
 
 ```yaml
 reviews:
   review_status: false
   auto_review:
-    enabled: true
+    enabled: false
     auto_incremental_review: false
-    labels:
-      - maintainer-review
 ```
 
-A positive `labels` list restricts automatic review to pull requests carrying one of those labels,
-so a PR without it is never reviewed automatically. Apply it as you open the PR:
+So whoever opens a PR from a `feat/…`, `fix/…`, `hotfix/…`, `release/…` or `chore/…` branch requests
+the review **in the same step**, straight after creating it:
 
 ```bash
-gh pr create --label maintainer-review --title '…' --body '…'
-gh pr edit <pr> --add-label maintainer-review   # one that is already open
+gh pr create --base develop --title '…' --body '…'   # --base main for release/hotfix PRs
+gh pr comment <pr> --body '@coderabbitai review'
 ```
 
-**The omission is silent, which is what makes this a rule rather than a preference.** The same file
-sets `review_status: false`, so CodeRabbit posts no "review skipped" notice: an unlabelled PR is
-indistinguishable from one whose review has not landed yet, and waiting produces nothing. Verify the
-label is present after opening the PR rather than assuming the flag took effect. Whether adding the
-label to an ALREADY-OPEN PR starts a review, rather than only carrying it at creation, is read from
-the setting and not measured — if a review does not appear, ask for one with `@coderabbitai review`
-rather than waiting.
+**`docs/…` PRs are excluded — do not request a review on one.** The review exists for code, and a
+documentation-only PR spends a review on prose the doc gates already check. A back-merge PR (`main`
+→ `develop`) is excluded too: it carries only commits already reviewed on their way into `main`.
 
-**From 2026-09-16 to 2026-09-22 this file read `enabled: false`, and labelled PRs were not reviewed
-— but do not read that as a rule about `enabled`.** CodeRabbit's documented contract is that a
-positive label opts a PR in _even while automatic review is disabled_
-([auto-review](https://docs.coderabbit.ai/configuration/auto-review)), so the old form expressed the
-same gate and should have worked. It did not: PR #344 and PR #353 both carried the label and neither
-was reviewed until a human commented `@coderabbitai review`. **The cause was never established.**
-`enabled: true` is not a diagnosed fix, only the form that does not depend on the disabled-mode
-opt-in path, which removes one variable. One candidate the documentation does not settle is timing —
-whether a label applied _as_ the PR is opened is seen by the same webhook that decides to review, or
-only a label applied afterwards is. If a labelled PR still goes unreviewed, the cause is elsewhere;
-ask for the review by hand and say so here rather than adjusting the flag again on a guess.
+**Always pass `--base`.** `main` is the default branch, so a `gh pr create` without `--base` targets
+`main` — the release branch, whose merges redeploy the public website. Every PR except a release or
+hotfix PR targets `develop` (§15.3).
 
-To suspend automatic review deliberately, set `enabled: false` **and remove the positive entry from
-`labels`** — a positive label would otherwise keep opting PRs in — and leave `description_keyword`
-unset, which is the other opt-in trigger for the disabled state.
+**Why a comment rather than automatic review.** CodeRabbit's automatic review covers the default
+branch plus `base_branches`. With `main` as the default, automatic review would have to be re-scoped
+to `develop`, and it would then fire on every `docs/…` PR as well: neither `base_branches` nor
+`labels` can exclude a PR by its HEAD branch. A comment trigger is explicit and excludable. The
+previous rule — a `maintainer-review` label opting a PR in — is retired; that label no longer
+triggers anything.
 
-A repository `.coderabbit.yaml` takes precedence over the CodeRabbit dashboard, so changing the
-toggle in the web UI has no effect while this file sets the same key — the edit must be here.
+**The omission is silent, which is what makes this a rule rather than a preference.** The file sets
+`review_status: false`, so CodeRabbit posts no "review skipped" notice: a PR nobody asked to review
+is indistinguishable from one whose review has not landed yet, and waiting produces nothing. Check
+that the comment was posted rather than assuming it was.
 
-`auto_incremental_review: false` sits beside it, so the label buys the **first** review and not a
-re-review: commits pushed to an already-reviewed PR are not picked up on their own, and asking for
-another pass after addressing findings still means `@coderabbitai review`. That is read from the
-setting rather than measured here — treat it as the expected behaviour to confirm, not a result.
+`auto_incremental_review: false` stays explicit, so re-enabling automatic review later does not
+silently turn on a re-review of every push. A second pass after addressing findings is another
+`@coderabbitai review` comment.
 
-**The external-contribution gate is unchanged, and it does not rest on this rule being obeyed.** The
-label exists so that fork pull requests do not consume automatic reviews: a maintainer adds it only
-after accepting a contribution. An outside contributor — or an agent acting for one, reading this
-file from their own clone — cannot bypass that by following §16.7. Applying a label requires the
-**Triage** role or above on _this_ repository, which a fork contributor does not have, so `--label`
-/ `--add-label` fails with HTTP 403 and the label is simply not applied. Expect that failure on a
-fork PR: it is the gate working, not a misconfiguration to retry around. This rule governs a PR
-opened on a branch in this repository.
+To re-enable automatic review, set `enabled: true` and scope it with `base_branches` — and record
+here how `docs/…` PRs are kept out, since no setting does that by branch name. A positive `labels`
+entry or a `description_keyword` would also opt a PR in while `enabled` is false, so keep both
+unset. A repository `.coderabbit.yaml` takes precedence over the CodeRabbit dashboard, so changing
+the toggle in the web UI has no effect while this file sets the same key — the edit must be here.
+
+**External contributions.** Fork pull requests are proposals: a maintainer reproduces an accepted
+change in a repository branch, and that branch's PR is the one reviewed (CONTRIBUTING.md). Do not
+request a CodeRabbit review on a fork PR. Whether CodeRabbit honours a review command posted by a
+non-collaborator is not measured here — if that ever matters, establish it rather than assume it.
 
 ---
 
