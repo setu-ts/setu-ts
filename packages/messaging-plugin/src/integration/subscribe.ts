@@ -92,6 +92,63 @@ export type IntegrationEventSubscribeOptions = SubscribeOptions & {
 };
 
 /**
+ * Produces an inbox subscription for an integration-event contract (M108):
+ * each event's database writes are applied ONCE per consumer, although the
+ * outbox and every broker deliver at least once.
+ *
+ * The handler receives a fourth argument — the unit of work of the
+ * transaction in which the inbox marker `(consumer, envelope id)` is created
+ * FIRST — and every write through it commits with the marker or not at all.
+ * A duplicate delivery is acknowledged without running the handler; a handler
+ * that fails leaves no marker, so the broker's redelivery runs it again; after
+ * any rejection the marker is re-read, and only a present marker means
+ * another delivery already handled the event. The broker `queue` defaults to
+ * `inbox.consumer`.
+ *
+ * **The promise.** For one consumer name, the handler's writes through the
+ * supplied unit of work are committed at most once per envelope id while the
+ * marker is retained; a delivery after the marker is purged is processed
+ * again. Nothing is promised about effects outside that unit of work, about
+ * two processes using one consumer name with different handlers, or about a
+ * database other than the store's.
+ *
+ * Returns a {@linkcode RegistryFactory} rather than a definition: it is
+ * resolved against the registry — in `MessagingPlugin({ subscriptions })` at
+ * `onInit`, after the inbox store is verified; imperatively, by calling it
+ * with `ctx.services` at or after `onInit`.
+ *
+ * @typeParam T - The event payload type
+ * @typeParam S - The unit-of-work type the inbox store supplies, inferred
+ *   from the handler's fourth-parameter annotation
+ * @param definition - The contract being consumed
+ * @param handler - The application handler, given the unit of work
+ * @param options - `inbox` (the consumer name, and the messaging instance),
+ *   and the broker `queue`
+ * @returns A factory producing the subscription definition
+ * @throws {TypeError} When `inbox.consumer` is not a valid publish id — at
+ *   the call
+ * @example
+ * ```typescript
+ * import type { IUnitOfWork } from '@setu-ts/database-plugin';
+ * import { onIntegrationEvent } from '@setu-ts/messaging-plugin';
+ *
+ * MessagingPlugin({
+ *   inbox: { store: createDatabaseInboxStore() },
+ *   subscriptions: [
+ *     onIntegrationEvent(personHired, async (payload, _envelope, _metadata, uow: IUnitOfWork) => {
+ *       await uow.getRepository('PayrollRecord').create({ id: payload.personId });
+ *     }, { inbox: { consumer: 'payroll' } }),
+ *   ],
+ * });
+ * ```
+ * @since 0.9.0
+ */
+export function onIntegrationEvent<T, S = unknown>(
+  definition: IntegrationEventDefinition<T>,
+  handler: IntegrationEventInboxHandler<T, S>,
+  options: IntegrationEventSubscribeOptions,
+): RegistryFactory<SubscriptionDefinition>;
+/**
  * Produces a {@linkcode SubscriptionDefinition} for an integration-event
  * contract — the declarative form, plugging straight into
  * `MessagingPlugin({ subscriptions })`, or spread by hand into an imperative
@@ -142,11 +199,6 @@ export type IntegrationEventSubscribeOptions = SubscribeOptions & {
  * ```
  * @since 0.6.0
  */
-export function onIntegrationEvent<T, S = unknown>(
-  definition: IntegrationEventDefinition<T>,
-  handler: IntegrationEventInboxHandler<T, S>,
-  options: IntegrationEventSubscribeOptions,
-): RegistryFactory<SubscriptionDefinition>;
 export function onIntegrationEvent<T>(
   definition: IntegrationEventDefinition<T>,
   handler: IntegrationEventHandler<T>,

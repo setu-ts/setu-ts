@@ -13243,7 +13243,10 @@ where "all pending rows in order" is expensive or impossible. The consumer side 
 
 ## Milestone 108: Consumer Inbox
 
-**Package(s):** `packages/messaging-plugin`.
+**Package(s):** `packages/messaging-plugin`, `packages/common` (the `IInboxStore` port and the
+`CAPABILITIES.INBOX` token) and `packages/database-plugin` (the `createDatabaseInboxStore` bridge),
+because `IUnitOfWork` is declared in `database-plugin` and the port must be implemented there by
+name (the M107 C1 shape); `packages/cli` (one health-indicator claim-table line).
 
 **Objective:** a consumer applies an integration event's database effects once, even though the
 outbox (M107) and every broker deliver at least once.
@@ -13264,13 +13267,14 @@ hand-rolls the same check, usually against the wrong key.
   `(definition, handler, options?)` with the handler called as `(payload, envelope, metadata)`. The
   inbox arrives through the options argument, e.g.
   `onIntegrationEvent(definition, handler, { inbox: { consumer: 'payroll' } })`. The inbox record is
-  inserted through the same `IUnitOfWork` as the handler's writes, a `DuplicateKeyError` (#420)
-  means "already handled" and the delivery is acknowledged without running the handler, and a
-  handler failure rolls back both. The released handler receives no transaction, so the handler must
-  be given the `IUnitOfWork` somehow, and the plan decides how. Two options: an additive fourth
-  handler argument, used only with `inbox`, which keeps every existing handler assignable; or a
-  separate `IntegrationEventInboxHandler` type selected by the `inbox` option. Either way, an
-  existing call must not change meaning, so the plan states the choice and its compatibility (§9.2).
+  inserted through the same `IUnitOfWork` as the handler's writes, and a handler failure rolls back
+  both. **Corrected by the plan (C2):** a `DuplicateKeyError` alone does NOT mean "already handled"
+  — one raised at commit carries no entity, so it cannot be told from a duplicate in the handler's
+  own writes, and a concurrent loser on a MongoDB replica set is a write conflict instead. After any
+  rejection the inbox re-reads its marker; only a present marker means "already handled". **Decided
+  (C3):** a separate `IntegrationEventInboxHandler<T, S>` type whose fourth argument is the unit of
+  work, selected by an overload on the `inbox` option; the call then returns a
+  `RegistryFactory<SubscriptionDefinition>`. Every existing call keeps its type and meaning.
 - **Effects outside the database are a stated choice, not a guarantee.** Sending an email or calling
   a provider cannot join the transaction; the README names the three options — record before (at
   most once), record after (at least once), or forward a derived key the provider de-duplicates
@@ -13280,15 +13284,20 @@ hand-rolls the same check, usually against the wrong key.
   used; `IngressContext.attempt` is absent for messaging by contract.
 - **Retention.** Inbox rows are kept at least as long as broker redelivery plus the outbox's replay
   window; replaying anything older than that produces duplicates, documented.
-- **Backends.** The same per-backend table as M107: SQL, MongoDB, DynamoDB and D1 support it; Cosmos
-  needs the inbox row in the business partition; Bigtable is refused by name.
+- **Backends.** SQL, a MongoDB replica set, DynamoDB and D1 support it. **Corrected by the plan
+  (C4):** Cosmos is refused at startup — a transaction is one partition, and the inbox row cannot
+  share the business partition without a per-application partition selector (unowned follow-up);
+  Bigtable is refused by name.
 - **The discriminator hazard is inherited.** An inbox sharing a table, collection or Cosmos
   container with business documents must carry a discriminator on every row and require it on every
   read, count, transition and delete, exactly as M107's `kind: 'setu-outbox'` does — Cosmos queries
   a container as a whole, so without it the inbox reads, counts or deletes business documents.
 
 **Depends on** broker redelivery being real, which #419 and #421 fixed — an inbox on a broker that
-discards failed messages has nothing to de-duplicate.
+discards failed messages has nothing to de-duplicate. **Corrected by the plan (C6):** that holds for
+a durable NAMED RabbitMQ queue and for Redis Streams; a queue-less RabbitMQ subscriber discards a
+failure, so the inbox defaults the broker `queue` to the consumer name, and NATS (no `max_deliver`)
+and Kafka (no per-message dead-letter) need the inbox's own `maxAttempts`.
 
 **Deliverables**
 

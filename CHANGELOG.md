@@ -151,6 +151,43 @@ All notable changes to this project are documented here. The format follows
   standalone MongoDB, or a missing or unreadable table. The DDL for PostgreSQL and SQLite/D1 is in
   the messaging-plugin README.
 
+- **Consumer inbox (M108, `@setu-ts/messaging-plugin`).** `MessagingPlugin({ inbox })` plus
+  `onIntegrationEvent(definition, handler, { inbox: { consumer } })` applies an integration event's
+  database writes once per consumer: a marker keyed by `(consumer, envelope id)` is created in the
+  SAME transaction as the handler's writes, and the handler receives that transaction's unit of work
+  as a fourth argument (`IntegrationEventInboxHandler`, its type inferred from the annotation). A
+  duplicate delivery is acknowledged without running the handler; a failed handler leaves no marker,
+  so the redelivery runs it again; after any rejection the marker is re-read to tell a lost race
+  from a real failure. The broker `queue` defaults to the consumer name. With the `inbox` option the
+  call returns a `RegistryFactory<SubscriptionDefinition>` resolved at `onInit` after the store is
+  verified; without it nothing changes. Optional `maxAttempts` counts failures outside the
+  transaction and parks a delivery at the limit (so a Kafka partition or a NATS consumer moves on);
+  `IInbox` lists parked deliveries and releases them (`retry` hands back the envelope to re-publish,
+  `discard` keeps them skipped). A scheduled purge (`inbox-purge`, `retainMs`) and an `inbox` health
+  indicator ship with it. Refusals: `InboxNotConfiguredError`, `InboxConsumerConflictError` (two
+  handlers sharing a consumer name on one topic), `InboxNotReadyError`,
+  `InboxPurgeUnscheduledError`, `InboxStoreVerifyTimeoutError`, `InboxRowStateError`. The types are
+  `InboxOptions` (with `InboxPurgeOptions` and `InboxStoreEntry`), `IntegrationEventInboxOptions`,
+  `IntegrationEventSubscribeOptions`, `ParkedInboxEntry` and `InboxReleaseResult`. Driven against
+  real PostgreSQL with real RabbitMQ 4 and Redis Streams (duplicates, a failure rolled back and
+  redelivered, two consumer groups, and an outbox row relayed twice handled once), a MongoDB replica
+  set and the Bigtable emulator; D1 at unit level over real SQLite.
+
+- **The inbox store port in `@setu-ts/common` (M108).** `IInboxStore` — `find`, `run`,
+  `recordFailure`, `park`, `parked`, `release`, `stats`, `purge` and `verify`, every method
+  rejecting rather than throwing — with `InboxRecord`, `InboxStatus`, `InboxIds`,
+  `InboxFailureUpdate`, `InboxReleaseOutcome`, `InboxStoreStats`, the `'setu-inbox'` discriminator
+  `INBOX_RECORD_KIND`, and the token `CAPABILITIES.INBOX` (`'inbox'`, `inbox.<name>` for a named
+  messaging instance).
+
+- **`createDatabaseInboxStore` in `@setu-ts/database-plugin` (M108).** The shipped `IInboxStore`
+  over `IDatabaseService`, as a `RegistryFactory` (`DatabaseInboxStoreOptions`: `entity`, default
+  `'Inbox'`, and `database`). Every row carries `kind: 'setu-inbox'` and every read requires it. Its
+  `verify()` refuses Cosmos DB and Bigtable by adapter arm or class, then runs a two-row
+  transactional probe that always rolls back, refusing a standalone MongoDB and a one-row-per-
+  transaction adapter with `InboxStoreUnavailableError`. The DDL for PostgreSQL and SQLite/D1 is in
+  the messaging-plugin README.
+
 - **`SpanOptions.root` in `@setu-ts/common` (M107).** An optional `root: true` starts a parentless
   span, ignoring both `parentContext` and the active span; `@setu-ts/telemetry-plugin` carries it to
   OpenTelemetry's own `SpanOptions.root`. The outbox relay uses it for a row with no valid stored

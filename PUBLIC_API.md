@@ -2317,6 +2317,38 @@ const store = createDatabaseOutboxStore({ entity: 'Outbox', database: 'orders' }
   MongoDB a missing entity cannot be detected (both create lazily). Every refusal is a rejected
   promise.
 
+### Consumer inbox store (M108)
+
+`createDatabaseInboxStore(options?)` returns a `RegistryFactory<IInboxStore>` — the shipped
+implementation of the `IInboxStore` port in `@setu-ts/common` over `IDatabaseService`. It is passed
+to the messaging plugin's `inbox.store` option, which resolves it in `onInit` and runs `verify()`
+there.
+
+```typescript
+import { createDatabaseInboxStore } from '@setu-ts/database-plugin';
+
+const store = createDatabaseInboxStore({ entity: 'Inbox', database: 'orders' });
+```
+
+| Export                       | Kind      | Notes                                                                                                                                                                                                                |
+| ---------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createDatabaseInboxStore`   | function  | Resolves `CAPABILITIES.DATABASE` (or `database.<name>`) and `CAPABILITIES.RUNTIME`. Throws `TypeError` at the call for an empty `entity`                                                                             |
+| `DatabaseInboxStoreOptions`  | interface | `entity?` (default `'Inbox'`), `database?` — must be the database the handlers write to                                                                                                                              |
+| `InboxStoreUnavailableError` | class     | Rejected by `verify()`; `entity`, `reason` (`'cosmos-unsupported'`, `'bigtable-unsupported'`, `'mongodb-standalone'`, `'transaction-scope'`, `'entity-unavailable'`), the adapter error as `cause` when there is one |
+
+- **`run`** opens one transaction, creates the marker FIRST, then runs the work with the unit of
+  work; any rejection rolls both back. A duplicate marker id rejects (the adapter's
+  `DuplicateKeyError`, or a write conflict on a MongoDB replica set).
+- **Discriminator.** Every row carries `kind: 'setu-inbox'` (`INBOX_RECORD_KIND`); every read
+  (`find`, `parked`, `stats`, `purge`) requires it, and a row of another `kind` is missing.
+- **Read-then-write.** `recordFailure` and `release` read the row and write in two calls, so two
+  concurrent failures can record one increment until M105's conditional write.
+- **`verify()`** refuses Cosmos DB and Bigtable by adapter arm or class, runs `purge(0, 1)`, then a
+  transaction that creates two probe rows and always rolls back: a `BigtableTransactionScopeError`
+  at the second row is `'transaction-scope'`, a cause chain carrying `code: 20` with
+  `codeName: 'IllegalOperation'` is `'mongodb-standalone'`, anything else `'entity-unavailable'`.
+  Nothing the probe writes survives.
+
 ### Multiple Databases
 
 ```typescript
@@ -5848,6 +5880,27 @@ export type {
   OutboxWriteInput,
 } from '@setu-ts/messaging-plugin';
 
+// Consumer inbox (M108)
+export {
+  InboxConsumerConflictError,
+  InboxNotConfiguredError,
+  InboxNotReadyError,
+  InboxPurgeUnscheduledError,
+  InboxRowStateError,
+  InboxStoreVerifyTimeoutError,
+} from '@setu-ts/messaging-plugin';
+export type {
+  IInbox,
+  InboxOptions,
+  InboxPurgeOptions,
+  InboxReleaseResult,
+  InboxStoreEntry,
+  IntegrationEventInboxHandler,
+  IntegrationEventInboxOptions,
+  IntegrationEventSubscribeOptions,
+  ParkedInboxEntry,
+} from '@setu-ts/messaging-plugin';
+
 // Re-exported types from @setu-ts/common
 export type {
   IMessageBroker,
@@ -6177,6 +6230,13 @@ class (rejections, below), and five types:
 - **`IntegrationEventHandler<T>`** (type) — `(payload: T, envelope: IntegrationEventEnvelope<T>`,
   `metadata: MessageMetadata) => void | Promise<void>`: parsed payload first, envelope second,
   transport metadata third.
+- **`onIntegrationEvent` overloads (M108).** With `options.inbox` the call takes an
+  `IntegrationEventInboxHandler<T, S>` — the same three arguments plus the inbox transaction's unit
+  of work, `S` inferred from the handler's annotation — and returns a
+  `RegistryFactory<SubscriptionDefinition>` (see [Consumer inbox](#consumer-inbox-m108)). Without it
+  the call is unchanged and returns a `SubscriptionDefinition`; the inbox overload is declared
+  first, and the legacy options take `inbox?: never`, so an options variable carrying `inbox` is
+  typed as the factory it is.
 - **`IntegrationEventRejectionReason`** (type) —
   `'malformed' | 'type-mismatch' | 'version-mismatch' | 'parse'`, the `reason` discriminant of
   `IntegrationEventRejectedError` (table below).
@@ -6337,6 +6397,75 @@ value out of range, `NaN` or a fraction throws a `RangeError` naming the option,
 - **Backends.** The per-backend requirements are under
   [Transactional outbox store](#transactional-outbox-store-m107) in the database plugin; the
   messaging plugin README carries the DDL (PostgreSQL, SQLite/D1) and the adapter mappings.
+
+### Consumer inbox (M108)
+
+`MessagingPlugin({ inbox })` plus `onIntegrationEvent(definition, handler, { inbox: { consumer } })`
+records each event a consumer applied, keyed by `(consumer, envelope id)`, in the SAME transaction
+as the handler's writes. The store is reached through the `IInboxStore` port in `@setu-ts/common` —
+normally `createDatabaseInboxStore()` from `@setu-ts/database-plugin`.
+
+```typescript
+import { createDatabaseInboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IUnitOfWork } from '@setu-ts/database-plugin';
+import { MessagingPlugin, onIntegrationEvent } from '@setu-ts/messaging-plugin';
+
+app.register(DatabasePlugin({ type: 'memory' }));
+app.register(MessagingPlugin({
+  inbox: { store: createDatabaseInboxStore() },
+  subscriptions: [
+    onIntegrationEvent(personHired, async (payload, _envelope, _metadata, uow: IUnitOfWork) => {
+      await uow.getRepository('PayrollRecord').create({ id: payload.personId });
+    }, { inbox: { consumer: 'payroll' } }),
+  ],
+}));
+```
+
+**The promise.** For one consumer name, the handler's writes through the supplied unit of work are
+committed at most once per envelope id while the marker is retained; a delivery after the marker is
+purged is processed again. Nothing is promised about effects outside that unit of work, about two
+processes using one consumer name with different handlers, or about a database other than the
+store's.
+
+| Export                             | Kind      | Notes                                                                                                                                 |
+| ---------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `IInbox`                           | interface | `parked(limit?)` (never the envelope); `release(rowId, 'retry' \| 'discard')`; `purge()`                                              |
+| `InboxOptions`                     | interface | `store`, `maxAttempts?`, `retainMs?` (7 days), `storeTimeoutMs?` (5000), `maxParkedEnvelopeBytes?` (262 144), `purge?`                |
+| `InboxPurgeOptions`                | interface | `schedule?` (`true`), `intervalMs?` (60 000), `batch?` (100)                                                                          |
+| `InboxStoreEntry`                  | type      | an `IInboxStore` or a `RegistryFactory<IInboxStore>`, resolved in `onInit`                                                            |
+| `ParkedInboxEntry`                 | interface | `rowId`, `consumer`, `topic`, `envelopeId?`, `attempts`, `updatedAt`, `lastError?`                                                    |
+| `InboxReleaseResult`               | interface | `topic`, and for `retry` the stored `envelope` (absent when too large or unreadable)                                                  |
+| `IntegrationEventInboxHandler`     | type      | `(payload, envelope, metadata, scope: S)`                                                                                             |
+| `IntegrationEventInboxOptions`     | interface | `consumer` (a valid publish id, required), `instance?` (resolves `inbox.<instance>`)                                                  |
+| `IntegrationEventSubscribeOptions` | type      | `SubscribeOptions & { inbox: IntegrationEventInboxOptions }`                                                                          |
+| `InboxNotConfiguredError`          | class     | resolution — `reason: 'unregistered'` (no `MessagingPlugin({ inbox })`) or `'foreign-provider'` (a replacement provider of the token) |
+| `InboxConsumerConflictError`       | class     | resolution — a second subscription with the same `consumer` on the same topic in one inbox                                            |
+| `InboxNotReadyError`               | class     | `state: 'not-started'` (resolution or a call before the store is verified) or `'closed'`                                              |
+| `InboxPurgeUnscheduledError`       | class     | `start()` — `purge.schedule` (the default) without a `CAPABILITIES.SCHEDULER`                                                         |
+| `InboxStoreVerifyTimeoutError`     | class     | `start()` — `verify()` did not settle within `storeTimeoutMs`                                                                         |
+| `InboxRowStateError`               | class     | `release` — `outcome: 'invalid-id'`, `'missing'` or `'not-parked'` (with the marker's `status`)                                       |
+
+- **Delivery.** Validate the envelope; read the marker (present → acknowledge); parse; then ONE
+  transaction that creates the marker first and runs the handler. After ANY rejection the marker is
+  read again: present → acknowledge (another delivery handled it); absent → the handler failed. Row
+  ids are a SHA-256 of `(consumer, envelope id)`, so any string id is keyable; the raw id is stored
+  only when it is a valid publish id.
+- **Queue.** The broker `queue` defaults to `consumer`, so the subscription is a durable consumer
+  group that redelivers.
+- **Failures.** Without `maxAttempts` a failure is rethrown and the broker's budget applies (NATS
+  redelivers without limit and Kafka blocks the partition). With it, failures are counted outside
+  the transaction and at the limit the delivery is parked and acknowledged; a parse rejection parks
+  at once.
+- **Wiring.** With `inbox` set the plugin also provides `CAPABILITIES.INBOX` (`inbox.<name>`),
+  declares `CAPABILITIES.SCHEDULER` as an optional dependency, registers an `inbox` health indicator
+  (`down` before verification and after close, `degraded` with `parked-rows`,
+  `up`/`reachable:
+  'unknown'` when the count does not answer within 2 s), verifies the store at
+  `onInit` before any inbox subscription is resolved, schedules `inbox-purge[.<name>]`, and closes
+  in an `onClose` hook registered after the broker's, so a delivery in flight during `stop()` is not
+  refused.
+- **Backends.** Memory, Prisma, Drizzle, D1, a MongoDB replica set and DynamoDB; Cosmos and Bigtable
+  are refused. The DDL is in the messaging plugin README.
 
 ## Queue (`@setu-ts/queue-plugin`)
 
@@ -10978,7 +11107,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 
 | Export                                                 | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103), `OUTBOX: 'outbox'` (transactional outbox, `outbox.<name>` for a named messaging instance, M107)                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103), `OUTBOX: 'outbox'` (transactional outbox, `outbox.<name>` for a named messaging instance, M107), `INBOX: 'inbox'` (consumer inbox, `inbox.<name>` for a named messaging instance, M108)                                                                                                                                                                                                                                                                                                                                        |
 | `createCapabilityToken(name)`                          | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `encodeFrameData(data)`                                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `decodeFrameData(payload)`                             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -11082,6 +11211,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | View rendering      | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Localization        | `ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue` — the localization port (`t(key, values?)`, `locale`, `locales`, `forLocale(tag)`) served under `CAPABILITIES.LOCALIZATION`, and the catalogue shape: a string with `{name}` placeholders or a CLDR plural record with `other` required (M103)                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Outbox              | `IOutboxStore`, `IOutboxWriteScope`, `OutboxRecord`, `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, `OUTBOX_RECORD_KIND` — the transactional-outbox store port (`append`, `scanPending`, `failedKeys`, `markSent`, `markFailure`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws), the row shape (every field a JSON scalar, times as epoch ms), the conditional-transition outcome (`applied` / `missing` / `not-pending` / `not-failed`), and the `'setu-outbox'` discriminator every row carries and every read requires (M107)                                                                                                                                               |
+| Inbox               | `IInboxStore`, `InboxRecord`, `InboxStatus`, `InboxIds`, `InboxFailureUpdate`, `InboxReleaseOutcome`, `InboxStoreStats`, `INBOX_RECORD_KIND` — the consumer-inbox store port (`find`, `run`, `recordFailure`, `park`, `parked`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws; `run` creates the marker first in one transaction), the row shape (every field a JSON scalar, times as epoch ms), the release outcome (`applied` / `missing` / `not-parked`), and the `'setu-inbox'` discriminator every row carries and every read requires (M108)                                                                                                                                                    |
 | Idempotency         | `IIdempotencyStore`, `IdempotencyClaimRequest`, `IdempotencyClaimResult`, `IdempotencySettleResult`, `IIdempotencyService`, `IdempotentRouteOptions`, `IdempotencyKeySource`, `IdempotencyFingerprintSource`, `IdempotentIngressOptions`, `IdempotentIngressCommonOptions`, `IngressIdempotencyKeySource`, `IngressIdempotencyFingerprintSource` — the store port, the service contract served under `CAPABILITIES.IDEMPOTENCY`, and the route/ingress option types (M109a). The record is an opaque string so every store holds identical bytes; the mechanism lives in `@setu-ts/idempotency-plugin`. `IngressContext.consumer` (below) is the dispatch identity the ingress key is scoped by.                                  |
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
