@@ -79,8 +79,9 @@ describe('inbox failures', () => {
   });
 
   it('parks a parse rejection at once when maxAttempts is set', async () => {
-    const { store, service, subscription } = failing({ maxAttempts: 5 });
+    const { store, service, subscription, warnings } = failing({ maxAttempts: 5 });
     await service.deliver(subscription, envelope('e-1', { personId: 7 }), metadata);
+    expect(warnings).toEqual(['inbox: parked a delivery whose payload the definition rejected']);
     const parked = store.rows.get((await idsOf('e-1')).marker);
     expect(parked).toMatchObject({ status: 'parked', attempts: 1 });
     expect(parked?.lastError).toContain('parse');
@@ -119,9 +120,11 @@ describe('inbox failures', () => {
   });
 
   it('acknowledges when park finds a marker already present', async () => {
-    const { store, service, subscription } = failing({ maxAttempts: 1 });
+    const { store, service, subscription, warnings } = failing({ maxAttempts: 1 });
     store.park$ = () => Promise.resolve('exists');
     await service.deliver(subscription, envelope('e-1'), metadata);
+    // Nothing was parked, so nothing is reported as parked.
+    expect(warnings).toEqual([]);
   });
 
   it('parks without the envelope when it exceeds the cap, or the cap is 0', async () => {

@@ -214,7 +214,7 @@ export class InboxService implements IInbox {
       // parking enabled it parks at once (and can be retried once the schema
       // is fixed); without, the broker's own path takes it, as today.
       if (this.#deps.options.maxAttempts === undefined) throw rejection;
-      await this.#park(store, ids, base, raw, rejection, 1);
+      await this.#park(store, ids, base, raw, rejection, 1, 'rejected');
       return;
     }
 
@@ -302,7 +302,7 @@ export class InboxService implements IInbox {
       throw error;
     }
     if (count < maxAttempts) throw error;
-    await this.#park(store, ids, base, raw, error, count);
+    await this.#park(store, ids, base, raw, error, count, 'exhausted');
   }
 
   /** Parks a delivery and resolves (acknowledging it), or rethrows `error` when parking fails. */
@@ -313,6 +313,7 @@ export class InboxService implements IInbox {
     raw: unknown,
     error: unknown,
     attempts: number,
+    cause: 'exhausted' | 'rejected',
   ): Promise<void> {
     const envelope = this.#storableEnvelope(raw);
     const marker: InboxRecord = {
@@ -325,8 +326,9 @@ export class InboxService implements IInbox {
       lastError: errorLine(error),
       ...(envelope !== undefined ? { envelope } : {}),
     };
+    let outcome: 'applied' | 'exists';
     try {
-      await this.#bounded(() => store.park(marker));
+      outcome = await this.#bounded(() => store.park(marker));
     } catch (parkError) {
       this.#warn('inbox: parking a delivery failed', {
         consumer: base.consumer,
@@ -335,11 +337,15 @@ export class InboxService implements IInbox {
       });
       throw error;
     }
-    this.#warn('inbox: parked a delivery after repeated failures', {
-      consumer: base.consumer,
-      topic: base.topic,
-      attempts,
-    });
+    // `exists`: another delivery's marker was already there, so nothing was
+    // parked and there is nothing for an operator to act on.
+    if (outcome === 'exists') return;
+    this.#warn(
+      cause === 'exhausted'
+        ? 'inbox: parked a delivery after repeated failures'
+        : 'inbox: parked a delivery whose payload the definition rejected',
+      { consumer: base.consumer, topic: base.topic, attempts },
+    );
   }
 
   /** The envelope as stored on a parked marker, or `undefined` when over the cap or unserializable. */

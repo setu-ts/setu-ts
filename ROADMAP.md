@@ -13278,7 +13278,10 @@ hand-rolls the same check, usually against the wrong key.
 - **Effects outside the database are a stated choice, not a guarantee.** Sending an email or calling
   a provider cannot join the transaction; the README names the three options — record before (at
   most once), record after (at least once), or forward a derived key the provider de-duplicates
-  (once where the provider supports it).
+  (once where the provider supports it). **Corrected at verification:** "record before" is not
+  reachable inside the handler — the inbox runs nothing after the commit, so an effect performed in
+  the handler is at least once whatever its position; at most once needs the application's own claim
+  committed in a separate transaction before the effect, which the README now states.
 - **Poison messages.** A failing handler keeps being redelivered (and blocks a Kafka partition).
   Failures are counted OUTSIDE the rolled-back transaction, or the broker's own delivery limit is
   used; `IngressContext.attempt` is absent for messaging by contract.

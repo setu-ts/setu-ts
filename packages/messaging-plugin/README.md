@@ -1456,13 +1456,16 @@ real MongoDB replica set in `test/integration/inbox-backends-real.test.ts`.
 
 ### Effects outside the database
 
-Sending an email or calling a provider cannot join the transaction. Choose per effect:
+Sending an email or calling a provider cannot join the transaction, and the inbox runs nothing after
+the commit — so an effect performed inside the handler is AT LEAST ONCE: if the commit is refused or
+the process dies, the effect has already happened and the redelivery runs it again. Choose per
+effect:
 
-| Choice                   | How                                                                                                 | Guarantee                              |
-| ------------------------ | --------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| Record before the effect | perform the effect after the handler's database writes, accepting a lost effect if the commit fails | at most once                           |
-| Record after the effect  | perform it anywhere in the handler (the default shape)                                              | at least once                          |
-| Forward a derived key    | pass `${consumer}:${envelope.id}` as the provider's idempotency key                                 | once, where the provider de-duplicates |
+| Choice                     | How                                                                                                                                                                  | Guarantee                                               |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Perform it in the handler  | anywhere in the handler (the default shape)                                                                                                                          | at least once                                           |
+| Forward a derived key      | pass `${consumer}:${envelope.id}` as the provider's idempotency key                                                                                                  | once, where the provider de-duplicates                  |
+| Claim it before the effect | in the handler, COMMIT your own claim row for the effect in a SEPARATE transaction (not the inbox's unit of work), and skip the effect when the claim already exists | at most once — a crash after the claim loses the effect |
 
 On the backends that defer writes to commit (memory, D1, DynamoDB) the handler runs BEFORE a
 concurrent duplicate can be refused, so its outside effects run for both; and DynamoDB's reads are
@@ -1487,7 +1490,10 @@ With `maxAttempts`, each failure is counted on a separate row OUTSIDE the rolled
 and at the limit the delivery is PARKED and acknowledged: its marker becomes `parked` with the
 envelope (up to `maxParkedEnvelopeBytes`), so the partition moves on and every redelivery is
 skipped. A parse rejection parks at once — redelivery cannot fix it. The count is a lower bound (two
-concurrent failures can record one increment), so parking comes one attempt late, never early. On a
+concurrent failures can record one increment), so parking comes one attempt late, never early. On
+RabbitMQ and Redis Streams `consumerRetry` (default 5 attempts) also applies, and whichever budget
+runs out first wins: set `maxAttempts` at or below `consumerRetry.maxAttempts`, or set
+`consumerRetry: false`, or the broker dead-letters the delivery before it is ever parked. On a
 backend that defers writes, a concurrent delivery's park can commit while a sibling's successful
 transaction is still open; the sibling then rolls back and acknowledges, and the event ends parked —
 recoverable through `release('retry')`.

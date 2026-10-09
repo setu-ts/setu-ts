@@ -1279,6 +1279,9 @@ export interface InboxOptions {
    * (the default), a failure is rethrown and the broker's own retry budget
    * applies — RabbitMQ and Redis Streams retry and dead-letter, while NATS
    * redelivers without limit and Kafka blocks the partition, so set it there.
+   * On RabbitMQ and Redis Streams both budgets apply and the smaller wins:
+   * keep it at or below `consumerRetry.maxAttempts` (or disable
+   * `consumerRetry`), or the broker dead-letters before the inbox parks.
    */
   readonly maxAttempts?: number;
   /**
