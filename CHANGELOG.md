@@ -24,10 +24,16 @@ All notable changes to this project are documented here. The format follows
   gains `createDatabaseIdempotencyStore` (with `DatabaseIdempotencyStoreOptions`) and
   `TransactionalStoreUnavailableError`; and `@setu-ts/sdk` gains `ClientOptions.idempotency`
   (`ClientIdempotencyOptions`) and `ClientRequest.idempotencyKey`, so a keyed request keeps ONE key
-  across every retry attempt and may retry any method and `409`. On both the first call and a
-  replay, `within` returns the JSON round trip of what `fn` returned: dates become ISO strings,
-  `undefined` object members are absent, and nested `toJSON()` output is respected. The service also
-  exposes `purgeTransactional()` for retention cleanup.
+  across every retry attempt and may retry any method and `409`, but keyed `POST`/`PATCH` requests
+  are never retried after a `2xx` response arrives, including a body-read failure or a throwing
+  response interceptor; the original thrown value reaches the caller unchanged. On both the first
+  call and a replay, `within` returns the JSON round trip of what `fn` returned: dates become ISO
+  strings, `undefined` object members are absent, and nested `toJSON()` output is respected. The
+  service also exposes `purgeTransactional()` for retention cleanup. On PostgreSQL (Prisma), a
+  concurrent loser normally waits on the winner's unique-key lock and replays; if it exceeds the
+  adapter's `transactionTimeout` (default 30 s), timeout `P2028` replays when the re-read finds the
+  winner's committed record, otherwise answers `'store-failed'` (`503`), with no timeout-to-`409`
+  mapping. Tier C is not verified against a real Prisma client.
 
 - **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
   questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup
@@ -645,16 +651,6 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
-
-- **Prisma tier-C backend documentation (M109b).** A concurrent loser normally waits on the winner's
-  unique-key lock and replays. The adapter's `transactionTimeout` defaults to 30 s; a transaction
-  timeout (`P2028`) replays if the re-read finds the winner's committed record, otherwise it answers
-  `'store-failed'` (`503`). It has no timeout-to-`409` mapping. Tier C is not verified against a
-  real Prisma client; the existing adapter and classification policy are unchanged.
-
-- **Keyed SDK requests after a successful response (`@setu-ts/sdk`, M109b).** A keyed POST is never
-  retried when reading a `2xx` response body fails or a response interceptor throws a primitive or
-  function. The original thrown value still reaches the caller unchanged.
 
 - **Worker lifecycle and example hardening (M45c, #433).** Expired pending tasks reclaim excess
   starting slots; stale startup callbacks cannot reject unrelated work. Termination throws and
