@@ -2,8 +2,8 @@
 
 > **Status:** Planning. Branch: `feat/m109b-idempotency-tier-c-sdk`. `develop` and `main` are
 > protected — all work (implementation + fixes) stays on this one branch until it merges via a
-> single PR. **Implementation waits for M108 (PR #436) to merge**: §3.6 extracts helpers out of
-> M108's `database-plugin` inbox store, and the branch is rebased on `develop` once it carries M108.
+> single PR. M108 (PR #436) is merged into `develop`, which this branch is based on; §3.6 extracts
+> helpers out of its `database-plugin` inbox store.
 
 ## 0. Objective & scope
 
@@ -51,9 +51,9 @@ retry attempt, which is what makes a `POST` or `PATCH` safe to retry.
 | `JsonValue`                                | `packages/common/src/types.ts:135`                                                            | `string \| number \| boolean \| null \| readonly JsonValue[] \| { readonly [key: string]: JsonValue \| undefined }`. The `within` result type is bounded by it.                                               |
 | `IDatabaseService.transaction`             | `packages/database-plugin/src/interfaces/index.ts:212-215`                                    | `transaction<T>(work: (uow: IUnitOfWork) => Promise<T>, options?): Promise<T>`; a throw rolls back. The store opens the transaction, so the caller never owns it (§3.3).                                      |
 | `IUnitOfWork.getRepository`                | `packages/database-plugin/src/interfaces/index.ts:197`                                        | What `fn` receives as its scope; the record and the business writes go through the SAME unit of work.                                                                                                         |
-| M108 `IInboxStore`                         | `packages/common/src/services/inbox.ts:158-240` (branch `feat/m108-consumer-inbox`, PR #436)  | `find`, `run(marker, work)` (marker created FIRST in one transaction), `purge`, `verify` — the seam tier C shares. Its record shape (consumer, topic, parked) does not fit a stored result, hence a new port. |
-| M108 `DatabaseInboxStore`                  | `packages/database-plugin/src/inbox/database-inbox-store.ts:108-160, 345-400` (same branch)   | `ProbeRollback`, `unavailableReason`, `isMongoReplicaSetRefusal`, the Cosmos/Bigtable refusal through `adapterInfoOf`, and the two-row rolled-back probe — the code §3.6 extracts instead of copying.         |
-| `adapterInfoOf`                            | `packages/database-plugin/src/services/database-service.ts:129` (same branch)                 | Internal; reports `{ type, adapter }` so a shipped adapter handed to the `'custom'` arm is still refused by class.                                                                                            |
+| M108 `IInboxStore`                         | `packages/common/src/services/inbox.ts:158-240`                                               | `find`, `run(marker, work)` (marker created FIRST in one transaction), `purge`, `verify` — the seam tier C shares. Its record shape (consumer, topic, parked) does not fit a stored result, hence a new port. |
+| M108 `DatabaseInboxStore`                  | `packages/database-plugin/src/inbox/database-inbox-store.ts:108-160, 345-400`                 | `ProbeRollback`, `unavailableReason`, `isMongoReplicaSetRefusal`, the Cosmos/Bigtable refusal through `adapterInfoOf`, and the two-row rolled-back probe — the code §3.6 extracts instead of copying.         |
+| `adapterInfoOf`                            | `packages/database-plugin/src/services/database-service.ts:129`                               | Internal; reports `{ type, adapter }` so a shipped adapter handed to the `'custom'` arm is still refused by class.                                                                                            |
 | `RegistryFactory` / `resolveRegistryEntry` | `packages/common/src/registry.ts:66, 216`                                                     | The `transactional.store` option is an instance or a factory resolved at `onInit` (the M108 `inbox.store` shape).                                                                                             |
 | `withDeadline`                             | `packages/common/src/health/deadline.ts:118`                                                  | Bounds every store call except the transaction itself (`storeTimeoutMs`), as M108 does.                                                                                                                       |
 | `withHttpStatusHint`                       | `packages/common/src/errors/status-hint.ts:141`                                               | Brands `IdempotencyWithinError` so `errorHandler` answers `422`/`400` from a handler that calls `within` (§3.4).                                                                                              |
@@ -436,8 +436,8 @@ deno task release:verify <version>
 
 ## 8. Risks & mitigations
 
-- M108 review changes the inbox store before merge → §3.6's extraction is rebased after #436 merges;
-  the inbox tests gate it.
+- §3.6's extraction changes M108's inbox store → its existing tests are the regression gate and must
+  pass unchanged.
 - Deferred backends run `fn` twice for a concurrent duplicate → its database writes still commit
   once; outside effects are documented as at-least-once (M108's table, carried over).
 - A purge removing a record before a client stops retrying → `ttlMs` ≥ client retry window,
