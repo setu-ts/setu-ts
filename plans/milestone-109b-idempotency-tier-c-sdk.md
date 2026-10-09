@@ -10,14 +10,15 @@
 109a delivered the first of the three guarantees M109 names — no duplicate processing — on tiers A
 and B, which hold the idempotency record OUTSIDE the business transaction. This milestone delivers
 the second: **the work and its record committed together** (tier C). `service.within(options, fn)`
-opens ONE database transaction, writes the idempotency record in it FIRST, runs `fn` with that
-transaction's unit of work, stores `fn`'s JSON result on the record, and commits. A repeated key
-whose record is committed returns the stored result without running `fn`; a concurrent duplicate
-loses the race on the record's primary key, its business writes roll back with it, and the record is
-re-read to return the winner's result. It is the M108 inbox algorithm (pre-read, record first,
-re-read after any rejection) applied to plain code instead of a broker delivery. It also delivers
-the client half: an `@setu-ts/sdk` request carrying an idempotency key keeps one key across every
-retry attempt, which is what makes a `POST` or `PATCH` safe to retry.
+opens ONE database transaction, creates a claim row in it FIRST, runs `fn` with that transaction's
+unit of work, creates a result row holding `fn`'s JSON result, and commits. A repeated key whose
+record is committed returns the stored result without running `fn`; a concurrent duplicate loses the
+race on the claim's primary key and its business writes roll back with it — then it replays the
+winner's result, or, where it failed before the winner committed, rejects with a retryable `409`
+(§3.3, §3.7). It is the M108 inbox algorithm (pre-read, write first, re-read after a rejection)
+applied to plain code instead of a broker delivery. It also delivers the client half: an
+`@setu-ts/sdk` request carrying an idempotency key keeps one key across every retry attempt, which
+is what makes a `POST` or `PATCH` safe to retry.
 
 - **In scope:**
   - `common`: the tier-C store port `ITransactionalIdempotencyStore`, its record type and kind
@@ -27,7 +28,8 @@ retry attempt, which is what makes a `POST` or `PATCH` safe to retry.
     resolved and verified at `onInit`, a scheduled retention purge), `IdempotencyWithinError`, and
     the store-failure log rule (§3.3–§3.5).
   - `database-plugin`: `createDatabaseIdempotencyStore()`, a bridge over `IDatabaseService`, with
-    the backend refusals shared with M108's inbox store through one extracted helper (§3.6, §3.7).
+    the backend refusals shared with M107's outbox and M108's inbox stores through one extracted
+    helper (§3.6, §3.7).
   - `sdk`: `ClientOptions.idempotency` and `ClientRequest.idempotencyKey`; a keyed request is
     retryable on any method and also on `409` (§3.8, §3.9).
   - Docs: package READMEs, PUBLIC_API.md, CHANGELOG `Unreleased`, ROADMAP corrections (§2) and a
@@ -39,8 +41,9 @@ retry attempt, which is what makes a `POST` or `PATCH` safe to retry.
     tier C stays a code entry point; an HTTP handler calls `within` itself (§3.3 worked example).
   - The ingress entry point on tier C. M108's inbox is the tier-C mechanism for broker messages; a
     queue-job equivalent is unowned.
-  - Codegen changes in `@setu-ts/sdk`: generated operations take no per-call options today, so they
-    get keys through the client-level `idempotency` option (§3.8), not a new per-operation argument.
+  - Codegen changes in `@setu-ts/sdk`: generated operations take no per-call options beyond the
+    header parameters their document declares, so they get generated keys through the client-level
+    `idempotency` option (§3.8), not a new per-operation argument.
   - Lease renewal, an erase-by-principal API — still unowned (109a §0).
 
 ## 1. Contracts verified from SOURCE (not names)
@@ -62,20 +65,20 @@ retry attempt, which is what makes a `POST` or `PATCH` safe to retry.
 | 109a plugin wiring                         | `packages/idempotency-plugin/src/plugin/idempotency-plugin.ts:30-75`                          | `register()` connects the tier A/B store and registers the service; no `onInit`, no scheduler dependency today. §3.5 adds both.                                                                               |
 | `IScheduler.every`                         | `packages/common/src/services/scheduler.ts:109`                                               | The retention purge job (`idempotency-purge`), M108's `inbox-purge` precedent.                                                                                                                                |
 | SDK retry gate                             | `packages/sdk/src/retry/retry-strategy.ts:65, 68-75, 104-135`                                 | `SAFE_METHODS` = GET/HEAD/OPTIONS/PUT/DELETE; retryable statuses 408/425/429/5xx; `runWithRetry(fn, policy, method, timing, signal)` decides `canRetry` from the method alone.                                |
-| SDK request path                           | `packages/sdk/src/http/http-client.ts:138-200`                                                | Headers built once, request interceptors run ONCE before any attempt, then `runWithRetry(execute)` re-sends the SAME `headers` object — so a key set before the loop is reused on every attempt by structure. |
+| SDK request path                           | `packages/sdk/src/http/http-client.ts:138-311`                                                | Headers built once, request interceptors run ONCE before any attempt, then `runWithRetry(execute)` re-sends the SAME `headers` object — so a key set before the loop is reused on every attempt by structure. |
 | `ClientRequest` / `ClientOptions`          | `packages/sdk/src/http/contracts.ts:43-64, 164-196`                                           | Neither interface has an idempotency member today.                                                                                                                                                            |
 | SDK randomness                             | `packages/sdk/src/http/observed-fetch.ts:108`                                                 | The SDK already uses `crypto.getRandomValues` behind a guarded availability check — the precedent for key generation (§3.8).                                                                                  |
 | 109a server `409`                          | `packages/idempotency-plugin/src/middleware/http-middleware.ts:217-222`                       | A concurrent duplicate answers `409 Conflict`, no `Retry-After`; the record replays once the first request completes. §3.9 retries it.                                                                        |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                        | Resolution (picked side)                                                                                                                                                                                                                                                                                                                  | Doc deliverable (same PR)                                                |
-| -- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| C1 | ROADMAP M109 and 109a plan §0 name the entry point `within(uow, key, fn)` — the CALLER's unit of work.                                          | `within(options, fn)`: the store opens the transaction. With a caller-owned transaction, a lost race surfaces OUTSIDE `within` — a PostgreSQL insert aborts the caller's transaction so no re-read is possible inside it, and the deferred backends refuse at the caller's commit — so the winner's result could never be returned. §3.3. | ROADMAP M109 "Four entry points" bullet.                                 |
-| C2 | ROADMAP M109: "Tier C per backend: SQL, MongoDB and DynamoDB yes; D1 for database-only effects; Cosmos only within one partition; Bigtable no." | Cosmos is REFUSED, like M108's inbox: a database-plugin transaction is one container and one partition-key value, and the record lives in its own entity, so it cannot share the business partition. D1 is supported through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })` with the deferred-write caveat (§3.7).              | ROADMAP M109 tier-C bullet.                                              |
-| C3 | ROADMAP M109 `Package(s)`: "109b: `packages/sdk` (the `idempotencyKey` request option) and tier C."                                             | 109b: `common`, `idempotency-plugin`, `database-plugin`, `sdk`.                                                                                                                                                                                                                                                                           | ROADMAP `Package(s)` line; Progress row `109b`.                          |
-| C4 | 109a plan §3.18 and the idempotency-plugin README tier table: tier C row reads "Expiry: Backend-specific; Clock: —".                            | Expiry is the record's `expiresAt`, written from `runtime.now()` (wall clock, because records outlive the process and are read by other replicas), removed by the scheduled purge; an expired record is treated as absent and replaced inside the next transaction.                                                                       | idempotency-plugin README tier table; PUBLIC_API.md idempotency section. |
-| C5 | ROADMAP M109 SDK bullet: "an `idempotencyKey` request option, generated once per logical call".                                                 | Two members: per-request `ClientRequest.idempotencyKey` (a caller's own key) and client-level `ClientOptions.idempotency` (generated keys, the only way a GENERATED client gets one, since generated operations take no per-call options — §1).                                                                                           | ROADMAP M109 SDK bullet.                                                 |
+| #  | Conflict                                                                                                                                                                      | Resolution (picked side)                                                                                                                                                                                                                                                                                                                  | Doc deliverable (same PR)                                                              |
+| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| C1 | ROADMAP M109 and 109a plan §0 name the entry point `within(uow, key, fn)` — the CALLER's unit of work.                                                                        | `within(options, fn)`: the store opens the transaction. With a caller-owned transaction, a lost race surfaces OUTSIDE `within` — a PostgreSQL insert aborts the caller's transaction so no re-read is possible inside it, and the deferred backends refuse at the caller's commit — so the winner's result could never be returned. §3.3. | ROADMAP M109 "Four entry points" bullet.                                               |
+| C2 | ROADMAP M109: "Tier C per backend: SQL, MongoDB and DynamoDB yes; D1 for database-only effects; Cosmos only within one partition; Bigtable no."                               | Cosmos is REFUSED, like M108's inbox: a database-plugin transaction is one container and one partition-key value, and the record lives in its own entity, so it cannot share the business partition. D1 is supported through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })` with the deferred-write caveat (§3.7).              | ROADMAP M109 tier-C bullet.                                                            |
+| C3 | ROADMAP M109 `Package(s)`: "109b: `packages/sdk` (the `idempotencyKey` request option) and tier C."                                                                           | 109b: `common`, `idempotency-plugin`, `database-plugin`, `sdk`.                                                                                                                                                                                                                                                                           | ROADMAP `Package(s)` line; Progress row `109b`.                                        |
+| C4 | The idempotency-plugin README tier table (`README.md:124-128`) has no tier-C row; only the archived 109a plan (§3.18) describes one, as "Expiry: Backend-specific; Clock: —". | Tier C row: atomic with the business write; expiry is `expiresAt` from `runtime.now()` (wall clock, read by other replicas), and a record stays authoritative until the scheduled purge deletes it (§3.10).                                                                                                                               | idempotency-plugin README tier table gains the row; PUBLIC_API.md idempotency section. |
+| C5 | ROADMAP M109 SDK bullet: "an `idempotencyKey` request option, generated once per logical call".                                                                               | Two members: per-request `ClientRequest.idempotencyKey` (a caller's own key) and client-level `ClientOptions.idempotency` (generated keys — how a GENERATED client gets one, since its operations take no per-call options beyond document-declared header parameters, `test/fixtures/generated-client.ts:47-52`).                        | ROADMAP M109 SDK bullet.                                                               |
 
 ## 3. Design decisions
 
@@ -85,49 +88,61 @@ retry attempt, which is what makes a `POST` or `PATCH` safe to retry.
   next unreleased version if 0.9.0 is tagged first):
 
 ```ts
-/** Discriminator on every tier-C record row. */
+/** Discriminator on every tier-C row. */
 export const IDEMPOTENCY_RECORD_KIND = 'setu-idempotency';
 
-/** A committed tier-C record. */
+/** A committed tier-C record, as `find` returns it. */
 export interface TransactionalIdempotencyRecord {
-  /** 64 lower-case hex: the derived key (§3.2). The row id. */
+  /** 64 lower-case hex: the derived key (§3.2). */
   readonly id: string;
-  readonly kind: typeof IDEMPOTENCY_RECORD_KIND;
   /** 64 lower-case hex. */
   readonly fingerprint: string;
   /** The encoded result envelope (§3.3). */
   readonly result: string;
   /** Epoch milliseconds. */
   readonly createdAt: number;
-  /** Epoch milliseconds; the record is absent once `expiresAt <= now`. */
+  /** Epoch milliseconds: the earliest the purge may delete the record (§3.10). */
+  readonly expiresAt: number;
+}
+
+/** The claim `run` writes first. */
+export interface TransactionalIdempotencyClaim {
+  readonly id: string;
+  readonly fingerprint: string;
+  readonly createdAt: number;
   readonly expiresAt: number;
 }
 
 export interface ITransactionalIdempotencyStore {
-  /** The committed record, or `undefined`. A row of another `kind` is absent. Read outside any transaction. */
+  /** The committed record, or `undefined` when either of its rows is missing or of another `kind`. */
   find(id: string): Promise<TransactionalIdempotencyRecord | undefined>;
   /**
-   * ONE transaction: delete an expired row of `claim.id` if present, create `claim` (with
-   * `result: ''`) FIRST, run `work` with the transaction's scope, write its returned `result`
-   * onto the row, commit. Rejects — and rolls back the work — when the create or the commit is
-   * refused (a concurrent duplicate) or `work` throws.
+   * ONE transaction: CREATE the claim row (`id`), run `work` with the transaction's scope, then
+   * CREATE the result row (`${id}.r`) from the `result` work returns, and commit. Only creates — no
+   * update and no delete — so every supported backend can perform it (§3.7). Rejects, rolling
+   * everything back, when a create or the commit is refused or `work` throws.
    */
   run<R>(
-    claim: TransactionalIdempotencyRecord,
-    now: number,
+    claim: TransactionalIdempotencyClaim,
     work: (scope: unknown) => Promise<{ readonly result: string; readonly value: R }>,
   ): Promise<R>;
-  /** Deletes up to `limit` records with `expiresAt < before`; returns the count. */
+  /** Deletes the rows of up to `limit` records whose `expiresAt < before`; returns the count. */
   purge(before: number, limit: number): Promise<number>;
-  /** Refuses at startup a backend that cannot serve tier C, by name. Leaves no row. */
+  /**
+   * Refuses at startup a backend that cannot serve tier C, by name, by running exactly `run`'s write
+   * pattern (two creates on distinct keys) in a transaction that always rolls back. Leaves no row.
+   */
   verify(): Promise<void>;
 }
 ```
 
-- **Why:** M108's `IInboxStore` is the same seam but its record carries consumer/topic/parking and
-  no result, so a separate, smaller port. The port lives in `common` because `database-plugin`
-  implements it and `idempotency-plugin` consumes it (AI_GUIDELINES §2.2). `run` takes the result
-  from `work` rather than a second call so the store writes it in the SAME transaction.
+- **Why two rows, creates only:** DynamoDB and D1 have no read-your-own-writes inside a transaction
+  — an in-transaction `update` reads committed state and throws (`dynamo-data-source.ts:251-255`,
+  `cloudflare-plugin/src/database/d1-data-source.ts:368-381`), and the DynamoDB buffer refuses two
+  operations on one item (`dynamo-transaction-buffer.ts:46-53`). Two creates on distinct keys work
+  on every supported backend, and the claim row is still created FIRST, which is what makes a
+  PostgreSQL loser block on the primary key before running `fn`. A separate port from M108's
+  `IInboxStore` because the inbox record carries consumer/topic/parking and no result.
 - **Test home:** `packages/common/test/unit/idempotency-contract.test.ts` (extended).
 
 ### 3.2 `within` options, result, key and fingerprint
@@ -138,69 +153,90 @@ export interface ITransactionalIdempotencyStore {
 export interface IdempotentWithinOptions {
   /** The client's key: 1–255 characters of 0x21–0x7E, no `"` (109a `parseKeyValue`). */
   readonly key: string;
-  /** What the key is for, e.g. `'payments.charge'`. 1–256 characters, none below U+0020. */
+  /** What the key is for, e.g. `'payments.charge'`. 1–256 characters of 0x20–0x7E. */
   readonly namespace: string;
   /**
-   * REQUIRED isolation segment — typically `${tenantId}:${principalId}`. `''` declares the
-   * record global on purpose. Never derived for the caller: `within` has no request context.
+   * REQUIRED isolation segment, built ONLY from authenticated identity — typically
+   * `${tenantId}:${principalId}`. `''` declares the record global on purpose. Never derived for the
+   * caller: `within` has no request context.
    */
   readonly scope: string;
-  /** Any canonical-JSON-able value describing the request; a different value under the same key is refused. Default: none (any repeat matches). */
+  /** Any canonical-JSON value describing the request; a different value under one key is refused. Default: none. */
   readonly fingerprint?: unknown;
   /** Default: the plugin's `transactional.ttlMs` (86,400,000). Integer 60,000–2,592,000,000. */
   readonly ttlMs?: number;
 }
 
 export interface IdempotentWithinResult<R> {
+  /** The JSON round trip of what `fn` returned — identical on the first call and on a replay. */
   readonly value: R;
   /** `true` when `value` came from a committed record and `fn` did not run in this call. */
   readonly replayed: boolean;
 }
 
-// on IIdempotencyService:
-within<R extends JsonValue | void, S = unknown>(
+// on IIdempotencyService (both REQUIRED):
+within<R, S = unknown>(
   options: IdempotentWithinOptions,
   fn: (scope: S) => Promise<R>,
 ): Promise<IdempotentWithinResult<R>>;
+purgeTransactional(): Promise<number>;
 ```
 
 - `id = deriveHash(['within', namespace, scope, key])`; fingerprint =
   `deriveHash(['within-fp', canonicalJson(fingerprint ?? null)])`. Raw key, scope and namespace are
   never stored.
-- `S` is the caller's annotation of the scope (an `IUnitOfWork` from the database the store writes
-  to), unchecked — the M108 `IntegrationEventInboxHandler<T, S>` precedent.
-- **Why:** `scope` is REQUIRED because `within` has no request context to derive a principal from,
-  and an omitted principal is exactly 109a's D1 (cross-user replay). Making `''` an explicit choice
-  keeps that decision visible in the call site. `replayed` lets an HTTP handler answer `200` on a
-  replay and `201` on first execution.
+- `R` is UNCONSTRAINED: a `JsonValue` bound refuses a named `interface` (`TS2322`, measured by the
+  plan review), which is how domain types are usually written. JSON-ness is enforced at run time
+  (§3.3 step 4), and `value` is the decoded encoding on BOTH paths, so a first call and a replay can
+  never differ (a `Date` comes back a string on both paths — the JSDoc says so).
+- `S` is the caller's annotation of the scope (an `IUnitOfWork` of the store's database), unchecked
+  — the M108 `IntegrationEventInboxHandler<T, S>` precedent.
+- **Why:** `scope` is REQUIRED because an omitted principal is 109a's D1 (cross-user replay), and
+  `within` cannot derive one. `replayed` lets an HTTP handler answer `200` on a replay and `201`
+  otherwise. Both new service members are required: a replacement provider must serve tier C, or
+  throws `IdempotencyConfigurationError('transactional', …)` from both — there is no optional half.
 - **Test home:** `packages/idempotency-plugin/test/unit/within-options.test.ts`,
-  `test/unit/within.test.ts`.
+  `test/unit/within.test.ts`, the contract test (an `interface` result compiles).
 
 ### 3.3 The `within` algorithm
 
 - **Decision:** in this order:
-  1. Validate options (§3.13 bounds); refuse a key `parseKeyValue` rejects with
-     `IdempotencyWithinError('key-invalid')`. No store call.
+  1. Validate options (§3.13); a key `parseKeyValue` rejects →
+     `IdempotencyWithinError
+     ('key-invalid')`; a `fingerprint` `canonicalJson` rejects →
+     `'fingerprint-invalid'` (its message names key paths of the input, so it is never surfaced). No
+     store call.
   2. Derive id and fingerprint; `now = runtime.now()`.
-  3. Pre-read `store.find(id)` (bounded by `storeTimeoutMs`). A record with `expiresAt > now`:
-     fingerprint differs → `IdempotencyWithinError('fingerprint-mismatch')`; equal → decode and
-     return `{ value, replayed: true }`.
-  4. `store.run(claim, now, work)` where `work` runs `fn(scope)`, encodes
-     `JSON.stringify({ v: value })` (`void` → `{}`), refuses a result over `maxResultBytes` UTF-8
-     bytes (`'result-too-large'`) or one `JSON.stringify` rejects or returns `undefined` for
-     (`'result-unserializable'`) — throwing inside the transaction, so the work rolls back — and
-     returns `{ result, value }`. Resolve → `{ value, replayed: false }`.
-  5. On ANY rejection of step 4, re-read `find(id)` (bounded; a failing re-read counts as absent and
-     is logged per §3.4): a live record with the same fingerprint →
-     `{ value: decoded,
-     replayed: true }`; a different fingerprint → `'fingerprint-mismatch'`;
-     absent → rethrow the ORIGINAL rejection.
-  - A stored `result` that does not parse to `{ v? }` → `IdempotencyWithinError('record-invalid')`,
-    never `fn` re-run.
-- **Why:** the M108 inbox algorithm, which measured that the error alone cannot tell a lost race
-  from a real failure (a commit-time `DuplicateKeyError` carries no entity; a MongoDB replica-set
-  loser is a write conflict). Rolling back on an oversized result keeps "work and record together"
-  true: no record means no committed work.
+  3. Pre-read `store.find(id)` (bounded by `storeTimeoutMs`). A record, whatever its `expiresAt`:
+     different fingerprint → `'fingerprint-mismatch'`; equal → decode, return
+     `{ value,
+     replayed: true }`.
+  4. `store.run(claim, work)`. `work` calls `fn(scope)` inside a try that TAGS a throw as `fn`'s
+     own; then encodes `JSON.stringify({ v: value })` (`void` → `{}`), refusing an encoding over
+     `maxResultBytes` UTF-8 bytes (`'result-too-large'`) or one `JSON.stringify` throws on or omits
+     (`'result-unserializable'`) — inside the transaction, so the work rolls back — and returns
+     `{ result, value: decode(result) }`. Resolve → `{ value, replayed: false }`.
+  5. On ANY rejection of step 4:
+     - `fn`'s own tagged error, or an `IdempotencyWithinError` from step 4 → rethrown UNCHANGED, no
+       re-read (nothing committed for this key from this call).
+     - Otherwise (a store-side rejection), re-read `find(id)` (bounded; a failing re-read counts as
+       absent and is logged per §3.4). Same fingerprint → `{ value, replayed: true }`; different →
+       `'fingerprint-mismatch'`; absent → `'conflict'` when the rejection or its cause chain is a
+       `DuplicateKeyError` or carries a `409` status hint (the database plugin brands
+       `SerializationConflictError`, M90f), else `'store-failed'`. Neither carries the original as
+       `cause`.
+  - A stored `result` that does not decode to `{ v? }` → `'record-invalid'`; `fn` is never re-run.
+- **The honest contract (§3.7):** a loser that fails BEFORE the winner commits — a MongoDB write
+  conflict, a DynamoDB transaction conflict, a Prisma interactive-transaction timeout while waiting
+  — cannot re-read the result yet and rejects `'conflict'` (a `409`). A retry then replays. The SDK
+  retries a keyed `409` (§3.9), so a keyed client converges.
+- **Why:** the M108 inbox algorithm (pre-read, write first, re-read after a rejection), plus the tag
+  that separates `fn`'s errors — which belong to the application and stay unchanged — from store
+  errors, whose driver message can list every bound parameter including the result (M108 F1). An
+  expired record is NOT replaced: `IRepository.delete` is unconditional and buffered, so two
+  transactions that each delete-then-create an expired key both commit on memory and D1 (measured on
+  memory by the plan review). A present record therefore stays authoritative until the purge removes
+  it (§3.10).
 - **Worked example (README):** an HTTP handler calls
   `within({ key: headerKey, namespace:
   'orders.create', scope:`
@@ -211,16 +247,21 @@ within<R extends JsonValue | void, S = unknown>(
 
 ### 3.4 Errors and logging
 
-- **Decision:** `IdempotencyWithinError extends Error` with
-  `reason: 'key-invalid' | 'fingerprint-mismatch' | 'result-too-large' | 'result-unserializable' |
-  'record-invalid'`.
-  Messages carry no key, scope, namespace, fingerprint or result. `key-invalid` is branded with the
-  status hint `400`, `fingerprint-mismatch` with `422`; the rest stay unhinted (a masked `500`).
-  Calling `within` without the `transactional` option throws
-  `IdempotencyConfigurationError('transactional', …)`. A failed store call (`find`, re-read,
-  `purge`) is logged with the error CLASS only, `{ errorKind }`, never its message.
-- **Why:** M108's audit finding F1 — Drizzle's error message lists every bound parameter, which for
-  tier C includes the stored result. 109a's `IdempotencyRefusedError` carries ingress-only fields.
+- **Decision:** `IdempotencyWithinError extends Error`,
+  `reason: 'key-invalid' |
+  'fingerprint-invalid' | 'fingerprint-mismatch' | 'conflict' | 'result-too-large' |
+  'result-unserializable' | 'record-invalid' | 'store-failed'`.
+  Messages carry no key, scope, namespace, fingerprint input or result, and no `cause`. Status
+  hints: `key-invalid` and `fingerprint-invalid` → `400`; `fingerprint-mismatch` → `422`; `conflict`
+  → `409`; `store-failed` → `503`; the rest unhinted (a masked `500`). Every store failure the
+  plugin sees (pre-read, re-read, `run`, `purge`, `verify`) is logged once with `{ errorKind }` —
+  the error's class name — never its message. `verify` exceeding `storeTimeoutMs` rejects `start()`
+  with `IdempotencyVerifyTimeoutError` (M108 `InboxStoreVerifyTimeoutError` precedent); a scheduled
+  purge without `CAPABILITIES.SCHEDULER` rejects `start()` with
+  `IdempotencyConfigurationError('transactional.purge.schedule', …)`; `within` without the option or
+  before `onInit` completed → `IdempotencyConfigurationError('transactional', …)`.
+- **Why:** M108's F1 (Drizzle error messages quote bound parameters) and its round-1 fix. A store
+  error rethrown verbatim would reach the application's `errorHandler`, which logs the cause chain.
 - **Test home:** `test/unit/within-errors.test.ts`, `test/unit/within.test.ts`.
 
 ### 3.5 Plugin wiring
@@ -228,196 +269,236 @@ within<R extends JsonValue | void, S = unknown>(
 - **Decision:**
   `IdempotencyPluginOptions.transactional?: { store, ttlMs?, storeTimeoutMs?,
   maxResultBytes?, purge?: { schedule?, intervalMs?, batch? } }`.
-  The plugin adds `optionalDependencies: [CAPABILITIES.SCHEDULER, CAPABILITIES.DATABASE]` only when
-  `transactional` is set, resolves `store` at `onInit` (so `DatabasePlugin` may register before or
-  after), runs `verify()` bounded by `storeTimeoutMs` (a timeout rejects `start()` naming the
-  bound), and schedules `idempotency-purge` via `CAPABILITIES.SCHEDULER`; without a scheduler and
-  with `purge.schedule` not `false`, `start()` rejects naming the option. The purge job is removed
-  in `onShutdown`. `within` before `onInit` completes throws
-  `IdempotencyConfigurationError('transactional', …)` naming readiness.
-- **Why:** M108's `inbox` wiring, already audited, including the ordering lessons (factory at
-  `onInit`, verify before first use). On Workers the purge is not scheduled; §3.12 covers it.
+  With `transactional` set the plugin declares
+  `optionalDependencies: [CAPABILITIES.SCHEDULER, CAPABILITIES.DATABASE]`, resolves `store` at
+  `onInit` (so `DatabasePlugin` may register before or after), runs `verify()` bounded by
+  `storeTimeoutMs`, schedules `idempotency-purge` unless `purge.schedule` is `false`, and removes
+  the job in `onShutdown`. No new health indicator: the record lives in the application database,
+  whose own indicator reports reachability; the existing `idempotency` indicator is unchanged.
+- **Why:** M108's `inbox` wiring, already audited (factory at `onInit`, verify before first use,
+  named refusals).
 - **Test home:** `test/integration/within-plugin.test.ts`.
 
 ### 3.6 `createDatabaseIdempotencyStore` and the shared backend helper
 
 - **Decision:** `createDatabaseIdempotencyStore({ entity = 'Idempotency', database? })` returns a
   `RegistryFactory<ITransactionalIdempotencyStore>` resolving `CAPABILITIES.DATABASE` (or
-  `database.<name>`). The M108 inbox store's backend refusal — `adapterInfoOf` Cosmos/Bigtable
-  checks, `unavailableReason`, `isMongoReplicaSetRefusal`, `ProbeRollback` and the rolled-back probe
-  — moves to ONE internal module `src/transactional/backend-probe.ts` used by both stores, with the
-  inbox store's behaviour unchanged (its tests are the regression gate). The tier-C store refuses
-  with a new `TransactionalStoreUnavailableError` carrying the same `reason` union and its `entity`;
-  `InboxStoreUnavailableError` keeps its name and shape, and both come from the one shared reason
-  computation.
+  `database.<name>`). Rows: claim
+  `{ id, kind, role: 'claim', fingerprint, createdAt, expiresAt,
+  result: null }` and result
+  `{ id:`${id}.r`, kind, role: 'result', fingerprint, createdAt,
+  expiresAt, result }`; `find`
+  reads both by id and requires both, matching `kind`. The backend refusal code — `adapterInfoOf`
+  Cosmos/Bigtable checks, `unavailableReason`, `isMongoReplicaSetRefusal`, `ProbeRollback` and the
+  rolled-back two-create probe — moves to ONE internal module `src/transactional/backend-probe.ts`
+  used by THREE stores: the new one, M108's inbox store and M107's outbox store
+  (`database-outbox-store.ts:150-175` holds the third copy today). The outbox keeps its own policy
+  on Cosmos (it supports it); the helper exposes the reason computation and the probe, and each
+  store applies its own refusal set. The tier-C store refuses with a new
+  `TransactionalStoreUnavailableError` (`reason`, `entity`); `InboxStoreUnavailableError` and the
+  outbox error keep their names and shapes.
 - **Why:** §11.1 — one implementation of "can this backend do a record-first transaction".
 - **Test home:** `packages/database-plugin/test/unit/idempotency/*.test.ts`; the existing
-  `test/unit/inbox/*` stay green unchanged.
+  `test/unit/inbox/*` and outbox tests stay green unchanged.
 
 ### 3.7 Per-backend behaviour
 
-| Backend                      | Behaviour                                                                                                                                |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| memory                       | Supported, single process; a concurrent duplicate is refused at commit.                                                                  |
-| PostgreSQL (Drizzle, Prisma) | Supported; the second insert blocks on the primary key until the first commits, then fails; the loser re-reads.                          |
-| SQLite / D1                  | Supported; writes deferred to commit, so `fn` runs before a concurrent duplicate is refused — its OUTSIDE effects run for both (README). |
-| MongoDB replica set          | Supported; the loser is a write conflict. Collections must exist (implicit creation in two transactions conflicts — M108).               |
-| MongoDB standalone           | Refused, `'mongodb-standalone'`.                                                                                                         |
-| DynamoDB                     | Supported (deferred, `TransactWriteItems`); the purge `Scan`s without a GSI on `kind`/`expiresAt`.                                       |
-| Cosmos DB                    | Refused, `'cosmos-unsupported'` (C2).                                                                                                    |
-| Bigtable                     | Refused, `'bigtable-unsupported'` (one row per transaction).                                                                             |
+| Backend                         | Behaviour                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| memory                          | Supported, single process; a concurrent duplicate is refused at commit, re-reads the committed record and replays.                                                                                                                                                                                                           |
+| PostgreSQL (Drizzle)            | Supported; the loser's claim insert blocks on the primary key until the winner commits, then fails and replays. Each blocked loser holds a pooled connection for the length of `fn` (§10 D17).                                                                                                                               |
+| PostgreSQL (Prisma)             | As Drizzle, but a loser waiting longer than Prisma's interactive-transaction timeout (5 s default) rejects `'conflict'`.                                                                                                                                                                                                     |
+| SQLite (Drizzle, `node:sqlite`) | Supported; one writer at a time, so a concurrent loser fails with a busy/locked error → `'conflict'` or a replay depending on timing.                                                                                                                                                                                        |
+| D1                              | Supported through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })`; writes are deferred to one batch at commit, so `fn` runs before a concurrent duplicate is refused — its OUTSIDE effects run for both.                                                                                                            |
+| MongoDB replica set             | Supported; a concurrent loser is an immediate write conflict → `'conflict'` (no replay while the winner is open). Collections must exist (two transactions creating one implicitly conflict — M108).                                                                                                                         |
+| MongoDB standalone              | Refused, `'mongodb-standalone'`.                                                                                                                                                                                                                                                                                             |
+| DynamoDB                        | Supported (deferred, `TransactWriteItems`); a loser is a transaction conflict → `'conflict'`. Reads are eventually consistent, so a sequential repeat inside the consistency window can miss the record and run `fn` again — its database writes are then refused at commit, its outside effects are not. The purge `Scan`s. |
+| Cosmos DB                       | Refused, `'cosmos-unsupported'` (C2).                                                                                                                                                                                                                                                                                        |
+| Bigtable                        | Refused, `'bigtable-unsupported'`.                                                                                                                                                                                                                                                                                           |
 
-- **Test home:** `test/integration/within-real.test.ts` (PostgreSQL, MongoDB RS, DynamoDB Local,
-  Bigtable refusal), `test/integration/within-d1.test.ts` (D1 over real SQLite).
+- **Test home:** `test/integration/within-real.test.ts` (PostgreSQL via Drizzle, MongoDB RS,
+  DynamoDB Local happy path AND duplicate, Bigtable and standalone MongoDB refusals),
+  `test/integration/within-d1.test.ts` (D1 over real SQLite: happy path, replay, concurrent
+  duplicate).
 
 ### 3.8 SDK: where a key comes from
 
 - **Decision:**
-  - `ClientRequest.idempotencyKey?: string` — the caller's own key, validated 1–255 characters of
-    `0x21`–`0x7E` with no `"` before any network call (`Error` naming the field, never the value).
+  - `ClientRequest.idempotencyKey?: string` — the caller's own key, validated (1–255 characters of
+    `0x21`–`0x7E`, no `"`) before any network call; the error names the field, never the value.
   - `ClientOptions.idempotency?: { methods?: readonly string[] (default ['POST', 'PATCH']); header?:
-    string (default 'Idempotency-Key'); generateKey?: () => string }`
-    — every request whose method is listed and that carries no key gets ONE generated key: 32 hex
-    characters from 16 `crypto.getRandomValues` bytes, behind the `observed-fetch.ts` availability
-    check. `header` is validated as an HTTP token at construction.
-  - The key is set on the request headers BEFORE request interceptors run; supplying
-    `idempotencyKey` while `headers` already names the header is refused.
-- **Why:** generated clients have no per-call options (§1, C5), so the client-level option is the
-  only route for them; the request headers are built once and reused by every attempt
-  (`http-client.ts:168-236`), so "one key per logical call" holds by construction.
-- **Test home:** `packages/sdk/test/unit/idempotency-key.test.ts`.
+    string (default 'Idempotency-Key'); generateKey?: () => string }`.
+    Every request whose method is listed and that has no key gets ONE generated key: 32 hex
+    characters from 16 `crypto.getRandomValues` bytes, through `drawNonce` extracted from
+    `observed-fetch.ts` into a shared internal `http/random-hex.ts` (§11.1). `crypto` availability
+    and the `header` token are checked at `createClient`; `generateKey()`'s OUTPUT is validated on
+    every call like a caller's key.
+  - Without `ClientOptions.idempotency` the header name is `Idempotency-Key` and only
+    `ClientRequest.idempotencyKey` sets it.
+  - Conflicts are refused: `ClientOptions.headers` naming the header while `idempotency` is set
+    (refused at `createClient` — a static default would key every request identically), and a
+    request carrying both `idempotencyKey` and that header in its merged headers.
+  - The key is set before request interceptors run.
+- **Why:** generated clients have no per-call option other than document-declared header parameters,
+  so the client-level option is how they get generated keys (C5). The headers object is built once
+  and reused by every attempt (`http-client.ts:168-236`), so "one key per logical call" holds by
+  construction.
+- **Test home:** `packages/sdk/test/unit/idempotency-key.test.ts`, `test/unit/random-hex.test.ts`.
 
 ### 3.9 SDK: which requests retry
 
-- **Decision:** a request is KEYED when its final headers (after interceptors) carry the configured
-  header (default `Idempotency-Key`), however it got there. `runWithRetry` takes `keyed: boolean`
-  (internal signature change): a keyed request may retry on ANY method, and a keyed request also
-  retries `409`. Everything else is unchanged.
-- **Why:** the key is what makes a non-idempotent method safe to repeat; 109a answers a concurrent
-  duplicate `409` and replays once the first completes. A manually set header counts so an existing
-  caller who already sends one benefits — recorded as a CHANGELOG `Changed` entry, not breaking.
+- **Decision:** a request is KEYED when `ClientRequest.idempotencyKey` was given or
+  `ClientOptions.idempotency` set a key on it — never merely because some header is present, so a
+  client that sets neither behaves exactly as today. `runWithRetry` takes `keyed: boolean`
+  (internal): a keyed request may retry on ANY method, and retries `409` as well as today's
+  statuses. For a keyed method outside the safe set, an error raised AFTER a `2xx` arrived (JSON
+  parse, a response interceptor) is never retried — the server executed; `execute` tags the
+  rejection by phase.
+- **Why:** the key is what makes a non-idempotent method safe to repeat; 109a's middleware answers a
+  concurrent duplicate `409`, and tier C answers `'conflict'` `409`. Opt-in detection keeps existing
+  callers' behaviour identical.
+- **Browser note (README):** `Idempotency-Key` is not a CORS-safelisted request header, so a
+  cross-origin keyed request is preflighted; the server's `allowedHeaders` must include it (or omit
+  `allowedHeaders`, whose M70m default echoes the request headers).
 - **Test home:** `packages/sdk/test/unit/retry-strategy.test.ts` (extended),
   `test/integration/idempotency-roundtrip.test.ts` (a real `IdempotencyPlugin` app over `app.fetch`:
-  a lost response retried once executes the handler once).
+  a dropped first response retried with the same key runs the handler once; the replay header is
+  present).
 
 ### 3.10 Retention
 
-- **Decision:** `purge` deletes up to `purge.batch` (default 100) expired records per run every
-  `purge.intervalMs` (default 60,000). The table stays bounded only while inflow stays below that
-  rate — stated in the README and the option JSDoc (M108 round-2 NEW-5).
-- **Test home:** `test/integration/within-plugin.test.ts`.
+- **Decision:** a record is authoritative from commit until the purge deletes it; `expiresAt` only
+  makes it ELIGIBLE. The purge lists up to `purge.batch` (default 100) eligible claim rows every
+  `purge.intervalMs` (default 60,000) and deletes each claim and its result row. The table stays
+  bounded only while inflow stays below that rate (README and JSDoc; M108 round-2 NEW-5). A record
+  can therefore outlive `ttlMs` by the purge lag, and a key reused after `ttlMs` replays until the
+  purge runs — stated. Accepted race: a purge that lists an id, then deletes it after another
+  replica purged and a new `within` recreated it, deletes a live record (the window is one list-to-
+  delete gap; the cost is one re-execution) — documented.
+- **Test home:** `test/integration/within-plugin.test.ts`, the database-plugin store tests.
 
 ### 3.11 Clock
 
-- **Decision:** `createdAt`/`expiresAt` from `runtime.now()` (epoch ms). Never `Date.now()`, never
-  `hrtime()` — the record is read by other processes.
+- **Decision:** `createdAt`/`expiresAt` from `runtime.now()` (epoch ms) — read by other processes,
+  so never `hrtime()`; never `Date.now()`.
 - **Test home:** `test/unit/within.test.ts` (fake runtime clock).
 
 ### 3.12 Manual purge (Workers)
 
 - **Decision:** with `purge.schedule: false` the application calls `service.purgeTransactional()` (a
-  Cron Trigger on Workers). That method is on the concrete `IdempotencyService` and on
-  `IIdempotencyService` as an OPTIONAL member (`purgeTransactional?(): Promise<number>`), so a
-  replacement provider need not implement tier C.
+  Cron Trigger on Workers); it throws `IdempotencyConfigurationError('transactional', …)` when tier
+  C is not configured.
 - **Test home:** `test/integration/within-plugin.test.ts`.
 
 ### 3.13 Bounds
 
-| Option                         | Default           | Bound                                         |
-| ------------------------------ | ----------------- | --------------------------------------------- |
-| `within` `key`                 | —                 | 1–255 chars, `0x21`–`0x7E`, no `"`            |
-| `within` `namespace`           | —                 | 1–256 chars, none below U+0020                |
-| `within` `scope`               | — (required)      | 0–512 chars, none below U+0020                |
-| `ttlMs`                        | 86,400,000        | integer 60,000–2,592,000,000                  |
-| `transactional.storeTimeoutMs` | 5,000             | integer 1–2,147,483,647                       |
-| `transactional.maxResultBytes` | 65,536            | integer 2–16,777,216                          |
-| `purge.intervalMs`             | 60,000            | integer 1–2,147,483,647                       |
-| `purge.batch`                  | 100               | integer 1–100,000                             |
-| SDK `idempotency.methods`      | POST, PATCH       | 1–16 entries, each an HTTP token, upper-cased |
-| SDK `idempotency.header`       | `Idempotency-Key` | HTTP token                                    |
+| Option                         | Default           | Bound                                                                                  |
+| ------------------------------ | ----------------- | -------------------------------------------------------------------------------------- |
+| `within` `key`                 | —                 | 1–255 chars, `0x21`–`0x7E`, no `"`                                                     |
+| `within` `namespace`           | —                 | 1–256 chars, `0x20`–`0x7E`                                                             |
+| `within` `scope`               | — (required)      | 0–512 chars, `0x20`–`0x7E`                                                             |
+| `ttlMs`                        | 86,400,000        | integer 60,000–2,592,000,000                                                           |
+| `transactional.storeTimeoutMs` | 5,000             | integer 1–2,147,483,647                                                                |
+| `transactional.maxResultBytes` | 65,536            | integer 2–262,144 (under DynamoDB's 400 KB item limit with the row's other attributes) |
+| `purge.intervalMs`             | 60,000            | integer 1–2,147,483,647                                                                |
+| `purge.batch`                  | 100               | integer 1–100,000                                                                      |
+| SDK `idempotency.methods`      | POST, PATCH       | 1–16 entries, each an HTTP token, upper-cased                                          |
+| SDK `idempotency.header`       | `Idempotency-Key` | HTTP token                                                                             |
 
 `NaN`, `Infinity`, negatives and fractions fail every numeric bound (the M90a fail-open class).
 
 ## 4. Exported surface — every symbol names its consumer
 
-**Breaking for implementors:** none in a published release. `IIdempotencyService.within` is a
-required member added to an interface that ships for the first time in 0.9.0 (still `Unreleased`).
-`runWithRetry`'s signature is internal.
+**Breaking for implementors:** none in a published release. `IIdempotencyService.within` and
+`purgeTransactional` are required members of an interface first shipping in 0.9.0 (still
+`Unreleased`; latest tag `v0.8.0`). Six in-repo test doubles gain them:
+`common/test/unit/idempotency-contract.test.ts:112`,
+`decorator-plugin/test/integration/idempotent-registration.test.ts:39,149`,
+`idempotency-plugin/test/unit/idempotent.test.ts:36,78,102`. `runWithRetry` is internal.
 
-| Exported symbol                                      | Kind      | Consumer / real code path that READS it                            |
-| ---------------------------------------------------- | --------- | ------------------------------------------------------------------ |
-| `IDEMPOTENCY_RECORD_KIND` (common)                   | const     | `DatabaseIdempotencyStore` writes and filters on it                |
-| `TransactionalIdempotencyRecord`                     | interface | the port's `find`/`run`; `IdempotencyService.within`               |
-| `ITransactionalIdempotencyStore`                     | interface | implemented by `database-plugin`; consumed by `IdempotencyService` |
-| `IdempotentWithinOptions`                            | interface | `within`'s parameter                                               |
-| `IdempotentWithinResult`                             | interface | `within`'s return                                                  |
-| `IIdempotencyService.within` / `purgeTransactional?` | members   | application code; the plugin's purge job                           |
-| `IdempotencyWithinError` (plugin)                    | class     | thrown by `within`; `errorHandler` reads its status hint           |
-| `IdempotencyWithinErrorReason` (plugin)              | type      | `IdempotencyWithinError.reason`                                    |
-| `TransactionalIdempotencyOptions` (plugin)           | interface | `IdempotencyPluginOptions.transactional`                           |
-| `createDatabaseIdempotencyStore` (database-plugin)   | function  | application's `transactional.store`                                |
-| `DatabaseIdempotencyStoreOptions`                    | interface | its parameter                                                      |
-| `TransactionalStoreUnavailableError`                 | class     | thrown by `verify()`; `start()` rejects with it                    |
-| `ClientIdempotencyOptions` (sdk)                     | interface | `ClientOptions.idempotency`                                        |
-| `ClientRequest.idempotencyKey`                       | member    | `HttpClient.request`                                               |
+| Exported symbol                                                                       | Kind                | Consumer / real code path that READS it                            |
+| ------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------ |
+| `IDEMPOTENCY_RECORD_KIND` (common)                                                    | const               | `DatabaseIdempotencyStore` writes and filters on it                |
+| `TransactionalIdempotencyRecord` / `…Claim`                                           | interface           | the port's `find` / `run`; `IdempotencyService.within`             |
+| `ITransactionalIdempotencyStore`                                                      | interface           | implemented by `database-plugin`; consumed by `IdempotencyService` |
+| `IdempotentWithinOptions` / `IdempotentWithinResult`                                  | interface           | `within`'s parameter and return                                    |
+| `IIdempotencyService.within` / `purgeTransactional`                                   | members             | application code; the plugin's purge job                           |
+| `IdempotencyWithinError`, `IdempotencyWithinErrorReason` (plugin)                     | class, type         | thrown by `within`; `errorHandler` reads the status hint           |
+| `IdempotencyVerifyTimeoutError` (plugin)                                              | class               | `start()` rejects with it                                          |
+| `TransactionalIdempotencyOptions` (plugin)                                            | interface           | `IdempotencyPluginOptions.transactional`                           |
+| `createDatabaseIdempotencyStore`, `DatabaseIdempotencyStoreOptions` (database-plugin) | function, interface | the application's `transactional.store`                            |
+| `TransactionalStoreUnavailableError` (database-plugin)                                | class               | thrown by `verify()`; `start()` rejects with it                    |
+| `ClientIdempotencyOptions` (sdk)                                                      | interface           | `ClientOptions.idempotency`                                        |
+| `ClientRequest.idempotencyKey` (sdk)                                                  | member              | `HttpClient.request`                                               |
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                           | Consumer                          | Behavior                                   |
-| ------------------------------------------------ | --------------------------------- | ------------------------------------------ |
-| `transactional.store`                            | plugin `onInit`                   | resolved, verified, used by every `within` |
-| `transactional.ttlMs`                            | `within`                          | default record lifetime                    |
-| `transactional.storeTimeoutMs`                   | `within` reads, `verify`, `purge` | bounds each call                           |
-| `transactional.maxResultBytes`                   | `within` step 4                   | refuses and rolls back a larger result     |
-| `transactional.purge.*`                          | plugin `onInit` / purge job       | schedule, interval, batch                  |
-| `within` `key/namespace/scope/fingerprint/ttlMs` | `within`                          | §3.2–§3.3                                  |
-| `ClientOptions.idempotency.*`                    | `HttpClient.request`              | §3.8                                       |
-| `ClientRequest.idempotencyKey`                   | `HttpClient.request`              | §3.8                                       |
+| Option                                           | Consumer                             | Behavior                                   |
+| ------------------------------------------------ | ------------------------------------ | ------------------------------------------ |
+| `transactional.store`                            | plugin `onInit`                      | resolved, verified, used by every `within` |
+| `transactional.ttlMs`                            | `within`                             | default record eligibility age             |
+| `transactional.storeTimeoutMs`                   | `within` reads, `verify`, `purge`    | bounds each call                           |
+| `transactional.maxResultBytes`                   | `within` step 4                      | refuses and rolls back a larger result     |
+| `transactional.purge.*`                          | plugin `onInit` / purge job          | schedule, interval, batch                  |
+| `within` `key/namespace/scope/fingerprint/ttlMs` | `within`                             | §3.2–§3.3                                  |
+| `ClientOptions.idempotency.*`                    | `createClient`, `HttpClient.request` | §3.8                                       |
+| `ClientRequest.idempotencyKey`                   | `HttpClient.request`                 | §3.8                                       |
 
 ## 5. Implementation files
 
-| File                                                                     | Purpose                                           |
-| ------------------------------------------------------------------------ | ------------------------------------------------- |
-| `packages/common/src/services/idempotency.ts`                            | §3.1, §3.2 declarations                           |
-| `packages/common/src/index.ts`                                           | barrel                                            |
-| `packages/idempotency-plugin/src/within/within.ts`                       | §3.3 algorithm                                    |
-| `packages/idempotency-plugin/src/within/within-options.ts`               | §3.13 validation and defaults                     |
-| `packages/idempotency-plugin/src/within/result-codec.ts`                 | result envelope encode/decode                     |
-| `packages/idempotency-plugin/src/within/transactional-runtime.ts`        | §3.5 wiring: store resolution, verify, purge job  |
-| `packages/idempotency-plugin/src/core/error-kind.ts`                     | `errorKind` (class-only log field)                |
-| `packages/idempotency-plugin/src/errors.ts`                              | `IdempotencyWithinError`                          |
-| `packages/idempotency-plugin/src/service/idempotency-service.ts`         | `within`, `purgeTransactional`                    |
-| `packages/idempotency-plugin/src/plugin/idempotency-plugin.ts`           | `transactional` option, `onInit`, `onShutdown`    |
-| `packages/idempotency-plugin/src/interfaces/index.ts`, `src/index.ts`    | options, barrel                                   |
-| `packages/database-plugin/src/transactional/backend-probe.ts`            | §3.6 shared refusal + probe (extracted from M108) |
-| `packages/database-plugin/src/idempotency/database-idempotency-store.ts` | the bridge                                        |
-| `packages/database-plugin/src/idempotency/errors.ts`                     | `TransactionalStoreUnavailableError`              |
-| `packages/database-plugin/src/inbox/database-inbox-store.ts`             | uses the extracted helper (no behaviour change)   |
-| `packages/database-plugin/src/index.ts`                                  | barrel                                            |
-| `packages/sdk/src/http/contracts.ts`                                     | §3.8 members                                      |
-| `packages/sdk/src/http/idempotency-key.ts`                               | key validation and generation                     |
-| `packages/sdk/src/http/http-client.ts`                                   | sets the key, computes `keyed`                    |
-| `packages/sdk/src/retry/retry-strategy.ts`                               | `keyed` gate and `409`                            |
-| `packages/sdk/src/sdk.ts`, `src/index.ts`                                | option validation at `createClient`, barrel       |
+| File                                                                     | Purpose                                                   |
+| ------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `packages/common/src/services/idempotency.ts`, `src/index.ts`            | §3.1, §3.2 declarations; barrel                           |
+| `packages/idempotency-plugin/src/within/within.ts`                       | §3.3 algorithm                                            |
+| `packages/idempotency-plugin/src/within/within-options.ts`               | §3.13 validation and defaults                             |
+| `packages/idempotency-plugin/src/within/result-codec.ts`                 | result envelope encode/decode                             |
+| `packages/idempotency-plugin/src/within/transactional-runtime.ts`        | §3.5 wiring: resolution, verify, purge job                |
+| `packages/idempotency-plugin/src/core/error-kind.ts`                     | `errorKind` (class-only log field)                        |
+| `packages/idempotency-plugin/src/errors.ts`                              | `IdempotencyWithinError`, `IdempotencyVerifyTimeoutError` |
+| `packages/idempotency-plugin/src/service/idempotency-service.ts`         | `within`, `purgeTransactional`                            |
+| `packages/idempotency-plugin/src/plugin/idempotency-plugin.ts`           | `transactional` option, `onInit`, `onShutdown`            |
+| `packages/idempotency-plugin/src/interfaces/index.ts`, `src/index.ts`    | options, barrel                                           |
+| `packages/idempotency-plugin/deno.json`                                  | test `net` grants for the real backends (§6)              |
+| `packages/database-plugin/src/transactional/backend-probe.ts`            | §3.6 shared reason + probe (from the inbox and outbox)    |
+| `packages/database-plugin/src/idempotency/database-idempotency-store.ts` | the bridge                                                |
+| `packages/database-plugin/src/idempotency/errors.ts`                     | `TransactionalStoreUnavailableError`                      |
+| `packages/database-plugin/src/inbox/database-inbox-store.ts`             | uses the helper (no behaviour change)                     |
+| `packages/database-plugin/src/outbox/database-outbox-store.ts`           | uses the helper (no behaviour change)                     |
+| `packages/database-plugin/src/index.ts`                                  | barrel                                                    |
+| `packages/sdk/src/http/contracts.ts`                                     | §3.8 members                                              |
+| `packages/sdk/src/http/random-hex.ts`                                    | `drawNonce`, extracted and shared                         |
+| `packages/sdk/src/http/idempotency-key.ts`                               | key validation and generation                             |
+| `packages/sdk/src/http/observed-fetch.ts`                                | uses `random-hex.ts`                                      |
+| `packages/sdk/src/http/http-client.ts`                                   | sets the key, computes `keyed`, tags the response phase   |
+| `packages/sdk/src/retry/retry-strategy.ts`                               | `keyed` gate, `409`, post-2xx refusal                     |
+| `packages/sdk/src/sdk.ts`, `src/index.ts`                                | option validation at `createClient`, barrel               |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                   | src covered                         | Key assertions                                                                                                                                                                                                           |
-| ----------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `common/test/unit/idempotency-contract.test.ts`             | `services/idempotency.ts`           | type rows: `within` result typing (`R` bounded by `JsonValue \| void`, a `Date` refused at compile time), port shape; barrel exports                                                                                     |
-| `idempotency-plugin/test/unit/within-options.test.ts`       | `within-options.ts`                 | every §3.13 bound incl. `NaN`/fraction; `scope` required at the type level and `''` accepted                                                                                                                             |
-| `idempotency-plugin/test/unit/result-codec.test.ts`         | `result-codec.ts`                   | round trip; `void`; oversized; `undefined`/cyclic/BigInt refused; malformed stored text → `record-invalid`                                                                                                               |
-| `idempotency-plugin/test/unit/within.test.ts`               | `within.ts`, service `within`       | pre-read replay; mismatch; run; re-read after ANY rejection (dup, unclassified error, re-read itself failing); absent → original rethrown; expired record ignored; no store call on bad key                              |
-| `idempotency-plugin/test/unit/within-errors.test.ts`        | `errors.ts`, `error-kind.ts`        | status hints 400/422; messages carry no input value; `errorKind` never the message (hostile `name`, throwing getter)                                                                                                     |
-| `idempotency-plugin/test/integration/within-plugin.test.ts` | plugin, `transactional-runtime.ts`  | factory resolved at `onInit` with `DatabasePlugin` registered before and after; verify refusal fails `start()`; verify timeout; no scheduler → refused; purge scheduled and removed at shutdown; `within` without option |
-| `idempotency-plugin/test/integration/within-kernel.test.ts` | end to end, memory database         | HTTP handler worked example: `201` then replayed `200` with one business row; `422` through `errorHandler` in `rfc9457`                                                                                                  |
-| `idempotency-plugin/test/integration/within-real.test.ts`   | real backends (`ignore:`-guarded)   | PostgreSQL and MongoDB RS: two apps race one key → one business row, both return the same value, one `replayed`; DynamoDB Local; Bigtable refused; standalone Mongo refused                                              |
-| `idempotency-plugin/test/integration/within-d1.test.ts`     | D1 over real SQLite                 | replay and duplicate refused at commit; outside effect counted twice (documents the caveat)                                                                                                                              |
-| `database-plugin/test/unit/idempotency/*.test.ts`           | store, errors, `backend-probe.ts`   | discriminator (a foreign `kind` row is absent and never purged), expired-row replacement inside `run`, purge limit, verify leaves no row, Cosmos/Bigtable refused by arm and by class                                    |
-| `database-plugin/test/unit/inbox/*` (existing)              | inbox store after extraction        | unchanged and green — the regression gate for §3.6                                                                                                                                                                       |
-| `sdk/test/unit/idempotency-key.test.ts`                     | `idempotency-key.ts`, client wiring | validation; generated key format; one key reused across every attempt (fake fetch records headers); header+option conflict refused; header token validated at construction                                               |
-| `sdk/test/unit/retry-strategy.test.ts` (extended)           | `retry-strategy.ts`                 | keyed POST retries 5xx and 409; unkeyed POST does not; unkeyed 409 does not; abort still wins                                                                                                                            |
-| `sdk/test/integration/idempotency-roundtrip.test.ts`        | sdk ↔ idempotency-plugin            | real app via `app.fetch`: first response dropped by the fetch double, retry carries the same key, handler ran once, replay header present                                                                                |
+| Test file                                                    | src covered                         | Key assertions                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common/test/unit/idempotency-contract.test.ts`              | `services/idempotency.ts`           | port shape; `within` with a named `interface` result compiles; barrel exports; the double gains the two members                                                                                                                                                                                 |
+| `idempotency-plugin/test/unit/within-options.test.ts`        | `within-options.ts`                 | every §3.13 bound incl. `NaN`/fraction/U+007F; `scope` required at the type level, `''` accepted                                                                                                                                                                                                |
+| `idempotency-plugin/test/unit/result-codec.test.ts`          | `result-codec.ts`                   | round trip; `void`; first-call value equals the replay value (a `Date` is a string on both); oversized, cyclic, `BigInt`, `undefined` refused; malformed stored text → `record-invalid`                                                                                                         |
+| `idempotency-plugin/test/unit/within.test.ts`                | `within.ts`, service `within`       | pre-read replay (an expired-but-present record still replays); mismatch; `fn`'s error rethrown unchanged with no re-read; store rejection → re-read → replay / mismatch / `conflict` (DuplicateKeyError, 409 hint) / `store-failed`; failing re-read; no store call on a bad key or fingerprint |
+| `idempotency-plugin/test/unit/within-errors.test.ts`         | `errors.ts`, `error-kind.ts`        | status hints per reason; no message carries an input or stored value; no `cause`; `errorKind` never the message (hostile `name`, throwing getter)                                                                                                                                               |
+| `idempotency-plugin/test/integration/within-plugin.test.ts`  | plugin, `transactional-runtime.ts`  | factory resolved with `DatabasePlugin` registered before and after; verify refusal and `IdempotencyVerifyTimeoutError`; no scheduler → refused; purge scheduled, deletes eligible records, removed at shutdown; `within`/`purgeTransactional` without the option                                |
+| `idempotency-plugin/test/integration/within-kernel.test.ts`  | end to end, memory database         | the README handler: `201` then replayed `200`, one business row; `422` and `409` through `errorHandler` in `rfc9457`; a Drizzle-shaped store error's message reaches no log line and no body                                                                                                    |
+| `idempotency-plugin/test/integration/within-real.test.ts`    | real backends, `ignore:`-guarded    | PostgreSQL (Drizzle): two apps race one key → one business row, the loser replays the same value; MongoDB RS: one business row, the loser `conflict` then replays on retry; DynamoDB Local: happy path and duplicate; Bigtable and standalone MongoDB refused                                   |
+| `idempotency-plugin/test/integration/within-d1.test.ts`      | D1 over real SQLite                 | happy path; replay; concurrent duplicate refused at commit with the outside-effect counter at 2 (documents the caveat)                                                                                                                                                                          |
+| `database-plugin/test/unit/idempotency/*.test.ts`            | store, errors, `backend-probe.ts`   | two creates per `run`; a foreign-`kind` row is absent and never purged; a claim without its result row is absent; purge deletes both rows and honours `limit`; verify runs `run`'s pattern and leaves no row; Cosmos/Bigtable refused by arm and by class                                       |
+| `database-plugin/test/unit/inbox/*`, outbox tests (existing) | inbox and outbox after extraction   | unchanged and green — the regression gate for §3.6                                                                                                                                                                                                                                              |
+| `sdk/test/unit/idempotency-key.test.ts`                      | `idempotency-key.ts`, client wiring | validation of both key sources incl. a bad `generateKey` output; one key on every attempt; default-header and per-request conflicts refused; `crypto` absence and bad `header` refused at `createClient`                                                                                        |
+| `sdk/test/unit/random-hex.test.ts`                           | `random-hex.ts`                     | 32 hex; refusal without `crypto.getRandomValues`; `observed-fetch` behaviour unchanged                                                                                                                                                                                                          |
+| `sdk/test/unit/retry-strategy.test.ts` (extended)            | `retry-strategy.ts`                 | keyed POST retries 5xx, 409 and fetch rejections; keyed POST never retries a post-2xx failure; unkeyed POST and unkeyed 409 unchanged; a client with neither option is byte-for-byte as before; abort still wins                                                                                |
+| `sdk/test/integration/idempotency-roundtrip.test.ts`         | sdk ↔ idempotency-plugin            | a real app via `app.fetch`: dropped first response, retry carries the same key, handler ran once, replay header present                                                                                                                                                                         |
+
+**Real-backend wiring.** `packages/idempotency-plugin/deno.json` gains the test `net` grants the
+messaging plugin already carries for these backends (`127.0.0.1:5433`, `127.0.0.1:27018`,
+`127.0.0.1:8000`, `127.0.0.1:8086`) — a CLI `--allow-net` replaces the block (M53). The suite reads
+`OUTBOX_POSTGRES_URL`, `MONGODB_RS_URI`, `MONGODB_URI`, `DYNAMODB_ENDPOINT_URL` and
+`BIGTABLE_EMULATOR_ENDPOINT`, which CI already sets for M107/M108; `test/apps-gate.test.ts` pins the
+grants so an `ignore:`-guarded suite cannot skip silently.
 
 ## 7. Verification gates
 
@@ -436,74 +517,109 @@ deno task release:verify <version>
 
 ## 8. Risks & mitigations
 
-- §3.6's extraction changes M108's inbox store → its existing tests are the regression gate and must
-  pass unchanged.
+- §3.6's extraction changes M107's and M108's stores → their existing tests are the regression gate
+  and must pass unchanged.
 - Deferred backends run `fn` twice for a concurrent duplicate → its database writes still commit
-  once; outside effects are documented as at-least-once (M108's table, carried over).
-- A purge removing a record before a client stops retrying → `ttlMs` ≥ client retry window,
+  once; outside effects are at-least-once (README, M108's table carried over).
+- A purge removing a record a client still retries against → `ttlMs` ≥ the client retry window,
   documented beside the option.
-- The SDK starts retrying POSTs a caller manually keyed → `Changed` CHANGELOG entry; retries are
-  still bounded by `retry.limit` and only happen when `retry` is configured.
 
 ## 9. Out of scope
 
 - Tier C behind `idempotent()` middleware or the ingress behaviour (§0).
 - A per-operation `idempotencyKey` argument in generated clients — codegen (unowned).
 - Lease renewal; erase-by-principal — unowned (109a).
+- A conditional write on `IRepository` (M105), which would let a record be replaced in place.
 
 ## 10. Design security review (recorded before implementation)
 
-Recorded 2026-10-09 before any implementation. Nothing below is reverse-engineered from code.
+Recorded 2026-10-09 before any implementation; revised the same day after the plan review (rows
+D17–D20, obligations 8–9). Nothing below is reverse-engineered from code.
 
 **Flows reviewed.** (F1) `within`: client key, caller-supplied scope and fingerprint → derived id →
-pre-read → record-first transaction with the business writes → stored result → replay. (F2) The
-store boundary: a shared business database, other applications possibly sharing the table. (F3) The
-retention purge. (F4) Logs and error bodies. (F5) The SDK: key generation, header, retry.
+pre-read → two-create transaction with the business writes → stored result → replay. (F2) The store
+boundary: a shared business database, other applications possibly sharing the table. (F3) The
+retention purge. (F4) Logs, error messages and error bodies. (F5) The SDK: key generation, header,
+retry.
 
 **Assets.** Stored results (may carry personal data); isolation between principals, tenants and
-namespaces; the guarantee itself; database capacity; log integrity.
+namespaces; the once-only guarantee; database capacity, including the connection pool; log
+integrity.
 
 **Attackers.** (A1) An authenticated user choosing keys, including another user's key. (A2) A client
-flooding unique keys. (A3) A reader of logs and error bodies. (A4) Developer misconfiguration (an
-empty `scope`, a too-short TTL, the wrong database). (A5) A party with write access to the
-idempotency table. (A6) A network observer or a server seeing SDK keys.
+flooding keys — unique ones, or one key concurrently. (A3) A reader of logs and error bodies. (A4)
+Developer misconfiguration (an empty or request-derived `scope`, a too-short TTL, the wrong
+database). (A5) A party with write access to the idempotency table. (A6) A network observer or a
+server seeing SDK keys.
 
-**Approved budgets.** Per `within` call: one SHA-256 over the canonical fingerprint, one pre-read,
-one transaction (record create + result update); one extra read only after a rejection; none beyond
-the pre-read on a replay. SDK: 16 random bytes per generated key; no extra request.
+**Approved budgets.** Per `within` call: one SHA-256 over the canonical fingerprint, one pre-read
+(two reads by id), one transaction with two creates; one extra read only after a store-side
+rejection; nothing beyond the pre-read on a replay. SDK: 16 random bytes per generated key; no extra
+request.
 
 **Design-time findings.**
 
-| #   | Finding                                                                               | Disposition                                                                                                                                                          |
-| --- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | Without principal scope, user B with A's key receives A's stored result (A1)          | `scope` is REQUIRED (§3.2); JSDoc/README: put tenant and principal in it; `''` means global on purpose                                                               |
-| D2  | Two namespaces share a key space (A4)                                                 | `namespace` is part of the derived id (§3.2)                                                                                                                         |
-| D3  | `422` reveals a key exists (A1)                                                       | Accepted once scoped (109a D3); key never echoed                                                                                                                     |
-| D4  | Unique keys grow the table (A2)                                                       | Rate limiting upstream; TTL ≤ 30 days; purge, with its rate condition stated (§3.10); 64-hex ids                                                                     |
-| D5  | Stored results hold personal data for the TTL                                         | `maxResultBytes`; README: retention counts toward the data inventory; the caller chooses what `fn` returns (return an id, not a document)                            |
-| D6  | Driver errors quote bound parameters — including the result — into logs (A3; M108 F1) | Store failures logged as `errorKind` only (§3.4); error messages carry no input or stored value                                                                      |
-| D7  | A forged or corrupted row (A5) replays an attacker-chosen value, or crashes decoding  | Decode refuses anything but the envelope → `record-invalid`; `fn` is never re-run on it; an attacker with table write access is outside the trust boundary otherwise |
-| D8  | A row of another `kind` in a shared table is read or purged                           | `kind` discriminator on every read and purge (§3.1; M108 D5 precedent)                                                                                               |
-| D9  | Lost race returns the wrong result                                                    | Re-read after ANY rejection, fingerprint re-checked before a replay is returned (§3.3)                                                                               |
-| D10 | An oversized or unserializable result commits work with no record                     | Refused inside the transaction, so the work rolls back (§3.3)                                                                                                        |
-| D11 | Deferred backends run outside effects twice                                           | Documented (§3.7); the database writes are still once                                                                                                                |
-| D12 | A purge deletes a record a client still retries against → the work runs again         | `ttlMs` documented against the client retry window; floor 60 s                                                                                                       |
-| D13 | Predictable SDK keys let another client pre-claim a key (A1/A6)                       | 128 random bits from `crypto.getRandomValues`; server scope makes a guessed key useless across principals                                                            |
-| D14 | SDK retries a non-idempotent call without a key                                       | Only KEYED requests retry outside the safe set (§3.9)                                                                                                                |
-| D15 | SDK key or header injection (CR/LF)                                                   | Key restricted to `0x21`–`0x7E`; header name validated as a token at construction                                                                                    |
-| D16 | Keys in logs or error bodies on the client                                            | The SDK never logs; refusal messages name the field, never the value                                                                                                 |
+| #   | Finding                                                                                                             | Disposition                                                                                                                             |
+| --- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Without principal scope, user B with A's key receives A's stored result (A1)                                        | `scope` REQUIRED (§3.2); JSDoc/README: build it from authenticated identity only; `''` means global on purpose                          |
+| D2  | Two namespaces share a key space (A4)                                                                               | `namespace` is part of the derived id                                                                                                   |
+| D3  | `422` reveals a key exists (A1)                                                                                     | Accepted once scoped (109a D3); key never echoed                                                                                        |
+| D4  | Unique keys grow the table (A2)                                                                                     | Rate limiting upstream; TTL ≤ 30 days; purge with its rate condition stated (§3.10); 64-hex ids                                         |
+| D5  | Stored results hold personal data until purged                                                                      | `maxResultBytes`; README: retention counts toward the data inventory; return an id, not a document                                      |
+| D6  | Driver errors quote bound parameters — including the result — into logs and error bodies (A3; M108 F1)              | Store errors are never rethrown: `'conflict'`/`'store-failed'` with no `cause`; logs carry `errorKind` only (§3.3–§3.4)                 |
+| D7  | A forged or corrupted row (A5) replays an attacker-chosen value                                                     | Decode accepts only the envelope → `record-invalid`; `fn` is never re-run on it; table write access is otherwise the trust boundary     |
+| D8  | A row of another `kind` in a shared table is read or purged                                                         | `kind` on every read and purge; `find` requires both rows                                                                               |
+| D9  | A lost race returns the wrong result                                                                                | Re-read after a store-side rejection, fingerprint re-checked before a replay                                                            |
+| D10 | An oversized or unserializable result commits work with no record                                                   | Refused inside the transaction, so the work rolls back                                                                                  |
+| D11 | Deferred backends run outside effects twice                                                                         | Documented (§3.7); database writes still once                                                                                           |
+| D12 | A purge deletes a record a client still retries against → the work runs again                                       | `ttlMs` documented against the retry window; floor 60 s; the list-to-delete race documented (§3.10)                                     |
+| D13 | Predictable SDK keys let another client pre-claim a key (A1/A6)                                                     | 128 random bits; server scope makes a guessed key useless across principals                                                             |
+| D14 | SDK retries a non-idempotent call without a key, or after the server executed                                       | Only KEYED requests retry outside the safe set; never after a `2xx` arrived (§3.9)                                                      |
+| D15 | SDK key or header injection (CR/LF), from both key sources                                                          | Both keys validated `0x21`–`0x7E`; header validated as a token at `createClient`                                                        |
+| D16 | Keys in client logs or errors                                                                                       | The SDK never logs; refusal messages name the field, never the value                                                                    |
+| D17 | One key flooded concurrently: each PostgreSQL loser holds a pooled connection, blocked, for the length of `fn` (A2) | Rate limiting upstream; the pre-read answers completed keys without a transaction; README states the pool cost per concurrent duplicate |
+| D18 | Replacing an expired record inside the transaction lets two concurrent calls both commit (memory, D1)               | No replacement (§3.3); a present record is authoritative until purged                                                                   |
+| D19 | A result over a backend limit fails at commit with a driver message                                                 | `maxResultBytes` capped at 262,144; the failure surfaces as value-free `'store-failed'` (D6)                                            |
+| D20 | A static default `Idempotency-Key` header keys every SDK request identically                                        | Refused at `createClient` when `idempotency` is set (§3.8)                                                                              |
 
 **Obligations the committed-tree audit must meet.**
 
 1. User A's stored result is never returned to a call with a different `scope` or `namespace` for
    the same key, on every supported backend.
-2. Two concurrent `within` calls for one key on real PostgreSQL and a real MongoDB replica set
-   commit the business write once and both return the same value; drive it.
-3. No log line, error message or error body contains the key, scope, namespace, fingerprint input or
-   stored result; probe with recognizable values on real PostgreSQL with a failing store write.
-4. A tampered row (wrong envelope, wrong `kind`) is never replayed and never purged as ours.
+2. Two concurrent `within` calls for one key commit the business write ONCE on real PostgreSQL, a
+   real MongoDB replica set and DynamoDB Local; on PostgreSQL both return the same value, on MongoDB
+   and DynamoDB the loser rejects `'conflict'` and its retry replays.
+3. No log line, error message, error `cause` or error body contains the key, scope, namespace,
+   fingerprint input or stored result; probe with recognizable values on real PostgreSQL with a
+   failing store write AND a failing commit.
+4. A tampered row (wrong envelope, wrong `kind`, a claim without its result row) is never replayed
+   and never purged as ours.
 5. An oversized result leaves no record and no business row.
 6. Cosmos, Bigtable and standalone MongoDB are refused at `start()`, and the extracted helper leaves
-   M108's inbox refusals unchanged.
-7. The SDK sends one key across every attempt, never retries an unkeyed POST, and refuses a key with
-   a control character before any network call.
+   M107's and M108's refusals unchanged.
+7. The SDK sends one key across every attempt, never retries an unkeyed POST or a keyed POST after a
+   `2xx`, and refuses a key with a control character from both sources before any network call.
+8. Two concurrent calls on an expired-but-unpurged key do not both commit (memory and D1).
+9. A client with neither `idempotency` nor `idempotencyKey` retries exactly as before.
+
+## 11. Review dispositions (plan verification, one round)
+
+| Finding                                                      | Disposition                                                                                                   |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| B1 update inside `run` fails on DynamoDB and D1              | Fixed: two creates, no update (§3.1); `verify` runs the same pattern; happy-path tests on both                |
+| B2 expired-row replacement double-commits                    | Fixed: no replacement; authoritative until purged (§3.3, §3.10, D18, obligation 8)                            |
+| M1 the loser cannot always replay                            | Fixed: honest contract, `'conflict'` `409`, per-backend rows (§3.3, §3.7, obligation 2)                       |
+| M2 store errors leak via rethrow                             | Fixed: `fn` errors tagged and rethrown; store errors value-free (§3.3, §3.4, D6); `fingerprint-invalid` added |
+| M3 `JsonValue` bound refuses interfaces                      | Fixed: `R` unconstrained, runtime check, one decoded value on both paths (§3.2)                               |
+| M4 optional vs required contradiction                        | Fixed: both members required; six test doubles named (§4)                                                     |
+| Minor: outbox third copy                                     | Folded into the extraction (§3.6)                                                                             |
+| Minor: C4 misdescribes README                                | Corrected (C4)                                                                                                |
+| Minor: named errors, health indicator                        | Decided (§3.4, §3.5)                                                                                          |
+| Minor: real-backend wiring                                   | Stated (§6)                                                                                                   |
+| Minor: SQLite and D1 conflated                               | Split (§3.7)                                                                                                  |
+| Minor: first call vs replay values                           | Fixed (§3.2)                                                                                                  |
+| Minor: purge TOCTOU                                          | Documented (§3.10)                                                                                            |
+| Minor: §10 missing threats                                   | D17, D19 and the scope-source rule in D1                                                                      |
+| Minor: SDK key output, merged headers, `crypto`, `drawNonce` | Fixed (§3.8)                                                                                                  |
+| Minor: SDK opt-in, post-2xx, CORS                            | Fixed (§3.9)                                                                                                  |
+| Nits                                                         | Citations aligned; C5 narrowed; `namespace`/`scope` restricted to `0x20`–`0x7E`                               |
