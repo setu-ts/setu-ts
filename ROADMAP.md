@@ -13411,6 +13411,175 @@ and Brandur Leach's Postgres idempotency article.
 
 ---
 
+## Milestone 110: Authorization Beyond Global Roles
+
+**Package(s):** `packages/common`, `packages/auth-plugin`, `packages/decorator-plugin` in both
+letters; 110a possibly `packages/openapi-plugin`; 110b also `packages/database-plugin`.
+
+**Objective:** take authorization past "does this principal hold this role, anywhere". 110a adds the
+general-purpose layer — an async check that can see the target — and 110b builds scoped RBAC as one
+implementation of it, so an application preferring an external engine (Casbin, OpenFGA) plugs in at
+the same seam. **110a ships first; 110b depends on it.**
+
+**Does the framework need ABAC?** No — and this pair is the answer to that question rather than an
+ABAC engine. Checked against current documentation (2026-10-09), every comparable framework ships
+this layer and none ships an attribute engine — attribute logic lives in the policies they let you
+write:
+
+| Framework       | The layer                                                                                                | Async | Target                                         |
+| --------------- | -------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------- |
+| ASP.NET Core    | `IAuthorizationService.AuthorizeAsync(user, resource, policy)` + `AuthorizationHandler<TReq, TResource>` | yes   | loaded resource, imperative only               |
+| NestJS          | `@nestjs/authorization`: `@Policy()` classes, `@Can(Policy, 'ability', extractor)`, `authorize()`        | yes   | loaded resource or values extracted from route |
+| Spring Security | `@PreAuthorize("hasPermission(#id, 'Type', 'READ')")` → `PermissionEvaluator`                            | no    | object, or `(targetId, targetType)` unloaded   |
+
+Two surveyed production applications (multi-tenant B2B portals, one TypeScript and one .NET) confirm
+the shape from the other side: each hand-rolled a throwing check plus a non-throwing twin for UI
+flags, and each had to make the two share one evaluator after they disagreed in production.
+
+The gap those applications exposed is not attribute logic (both keep it in ordinary code) but SCOPE:
+a role held in one tenant, organisation or region rather than everywhere. No framework core in the
+table ships that either; libraries do (spatie/laravel-permission "teams", Casbin "RBAC with
+domains"). 110b brings it into the framework on top of 110a's seam.
+
+### Milestone 110a: Authorization Policies — An Async, Target-Aware Check
+
+**Package(s):** `packages/common`, `packages/auth-plugin`, `packages/decorator-plugin`, with
+`packages/openapi-plugin` only if the M57 security brand needs a new reader.
+
+**Objective:** one place to answer "may this principal do this, to this target?" — asynchronously,
+with the target (a loaded resource, a `{ type, id }` reference, or a scope) as an argument — reached
+declaratively from a route and imperatively from a service, failing closed. It is the layer every
+comparable framework ships and Setu-TS does not, and it is the seam 110b's scoped RBAC is built on.
+
+**Why.** `IAuthorizationService` (`common/src/services/auth.ts:152`) is synchronous and its four
+members take a principal and a role or permission STRING — there is no parameter through which a
+target can reach a decision. So "the author of this document", "an approver in this tenant", or any
+rule an application derives from attributes has no framework home: the only option is a hand-written
+`MiddlewareFunction`, which gets none of the guards' guarantees (the `501`/`401`/`403` split in
+`auth-plugin/src/guards/index.ts`, the shared responder in
+`common/src/errors/authorization-responder.ts`, the M57 OpenAPI brand) unless the author re-derives
+each one.
+
+**Scope.**
+
+- A new capability token and contract beside `CAPABILITIES.AUTHORIZATION`, which stays byte-for-byte
+  unchanged (it is consumed by the six guards, by `decorator-plugin`'s `@Roles`/`@Permissions`
+  middleware, and by M98h's authorization explanations). Proposed shape, names settled by the plan:
+  `authorize(principal | null, ability, target?) → Promise<AuthorizationDecision>` and
+  `can(...) → Promise<boolean>`, both funnelling through ONE evaluator.
+- Policies registered by name, each a set of abilities
+  `(principal | null, target?) → boolean | Promise<boolean>`, with an optional `before()` that may
+  allow or deny every ability of the policy (NestJS's admin bypass). Functional form in
+  `auth-plugin`; a class form (`@Policy`) in `decorator-plugin`, matching the framework's
+  functional-default / class-based-opt-in split (M65).
+- Entry points: a route guard `can(policy, ability, target?)` where `target` is a value or an
+  extractor `(ctx) => target | Promise<target>`; `@Can(...)` in `decorator-plugin`; imperative
+  `authorize()` for checks on records a handler loads (ASP.NET's lesson: a declarative check runs
+  before the record exists).
+- **Fixed semantics, not configuration:** only a literal `true` allows; an anonymous principal that
+  is denied gets `401`, a signed-in one `403`, through the existing responder so the body matches
+  the guards; a policy that throws or rejects DENIES and is reported to the logger, never answers
+  `200`; an unknown policy or ability named by a guard or decorator fails at `register()`, an
+  unknown one passed imperatively rejects by name.
+- The six existing role/permission guards are NOT rerouted through the new evaluator in this
+  milestone — their responses are pinned byte-identical and rewiring them buys nothing yet.
+- Non-HTTP ingress: `IngressContext` (`common/src/services/ingress.ts:55`) carries no principal, so
+  an ingress behaviour form needs a principal source. The plan either defines one or names the gap
+  with an owner — it does not ship a behaviour that silently evaluates as anonymous.
+- `docs/` gains the page that answers "where does ABAC go": attribute rules are policies.
+
+**Deliverables**
+
+- [ ] The contract, the token, and the evaluator, with the guard and the yes/no check proven to
+      agree under a non-default configuration
+- [ ] Functional and class policy forms, the route guard, `@Can`, and `authorize()`
+- [ ] Fixed-semantics tests: literal-`true`, `401`/`403`, throwing policy denies, unknown names
+      refused — each with a negative control
+- [ ] M57 brand on `can(...)` routes so `deriveSecurity` documents them
+- [ ] PUBLIC_API.md, the auth-plugin and decorator-plugin READMEs, and the ABAC guidance page
+- [ ] A design security review in the plan, and a committed-tree audit
+
+**Breaking for implementors:** none expected — a new token and new exports. The plan confirms it.
+
+### Milestone 110b: Scoped RBAC
+
+**Package(s):** `packages/common`, `packages/auth-plugin`, `packages/decorator-plugin`, with
+`packages/database-plugin` for a repository-backed grant source (the M101c `DatabaseTenantDataStore`
+precedent). Depends on 110a.
+
+**Objective:** a role granted IN a scope — a tenant, an organisation, a team, a region — rather than
+everywhere, evaluated as one implementation of 110a's evaluator, and configurable enough that the
+reference scenarios below need configuration only, no custom code.
+
+**Why.** Today a role is global: `RbacConfig` is one static `roles` map
+(`common/src/services/auth.ts:98`) and `hasPermission(principal, permission)` has no scope argument,
+so "may approve invoices in tenant X" can only be faked by packing tenant-prefixed strings into
+`principal.permissions`. Both surveyed applications are built on exactly this missing shape — one
+grants roles per tenant with `null` meaning platform-wide and delegates through parent/child tenant
+relationships, the other merges grants keyed by role × country, role × channel, and per user. No
+mainstream framework core ships it (ASP.NET, NestJS and Spring leave scope to the application); it
+lives in libraries — spatie/laravel-permission "teams" (`team_id`, `null` = global role) and Casbin
+"RBAC with domains" (`g = _, _, _`: user, role, domain) — and in identity providers (Keycloak 26
+Organizations). Shipping it puts the framework level with those libraries rather than behind them.
+
+**The model.** A grant is `(principal, role, scope | null)`: the ASSIGNMENT carries the scope, so
+roles stay one catalogue reused across scopes (Casbin), and `null` is a global grant (spatie). A
+scope is a typed reference `{ type, id }`.
+
+**Configuration axes** — each with a default that reproduces today's single global scope:
+
+1. **Scope shape** — flat, hierarchical (a `parentOf(scope)` resolver, cycle-refused,
+   depth-bounded), or several independent scope types at once.
+2. **Where a check's scope comes from** — the request's tenant (default, `IRequest.tenant`), a route
+   parameter, a value the handler loaded, or an explicit argument. With none, only global grants are
+   consulted — never "any scope".
+3. **Grant source** — static configuration, token claims (a mapper over `principal.claims`, the
+   Keycloak Organizations shape), a repository, or `'custom'`; several sources are unioned.
+4. **Carry-over across scopes** — whether global grants apply everywhere (default yes), whether a
+   parent scope's grants descend, and relationship-based delegation via a resolver.
+5. **Role catalogue** — the global catalogue, with optional per-role limits on which scope types it
+   may be granted in; per-scope custom roles are a stretch the plan accepts or defers by name.
+6. **Resolution timing** — per request, memoised by (principal, scope) (default); a bounded
+   cross-request cache with a stated revocation latency; or computed at sign-in into the principal.
+
+**Fixed, not configurable:**
+
+- Fail closed: an unresolved scope, a grant source that rejects or exceeds its deadline (M101a's
+  `withDeadline`), or a permission absent from the catalogue denies — the catalogue check also
+  catches a typo that would otherwise deny forever or slip through a fallback.
+- One evaluator for the guard, the decorator and the yes/no check.
+- Grants only — no deny rules. Deny-overrides is where policy combination gets hard; the plan leaves
+  room for it and names it deferred.
+- Bounded: grants per principal per scope, scope-chain depth, and source time.
+
+**Reference scenarios** — acceptance criteria, each driven through a real kernel application with
+configuration alone:
+
+- A. Tenant scope, platform-wide grants, delegation from a parent tenant to its children,
+  repository-backed.
+- B. Grants unioned from three keyed lists (role × region, role × channel, per user), resolved once
+  at sign-in from a remote source.
+- C. An organisation → team → project hierarchy where a grant descends.
+- D. Grants carried in token claims, no store.
+- E. Per-tenant custom roles (or its named deferral).
+
+**Security review must cover:** a route-parameter scope that disagrees with the resolved request
+tenant; scope identifiers reaching logs or M98h explanations (aliased, never raw); cache poisoning
+across principals; and revocation latency under each timing mode.
+
+**Deliverables**
+
+- [ ] The grant model, the grant-source port with its built-in arms, and the scope resolvers
+- [ ] Scoped forms of the guard and of `@Permissions`/`@Roles`, built on 110a's evaluator
+- [ ] Reference scenarios A–E as integration tests, each with a negative control
+- [ ] A repository grant source driven against a real database in CI
+- [ ] PUBLIC_API.md, the auth-plugin README, and a scoped-RBAC guide
+- [ ] A design security review in the plan, and a committed-tree audit
+
+**Breaking for implementors:** none expected — the existing global `RbacConfig` path is unchanged.
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -13649,3 +13818,5 @@ patch by construction and gains nothing new here.
 | 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, topic, envelope id), in the handler's transaction                                                                               |
 | 109       | ⬜     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |
+| 110a      | ⬜     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
+| 110b      | ⬜     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |
