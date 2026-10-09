@@ -227,9 +227,10 @@ purgeTransactional(): Promise<number>;
        `cause`.
   - A stored `result` that does not decode to `{ v? }` → `'record-invalid'`; `fn` is never re-run.
 - **The honest contract (§3.7):** a loser that fails BEFORE the winner commits — a MongoDB write
-  conflict, a DynamoDB transaction conflict, a Prisma interactive-transaction timeout while waiting
-  — cannot re-read the result yet and rejects `'conflict'` (a `409`). A retry then replays. The SDK
-  retries a keyed `409` (§3.9), so a keyed client converges.
+  conflict or a DynamoDB transaction conflict — cannot re-read the result yet and rejects
+  `'conflict'` (a `409`). A retry then replays. The SDK retries a keyed `409` (§3.9), so a keyed
+  client converges. A Prisma transaction timeout (`P2028`) has no `409` mapping: the re-read replays
+  if it finds the winner's record, otherwise the call rejects `'store-failed'` (`503`).
 - **Why:** the M108 inbox algorithm (pre-read, write first, re-read after a rejection), plus the tag
   that separates `fn`'s errors — which belong to the application and stay unchanged — from store
   errors, whose driver message can list every bound parameter including the result (M108 F1). An
@@ -306,7 +307,7 @@ purgeTransactional(): Promise<number>;
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | memory                          | Supported, single process; a concurrent duplicate is refused at commit, re-reads the committed record and replays.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | PostgreSQL (Drizzle)            | Supported; the loser's claim insert blocks on the primary key until the winner commits, then fails and replays. Each blocked loser holds a pooled connection for the length of `fn` (§10 D17).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| PostgreSQL (Prisma)             | As Drizzle, but a loser waiting longer than Prisma's interactive-transaction timeout (5 s default) rejects `'conflict'`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| PostgreSQL (Prisma)             | As Drizzle: a concurrent loser waits on the winner's unique-key lock and replays. If the winner's transaction outlives the adapter's `transactionTimeout` (default 30 s), the loser's transaction times out and it answers `'store-failed'` (`503`) unless its re-read already finds the winner's record. Not verified against a real Prisma client.                                                                                                                                                                                                                                                                                                                              |
 | SQLite (Drizzle, `node:sqlite`) | Supported; one writer at a time, so a concurrent loser fails with a busy/locked error → `'conflict'` or a replay depending on timing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | D1                              | Supported through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })`; writes are deferred to one batch at commit, so `fn` runs before a concurrent duplicate is refused — its OUTSIDE effects run for both.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | MongoDB replica set             | Supported; a concurrent loser is an immediate write conflict → `'conflict'` (no replay while the winner is open). Collections must exist (two transactions creating one implicitly conflict — M108).                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -319,6 +320,10 @@ purgeTransactional(): Promise<number>;
   DynamoDB Local happy path AND duplicate, Bigtable and standalone MongoDB refusals),
   `test/integration/within-d1.test.ts` (D1 over real SQLite: happy path, replay, concurrent
   duplicate).
+
+**Not verified:** tier C against a real PostgreSQL/Prisma client; DynamoDB's overlapping-service
+`TransactionConflictException` outcome on DynamoDB Local (M90f). The real PostgreSQL tier-C suite
+uses Drizzle, not Prisma.
 
 ### 3.8 SDK: where a key comes from
 
@@ -603,6 +608,13 @@ request.
 9. A client with neither `idempotency` nor `idempotencyKey` retries exactly as before.
 
 ## 11. Review dispositions (plan verification, one round)
+
+- Implementation deviation: §3.3 and §3.7 assumed a Prisma timeout meant `'conflict'` with a 5 s
+  default. Verification found the existing adapter uses `transactionTimeout ?? 30_000`
+  (`prisma-adapter.ts:293`), while `classify.ts` maps `P2034`, not timeout `P2028`, to a write
+  conflict. The shipped `within` re-read replays a committed winner or answers `'store-failed'`
+  (`within.ts:149–159`). The maintainer accepts this as a docs correction; the policy stays
+  unchanged, and tier C remains unverified against a real Prisma client.
 
 - Implementation deviation: the slice sequence put the service members after slice 1's port; both
   required `IIdempotencyService` members shipped in slice 1 to keep the contract and its

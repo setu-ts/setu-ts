@@ -14,9 +14,9 @@ All notable changes to this project are documented here. The format follows
   it FIRST, runs `fn` with that transaction's unit of work, creates a result row holding `fn`'s JSON
   result and commits; a repeated key whose record is committed returns the stored result without
   running `fn`, and a concurrent duplicate loses the race on the claim's primary key and its
-  business writes roll back with it — then it replays, or, where it failed before the winner
-  committed, rejects with a retryable `409`. The plugin gains `IdempotencyWithinError` (with
-  `IdempotencyWithinErrorReason`), `IdempotencyVerifyTimeoutError`,
+  business writes roll back with it — then it replays, or, where the backend reports a write
+  conflict before the winner committed, rejects with a retryable `409`. The plugin gains
+  `IdempotencyWithinError` (with `IdempotencyWithinErrorReason`), `IdempotencyVerifyTimeoutError`,
   `TransactionalIdempotencyOptions` and `TransactionalIdempotencyPurgeOptions`; `common` gains the
   port `ITransactionalIdempotencyStore` with `TransactionalIdempotencyClaim`,
   `TransactionalIdempotencyRecord`, the `IDEMPOTENCY_RECORD_KIND` discriminator, and the
@@ -647,6 +647,12 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **Prisma tier-C backend documentation (M109b).** A concurrent loser normally waits on the winner's
+  unique-key lock and replays. The adapter's `transactionTimeout` defaults to 30 s; a transaction
+  timeout (`P2028`) replays if the re-read finds the winner's committed record, otherwise it answers
+  `'store-failed'` (`503`). It has no timeout-to-`409` mapping. Tier C is not verified against a
+  real Prisma client; the existing adapter and classification policy are unchanged.
 
 - **Keyed SDK requests after a successful response (`@setu-ts/sdk`, M109b).** A keyed POST is never
   retried when reading a `2xx` response body fails or a response interceptor throws a primitive or
