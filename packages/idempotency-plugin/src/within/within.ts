@@ -167,7 +167,9 @@ async function recover<R>(
  * @param deps - The resolved store, runtime and bounds
  * @param options - The key, namespace, scope, fingerprint and TTL
  * @param fn - The work, given the transaction's scope
- * @returns The value and whether it was replayed
+ * @returns The JSON round trip of what `fn` returned on both the first call
+ *   and a replay, and whether it was replayed. A `Date` is an ISO string on
+ *   both paths; omitted object members and `toJSON()` output follow JSON rules.
  * @throws {IdempotencyWithinError} Refusing the options, or a store failure
  */
 export async function runWithin<R, S>(
@@ -212,7 +214,7 @@ export async function runWithin<R, S>(
         throw new WithinFnError(error);
       }
       const result = encodeResult(produced, deps.maxResultBytes);
-      return { result, value: produced };
+      return { result, value: decodeResult(result) as R };
     });
     return { value, replayed: false };
   } catch (error) {

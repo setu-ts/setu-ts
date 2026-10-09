@@ -24,7 +24,9 @@ All notable changes to this project are documented here. The format follows
   gains `createDatabaseIdempotencyStore` (with `DatabaseIdempotencyStoreOptions`) and
   `TransactionalStoreUnavailableError`; and `@setu-ts/sdk` gains `ClientOptions.idempotency`
   (`ClientIdempotencyOptions`) and `ClientRequest.idempotencyKey`, so a keyed request keeps ONE key
-  across every retry attempt and may retry any method and `409`.
+  across every retry attempt and may retry any method and `409`. On both the first call and a
+  replay, `within` returns the JSON round trip of what `fn` returned: dates become ISO strings,
+  `undefined` object members are absent, and nested `toJSON()` output is respected.
 
 - **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
   questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup

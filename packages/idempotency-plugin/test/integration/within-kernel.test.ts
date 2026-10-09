@@ -125,6 +125,33 @@ function post(
 }
 
 describe('within on a real kernel (M109b §3.3)', () => {
+  it('returns equal Date-bearing JSON values on the first call and replay', async () => {
+    const { app, captured } = await buildApp();
+    try {
+      let calls = 0;
+      const options = { key: 'date-result', namespace: 'orders.create', scope: 't1:u1' };
+      const first = await captured.idempotency!.within<unknown, IUnitOfWork>(
+        options,
+        async (uow) => {
+          calls++;
+          await uow.getRepository('Orders').create({ id: 'dated-order', name: 'Ada' });
+          return { id: 'dated-order', createdAt: new Date(0) };
+        },
+      );
+      const replay = await captured.idempotency!.within(options, () => {
+        calls++;
+        return Promise.resolve('unexpected');
+      });
+      expect(first.value).toEqual({ id: 'dated-order', createdAt: '1970-01-01T00:00:00.000Z' });
+      expect(first.value).toEqual(replay.value);
+      expect([first.replayed, replay.replayed]).toEqual([false, true]);
+      expect(calls).toBe(1);
+      expect(await captured.database!.getRepository('Orders').count()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('answers 201 then a replayed 200, with one business row', async () => {
     const { app, captured } = await buildApp();
     try {

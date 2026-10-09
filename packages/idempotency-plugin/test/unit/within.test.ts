@@ -78,6 +78,59 @@ function statefulStore(): {
 }
 
 describe('runWithin first call and replay (M109b §3.3)', () => {
+  it('returns the same ISO string for a Date on the first call and replay', async () => {
+    const { store } = statefulStore();
+    const dependencies = deps({ store });
+    const first = await runWithin<unknown, unknown>(
+      dependencies,
+      options(),
+      () => Promise.resolve(new Date(0)),
+    );
+    const replay = await runWithin(dependencies, options(), () => Promise.resolve('unexpected'));
+    expect(first.value instanceof Date).toBe(false);
+    expect(first.value).toBe('1970-01-01T00:00:00.000Z');
+    expect(replay.value).toEqual(first.value);
+    expect([first.replayed, replay.replayed]).toEqual([false, true]);
+  });
+
+  it('omits undefined object members on the first call and replay', async () => {
+    const { store } = statefulStore();
+    const dependencies = deps({ store });
+    const first = await runWithin(
+      dependencies,
+      options(),
+      () => Promise.resolve({ id: 'order', omitted: undefined }),
+    );
+    const replay = await runWithin(
+      dependencies,
+      options(),
+      () => Promise.resolve({ id: 'unexpected' }),
+    );
+    expect(Object.hasOwn(first.value, 'omitted')).toBe(false);
+    expect(Object.hasOwn(replay.value, 'omitted')).toBe(false);
+    expect(first.value).toEqual({ id: 'order' });
+    expect(replay.value).toEqual(first.value);
+  });
+
+  it('uses nested toJSON output on the first call and replay', async () => {
+    class Receipt {
+      toJSON(): { total: number } {
+        return { total: 42 };
+      }
+    }
+    const { store } = statefulStore();
+    const dependencies = deps({ store });
+    const first = await runWithin(
+      dependencies,
+      options(),
+      () => Promise.resolve({ receipt: new Receipt() }),
+    );
+    const replay = await runWithin(dependencies, options(), () => Promise.resolve('unexpected'));
+    expect(first.value.receipt instanceof Receipt).toBe(false);
+    expect(first.value).toEqual({ receipt: { total: 42 } });
+    expect(replay.value).toEqual(first.value);
+  });
+
   it('runs the work once, creates the claim and returns replayed:false', async () => {
     let claims: TransactionalIdempotencyClaim | undefined;
     const store = fakeTransactionalStore({

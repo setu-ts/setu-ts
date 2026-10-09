@@ -14065,6 +14065,10 @@ claim. See [`packages/idempotency-plugin/README.md`](packages/idempotency-plugin
 placement, the HTTP check order, failure classification, replay rules, the ingress allow-list, the
 tier-C backend table and the store guarantees.
 
+`within` returns the JSON round trip of what `fn` returned on both the first call and a replay.
+Dates become ISO strings, `undefined` object members are absent, and nested `toJSON()` output
+determines the stored value. A `void` result returns `undefined` on both paths.
+
 ### Values (runtime exports)
 
 | Export                          | Kind     | Purpose                                                                                   |

@@ -142,6 +142,10 @@ primary key and its business writes roll back with it, then it replays the winne
 where it failed before the winner committed, rejects with a retryable `409` (which `@setu-ts/sdk`'s
 keyed client retries).
 
+On both the first call and a replay, `value` is the JSON round trip of what `fn` returned: a `Date`
+becomes an ISO string, `undefined` object members are absent, and nested `toJSON()` methods
+determine their stored representation. A `void` result remains `undefined`.
+
 `scope` is REQUIRED and must be built ONLY from authenticated identity (typically
 `` `${tenantId}:${principalId}` ``); `''` declares the record global on purpose. The raw key, scope
 and namespace are never stored — only their derived hashes.
