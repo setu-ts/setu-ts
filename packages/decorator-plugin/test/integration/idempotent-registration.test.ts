@@ -9,6 +9,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type {
   Constructor,
+  IdempotentWithinResult,
   IIdempotencyService,
   IPlugin,
   IPluginContext,
@@ -42,6 +43,10 @@ function providerPlugin(calls: unknown[]): IPlugin {
       return (_ctx, next) => next();
     },
     behavior: () => ({ handle: (_ctx, next) => next() }),
+    within: <R>(): Promise<IdempotentWithinResult<R>> =>
+      Promise.reject(new Error('tier C not configured in this double')),
+    purgeTransactional: (): Promise<number> =>
+      Promise.reject(new Error('tier C not configured in this double')),
   };
   return {
     name: 'fake-idempotency-provider',
@@ -152,6 +157,10 @@ describe('@Idempotent runs AFTER the validation band (M109a §3.9, negative cont
             return next();
           },
           behavior: () => ({ handle: (_ctx, next) => next() }),
+          within: <R>(): Promise<IdempotentWithinResult<R>> =>
+            Promise.reject(new Error('tier C not configured in this double')),
+          purgeTransactional: (): Promise<number> =>
+            Promise.reject(new Error('tier C not configured in this double')),
         };
         ctx.services.register(CAPABILITIES.IDEMPOTENCY, service);
       },

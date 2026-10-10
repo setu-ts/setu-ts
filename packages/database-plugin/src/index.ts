@@ -155,6 +155,14 @@ export { createDatabaseInboxStore } from './inbox/database-inbox-store.ts';
 export type { DatabaseInboxStoreOptions } from './inbox/database-inbox-store.ts';
 export { InboxStoreUnavailableError } from './inbox/errors.ts';
 
+// Tier-C idempotency store bridge (M109b) — the shipped
+// `ITransactionalIdempotencyStore` over `IDatabaseService`, for the idempotency
+// plugin's `transactional.store` option. The store class stays internal: it
+// reaches an application only as `ITransactionalIdempotencyStore`.
+export { createDatabaseIdempotencyStore } from './idempotency/database-idempotency-store.ts';
+export type { DatabaseIdempotencyStoreOptions } from './idempotency/database-idempotency-store.ts';
+export { TransactionalStoreUnavailableError } from './idempotency/errors.ts';
+
 // Typed native Drizzle query access
 export {
   createDrizzleDatabase,

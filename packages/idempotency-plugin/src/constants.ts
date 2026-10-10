@@ -86,6 +86,36 @@ export const MAX_MEMORY_BYTES = 4_294_967_296;
 /** Largest allowed `commandTimeoutMs` / DO `timeoutMs` (`2^31 - 1`). */
 export const MAX_TIMEOUT_MS = 2_147_483_647;
 
+/** Default bound on one tier-C store call in milliseconds. */
+export const DEFAULT_STORE_TIMEOUT_MS = 5_000;
+
+/** Default cap on a stored tier-C result in UTF-8 bytes. */
+export const DEFAULT_MAX_RESULT_BYTES = 65_536;
+
+/** Largest allowed `transactional.maxResultBytes` (256 KiB). */
+export const MAX_RESULT_BYTES = 262_144;
+
+/** Smallest allowed `within` `ttlMs` (one minute). */
+export const MIN_WITHIN_TTL_MS = 60_000;
+
+/** Largest allowed `within` `namespace` length. */
+export const MAX_WITHIN_NAMESPACE_CHARS = 256;
+
+/** Largest allowed `within` `scope` length. */
+export const MAX_WITHIN_SCOPE_CHARS = 512;
+
+/** Default tier-C retention purge interval in milliseconds. */
+export const DEFAULT_PURGE_INTERVAL_MS = 60_000;
+
+/** Default tier-C retention purge batch size. */
+export const DEFAULT_PURGE_BATCH = 100;
+
+/** Largest allowed `transactional.purge.batch`. */
+export const MAX_PURGE_BATCH = 100_000;
+
+/** The scheduled tier-C retention purge job's name. */
+export const PURGE_JOB_NAME = 'idempotency-purge';
+
 /** Largest allowed `keyPrefix` length for the Redis and Durable Object stores. */
 export const MAX_KEY_PREFIX_CHARS = 64;
 

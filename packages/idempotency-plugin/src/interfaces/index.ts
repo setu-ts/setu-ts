@@ -4,7 +4,11 @@
  *
  * @module
  */
-import type { IIdempotencyStore } from '@setu-ts/common';
+import type {
+  IIdempotencyStore,
+  ITransactionalIdempotencyStore,
+  RegistryFactory,
+} from '@setu-ts/common';
 
 /**
  * The minimal Redis client surface the Redis store needs. A real `ioredis`
@@ -85,6 +89,42 @@ export type IdempotencyStoreConfig =
   };
 
 /**
+ * The tier-C retention purge's schedule (plan §3.10).
+ *
+ * @since 0.9.0
+ */
+export interface TransactionalIdempotencyPurgeOptions {
+  /** Runs the purge on `CAPABILITIES.SCHEDULER`. Default `true`; `false` means a manual `purgeTransactional()`. */
+  readonly schedule?: boolean;
+  /** Purge interval in milliseconds. Integer 1–2,147,483,647. Default 60,000. */
+  readonly intervalMs?: number;
+  /** Records deleted per purge. Integer 1–100,000. Default 100. */
+  readonly batch?: number;
+}
+
+/**
+ * The tier-C (`within`) configuration (plan §3.5).
+ *
+ * @since 0.9.0
+ */
+export interface TransactionalIdempotencyOptions {
+  /**
+   * The transactional store: an `ITransactionalIdempotencyStore`, or a
+   * {@linkcode RegistryFactory} resolved at `onInit` (so `DatabasePlugin` may
+   * register before or after).
+   */
+  readonly store: ITransactionalIdempotencyStore | RegistryFactory<ITransactionalIdempotencyStore>;
+  /** Default record eligibility age. Integer 60,000–2,592,000,000. Default 86,400,000. */
+  readonly ttlMs?: number;
+  /** Bounds each store call except the transaction itself. Integer 1–2,147,483,647. Default 5,000. */
+  readonly storeTimeoutMs?: number;
+  /** Largest storable result in UTF-8 bytes. Integer 2–262,144. Default 65,536. */
+  readonly maxResultBytes?: number;
+  /** The retention purge. Defaults: scheduled every 60,000 ms, batch 100. */
+  readonly purge?: TransactionalIdempotencyPurgeOptions;
+}
+
+/**
  * Options for {@linkcode IdempotencyPlugin}.
  *
  * @since 0.9.0
@@ -100,4 +140,6 @@ export interface IdempotencyPluginOptions {
   readonly ttlMs?: number;
   /** Default HTTP body cap. Default 262,144. */
   readonly maxResponseBytes?: number;
+  /** Tier C: enables `within` and the retention purge. Default: unconfigured. */
+  readonly transactional?: TransactionalIdempotencyOptions;
 }

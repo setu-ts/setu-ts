@@ -32,15 +32,22 @@ import {
   MAX_MEMORY_BYTES,
   MAX_MEMORY_ENTRIES,
   MAX_NAMESPACE_CHARS,
+  MAX_PURGE_BATCH,
   MAX_RESPONSE_BYTES,
+  MAX_RESULT_BYTES,
   MAX_TIMEOUT_MS,
   MAX_TTL_MS,
   MIN_MEMORY_BYTES,
+  MIN_WITHIN_TTL_MS,
   REPLAY_HEADER_DENY_SET,
   STORE_NAMESPACE_PATTERN,
 } from '../constants.ts';
 import { IdempotencyConfigurationError } from '../errors.ts';
-import type { IdempotencyPluginOptions, IdempotencyStoreConfig } from '../interfaces/index.ts';
+import type {
+  IdempotencyPluginOptions,
+  IdempotencyStoreConfig,
+  TransactionalIdempotencyOptions,
+} from '../interfaces/index.ts';
 import { validateInjectedClient } from '../stores/redis-client.ts';
 
 /** The plugin-level defaults a route or ingress option set resolves against. */
@@ -411,6 +418,95 @@ function validateStoreConfig(config: IdempotencyStoreConfig): void {
   }
 }
 
+/** Validates the tier-C `transactional` option set's shape (M109b §3.5, §3.13). */
+function validateTransactionalShape(transactional: TransactionalIdempotencyOptions): void {
+  if (typeof transactional !== 'object' || transactional === null) {
+    throw new IdempotencyConfigurationError(
+      'transactional',
+      'idempotency: transactional must be an options object',
+    );
+  }
+  const entry = transactional.store;
+  if (
+    entry === undefined || entry === null ||
+    (typeof entry !== 'object' && typeof entry !== 'function')
+  ) {
+    throw new IdempotencyConfigurationError(
+      'transactional.store',
+      'idempotency: transactional.store must be an ITransactionalIdempotencyStore or a factory',
+    );
+  }
+  if (typeof entry === 'object') {
+    const candidate = entry as Partial<
+      Record<'find' | 'run' | 'purge' | 'verify', unknown>
+    >;
+    if (
+      typeof candidate.find !== 'function' || typeof candidate.run !== 'function' ||
+      typeof candidate.purge !== 'function' || typeof candidate.verify !== 'function'
+    ) {
+      throw new IdempotencyConfigurationError(
+        'transactional.store',
+        'idempotency: transactional.store must be an ITransactionalIdempotencyStore',
+      );
+    }
+  }
+  if (
+    transactional.ttlMs !== undefined &&
+    !isIntInRange(transactional.ttlMs, MIN_WITHIN_TTL_MS, MAX_TTL_MS)
+  ) {
+    throw new IdempotencyConfigurationError(
+      'transactional.ttlMs',
+      'idempotency: transactional.ttlMs is out of range',
+    );
+  }
+  if (
+    transactional.storeTimeoutMs !== undefined &&
+    !isIntInRange(transactional.storeTimeoutMs, 1, MAX_TIMEOUT_MS)
+  ) {
+    throw new IdempotencyConfigurationError(
+      'transactional.storeTimeoutMs',
+      'idempotency: transactional.storeTimeoutMs is out of range',
+    );
+  }
+  if (
+    transactional.maxResultBytes !== undefined &&
+    !isIntInRange(transactional.maxResultBytes, 2, MAX_RESULT_BYTES)
+  ) {
+    throw new IdempotencyConfigurationError(
+      'transactional.maxResultBytes',
+      'idempotency: transactional.maxResultBytes is out of range',
+    );
+  }
+  const purge = transactional.purge;
+  if (purge === undefined) return;
+  if (typeof purge !== 'object' || purge === null) {
+    throw new IdempotencyConfigurationError(
+      'transactional.purge',
+      'idempotency: transactional.purge must be an options object',
+    );
+  }
+  if (purge.schedule !== undefined && typeof purge.schedule !== 'boolean') {
+    throw new IdempotencyConfigurationError(
+      'transactional.purge.schedule',
+      'idempotency: transactional.purge.schedule must be a boolean',
+    );
+  }
+  if (
+    purge.intervalMs !== undefined && !isIntInRange(purge.intervalMs, 1, MAX_TIMEOUT_MS)
+  ) {
+    throw new IdempotencyConfigurationError(
+      'transactional.purge.intervalMs',
+      'idempotency: transactional.purge.intervalMs is out of range',
+    );
+  }
+  if (purge.batch !== undefined && !isIntInRange(purge.batch, 1, MAX_PURGE_BATCH)) {
+    throw new IdempotencyConfigurationError(
+      'transactional.purge.batch',
+      'idempotency: transactional.purge.batch is out of range',
+    );
+  }
+}
+
 /**
  * Validates a plugin option set's SHAPE, each field alone.
  *
@@ -450,6 +546,7 @@ export function validatePluginOptionShape(options: IdempotencyPluginOptions): vo
     }
     validateStoreConfig(options.store);
   }
+  if (options.transactional !== undefined) validateTransactionalShape(options.transactional);
 }
 
 /** Applies the plugin defaults to a plugin option set. */

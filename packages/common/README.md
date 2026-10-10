@@ -126,6 +126,12 @@ package fits the plugin architecture.
 
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
+| `IDEMPOTENCY_RECORD_KIND`             | const     |
+| `ITransactionalIdempotencyStore`      | interface |
+| `IdempotentWithinOptions`             | interface |
+| `IdempotentWithinResult`              | interface |
+| `TransactionalIdempotencyClaim`       | interface |
+| `TransactionalIdempotencyRecord`      | interface |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
 | `brandErrorResponder`                 | function  |

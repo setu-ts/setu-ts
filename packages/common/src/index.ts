@@ -398,6 +398,7 @@ export type {
 // lives in `@setu-ts/idempotency-plugin`; only the contracts are shared so the
 // store adapters (memory, Redis, Durable Object) and the decorator plugin can
 // consume them without importing one another (AI_GUIDELINES §2.2).
+export { IDEMPOTENCY_RECORD_KIND } from './services/idempotency.ts';
 export type {
   IdempotencyClaimRequest,
   IdempotencyClaimResult,
@@ -407,10 +408,15 @@ export type {
   IdempotentIngressCommonOptions,
   IdempotentIngressOptions,
   IdempotentRouteOptions,
+  IdempotentWithinOptions,
+  IdempotentWithinResult,
   IIdempotencyService,
   IIdempotencyStore,
   IngressIdempotencyFingerprintSource,
   IngressIdempotencyKeySource,
+  ITransactionalIdempotencyStore,
+  TransactionalIdempotencyClaim,
+  TransactionalIdempotencyRecord,
 } from './services/idempotency.ts';
 export type {
   IScheduler,

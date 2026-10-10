@@ -1030,6 +1030,9 @@ imperative begin/commit.
 
 | Export                                    | Kind      |
 | ----------------------------------------- | --------- |
+| `DatabaseIdempotencyStoreOptions`         | interface |
+| `TransactionalStoreUnavailableError`      | class     |
+| `createDatabaseIdempotencyStore`          | function  |
 | `createDatabaseInboxStore`                | function  |
 | `createDatabaseOutboxStore`               | function  |
 | `createDatabaseTenantDataStore`           | function  |

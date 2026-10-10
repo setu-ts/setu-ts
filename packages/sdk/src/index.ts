@@ -13,6 +13,7 @@ export { createClient } from './sdk.ts';
 
 // Interfaces and types
 export type {
+  ClientIdempotencyOptions,
   ClientOptions,
   ClientRateLimitPolicy,
   ClientRequest,

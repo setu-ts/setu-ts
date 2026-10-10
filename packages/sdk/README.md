@@ -83,17 +83,18 @@ console.log(res.data); // User
 
 `createClient(options)` takes:
 
-| Option                 | Type                          | Default                                 | Description                                       |
-| ---------------------- | ----------------------------- | --------------------------------------- | ------------------------------------------------- |
-| `baseUrl`              | `string`                      | —                                       | Base URL for every request. Required.             |
-| `headers`              | `HeadersInit`                 | —                                       | Headers merged into every request.                |
-| `fetch`                | `typeof fetch`                | global `fetch`                          | Injected transport.                               |
-| `timing`               | `IClientTiming`               | `performance.now()` + abort-aware sleep | Clock and sleep seam, so tests need no real time. |
-| `retry`                | `ClientRetryPolicy`           | off                                     | Retry with fixed or exponential backoff.          |
-| `circuitBreaker`       | `CircuitBreakerPolicy`        | off                                     | Rolling-window breaker.                           |
-| `rateLimit`            | `ClientRateLimitPolicy`       | off                                     | Sliding-window limiter.                           |
-| `requestInterceptors`  | `ClientRequestInterceptor[]`  | `[]`                                    | Run in order before the request.                  |
-| `responseInterceptors` | `ClientResponseInterceptor[]` | `[]`                                    | Run in order after the response.                  |
+| Option                 | Type                          | Default                                 | Description                                                             |
+| ---------------------- | ----------------------------- | --------------------------------------- | ----------------------------------------------------------------------- |
+| `baseUrl`              | `string`                      | —                                       | Base URL for every request. Required.                                   |
+| `headers`              | `HeadersInit`                 | —                                       | Headers merged into every request.                                      |
+| `fetch`                | `typeof fetch`                | global `fetch`                          | Injected transport.                                                     |
+| `timing`               | `IClientTiming`               | `performance.now()` + abort-aware sleep | Clock and sleep seam, so tests need no real time.                       |
+| `retry`                | `ClientRetryPolicy`           | off                                     | Retry with fixed or exponential backoff.                                |
+| `circuitBreaker`       | `CircuitBreakerPolicy`        | off                                     | Rolling-window breaker.                                                 |
+| `rateLimit`            | `ClientRateLimitPolicy`       | off                                     | Sliding-window limiter.                                                 |
+| `idempotency`          | `ClientIdempotencyOptions`    | off                                     | Generated keys for `POST`/`PATCH`; see [Keyed retries](#keyed-retries). |
+| `requestInterceptors`  | `ClientRequestInterceptor[]`  | `[]`                                    | Run in order before the request.                                        |
+| `responseInterceptors` | `ClientResponseInterceptor[]` | `[]`                                    | Run in order after the response.                                        |
 
 `fetch` and `timing` are the two seams that keep the client testable without a network or real time
 — `Date.now()` appears nowhere in this package. See [Resilience](#resilience) for the three policy
@@ -110,17 +111,18 @@ injected `fetch` is always used as-is, which is what tests rely on.)
 
 ### ClientOptions
 
-| Option                 | Type                          | Description                                                                 |
-| ---------------------- | ----------------------------- | --------------------------------------------------------------------------- |
-| `baseUrl`              | `string` (required)           | Base URL for every request                                                  |
-| `headers`              | `Record<string, string>`      | Default headers cloned into each request                                    |
-| `fetch`                | `Function`                    | Injectable fetch seam (default bound to the global realm)                   |
-| `timing`               | `IClientTiming`               | Injectable timing seam (defaults to `createDefaultClientTiming()`)          |
-| `retry`                | `ClientRetryPolicy`           | Retry policy (retries transport failures + 408/425/429/5xx on safe methods) |
-| `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy                                           |
-| `rateLimit`            | `ClientRateLimitPolicy`       | Per-origin sliding-window rate limiter                                      |
-| `requestInterceptors`  | `ClientRequestInterceptor[]`  | Run once before resilient execution                                         |
-| `responseInterceptors` | `ClientResponseInterceptor[]` | Run after successful parse; skipped on failure                              |
+| Option                 | Type                          | Description                                                                                            |
+| ---------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `baseUrl`              | `string` (required)           | Base URL for every request                                                                             |
+| `headers`              | `Record<string, string>`      | Default headers cloned into each request                                                               |
+| `fetch`                | `Function`                    | Injectable fetch seam (default bound to the global realm)                                              |
+| `timing`               | `IClientTiming`               | Injectable timing seam (defaults to `createDefaultClientTiming()`)                                     |
+| `retry`                | `ClientRetryPolicy`           | Retry policy (transport failures + 408/425/429/5xx on safe methods; any method, and `409`, when keyed) |
+| `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy                                                                      |
+| `rateLimit`            | `ClientRateLimitPolicy`       | Per-origin sliding-window rate limiter                                                                 |
+| `idempotency`          | `ClientIdempotencyOptions`    | Generated idempotency keys; see [Keyed retries](#keyed-retries)                                        |
+| `requestInterceptors`  | `ClientRequestInterceptor[]`  | Run once before resilient execution                                                                    |
+| `responseInterceptors` | `ClientResponseInterceptor[]` | Run after successful parse; skipped on failure                                                         |
 
 ### Request
 
@@ -131,6 +133,7 @@ interface ClientRequest<TBody = never> {
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   json?: TBody;
+  idempotencyKey?: string;
   signal?: AbortSignal;
 }
 ```
@@ -212,16 +215,32 @@ const client = createClient({
 });
 ```
 
-Retries transport rejections and statuses 408, 425, 429, 500-599. Only retries safe methods (GET,
-HEAD, OPTIONS, PUT, DELETE). When a retryable response carries a `Retry-After` header with
-delta-seconds, that delay replaces the computed backoff only when it is within the policy cap. Set
-`maxRetryAfterMs` explicitly, or omit it to use the policy's largest fixed/exponential backoff. A
-larger hint surfaces the original `HttpClientError` immediately, with its headers intact.
+Retries transport rejections and statuses 408, 425, 429, 500-599. By default, only retries safe
+methods (GET, HEAD, OPTIONS, PUT, DELETE). When a retryable response carries a `Retry-After` header
+with delta-seconds, that delay replaces the computed backoff only when it is within the policy cap.
+Set `maxRetryAfterMs` explicitly, or omit it to use the policy's largest fixed/exponential backoff.
+A larger hint surfaces the original `HttpClientError` immediately, with its headers intact.
 
 At construction, `limit` must be a positive safe integer, `delay` must be finite and non-negative,
 and every explicit or derived delay must be at most `2_147_483_647` ms, the portable JavaScript
 timer maximum. Runtime strings, non-finite values, and timer-overflowing delays are rejected so they
 cannot disable the cap or be clamped into an immediate retry.
+
+### Keyed retries
+
+`ClientRequest.idempotencyKey` supplies a key; `ClientOptions.idempotency` generates one by default
+for `POST` and `PATCH`. The default header is `Idempotency-Key`; configure `idempotency.header` to
+match the server. When `ClientOptions.idempotency` applies to the request's method and
+`ClientRequest.idempotencyKey` is absent, a request that already carries the configured header uses
+its value as the key. Without matching configuration the header is sent but does not make the
+request keyed, and a request carrying both `idempotencyKey` and that header is refused rather than
+either value replacing the other. The same key is reused across retry attempts, including a
+retryable `409`.
+
+Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
+with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.
+A keyed request carries a non-safelisted header, so a cross-origin browser call triggers a CORS
+preflight; the server must list that header in `Access-Control-Allow-Headers`.
 
 ### Circuit Breaker
 
@@ -548,6 +567,7 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 
 | Export                          | Kind      |
 | ------------------------------- | --------- |
+| `ClientIdempotencyOptions`      | interface |
 | `createApiKeyAuthInterceptor`   | function  |
 | `createBearerAuthInterceptor`   | function  |
 | `createClient`                  | function  |

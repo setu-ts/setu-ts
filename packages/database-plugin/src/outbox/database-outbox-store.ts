@@ -42,6 +42,7 @@ import { CAPABILITIES, createCapabilityToken, OUTBOX_RECORD_KIND } from '@setu-t
 import { UnsupportedQueryFeatureError } from '../errors.ts';
 import { causeChain } from '../errors/classify.ts';
 import type { IDatabaseService, IRepository } from '../interfaces/index.ts';
+import { isMongoReplicaSetRefusal } from '../transactional/backend-probe.ts';
 import { conditionalDelete, conditionalUpdate } from '../repositories/conditional-write.ts';
 import { OutboxStoreUnavailableError } from './errors.ts';
 
@@ -97,9 +98,6 @@ const STATUSES: ReadonlySet<string> = new Set<OutboxStatus>([
   'failed',
   'discarded',
 ]);
-
-/** MongoDB's server code for "transactions need a replica set". */
-const MONGO_ILLEGAL_OPERATION = 20;
 
 /** A row as the adapter hands it back. */
 type Row = Record<string, unknown>;
@@ -157,21 +155,6 @@ function unavailableReason(error: unknown): OutboxStoreUnavailableError['reason'
     if (isMongoReplicaSetRefusal(member)) return 'mongodb-replica-set';
   }
   return 'entity-unavailable';
-}
-
-/**
- * Whether one error is the server's measured standalone refusal: code `20`,
- * `codeName: 'IllegalOperation'` ("Transaction numbers are only allowed on a
- * replica set member or mongos"). Read guarded, since a cause is foreign.
- */
-function isMongoReplicaSetRefusal(member: object): boolean {
-  try {
-    const candidate = member as { code?: unknown; codeName?: unknown };
-    return candidate.code === MONGO_ILLEGAL_OPERATION &&
-      candidate.codeName === 'IllegalOperation';
-  } catch {
-    return false;
-  }
 }
 
 /**

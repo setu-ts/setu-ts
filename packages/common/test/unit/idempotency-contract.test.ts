@@ -11,15 +11,19 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES, createCapabilityToken } from '../../src/index.ts';
+import { CAPABILITIES, createCapabilityToken, IDEMPOTENCY_RECORD_KIND } from '../../src/index.ts';
 import type {
   IdempotencyClaimRequest,
   IdempotencyClaimResult,
   IdempotencySettleResult,
   IdempotentIngressOptions,
   IdempotentRouteOptions,
+  IdempotentWithinOptions,
+  IdempotentWithinResult,
   IIdempotencyService,
   IIdempotencyStore,
+  ITransactionalIdempotencyStore,
+  TransactionalIdempotencyRecord,
 } from '../../src/index.ts';
 
 describe('CAPABILITIES.IDEMPOTENCY (M109a §3.2, §5)', () => {
@@ -117,9 +121,72 @@ describe('IIdempotencyService contract (M109a §3.2)', () => {
       behavior: () => ({
         handle: (_ctx, next) => next(),
       }),
+      within: <R>(): Promise<IdempotentWithinResult<R>> =>
+        Promise.reject(new Error('unconfigured')),
+      purgeTransactional: (): Promise<number> => Promise.reject(new Error('unconfigured')),
     };
 
     expect(typeof service.middleware).toBe('function');
     expect(typeof service.behavior).toBe('function');
+    expect(typeof service.within).toBe('function');
+    expect(typeof service.purgeTransactional).toBe('function');
+  });
+});
+
+/** A named interface — the shape `within` must accept as its result (M109b §3.2). */
+interface ChargeResult {
+  readonly id: string;
+  readonly amount: number;
+}
+
+describe('IIdempotencyService tier-C contract (M109b §3.2)', () => {
+  it('accepts a `within` whose result is a named interface', async () => {
+    const service: IIdempotencyService = {
+      middleware: () => (_ctx, next) => next(),
+      behavior: () => ({ handle: (_ctx, next) => next() }),
+      within: <R>(): Promise<IdempotentWithinResult<R>> =>
+        Promise.reject(new Error('unconfigured')),
+      purgeTransactional: (): Promise<number> => Promise.reject(new Error('unconfigured')),
+    };
+    const options: IdempotentWithinOptions = { key: 'k1', namespace: 'orders', scope: 't1:u1' };
+    await expect(
+      service.within<ChargeResult>(options, () => Promise.resolve({ id: 'c1', amount: 10 })),
+    ).rejects.toThrow('unconfigured');
+    await expect(service.purgeTransactional()).rejects.toThrow('unconfigured');
+  });
+});
+
+describe('ITransactionalIdempotencyStore contract (M109b §3.1)', () => {
+  it('admits a store with the four members and reads them', async () => {
+    const store: ITransactionalIdempotencyStore = {
+      find: () => Promise.resolve(undefined),
+      run: async (_claim, work) => (await work({ tenant: 't1' })).value,
+      purge: () => Promise.resolve(3),
+      verify: () => Promise.resolve(),
+    };
+
+    expect(await store.find('a'.repeat(64))).toBeUndefined();
+    expect(await store.purge(1_000, 10)).toBe(3);
+    await store.verify();
+    const value = await store.run(
+      { id: 'a'.repeat(64), fingerprint: 'b'.repeat(64), createdAt: 1, expiresAt: 2 },
+      (scope) => {
+        expect(scope).toEqual({ tenant: 't1' });
+        return Promise.resolve({ result: '{"v":7}', value: 7 });
+      },
+    );
+    expect(value).toBe(7);
+  });
+
+  it('exports the tier-C kind constant and record type from the barrel', () => {
+    expect(IDEMPOTENCY_RECORD_KIND).toBe('setu-idempotency');
+    const record: TransactionalIdempotencyRecord = {
+      id: 'a'.repeat(64),
+      fingerprint: 'b'.repeat(64),
+      result: '{"v":1}',
+      createdAt: 0,
+      expiresAt: 86_400_000,
+    };
+    expect(record.expiresAt).toBe(86_400_000);
   });
 });
