@@ -267,6 +267,24 @@ export type {
   PolicyRef,
   PolicyTarget,
 } from './services/authorization-policies.ts';
+export {
+  isScopeType,
+  MAX_SCOPE_ID_LENGTH,
+  SCOPED_RBAC_POLICY,
+  scopedPermissionAbility,
+  scopedRoleAbility,
+} from './services/scoped-authorization.ts';
+export type {
+  GrantQuery,
+  IGrantSource,
+  IScopedRoleSource,
+  ScopedGrant,
+  ScopedRbacTarget,
+  ScopedRoleDefinition,
+  ScopeRef,
+} from './services/scoped-authorization.ts';
+export { scopeFromParam, scopeFromTenant } from './services/scope-sources.ts';
+export type { ScopeSource } from './services/scope-sources.ts';
 export type {
   AuthMethod,
   IAuthSessionService,

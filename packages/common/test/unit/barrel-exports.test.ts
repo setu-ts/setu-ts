@@ -776,3 +776,43 @@ describe('@setu-ts/common barrel — authorization policies (M110a)', () => {
     expect(service.describe('post', 'read')).toEqual({ anonymous: false });
   });
 });
+
+describe('scoped RBAC exports (M110b)', () => {
+  it('exports the reserved policy name, the encoders and the scope sources', () => {
+    expect(common.SCOPED_RBAC_POLICY).toBe('scoped-rbac');
+    expect(common.MAX_SCOPE_ID_LENGTH).toBe(256);
+    expect(common.scopedPermissionAbility('p')).toBe('perm:p');
+    expect(common.scopedRoleAbility('r')).toBe('role:r');
+    expect(common.isScopeType('tenant')).toBe(true);
+    expect(typeof common.scopeFromTenant).toBe('function');
+    expect(typeof common.scopeFromParam).toBe('function');
+  });
+
+  it('exports the model types', () => {
+    const scope: import('../../src/index.ts').ScopeRef = { type: 'tenant', id: 't' };
+    const grant: import('../../src/index.ts').ScopedGrant = { role: 'r', scope };
+    const query: import('../../src/index.ts').GrantQuery = { kind: 'chain', scopes: [scope] };
+    const target: import('../../src/index.ts').ScopedRbacTarget = { scope: null };
+    const source: import('../../src/index.ts').ScopeSource = scope;
+    const definition: import('../../src/index.ts').ScopedRoleDefinition = {
+      scope,
+      role: 'r',
+      permissions: [],
+    };
+    const grants: import('../../src/index.ts').IGrantSource = {
+      name: 'g',
+      grantsFor: () => Promise.resolve([grant]),
+    };
+    const roles: import('../../src/index.ts').IScopedRoleSource = {
+      name: 'r',
+      rolesFor: () => Promise.resolve([definition]),
+    };
+    expect([query.kind, target.scope, source, grants.name, roles.name]).toEqual([
+      'chain',
+      null,
+      scope,
+      'g',
+      'r',
+    ]);
+  });
+});
