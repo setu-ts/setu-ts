@@ -21,12 +21,12 @@ import type {
   OrderDirection,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   keysetPredicate,
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
-  writePreconditionProblem,
 } from '@setu-ts/common';
 import {
   fromDriverDocument,
@@ -129,7 +129,15 @@ export function createMongoDataSource(
     operation: 'findById' | 'update' | 'delete',
   ): Promise<Record<string, unknown>> => {
     const columns = target.primaryKey;
+    // A key value reaches the driver as a filter value, and an object there is
+    // read as a query OPERATOR (`{ $ne: 'x' }` matches every other document),
+    // so only a string or number is accepted. The refusal never quotes the value.
+    const keyValueRefusal = (): Promise<never> =>
+      Promise.reject(
+        new Error(`MongoAdapter: ${operation} key values must be strings or numbers.`),
+      );
     if (columns.length === 1) {
+      if (typeof id !== 'string' && typeof id !== 'number') return keyValueRefusal();
       // Scalar path — still honours `idType: 'objectId'` conversion.
       return Promise.resolve({ _id: toDriverId(id, target.idType, objectIdCtor) });
     }
@@ -158,6 +166,7 @@ export function createMongoDataSource(
             ),
           );
         }
+        if (typeof value !== 'string' && typeof value !== 'number') return keyValueRefusal();
         subdoc[col] = value;
       }
       return Promise.resolve({ _id: subdoc });
@@ -183,6 +192,7 @@ export function createMongoDataSource(
           ),
         );
       }
+      if (typeof value !== 'string' && typeof value !== 'number') return keyValueRefusal();
       filter[col] = toDriverId(value, target.idType, objectIdCtor);
     }
     return Promise.resolve(filter);
@@ -286,10 +296,12 @@ export function createMongoDataSource(
     },
 
     async updateWhere(id, where, data) {
-      const problem = writePreconditionProblem(where, data);
-      if (problem !== undefined) {
-        throw new UnsupportedQueryFeatureError('write-precondition', 'mongodb', problem);
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'mongodb', checked.problem);
       }
+      where = checked.where;
+      data = checked.data;
       const mapped = mapQueryToDriver(
         { where, orderBy: {}, limit: -1, offset: 0, select: [] },
         target,
@@ -309,10 +321,11 @@ export function createMongoDataSource(
       return result == null ? null : fromDriverDocument(result, target);
     },
     async deleteWhere(id, where) {
-      const problem = writePreconditionProblem(where);
-      if (problem !== undefined) {
-        throw new UnsupportedQueryFeatureError('write-precondition', 'mongodb', problem);
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'mongodb', checked.problem);
       }
+      where = checked.where;
       const mapped = mapQueryToDriver(
         { where, orderBy: {}, limit: -1, offset: 0, select: [] },
         target,

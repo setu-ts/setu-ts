@@ -21,7 +21,10 @@ export function dynamoFixture() {
     return (input.ConditionExpression ?? '').split(' AND ').every((condition) => {
       if (condition.startsWith('attribute_exists')) return true;
       const [attribute, value] = condition.split(' = ');
-      const actual = item[names[attribute!]!];
+      // Own attributes only: DynamoDB has no prototype, so a condition on a
+      // `constructor` attribute is a missing attribute and fails the check.
+      const name = names[attribute!]!;
+      const actual = Object.prototype.hasOwnProperty.call(item, name) ? item[name] : undefined;
       return actual !== undefined &&
         unmarshalDynamoValue(actual) === unmarshalDynamoValue(values[value!]!);
     });

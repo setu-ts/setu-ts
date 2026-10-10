@@ -1577,11 +1577,17 @@ the same outcome and write nothing. The key and predicate remain separate conjun
 predicate names a key field.
 
 `WritePrecondition`, exported by `@setu-ts/common`, is `Readonly<Record<string, string | number>>`.
-`writePreconditionProblem(where, data?)` returns a reason or `undefined`; it requires a non-empty
-plain equality object, non-empty field names without a `$` prefix or `.`, string/number values, and,
-when supplied, a non-empty plain update payload. Every implementation validates direct calls as well
-as repository calls. Invalid inputs reject with `UnsupportedQueryFeatureError` feature
-`'write-precondition'` (unbranded) — except a direct call to the D1 data source, which rejects with
+`checkWritePrecondition(where, data?)` returns a `WritePreconditionCheck`: `{ ok: false, problem }`,
+or `{ ok: true, where, data }` carrying private copies of the inputs. It requires a non-empty plain
+equality object, non-empty field names without a `$` prefix or `.`, string or finite-number values,
+and, when supplied, a non-empty plain update payload. Each field is read once into the copy and the
+copy is what gets validated and written, so an input that changes between reads (a `Proxy`) cannot
+send something other than what passed. An own `__proto__` key stays an ordinary field. Every
+implementation validates direct calls as well as repository calls. No refusal from the conditional
+members quotes a caller value or field name, except D1's unknown-column refusal, which is SQLite's
+own diagnostic as for every D1 statement; Prisma's validation message is replaced with a fixed
+sentence. Invalid inputs reject with `UnsupportedQueryFeatureError` feature `'write-precondition'`
+(unbranded) — except a direct call to the D1 data source, which rejects with
 `CloudflareUnsupportedError`, since `cloudflare-plugin` cannot import `database-plugin`'s error.
 Through a repository the check runs in `BaseRepository` first, so every backend answers
 `'write-precondition'` there. `BaseRepository` rejects missing support with

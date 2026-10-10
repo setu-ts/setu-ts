@@ -52,7 +52,11 @@ export const sources: readonly {
           if (field === 'AND') {
             for (const clause of value as Record<string, unknown>[]) validate(clause);
           } else if (!['id', 'role', 'name'].includes(field)) {
-            throw new Error('Unknown argument in User predicate');
+            // Real Prisma's validation error is named so and renders the
+            // whole query, values included — which is what M105 must not echo.
+            const error = new Error(`Unknown argument in User.update ${JSON.stringify(where)}`);
+            error.name = 'PrismaClientValidationError';
+            throw error;
           }
         }
       };

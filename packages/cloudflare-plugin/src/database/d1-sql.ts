@@ -392,6 +392,12 @@ export function buildDelete(target: D1Target, id: EntityKey): D1Statement {
 function withPrecondition(statement: D1Statement, where: WritePrecondition): D1Statement {
   const params = [...statement.params];
   const predicate = Object.entries(where).map(([field, value]) => {
+    // Checked before quoting so the refusal names no caller-supplied field.
+    if (!IDENTIFIER.test(field)) {
+      throw new CloudflareUnsupportedError(
+        'D1: a write precondition field is not a valid SQL identifier.',
+      );
+    }
     params.push(value);
     return `${quoteIdentifier(field, 'write precondition column')} = ?${params.length}`;
   }).join(' AND ');

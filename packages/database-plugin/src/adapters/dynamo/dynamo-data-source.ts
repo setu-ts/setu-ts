@@ -1,11 +1,11 @@
 /** DynamoDB implementation of the per-entity IDataSource port. @module */
 import type { EntityKey, IDataSource, NormalizedQuery, PageResult } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   DuplicateKeyError,
   encodeCursor,
   sortFingerprint,
-  writePreconditionProblem,
 } from '@setu-ts/common';
 import type {
   DynamoAttributeMap,
@@ -304,10 +304,12 @@ export function createDynamoDataSource(
     },
     ...(transactionBuffer !== undefined ? {} : {
       async updateWhere(id, where, data) {
-        const problem = writePreconditionProblem(where, data);
-        if (problem !== undefined) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, problem);
+        const checked = checkWritePrecondition(where, data);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
         }
+        where = checked.where;
+        data = checked.data;
         const identifier = key(id, 'updateWhere');
         const entries = Object.entries(data).filter(([name, value]) =>
           value !== undefined && !target.keyColumns.includes(name)
@@ -348,10 +350,11 @@ export function createDynamoDataSource(
         }
       },
       async deleteWhere(id, where) {
-        const problem = writePreconditionProblem(where);
-        if (problem !== undefined) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, problem);
+        const checked = checkWritePrecondition(where);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
         }
+        where = checked.where;
         const identifier = key(id, 'deleteWhere');
         const builder = createDynamoExpressionBuilder();
         const conditions = Object.entries(where).map(([name, value]) =>

@@ -23,11 +23,11 @@ import type {
   PageResult,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   DuplicateKeyError,
   mintNextCursor,
   sortFingerprint,
-  writePreconditionProblem,
 } from '@setu-ts/common';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import { matchesFilter, matchesWhere, projectFields } from '../../query/query-builder.ts';
@@ -389,10 +389,12 @@ export function createBigtableDataSource(
 
     ...(buffer !== undefined ? {} : {
       async updateWhere(id, where, data) {
-        const problem = writePreconditionProblem(where, data);
-        if (problem !== undefined) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, problem);
+        const checked = checkWritePrecondition(where, data);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
         }
+        where = checked.where;
+        data = checked.data;
         const rowKey = composeRowKey(target, id, 'updateWhere');
         const test = preconditionTest(target, where);
         if (test === null) return null;
@@ -404,10 +406,11 @@ export function createBigtableDataSource(
         return matched ? await readOne(rowKey) : null;
       },
       async deleteWhere(id, where) {
-        const problem = writePreconditionProblem(where);
-        if (problem !== undefined) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, problem);
+        const checked = checkWritePrecondition(where);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
         }
+        where = checked.where;
         const rowKey = composeRowKey(target, id, 'deleteWhere');
         const test = preconditionTest(target, where);
         if (test === null) return false;

@@ -162,6 +162,8 @@ describe('conditional writes conjoin key and predicate at every public data sour
         { $where: 'canary' },
         { 'a.b': 1 },
         { '': 1 },
+        { n: Number.NaN },
+        { n: Number.POSITIVE_INFINITY },
       ];
       for (const value of refused) {
         const where = value as WritePrecondition;
@@ -171,17 +173,55 @@ describe('conditional writes conjoin key and predicate at every public data sour
       await expect(ds.updateWhere!('a', { role: 'owner' }, {})).rejects.toThrow();
       expect(await ds.findById('a')).toBeNull();
     });
-    it(`${name}: unknown-column outcome is ${unknown}`, async () => {
+    // `constructor` and `toString` are inherited members of a plain object: a
+    // field map read without an own-property check would resolve them.
+    for (const field of ['canary_field', 'constructor', 'toString']) {
+      it(`${name}: unknown column '${field}' is ${unknown} and never echoed`, async () => {
+        const ds = make();
+        await ds.create({ id: 'a', role: 'owner', name: 'old' });
+        const where = { [field]: 'canary-value' };
+        if (unknown === 'throws') {
+          for (
+            const attempt of [
+              () => ds.updateWhere!('a', where, { name: 'canary-payload' }),
+              () => ds.deleteWhere!('a', where),
+            ]
+          ) {
+            const error = await attempt().then(() => undefined, (caught: unknown) => caught);
+            expect(error).toBeInstanceOf(Error);
+            const message = (error as Error).message;
+            expect(message).not.toContain('canary-value');
+            expect(message).not.toContain('canary-payload');
+            // D1's unknown-column refusal is SQLite's own driver diagnostic,
+            // which names the column (as for every D1 statement).
+            if (name !== 'd1') expect(message).not.toContain(field);
+          }
+        } else {
+          expect(await ds.updateWhere!('a', where, { name: 'bad' })).toBeNull();
+          expect(await ds.deleteWhere!('a', where)).toBe(false);
+        }
+        expect(await ds.findById('a')).toMatchObject({ name: 'old' });
+      });
+    }
+    it(`${name}: writes the validated copy of a key-swapping predicate`, async () => {
       const ds = make();
       await ds.create({ id: 'a', role: 'owner', name: 'old' });
-      if (unknown === 'throws') {
-        await expect(ds.updateWhere!('a', { unknown: 1 }, { name: 'bad' })).rejects.toThrow();
-        await expect(ds.deleteWhere!('a', { unknown: 1 })).rejects.toThrow();
-      } else {
-        expect(await ds.updateWhere!('a', { unknown: 1 }, { name: 'bad' })).toBeNull();
-        expect(await ds.deleteWhere!('a', { unknown: 1 })).toBe(false);
-      }
+      await ds.create({ id: 'b', role: 'other', name: 'untouched' });
+      let reads = 0;
+      // Legitimate on the first read of each field; an operator afterwards.
+      const swapping = () =>
+        new Proxy({ role: 'other' } as Record<string, unknown>, {
+          get(target, key) {
+            reads += 1;
+            return reads === 1 ? Reflect.get(target, key) : { $ne: 'nothing' };
+          },
+        }) as WritePrecondition;
+      reads = 0;
+      expect(await ds.updateWhere!('a', swapping(), { name: 'bad' })).toBeNull();
+      reads = 0;
+      expect(await ds.deleteWhere!('a', swapping())).toBe(false);
       expect(await ds.findById('a')).toMatchObject({ name: 'old' });
+      expect(await ds.findById('b')).toMatchObject({ name: 'untouched' });
     });
   }
 });

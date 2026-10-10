@@ -18,12 +18,12 @@ import type {
   PageResult,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   keysetPredicate,
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
-  writePreconditionProblem,
 } from '@setu-ts/common';
 import type { ID1Database, ID1PreparedStatement } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
@@ -245,13 +245,16 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
     },
 
     async updateWhere(id, where, data) {
-      const problem = writePreconditionProblem(where, data);
-      if (problem !== undefined) throw new CloudflareUnsupportedError(problem);
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) throw new CloudflareUnsupportedError(checked.problem);
+      where = checked.where;
+      data = checked.data;
       return await prepareStatement(db, buildUpdateWhere(target, id, where, data)).first();
     },
     async deleteWhere(id, where) {
-      const problem = writePreconditionProblem(where);
-      if (problem !== undefined) throw new CloudflareUnsupportedError(problem);
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) throw new CloudflareUnsupportedError(checked.problem);
+      where = checked.where;
       const result = await prepareStatement(db, buildDeleteWhere(target, id, where)).all();
       return result.results.length > 0;
     },

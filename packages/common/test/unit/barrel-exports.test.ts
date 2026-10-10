@@ -10,12 +10,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as common from '../../src/index.ts';
-import type { WritePrecondition } from '../../src/index.ts';
+import type { WritePrecondition, WritePreconditionCheck } from '../../src/index.ts';
 
 describe('portable write precondition exports', () => {
   it('exports the type and validator', () => {
     const where: WritePrecondition = { status: 'pending', attempts: 1 };
-    expect(common.writePreconditionProblem(where)).toBeUndefined();
+    const checked: WritePreconditionCheck<undefined> = common.checkWritePrecondition(where);
+    expect(checked).toEqual({ ok: true, where, data: undefined });
   });
 });
 import type {

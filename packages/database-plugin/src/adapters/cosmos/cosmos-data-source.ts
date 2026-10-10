@@ -25,12 +25,12 @@ import type {
   WritePrecondition,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   keysetPredicate,
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
-  writePreconditionProblem,
 } from '@setu-ts/common';
 import type {
   CosmosItemResponse,
@@ -554,17 +554,20 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
 
     ...(buffer !== undefined ? {} : {
       async updateWhere(id, where, data) {
-        const problem = writePreconditionProblem(where, data);
-        if (problem !== undefined) {
-          throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', problem);
+        const checked = checkWritePrecondition(where, data);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', checked.problem);
         }
+        where = checked.where;
+        data = checked.data;
         return await guardedWrite(id, where, data);
       },
       async deleteWhere(id, where) {
-        const problem = writePreconditionProblem(where);
-        if (problem !== undefined) {
-          throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', problem);
+        const checked = checkWritePrecondition(where);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', checked.problem);
         }
+        where = checked.where;
         return (await guardedWrite(id, where)) !== null;
       },
     } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>),

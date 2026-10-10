@@ -48,3 +48,22 @@ describe('D1 conditional writes', () => {
     expect(await source.findById('a')).toBeNull();
   });
 });
+
+describe('D1 conditional-write refusals name no caller field (M105 audit O3)', () => {
+  it('refuses a non-identifier precondition field without echoing it', async () => {
+    const source = createD1DataSource(
+      new SqliteD1('CREATE TABLE users(id TEXT PRIMARY KEY, name TEXT, role TEXT)'),
+      target,
+    );
+    for (
+      const attempt of [
+        () => source.updateWhere!('a', { 'canary field': 'v' }, { name: 'x' }),
+        () => source.deleteWhere!('a', { 'canary field': 'v' }),
+      ]
+    ) {
+      const error = await attempt().then(() => undefined, (caught: unknown) => caught);
+      expect((error as Error).message).toMatch(/not a valid SQL identifier/);
+      expect((error as Error).message).not.toContain('canary');
+    }
+  });
+});

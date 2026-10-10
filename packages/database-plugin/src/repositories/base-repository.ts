@@ -5,7 +5,7 @@
  * @module
  */
 import type { EntityKey, IDataSource, WritePrecondition } from '@setu-ts/common';
-import { writePreconditionProblem } from '@setu-ts/common';
+import { checkWritePrecondition } from '@setu-ts/common';
 import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
 import {
   normalizeCountOptions,
@@ -118,10 +118,15 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string>
     where: WritePrecondition,
     data: Partial<Entity>,
   ): Promise<Entity | null> {
-    const problem = writePreconditionProblem(where, data);
-    if (problem !== undefined) {
-      throw new UnsupportedQueryFeatureError('write-precondition', 'database-plugin', problem);
+    const checked = checkWritePrecondition(where, data);
+    if (!checked.ok) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'database-plugin',
+        checked.problem,
+      );
     }
+    where = checked.where;
     if (this._dataSource.updateWhere === undefined) {
       throw new UnsupportedQueryFeatureError(
         'conditional-write',
@@ -132,7 +137,7 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string>
     const row = await this._dataSource.updateWhere(
       this.coerceId(id),
       where,
-      data as Partial<Record<string, unknown>>,
+      checked.data,
     );
     return row === null ? null : this.toEntity(row);
   }
@@ -147,10 +152,15 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string>
    * @since 0.9.0
    */
   async deleteWhere(id: Id, where: WritePrecondition): Promise<boolean> {
-    const problem = writePreconditionProblem(where);
-    if (problem !== undefined) {
-      throw new UnsupportedQueryFeatureError('write-precondition', 'database-plugin', problem);
+    const checked = checkWritePrecondition(where);
+    if (!checked.ok) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'database-plugin',
+        checked.problem,
+      );
     }
+    where = checked.where;
     if (this._dataSource.deleteWhere === undefined) {
       throw new UnsupportedQueryFeatureError(
         'conditional-write',

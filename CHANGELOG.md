@@ -9,10 +9,14 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **Conditional repository writes (M105).** Optional `updateWhere` and `deleteWhere` on
-  `IRepository` and `IDataSource`, with shared `WritePrecondition` and `writePreconditionProblem`
-  validation, native adapter conditions, bounded Cosmos version guards and Bigtable newest-cell
-  checks. Tenant, outbox and inbox bridges use conditional writes when supported and retain their
-  fallback for other sources.
+  `IRepository` and `IDataSource`, with shared `WritePrecondition` and `checkWritePrecondition`
+  validation (`WritePreconditionCheck`), native adapter conditions, bounded Cosmos version guards
+  and Bigtable newest-cell checks. `checkWritePrecondition` returns private copies of the predicate
+  and payload, and every implementation writes the copies, so the predicate the backend receives is
+  the one that was validated. Non-finite numbers are refused. Refusals from the conditional members
+  quote no caller value; Prisma's validation message, which renders the whole query, is replaced
+  with a fixed sentence there. Tenant, outbox and inbox bridges use conditional writes when
+  supported and retain their fallback for other sources.
 
 - **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
   questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup
@@ -630,6 +634,16 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **MongoDB refuses an operator-shaped key (`@setu-ts/database-plugin`, M105).** Since M78 a key
+  value that was an object — `findById({ $ne: 'x' })`, or such a value inside a composite key —
+  reached the driver filter and was read as a query operator, addressing other documents. Every
+  keyed operation now rejects a key value that is not a string or number, before any driver call,
+  without quoting it.
+- **Bigtable and DynamoDB field maps read own entries only (`@setu-ts/database-plugin`, M105).** A
+  field named after an inherited member (`constructor`, `toString`) resolved the inherited function
+  as a column address or date encoding; Bigtable then threw a `TypeError`. Both maps are now
+  null-prototype records, so such a field is an ordinary unmapped field.
 
 - **Worker lifecycle and example hardening (M45c, #433).** Expired pending tasks reclaim excess
   starting slots; stale startup callbacks cannot reject unrelated work. Termination throws and

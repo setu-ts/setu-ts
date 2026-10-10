@@ -14,7 +14,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
 import type { IMongoSession } from '../../src/adapters/mongo/mongo-client-types.ts';
-import type { NormalizedQuery } from '@setu-ts/common';
+import type { EntityKey, NormalizedQuery } from '@setu-ts/common';
 import { encodeCursor } from '@setu-ts/common';
 import { FakeMongoClient, fakeObjectIdCtor, FakeSession } from '../fixtures/fake-mongo-client.ts';
 
@@ -808,4 +808,57 @@ describe('scalar-key mapping renames in place (M79 review regression)', () => {
     expect(Object.entries(sort ?? {})).toEqual([['score', 'asc'], ['_id', 'asc']]);
     expect(page.rows.map((r) => r.id)).toEqual(['a', 'b']);
   });
+});
+
+describe('operator-shaped key values are refused before the driver (M105 audit O2)', () => {
+  // A key object reaching the filter is read as a query operator: `{ $ne: 'x' }`
+  // would address every OTHER document.
+  const operator = { $ne: 'nobody' } as unknown as EntityKey;
+  const targets = [
+    { name: 'scalar', entity: 'User', mapping: undefined, key: operator },
+    {
+      name: 'flat composite',
+      entity: 'User',
+      mapping: { User: { primaryKey: ['tenantId', 'userId'] as const } },
+      key: { tenantId: 't1', userId: operator } as unknown as EntityKey,
+    },
+    {
+      name: 'compound',
+      entity: 'User',
+      mapping: {
+        User: { primaryKey: ['tenantId', 'userId'] as const, idType: 'compound' as const },
+      },
+      key: { tenantId: 't1', userId: operator } as unknown as EntityKey,
+    },
+  ];
+  for (const { name, entity, mapping, key } of targets) {
+    it(`${name}: every keyed operation rejects without a driver call or an echo`, async () => {
+      const client = makeClient();
+      const ds = createMongoDataSource(client, 'testdb', entity, mapping);
+      const calls = client.db('testdb').collection(entity).calls;
+      for (
+        const attempt of [
+          () => ds.findById(key),
+          () => ds.update(key, { name: 'x' }),
+          () => ds.delete(key),
+          () => ds.updateWhere!(key, { name: 'a' }, { name: 'x' }),
+          () => ds.deleteWhere!(key, { name: 'a' }),
+        ]
+      ) {
+        let synchronous = false;
+        let pending: Promise<unknown>;
+        try {
+          pending = attempt();
+        } catch {
+          synchronous = true;
+          pending = Promise.resolve();
+        }
+        expect(synchronous).toBe(false);
+        const error = await pending.then(() => undefined, (caught: unknown) => caught);
+        expect((error as Error).message).toMatch(/key values must be strings or numbers/);
+        expect((error as Error).message).not.toContain('$ne');
+      }
+      expect(calls).toEqual([]);
+    });
+  }
 });

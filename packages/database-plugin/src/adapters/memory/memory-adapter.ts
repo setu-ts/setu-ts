@@ -23,13 +23,13 @@ import type {
   TransactionOptions,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   DuplicateKeyError,
   keysetPredicate,
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
-  writePreconditionProblem,
 } from '@setu-ts/common';
 import {
   applyOrderBy,
@@ -708,10 +708,12 @@ export class MemoryAdapter implements IDatabaseAdapter {
       delete: (id) => this.deleteEntity(entity, id),
       // deno-lint-ignore require-await -- atomic store mutation; errors must reject.
       updateWhere: async (id, where, data) => {
-        const problem = writePreconditionProblem(where, data);
-        if (problem !== undefined) {
-          throw new UnsupportedQueryFeatureError('write-precondition', 'memory', problem);
+        const checked = checkWritePrecondition(where, data);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', 'memory', checked.problem);
         }
+        where = checked.where;
+        data = checked.data;
         const store = this.getStore(entity);
         const index = findRecordIndex(store, id);
         if (index === -1 || !matchesWhere(store.records[index], where)) return null;
@@ -723,10 +725,11 @@ export class MemoryAdapter implements IDatabaseAdapter {
       },
       // deno-lint-ignore require-await -- atomic store mutation; errors must reject.
       deleteWhere: async (id, where) => {
-        const problem = writePreconditionProblem(where);
-        if (problem !== undefined) {
-          throw new UnsupportedQueryFeatureError('write-precondition', 'memory', problem);
+        const checked = checkWritePrecondition(where);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', 'memory', checked.problem);
         }
+        where = checked.where;
         const store = this.getStore(entity);
         const index = findRecordIndex(store, id);
         if (index === -1 || !matchesWhere(store.records[index], where)) return false;

@@ -654,5 +654,5 @@ export {
 
 export { hasForbiddenAliasCharacter } from './diagnostics/alias.ts';
 
-export type { WritePrecondition } from './services/write-precondition.ts';
-export { writePreconditionProblem } from './services/write-precondition.ts';
+export type { WritePrecondition, WritePreconditionCheck } from './services/write-precondition.ts';
+export { checkWritePrecondition } from './services/write-precondition.ts';
