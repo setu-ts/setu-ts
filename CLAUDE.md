@@ -6514,10 +6514,12 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   would then fire on `docs/…` PRs too — nothing in CodeRabbit's config excludes by HEAD branch.
   **The failure is silent**: `review_status: false` suppresses the "review skipped" notice, so a PR
   nobody asked to review looks exactly like one whose review has not arrived — check the comment was
-  posted. A re-review after pushing fixes is another `@coderabbitai review`. The `maintainer-review`
-  label is retired and triggers nothing. The repo file overrides the CodeRabbit dashboard, so the
-  web toggle changes nothing. Fork PRs are proposals and are not reviewed (CONTRIBUTING.md).
-  AI_GUIDELINES §16.7 is canonical.
+  posted. A re-review after pushing fixes is another `@coderabbitai review`. Also attach the
+  `maintainer-review` label to every such PR (`gh pr edit <pr> --add-label maintainer-review`) — the
+  maintainer keeps it as the marker of a PR awaiting their review, though it no longer triggers
+  CodeRabbit; the comment does. The repo file overrides the CodeRabbit dashboard, so the web toggle
+  changes nothing. Fork PRs are proposals and are not reviewed (CONTRIBUTING.md). AI_GUIDELINES
+  §16.7 is canonical.
 - **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
   the code-quality bot anchor findings to lines; answer in the thread
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with

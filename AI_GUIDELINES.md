@@ -1105,8 +1105,10 @@ hotfix PR targets `develop` (§15.3).
 branch plus `base_branches`. With `main` as the default, automatic review would have to be re-scoped
 to `develop`, and it would then fire on every `docs/…` PR as well: neither `base_branches` nor
 `labels` can exclude a PR by its HEAD branch. A comment trigger is explicit and excludable. The
-previous rule — a `maintainer-review` label opting a PR in — is retired; that label no longer
-triggers anything.
+`maintainer-review` label used to opt a PR in; it no longer triggers CodeRabbit, but every
+non-`docs/…` PR still carries it (`gh pr edit <pr> --add-label maintainer-review`) at the
+maintainer's direction, as the marker of a PR awaiting their review. A `docs/…` PR and a back-merge
+carry neither the comment nor the label.
 
 **The omission is silent, which is what makes this a rule rather than a preference.** The file sets
 `review_status: false`, so CodeRabbit posts no "review skipped" notice: a PR nobody asked to review
