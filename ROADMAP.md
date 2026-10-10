@@ -13002,8 +13002,10 @@ re-filed.
 
 ## Milestone 105: Conditional Writes on `IRepository`
 
-**Package(s):** `packages/database-plugin`, `packages/cloudflare-plugin` (`D1Adapter`), with
-`packages/common` only if a filter type must move there.
+**Package(s):** `packages/database-plugin`, `packages/cloudflare-plugin` (`D1Adapter`) and
+`packages/common`. **Corrected by the plan (C1):** this line named `common` "only if a filter type
+must move there", but `IDataSource` — the port every adapter implements — lives in `common`, so it
+changes unconditionally.
 
 **Objective:** a write that applies only when a predicate still holds, so a check and the write it
 guards are one operation rather than two.
@@ -13020,24 +13022,45 @@ isolation lets it through, and D1, DynamoDB and Cosmos defer writes until commit
 
 **Scope.**
 
-- `updateWhere(id, where, data)` and `deleteWhere(id, where)` on `IRepository`, each applied as ONE
-  native operation per adapter (a `WHERE key = ? AND col = ?` statement, a Mongo filter, a DynamoDB
-  `ConditionExpression`, a Cosmos/Bigtable conditional mutation), returning "not matched" rather
-  than writing when the predicate fails. An adapter that cannot express it atomically refuses by
-  name — never an emulated check-then-write, which would reproduce the defect.
-- Per the versioning policy below, the members ship OPTIONAL (a required member is breaking for
-  every out-of-repo implementor), with the required form deferred to a named minor; the plan records
-  that choice.
-- `DatabaseTenantDataStore` uses them when present and keeps today's documented two-call path
-  otherwise, so the bridge's JSDoc limit narrows to adapters lacking the member.
+- `updateWhere(id, where, data)` and `deleteWhere(id, where)` on `IRepository` (and on the
+  `IDataSource` port), each applied as ONE native operation per adapter (a
+  `WHERE key = ? AND
+  col = ?` statement, a Mongo filter, a DynamoDB `ConditionExpression`, a
+  Bigtable CheckAndMutateRow), returning "not matched" rather than writing when the predicate fails.
+  Cosmos has no predicate-conditioned delete, so it reads and then writes guarded by the read's
+  `_etag` (`IfMatch`) — a version compare-and-swap, not a check-then-write: probed on the emulator,
+  a delete-and-recreate under the same id fails the guard with `412` (corrected by the plan, C3). A
+  data source that cannot express it atomically omits the member and the repository refuses by name
+  — never an emulated check-then-write, which would reproduce the defect.
+- The predicate is an equality map on string and number values. Per the versioning policy below, the
+  members ship OPTIONAL — and stay optional permanently: absence means "this data source cannot
+  write conditionally", the `IDataSource.findPage?` arrangement, and a required form would break
+  out-of-repo implementors while removing no fallback (the deferred-write transactions below keep
+  refusing either way).
+- **Three callers switch over, not one** (widened by the plan, C2, maintainer-approved 2026-10-10):
+  `DatabaseTenantDataStore`, AND the M107 outbox store's status transitions and the M108 inbox
+  store's failure count and release — the database-plugin README and PUBLIC_API.md already promised
+  that this milestone closes those two races. Each keeps today's two-call path when the bound data
+  source lacks the member, through one shared fallback helper.
+- **Not covered, and not owned by the framework.** (1) A conditional write inside a transaction that
+  defers its writes to commit (memory, D1, DynamoDB, Cosmos, Bigtable): the outcome is not known
+  when the call returns, so those transaction data sources omit the members. (2) Predicates beyond
+  equality (`null`, booleans, `Date`, ranges, `contains`, `or`). Neither ASP.NET Core nor NestJS
+  owns either: both are ORM features — EF Core's concurrency tokens checked at `SaveChanges` and
+  `ExecuteUpdateAsync` with an arbitrary `Where`; TypeORM's `@VersionColumn`; MikroORM's `version`
+  checked at `flush()`. An application needing either uses its ORM directly through the existing
+  seams: `getDrizzleDatabase`/`getDrizzleTransaction` (M69), the application-supplied Prisma client,
+  and the injected MongoDB/DynamoDB/Cosmos/Bigtable clients.
+- **Not this milestone:** fencing a stale outbox relay and running several relays at once — M107b.
 
 **Deliverables**
 
-- [ ] The two members, implemented natively by every built-in adapter or refused by name
-- [ ] A per-adapter conformance table (the `filter-conformance.test.ts` shape) driving a predicate
+- [x] The two members, implemented natively by every built-in adapter or omitted and refused by name
+- [x] A per-adapter conformance table (the `filter-conformance.test.ts` shape) driving a predicate
       that fails between read and write, against the real backend where CI has one
-- [ ] The tenant bridge switched over, with a negative control reproducing the M101c race
-- [ ] PUBLIC_API.md, the database-plugin README, and the bridge JSDoc updated
+- [x] The tenant bridge switched over, with a negative control reproducing the M101c race
+- [x] The outbox and inbox stores switched over, with a negative control for each race
+- [x] PUBLIC_API.md, the database-plugin README, and the bridge JSDoc updated
 
 ---
 
@@ -13149,23 +13172,24 @@ publish (#425), and M106 gives a publish an ordering key and a deduplication id.
   writer's clock (clamped per process) and the envelope id, not `createdAt` — with M106's
   `orderingKey` and `deduplicationId` (the envelope id), then marked sent. The watermark trap is
   measured on real PostgreSQL and committed as `outbox-watermark-real.test.ts`.
-- **One relay at a time.** The portable repository has no `SKIP LOCKED` and no conditional update
-  (M105 adds the latter), so the only portable mode is a single relay per database. The relay is a
-  job on `CAPABILITIES.SCHEDULER`, whose slot lock and handler mutex (M70l) keep a job to one
-  replica — but only with a SHARED `distributedLock` (Redis or a Durable Object); the default
-  `MemoryLock` is per process. The plugin CANNOT tell which lock is in use — `IScheduler` exposes no
-  lock accessor — so it does not refuse; it DETECTS an overlap (a status write finding the row
-  already `sent` by another instance) and degrades health, and the README states the rule.
-  `IDistributedLock` itself lives in `scheduler-plugin`, which this package may not import, so this
-  is the route to it. The lock has no renewal, so the plan bounds every sweep instead: one
-  `sweepDeadlineMs` on the monotonic clock, kept at least 10 s below the lock's TTL (a rule the
-  README states, since the plugin cannot read the TTL), with every publish and store call bounded
-  inside it, so a relay stops starting rows before its lock can expire. That is a time bound, not
-  fencing: a publish abandoned at its timeout, or in flight while the process is paused, can still
-  reach the broker later. Ordering of FIRST deliveries survives, because a key's later row cannot
-  publish until the earlier one is marked sent, so the late arrival is always a DUPLICATE, which the
-  inbox (M108) absorbs and `aggregateVersion` orders. True fencing needs a conditional status write
-  (M105). Native `SKIP LOCKED` multi-relay is a later Postgres-only option.
+- **One relay at a time.** The portable repository has no `SKIP LOCKED` and had no conditional
+  update (M105 added the latter, and makes each status transition conditional on the expected
+  status), so the only portable mode is a single relay per database. The relay is a job on
+  `CAPABILITIES.SCHEDULER`, whose slot lock and handler mutex (M70l) keep a job to one replica — but
+  only with a SHARED `distributedLock` (Redis or a Durable Object); the default `MemoryLock` is per
+  process. The plugin CANNOT tell which lock is in use — `IScheduler` exposes no lock accessor — so
+  it does not refuse; it DETECTS an overlap (a status write finding the row already `sent` by
+  another instance) and degrades health, and the README states the rule. `IDistributedLock` itself
+  lives in `scheduler-plugin`, which this package may not import, so this is the route to it. The
+  lock has no renewal, so the plan bounds every sweep instead: one `sweepDeadlineMs` on the
+  monotonic clock, kept at least 10 s below the lock's TTL (a rule the README states, since the
+  plugin cannot read the TTL), with every publish and store call bounded inside it, so a relay stops
+  starting rows before its lock can expire. That is a time bound, not fencing: a publish abandoned
+  at its timeout, or in flight while the process is paused, can still reach the broker later.
+  Ordering of FIRST deliveries survives, because a key's later row cannot publish until the earlier
+  one is marked sent, so the late arrival is always a DUPLICATE, which the inbox (M108) absorbs and
+  `aggregateVersion` orders. M105's conditional transitions stop a stale relay REGRESSING a row's
+  status but not PUBLISHING it; true fencing and multi-relay are M107b.
 - **Latency.** Optionally publish right after commit, best effort, with the relay sweeping whatever
   that missed. On Cloudflare Workers, where `SchedulerPlugin` refuses to register (M70l) and Cron
   Triggers fire at most once a minute, the immediate publish runs in `waitUntil` and the cron sweep
@@ -13238,6 +13262,63 @@ where "all pending rows in order" is expensive or impossible. The consumer side 
       and purge); `apps/cloudflare` has no D1 binding to drive it against, so a workerd run is left
       for a follow-up that adds one
 - [x] README, PUBLIC_API.md, a design security review in the plan, and a committed-tree audit
+
+---
+
+## Milestone 107b: Outbox Relay Fencing and Multi-Relay Sweeping
+
+**Package(s):** `packages/messaging-plugin` (the relay), `packages/common` (the `IOutboxStore` port,
+if a claim or epoch member is needed) and `packages/database-plugin` (the
+`createDatabaseOutboxStore` bridge). The plan settles the list against source.
+
+**Depends on:** M105 (conditional writes) for the fencing arm.
+
+**Objective:** a relay that has lost its right to run cannot publish, and more than one relay can
+drain one outbox without double-sending.
+
+**Why.** M107 runs one relay per database under the scheduler's lock, and that lock has a TTL with
+no renewal. The sweep deadline keeps a healthy relay inside it, but a relay paused past the TTL — a
+GC pause, a frozen container, a slow broker call — can still publish a row a second relay has
+already sent. The inbox (M108) absorbs that duplicate, so it is not a correctness hole for a
+Setu-to-Setu consumer, but a foreign consumer sees it, and throughput is capped at one relay. M105's
+conditional transitions stop the stale relay regressing the row; they do not stop the publish.
+
+**Prior art (researched 2026-10-10).** Every comparable library owns relay coordination, and none
+promises more than at-least-once:
+
+- **MassTransit** claims one outbox entry inside a database transaction with
+  `SELECT … ORDER BY … LIMIT 1 FOR UPDATE SKIP LOCKED` (verified in
+  `PostgresLockStatementFormatter`). The lock IS the transaction, so it cannot expire under a paused
+  relay: the database releases it only when the transaction ends.
+- **Wolverine** elects one leader through Postgres advisory locks; the leader assigns recovery
+  agents to nodes and reassigns a dead node's work.
+- **CAP** offers `UseStorageLock` (off by default), a database lock around retry fetching only, and
+  documents that it does not bound retries cluster-wide.
+- **NServiceBus** has no separate relay — the outbox is dispatched while handling the incoming
+  message — and deduplicates by message id on the receiving side.
+
+**Scope — for the plan to decide.**
+
+- **Arm 1, a database-held claim**, where the backend has interactive transactions and row locks
+  (PostgreSQL and MySQL through Drizzle or Prisma; MongoDB to be probed): a relay claims a batch of
+  pending rows inside a transaction (`SKIP LOCKED`), so a stale relay's claim ends with its
+  transaction and no fencing token is needed. This is also what makes several relays safe at once.
+- **Arm 2, an epoch fence**, everywhere else (D1, DynamoDB, Cosmos, Bigtable, which defer writes to
+  commit): each relay holds an epoch that increases with every lock hand-off, and every row write is
+  an M105 `updateWhere` conditional on that epoch, so a stale relay's writes are refused. Whether it
+  can also stop the stale relay's PUBLISH (check the epoch immediately before publishing, which
+  narrows but does not close the window) is a plan decision, stated as a bound rather than implied.
+- Whether multi-relay is offered at all on Arm 2, or Arm 2 stays single-relay with fencing only.
+- How the relay learns which arm its store supports (a store capability, refused by name otherwise —
+  never inferred from the adapter's class).
+
+**Deliverables**
+
+- [ ] The chosen arms, each proven against a real backend with a paused-relay negative control (a
+      relay frozen past its lock's TTL publishes nothing once fenced)
+- [ ] Multi-relay, if offered, proven with N relays draining one outbox with no row published twice
+      by the relays (broker redelivery excluded) and per-key order preserved
+- [ ] README and PUBLIC_API.md stating which arm each backend gets and the exact promise
 
 ---
 
@@ -13844,9 +13925,10 @@ patch by construction and gains nothing new here.
 | 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |
 | 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |
 | 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
-| 105       | ⬜     | database-plugin + cloudflare-plugin — conditional writes on `IRepository` (closes the M101c tenant-bridge check-then-write race)                                                                                                              |
+| 105       | ✅     | database-plugin + cloudflare-plugin + common — conditional writes on `IRepository` (closes the M101c tenant-bridge, outbox-transition and inbox-count check-then-write races)                                                                 |
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
 | 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
+| 107b      | ⬜     | messaging-plugin + common + database-plugin — outbox relay fencing and multi-relay sweeping (depends on M105)                                                                                                                                 |
 | 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, topic, envelope id), in the handler's transaction                                                                               |
 | 109       | ✅     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |

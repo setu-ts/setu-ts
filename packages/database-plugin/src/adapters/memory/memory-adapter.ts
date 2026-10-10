@@ -23,6 +23,7 @@ import type {
   TransactionOptions,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   DuplicateKeyError,
   keysetPredicate,
@@ -705,6 +706,36 @@ export class MemoryAdapter implements IDatabaseAdapter {
       create: (data) => this.insertEntity(entity, data),
       update: (id, data) => this.updateEntity(entity, id, data),
       delete: (id) => this.deleteEntity(entity, id),
+      // deno-lint-ignore require-await -- atomic store mutation; errors must reject.
+      updateWhere: async (id, where, data) => {
+        const checked = checkWritePrecondition(where, data);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', 'memory', checked.problem);
+        }
+        where = checked.where;
+        data = checked.data;
+        const store = this.getStore(entity);
+        const index = findRecordIndex(store, id);
+        if (index === -1 || !matchesWhere(store.records[index], where)) return null;
+        // No await between lookup, predicate and write: the committed store is
+        // changed in one synchronous turn, including the key-immutability check.
+        if (changesKey(store, store.records[index], data)) throw immutableKeyError(entity);
+        store.records[index] = { ...store.records[index], ...data };
+        return { ...store.records[index] };
+      },
+      // deno-lint-ignore require-await -- atomic store mutation; errors must reject.
+      deleteWhere: async (id, where) => {
+        const checked = checkWritePrecondition(where);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', 'memory', checked.problem);
+        }
+        where = checked.where;
+        const store = this.getStore(entity);
+        const index = findRecordIndex(store, id);
+        if (index === -1 || !matchesWhere(store.records[index], where)) return false;
+        store.records.splice(index, 1);
+        return true;
+      },
       count: (where, filter) => this.countEntities(entity, where, filter),
       findPage: (query) =>
         this.findPageInternal(entity, query, () => this.getStore(entity).records),

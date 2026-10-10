@@ -164,6 +164,41 @@ function storeWith(rows: Record<string, unknown>[] = ROWS, tenantColumn?: string
 }
 
 describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
+  for (const column of ['tenant_id', 'org_id']) {
+    it(`conditional writes forward the ${column} predicate, strip its payload and avoid a pre-read`, async () => {
+      const { store, repo } = storeWith([{ id: '1', [column]: 'a', name: 'old' }], column);
+      const fake = repo();
+      const conditional: IRepository<Record<string, unknown>, EntityKey> = fake;
+      conditional.updateWhere = (id, where, data) => {
+        fake.calls.push({ method: 'updateWhere', arg: { id, where, data } });
+        const row = fake.rows.get(String(id));
+        return Promise.resolve(
+          row !== undefined && Object.entries(where).every(([key, value]) => row[key] === value)
+            ? { ...row, ...data }
+            : null,
+        );
+      };
+      conditional.deleteWhere = (id, where) => {
+        fake.calls.push({ method: 'deleteWhere', arg: { id, where } });
+        const row = fake.rows.get(String(id));
+        return Promise.resolve(
+          row !== undefined && Object.entries(where).every(([key, value]) => row[key] === value) &&
+            fake.rows.delete(String(id)),
+        );
+      };
+      expect(await store.update('a', 'Patient', '1', { name: 'new', [column]: 'b' })).toMatchObject(
+        { name: 'new', [column]: 'a' },
+      );
+      expect(fake.calls).toEqual([{
+        method: 'updateWhere',
+        arg: { id: '1', where: { [column]: 'a' }, data: { name: 'new' } },
+      }]);
+      expect(await store.update('b', 'Patient', '1', { name: 'bad' })).toBeNull();
+      expect(await store.delete('b', 'Patient', '1')).toBe(false);
+      expect(await store.delete('a', 'Patient', '1')).toBe(true);
+      expect(fake.calls.some((call) => call.method === 'findById')).toBe(false);
+    });
+  }
   it('findAll conjoins the tenant column to where', async () => {
     const { store, repo } = storeWith();
     await store.findAll('a', 'Patient');
@@ -215,6 +250,20 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
     expect(write.method).toBe('update');
     expect(write.arg).toEqual({ id: '1', data: { name: 'renamed' } });
     expect(updated).toMatchObject({ id: '1', name: 'renamed' });
+  });
+
+  it('update with nothing left after stripping answers the owned row and writes nothing', async () => {
+    for (const payload of [{}, { tenant_id: 'b' }]) {
+      const { store, repo } = storeWith();
+      expect(await store.update('a', 'Patient', '1', payload)).toEqual({
+        id: '1',
+        name: 'alpha',
+        tenant_id: 'a',
+      });
+      expect(await store.update('b', 'Patient', '1', payload)).toBeNull();
+      expect(repo().calls.map((c) => c.method)).toEqual(['findById', 'findById']);
+      expect(repo().rows.get('1')).toEqual({ id: '1', name: 'alpha', tenant_id: 'a' });
+    }
   });
 
   it('update returns null when the id is unknown under the tenant (no write)', async () => {

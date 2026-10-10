@@ -29,6 +29,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import { expect } from '@std/expect';
 import type { FilterExpression, IDataSource, NormalizedQuery } from '@setu-ts/common';
 import { decodeCursor, DuplicateKeyError } from '@setu-ts/common';
@@ -125,6 +126,73 @@ async function connect(
 }
 
 describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
+  it('M105 conditional writes ignore retained historical matches and persist current matches', {
+    ignore: skipReal,
+  }, async () => {
+    const tableId = await provision(`conditional_${suffix}`, ['cf']);
+    const adapter = await connect({ Row: { table: tableId } });
+    const raw = await rawClient();
+    try {
+      const source = adapter.createDataSource('Row');
+      await conditionalContract(
+        source,
+        'simple',
+        'missing',
+        { id: 'simple', tenant_id: 'a', name: 'old' },
+        { tenant_id: 'a' },
+        { name: 'new' },
+      );
+      const table = raw.instance(instanceId).table(tableId);
+      for (const operation of ['update', 'delete'] as const) {
+        await table.insert([{
+          key: operation,
+          data: {
+            cf: {
+              id: { value: `s:${operation}`, timestamp: new Date(1000) },
+              tenant_id: { value: 's:a', timestamp: new Date(1000) },
+              status: { value: 's:pending', timestamp: new Date(1000) },
+              name: { value: 's:secret', timestamp: new Date(1000) },
+            },
+          },
+        }]);
+        await table.insert([{
+          key: operation,
+          data: {
+            cf: {
+              tenant_id: { value: 's:b', timestamp: new Date(2000) },
+              status: { value: 's:sent', timestamp: new Date(2000) },
+            },
+          },
+        }]);
+        const [native] = await table.row(operation).get();
+        expect(native.data.cf.tenant_id).toHaveLength(2);
+        const before = await source.findById(operation);
+        const result = operation === 'update'
+          ? await source.updateWhere!(operation, { tenant_id: 'a', status: 'pending' }, {
+            name: 'historical-write',
+          })
+          : await source.deleteWhere!(operation, { tenant_id: 'a', status: 'pending' });
+        const readBack = await source.findById(operation);
+        expect({ result, readBack }).toEqual({
+          result: operation === 'update' ? null : false,
+          readBack: before,
+        });
+        expect(
+          operation === 'update'
+            ? await source.updateWhere!(operation, { tenant_id: 'b', status: 'sent' }, {
+              name: 'current-write',
+            })
+            : await source.deleteWhere!(operation, { tenant_id: 'b', status: 'sent' }),
+        ).toBeTruthy();
+        expect(await source.findById(operation)).toEqual(
+          operation === 'update' ? { ...before, name: 'current-write' } : null,
+        );
+      }
+    } finally {
+      await adapter.disconnect();
+      await raw.close();
+    }
+  });
   it('lazily imports the SDK and reads every CRUD write back', { ignore: skipReal }, async () => {
     const table = await provision(`crud_${suffix}`, ['cf']);
     const adapter = await connect({ User: { table } });

@@ -5938,6 +5938,36 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the narrower purge race plan §3.10 accepts — documented afterwards and NOT re-audited. The
   standalone-MongoDB refusal was also run once against a throwaway local `mongo:8`. Not verified: a
   browser — complete (PR #438).
+- **Milestone 105** (`packages/common` + `packages/database-plugin` + `packages/cloudflare-plugin` —
+  conditional writes on `IRepository`): optional `updateWhere(id, where, data)` /
+  `deleteWhere(id, where)` on `IDataSource` and `IRepository`, optional permanently (a maintainer-
+  approved departure from the versioning policy), answering `null`/`false` for a missing key or a
+  failed predicate. The predicate is a scalar equality map CONJOINED with the key on every backend,
+  never spread into it (Prisma `AND`, Mongo `$and`, Drizzle `and()`, D1 `WHERE … AND`, DynamoDB
+  `ConditionExpression`, a Bigtable nested condition capped to each column's NEWEST cell, a Cosmos
+  read then `_etag` IfMatch write bounded to 3 rounds). `checkWritePrecondition` in `common` returns
+  private copies that every implementation validates and writes, and refuses `$`/dotted/empty names,
+  an own `__proto__`, non-finite numbers and an empty payload. Deferred-write transaction sources
+  omit the members and `BaseRepository` refuses with `'conditional-write'` (501) before any I/O. The
+  tenant bridge, outbox transitions and inbox failure count switch over through one internal
+  fallback helper, closing the M101c check-then-write races; relay fencing moves to M107b.
+  Implemented by Codex, whose two stops corrected the plan (a Bigtable condition matching a retained
+  historical version, measured on the emulator) and a hand-off env block. Verification found a
+  tenant `update` with nothing left after stripping rejecting where the reference store returns the
+  row, and a PUBLIC_API rejection-class claim false for D1. The committed-tree security audit ran
+  five fresh-context rounds: round 1 failed on one Low (the tenant fallback race undocumented in the
+  README) and recorded observations folded in at the maintainer's direction — a Proxy changing a
+  predicate after validation (on Mongo it wrote through `$where`), a pre-existing (M78) Mongo key
+  filter reading an object key as an operator, Prisma validation messages rendering the whole query,
+  inherited-member field-map lookups in Bigtable and DynamoDB, and non-finite numbers; round 2 found
+  `__proto__` predicate fields dropped by Mongo and Prisma on Node/Bun (now refused) and two quoted
+  keys; rounds 3–4 found the docs still over-claiming which refusals carry no caller input, so they
+  now guarantee only the validator's reasons and the replaced Prisma message; round 5 passed on
+  `d36e7c3d`. Folded in afterwards at the maintainer's direction, NOT re-audited: Cosmos (since M81)
+  and DynamoDB (since M80) now refuse an own `__proto__` payload field, after measurement showed
+  Cosmos rows inheriting it as a prototype on Node and Bun and the AWS SDK returning a DynamoDB
+  `__proto__` attribute with no value (rows became unreadable), and the Mongo session test runs on a
+  replica set only — complete (PR #439).
 - **Milestone 110a** (`packages/common` + `packages/auth-plugin` + `packages/decorator-plugin` —
   authorization policies): an async, target-aware check under the new
   `CAPABILITIES.AUTHORIZATION_POLICIES`, always provided by `AuthPlugin`.
@@ -6507,10 +6537,12 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   would then fire on `docs/…` PRs too — nothing in CodeRabbit's config excludes by HEAD branch.
   **The failure is silent**: `review_status: false` suppresses the "review skipped" notice, so a PR
   nobody asked to review looks exactly like one whose review has not arrived — check the comment was
-  posted. A re-review after pushing fixes is another `@coderabbitai review`. The `maintainer-review`
-  label is retired and triggers nothing. The repo file overrides the CodeRabbit dashboard, so the
-  web toggle changes nothing. Fork PRs are proposals and are not reviewed (CONTRIBUTING.md).
-  AI_GUIDELINES §16.7 is canonical.
+  posted. A re-review after pushing fixes is another `@coderabbitai review`. Also attach the
+  `maintainer-review` label to every such PR (`gh pr edit <pr> --add-label maintainer-review`) — the
+  maintainer keeps it as the marker of a PR awaiting their review, though it no longer triggers
+  CodeRabbit; the comment does. The repo file overrides the CodeRabbit dashboard, so the web toggle
+  changes nothing. Fork PRs are proposals and are not reviewed (CONTRIBUTING.md). AI_GUIDELINES
+  §16.7 is canonical.
 - **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
   the code-quality bot anchor findings to lines; answer in the thread
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with

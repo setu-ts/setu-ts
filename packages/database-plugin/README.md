@@ -126,9 +126,15 @@ that strategy — `'tenant_id'` by default, `database: new ColumnPerTenant('org_
 there is one place to name it. Lookups by key go through the repository's own `findById`, so an
 entity whose primary key is not `id` (a MongoDB `primaryKey: 'user_id'`, a composite key) is
 addressed the way its adapter is configured; the tenant column is then checked on the row that comes
-back. `DatabaseTenantDataStore` is also exported for an application that holds its own
-`IDatabaseService` and constructs the store directly; its optional second constructor argument names
-the column for a store used outside the multi-tenancy plugin.
+back. `update` and `delete` guard the tenant column in the write itself through `updateWhere` /
+`deleteWhere`, which every built-in non-transactional data source offers. A custom data source
+without them falls back to an ownership read followed by a key-addressed write: if the row is
+deleted and a row from another tenant is created under the same caller-supplied key in between, the
+write lands on that row (a `delete` still reports `true`; an `update` refuses to return the foreign
+row, but has already written it). Generated keys never reuse a key, so let the backend generate
+them, or implement the two members. `DatabaseTenantDataStore` is also exported for an application
+that holds its own `IDatabaseService` and constructs the store directly; its optional second
+constructor argument names the column for a store used outside the multi-tenancy plugin.
 
 ## Transactional outbox store
 
@@ -171,12 +177,11 @@ by id treats a row of another `kind` as missing. An outbox sharing an entity wit
 Cosmos container is queried as a whole) never reads, counts, transitions or deletes a business
 document that happens to carry `status: 'pending'` or `'sent'`.
 
-**Transitions are conditional.** `markSent`, `markFailure` and `release` read the row and write only
-from the expected status, so a late failure never regresses a `sent` row. `IRepository` has no
-conditional write, so the read and the write are two calls; the worst outcome of a race between them
-is one stale overwrite — a duplicate publish, never a lost row — until ROADMAP Milestone 105's
-conditional write closes the window. Absent optional columns are written as `NULL` and read back as
-absent.
+**Transitions are conditional.** `markSent`, `markFailure` and `release` check the discriminator and
+expected status within `updateWhere`/`deleteWhere`, so a late failure cannot regress a `sent` row. A
+miss is re-read for classification; unexplained misses retry at most three rounds. When the source
+lacks conditional support, the two-call fallback retains the stale-overwrite race. Absent optional
+columns are written as `NULL` and read back as absent.
 
 **Startup check.** `verify()`, run by the outbox before it schedules the relay or accepts a write,
 runs the relay's first query and a transactional read of the outbox entity, and rejects with
@@ -243,8 +248,10 @@ marker is created in its transaction, so a handler writing elsewhere gets no onc
 
 **The marker's insert is the authority.** `run` opens one transaction, creates the marker in it
 first, then runs the handler; any rejection rolls both back. Every row carries `kind: 'setu-inbox'`
-and every read requires it. The failure count and `release` are read-then-write (two calls) until
-ROADMAP Milestone 105's conditional write: two concurrent failures can record one increment.
+and every read requires it. The failure count compares `kind` and the read `attempts` value in the
+write, retrying at most five rounds; `release` requires `kind` and `status: 'parked'`. Without
+conditional support, or for a non-safe-integer stored count, the two-call fallback can lose an
+increment under concurrent failures.
 
 **Startup check.** `verify()` refuses Cosmos DB and Bigtable by adapter arm or class
 (`'cosmos-unsupported'`, `'bigtable-unsupported'`), runs retention's first query, and runs a

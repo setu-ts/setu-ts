@@ -227,6 +227,9 @@ export function resolveDynamoTarget(
     // sortKey.
     keyColumns: sortKey === undefined ? [partitionKey] : [partitionKey, sortKey],
     indexes: override?.indexes ?? {},
-    dateAttributes: override?.dateAttributes ?? {},
+    // Copied into a null-prototype record so every `dateAttributes[name]`
+    // lookup reads an own entry: a field named `constructor` is not an
+    // inherited function masquerading as a date encoding.
+    dateAttributes: Object.assign(Object.create(null), override?.dateAttributes ?? {}),
   };
 }

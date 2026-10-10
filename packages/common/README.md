@@ -131,6 +131,7 @@ package fits the plugin architecture.
 | `authorizationFailureInit`            | function  |
 | `brandErrorResponder`                 | function  |
 | `causeMessage`                        | function  |
+| `checkWritePrecondition`              | function  |
 | `compileRealtimeDiagnosticsAlias`     | function  |
 | `composeBehaviorChain`                | function  |
 | `contentTypeFor`                      | function  |
@@ -662,6 +663,8 @@ package fits the plugin architecture.
 | `WebSocketUpgradeDecision`            | type      |
 | `WebSocketUpgradeGuard`               | type      |
 | `WebSocketUpgradeRouter`              | type      |
+| `WritePrecondition`                   | type      |
+| `WritePreconditionCheck`              | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

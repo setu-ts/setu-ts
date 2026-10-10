@@ -306,7 +306,7 @@ export interface ICosmosItem {
    *
    * @returns The delete envelope
    */
-  delete(): Promise<CosmosItemResponse<Record<string, unknown>>>;
+  delete(options?: CosmosRequestOptions): Promise<CosmosItemResponse<Record<string, unknown>>>;
 }
 
 /**

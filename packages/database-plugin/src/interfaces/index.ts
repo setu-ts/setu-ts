@@ -6,7 +6,12 @@
  *
  * @module
  */
-import type { EntityKey, IDatabaseAdapter, TransactionOptions } from '@setu-ts/common';
+import type {
+  EntityKey,
+  IDatabaseAdapter,
+  TransactionOptions,
+  WritePrecondition,
+} from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
 import type { SqlJsonDialect } from '../query/json-path.ts';
@@ -127,6 +132,31 @@ export interface IRepository<Entity, Id extends EntityKey = string> {
    * @since 0.1.0
    */
   delete(id: Id): Promise<boolean>;
+
+  /**
+   * Update only while the key and every equality precondition match.
+   * Optional permanently. BaseRepository rejects before I/O if the source lacks it.
+   *
+   * @param id - Primary key
+   * @param where - Non-empty string/number equality map on stored values
+   * @param data - Non-empty update payload
+   * @returns Updated entity, or `null` for a missing key or predicate mismatch
+   * @throws {UnsupportedQueryFeatureError} For an invalid predicate or unsupported source
+   * @since 0.9.0
+   */
+  updateWhere?(id: Id, where: WritePrecondition, data: Partial<Entity>): Promise<Entity | null>;
+
+  /**
+   * Delete only while the key and every equality precondition match.
+   * Optional permanently. BaseRepository rejects before I/O if the source lacks it.
+   *
+   * @param id - Primary key
+   * @param where - Non-empty string/number equality map on stored values
+   * @returns Whether the conditional delete applied
+   * @throws {UnsupportedQueryFeatureError} For an invalid predicate or unsupported source
+   * @since 0.9.0
+   */
+  deleteWhere?(id: Id, where: WritePrecondition): Promise<boolean>;
 
   /**
    * Check whether an entity with the given primary key exists.

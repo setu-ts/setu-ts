@@ -4,7 +4,8 @@
  *
  * @module
  */
-import type { EntityKey, IDataSource } from '@setu-ts/common';
+import type { EntityKey, IDataSource, WritePrecondition } from '@setu-ts/common';
+import { checkWritePrecondition } from '@setu-ts/common';
 import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
 import {
   normalizeCountOptions,
@@ -100,6 +101,74 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string>
 
   async delete(id: Id): Promise<boolean> {
     return await this._dataSource.delete(this.coerceId(id));
+  }
+
+  /**
+   * Apply an update only while the key and predicate match.
+   *
+   * @param id - Primary key
+   * @param where - Non-empty equality precondition
+   * @param data - Non-empty update payload
+   * @returns The updated entity, or `null` when not matched
+   * @throws {UnsupportedQueryFeatureError} For invalid input or an unsupported source, before I/O
+   * @since 0.9.0
+   */
+  async updateWhere(
+    id: Id,
+    where: WritePrecondition,
+    data: Partial<Entity>,
+  ): Promise<Entity | null> {
+    const checked = checkWritePrecondition(where, data);
+    if (!checked.ok) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'database-plugin',
+        checked.problem,
+      );
+    }
+    where = checked.where;
+    if (this._dataSource.updateWhere === undefined) {
+      throw new UnsupportedQueryFeatureError(
+        'conditional-write',
+        'database-plugin',
+        'The bound data source lacks updateWhere.',
+      );
+    }
+    const row = await this._dataSource.updateWhere(
+      this.coerceId(id),
+      where,
+      checked.data,
+    );
+    return row === null ? null : this.toEntity(row);
+  }
+
+  /**
+   * Apply a delete only while the key and predicate match.
+   *
+   * @param id - Primary key
+   * @param where - Non-empty equality precondition
+   * @returns Whether the delete applied
+   * @throws {UnsupportedQueryFeatureError} For invalid input or an unsupported source, before I/O
+   * @since 0.9.0
+   */
+  async deleteWhere(id: Id, where: WritePrecondition): Promise<boolean> {
+    const checked = checkWritePrecondition(where);
+    if (!checked.ok) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'database-plugin',
+        checked.problem,
+      );
+    }
+    where = checked.where;
+    if (this._dataSource.deleteWhere === undefined) {
+      throw new UnsupportedQueryFeatureError(
+        'conditional-write',
+        'database-plugin',
+        'The bound data source lacks deleteWhere.',
+      );
+    }
+    return await this._dataSource.deleteWhere(this.coerceId(id), where);
   }
 
   async exists(id: Id): Promise<boolean> {

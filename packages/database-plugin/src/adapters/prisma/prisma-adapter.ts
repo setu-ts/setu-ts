@@ -27,6 +27,7 @@ import type {
   TransactionOptions,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   keysetPredicate,
   mintNextCursor,
@@ -779,6 +780,34 @@ function createPrismaDataSourceInner(
     );
   }
 
+  // Prisma's validation message renders the whole query — key, predicate
+  // values and payload — so a conditional write replaces it with a fixed
+  // sentence. Every other error (P2034, connection faults) passes through for
+  // the M90f classifier.
+  const valueFreePrismaRefusal = (error: unknown): unknown =>
+    (error as { name?: unknown } | null)?.name === 'PrismaClientValidationError'
+      ? new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'prisma',
+        'Prisma refused the conditional write: the predicate or payload names a field or ' +
+          'value this model does not accept.',
+      )
+      : error;
+
+  const assertPreconditionFields = (where: Readonly<Record<string, string | number>>): void => {
+    if (
+      Object.keys(where).some((field) =>
+        field === 'AND' || field === 'OR' || field === 'NOT' || field === compoundKeyField
+      )
+    ) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'prisma',
+        'Prisma write preconditions may not name operators or the compound-key field.',
+      );
+    }
+  };
+
   return {
     async findById(id) {
       if (typeof id === 'object' && compoundKeyField === undefined) {
@@ -854,6 +883,47 @@ function createPrismaDataSourceInner(
       }
     },
 
+    async updateWhere(id, where, data) {
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'prisma', checked.problem);
+      }
+      where = checked.where;
+      data = checked.data;
+      assertPreconditionFields(where);
+      try {
+        return await delegate.update({
+          where: {
+            ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'updateWhere'),
+            AND: [where],
+          },
+          data,
+        });
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code === 'P2025') return null;
+        throw valueFreePrismaRefusal(error);
+      }
+    },
+    async deleteWhere(id, where) {
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'prisma', checked.problem);
+      }
+      where = checked.where;
+      assertPreconditionFields(where);
+      try {
+        await delegate.delete({
+          where: {
+            ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'deleteWhere'),
+            AND: [where],
+          },
+        });
+        return true;
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code === 'P2025') return false;
+        throw valueFreePrismaRefusal(error);
+      }
+    },
     count: (where, filter) => {
       const predicate = prismaWhere(where, filter, provider);
       return delegate.count(predicate === undefined ? {} : { where: predicate });

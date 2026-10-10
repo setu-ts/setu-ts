@@ -1465,16 +1465,18 @@ interface IRepository<Entity, Id extends EntityKey = string> {
   create(data: Partial<Entity>): Promise<Entity>;
   update(id: Id, data: Partial<Entity>): Promise<Entity>;
   delete(id: Id): Promise<boolean>;
+  updateWhere?(id: Id, where: WritePrecondition, data: Partial<Entity>): Promise<Entity | null>;
+  deleteWhere?(id: Id, where: WritePrecondition): Promise<boolean>;
   exists(id: Id): Promise<boolean>;
   count(options?: CountOptions): Promise<number>;
 }
 ```
 
-Every member of `IRepository` is **required** — including `findPage`, which is easy to miss because
-the sibling `IDataSource.findPage?` is optional. A class implementing `IRepository` directly,
-without extending `BaseRepository`, must supply `findPage`; the in-repo reference implementor is
-`packages/database-plugin/test/fixtures/repository-implementor.ts`, and the reader-side step is in
-[docs/upgrading.md](docs/upgrading.md).
+Every member except `updateWhere?` and `deleteWhere?` is **required** — including `findPage`, which
+is easy to miss because the sibling `IDataSource.findPage?` is optional. A class implementing
+`IRepository` directly, without extending `BaseRepository`, must supply `findPage`; the in-repo
+reference implementor is `packages/database-plugin/test/fixtures/repository-implementor.ts`, and the
+reader-side step is in [docs/upgrading.md](docs/upgrading.md).
 
 <!-- version:history -->
 
@@ -1593,6 +1595,12 @@ interface IDataSource {
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>>;
   delete(id: EntityKey): Promise<boolean>;
+  updateWhere?(
+    id: EntityKey,
+    where: WritePrecondition,
+    data: Partial<Record<string, unknown>>,
+  ): Promise<Record<string, unknown> | null>;
+  deleteWhere?(id: EntityKey, where: WritePrecondition): Promise<boolean>;
   findPage?(query: NormalizedQuery): Promise<PageResult>;
   count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number>;
 }
@@ -1600,6 +1608,65 @@ interface IDataSource {
 
 A data source owns query evaluation end to end — it applies `where`, `orderBy`, `offset`/`limit` and
 `select` itself, and `BaseRepository` must not re-apply any of them.
+
+**Conditional writes (M105, since 0.9.0).** Both optional members address the supplied key AND
+require every predicate field to equal its value at the write. `updateWhere` returns the updated row
+or `null`; `deleteWhere` returns whether a row was deleted. An absent key and a predicate miss have
+the same outcome and write nothing. The key and predicate remain separate conjunctions even when the
+predicate names a key field.
+
+`WritePrecondition`, exported by `@setu-ts/common`, is `Readonly<Record<string, string | number>>`.
+`checkWritePrecondition(where, data?)` returns a `WritePreconditionCheck`: `{ ok: false, problem }`,
+or `{ ok: true, where, data }` carrying private copies of the inputs. It requires a non-empty plain
+equality object, non-empty field names without a `$` prefix or `.`, string or finite-number values,
+and, when supplied, a non-empty plain update payload. Each field is read once into the copy and the
+copy is what gets validated and written, so an input that changes between reads (a `Proxy`) cannot
+send something other than what passed. An own `__proto__` key is refused, in the predicate and in
+the payload, because Node and Bun drop it from any object a backend rebuilds by assignment. Every
+implementation validates direct calls as well as repository calls. `checkWritePrecondition`'s
+refusal reasons quote no caller field name or value, and Prisma's validation message — which renders
+the whole query — is replaced with a fixed sentence. No other guarantee is made about message text:
+key handling shared with `findById`/`update`/`delete`, adapter mapping and marshalling refusals, and
+driver or server errors (a type the column rejects, an unknown column) may quote caller keys, field
+names or values, as for every other repository operation. Responses mask them (X12-3), so they reach
+server logs only. Invalid inputs reject with `UnsupportedQueryFeatureError` feature
+`'write-precondition'` (unbranded) — except a direct call to the D1 data source, which rejects with
+`CloudflareUnsupportedError`, since `cloudflare-plugin` cannot import `database-plugin`'s error.
+Through a repository the check runs in `BaseRepository` first, so every backend answers
+`'write-precondition'` there. `BaseRepository` rejects missing support with
+`UnsupportedQueryFeatureError` feature `'conditional-write'` (HTTP hint 501), before any I/O. Both
+members stay optional for implementors.
+
+| Data source                  | Write mechanism                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| Memory, outside transactions | Synchronous key lookup, predicate check and mutation                                              |
+| Prisma                       | Native `update`/`delete`, key conjoined with `AND: [where]`; `P2025` means no match               |
+| Drizzle                      | Key and predicate joined with `and(...)`, native `RETURNING`                                      |
+| MongoDB                      | `$and: [idFilter, whereFilter]`, `findOneAndUpdate` / `deleteOne`                                 |
+| D1                           | Bound `UPDATE` / `DELETE`, `WHERE key AND predicate`, `RETURNING`                                 |
+| DynamoDB                     | Native `ConditionExpression`, key existence AND aliased equality fields                           |
+| Cosmos DB                    | Read and check, then `_etag` IfMatch guarded `replace` / `delete`; retry 412 at most three rounds |
+| Bigtable                     | CheckAndMutateRow with nested per-field conditions, newest cell capped before value comparison    |
+
+Deferred transaction sources (memory overlay, D1 batch, DynamoDB buffer, Cosmos batch and Bigtable)
+omit both members: the result is unknown until commit, so the repository refuses
+`'conditional-write'`. Prisma, Drizzle and MongoDB transaction sources carry them. The tenant,
+outbox and inbox bridges use the conditional path when offered and fall back only on absence or that
+named refusal. Other errors propagate. On that fallback the tenant bridge reads ownership and then
+writes by key, so a delete-and-recreate under a reused caller-supplied key in between can move the
+write onto another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back
+separately; the tenant bridge checks the returned tenant on both paths before returning it.
+
+**`__proto__` fields.** The conditional members refuse an own `__proto__` field in the predicate and
+the payload on every adapter. Cosmos DB and DynamoDB also refuse one in a plain `create`/`update`
+payload (DynamoDB at any depth, because the AWS SDK returns such an attribute without a value), and
+neither lets a stored `__proto__` field set a read row's prototype: Cosmos returns it as an ordinary
+field, DynamoDB omits the attribute the SDK cannot deliver.
+
+**Stored representation.** Predicate scalars compare with the stored representation. DynamoDB date
+attributes encoded as ISO strings require the ISO string; Bigtable's typed/json codecs use their
+configured scalar encoding. Neither member translates a `Date` or allows a document path or operator
+in the predicate.
 
 **Breaking for implementors as of M79.** `findById`/`update`/`delete` moved from `string | number`
 to `EntityKey`, which adds a composite-record arm. A parameter is contravariant, so an adapter still
@@ -2341,8 +2408,9 @@ const store = createDatabaseOutboxStore({ entity: 'Outbox', database: 'orders' }
   transition treats a row of another `kind` as `missing`.
 - **Conditional transitions.** `markSent`/`markFailure` write only from `pending`, `release` only
   from `failed`; anything else answers `missing`, `not-pending` (with `sentBy` for a sent row) or
-  `not-failed`, and writes nothing. The read and the write are two calls, so a race between them can
-  overwrite once (a duplicate publish, never a loss) until M105's conditional write.
+  `not-failed`, and writes nothing. The conditional path checks `kind` and expected status in the
+  write and re-reads a miss for classification, retrying unexplained misses at most three rounds.
+  Without conditional support the two-call fallback retains the stale-overwrite race.
 - **Columns.** The row is the record's own fields; an absent optional field is written as `null` and
   read back as absent. `failedKeys` selects only `tenantId` and `orderingKey`; `purge` deletes
   `sent` then `discarded` rows with `settledAt < before`, at most `limit` per status.
@@ -2380,8 +2448,10 @@ const store = createDatabaseInboxStore({ entity: 'Inbox', database: 'orders' });
   `DuplicateKeyError`, or a write conflict on a MongoDB replica set).
 - **Discriminator.** Every row carries `kind: 'setu-inbox'` (`INBOX_RECORD_KIND`); every read
   (`find`, `parked`, `stats`, `purge`) requires it, and a row of another `kind` is missing.
-- **Read-then-write.** `recordFailure` and `release` read the row and write in two calls, so two
-  concurrent failures can record one increment until M105's conditional write.
+- **Conditional writes.** `recordFailure` compares `kind` and the read `attempts` value in the
+  write, retrying misses at most five rounds; `release` requires `kind` and `status: 'parked'`.
+  Without conditional support, or for a non-safe-integer count, the two-call fallback can lose an
+  increment under concurrent failures.
 - **`verify()`** refuses Cosmos DB and Bigtable by adapter arm or class, runs `purge(0, 1)`, then a
   transaction that creates two probe rows and always rolls back: a `BigtableTransactionScopeError`
   at the second row is `'transaction-scope'`, a cause chain carrying `code: 20` with
