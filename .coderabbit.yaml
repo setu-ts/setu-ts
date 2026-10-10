@@ -1,6 +1,7 @@
 # CodeRabbit never reviews a pull request on its own. Every review is requested with an
 # `@coderabbitai review` comment, which the agent or maintainer opening a non-`docs/…` PR posts
-# straight after `gh pr create` (AI_GUIDELINES §16.7). `docs/…` PRs are deliberately left
+# once the PR's head is final — after the last push that follows `gh pr create` — because a push
+# while a review runs aborts it ("Head commit changed") with no retry (AI_GUIDELINES §16.7). `docs/…` PRs are deliberately left
 # unreviewed: the review is for code.
 #
 # Why manual: `main` is the repository's default branch, while every milestone, fix and docs PR
