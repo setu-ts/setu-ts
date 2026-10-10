@@ -13641,18 +13641,27 @@ scope is a typed reference `{ type, id }`.
    consulted — never "any scope".
 3. **Grant source** — static configuration, token claims (a mapper over `principal.claims`, the
    Keycloak Organizations shape), a repository, or `'custom'`; several sources are unioned.
-4. **Carry-over across scopes** — whether global grants apply everywhere (default yes), whether a
-   parent scope's grants descend, and relationship-based delegation via a resolver.
+4. **Carry-over across scopes** — whether global grants apply everywhere (default yes, narrowed per
+   role by `grantableIn`), and ONE `inheritsFrom(scope)` resolver naming the scopes whose grants
+   also apply: a parent is one hop of it and a delegating tenant another, walked transitively with
+   cycle refusal and depth/node bounds. (Corrected in the plan, C2: the original text listed parent
+   descent and relationship-based delegation as two mechanisms; one resolver expresses both.)
 5. **Role catalogue** — the global catalogue, with optional per-role limits on which scope types it
-   may be granted in; per-scope custom roles are a stretch the plan accepts or defers by name.
+   may be granted in; per-scope custom roles are ACCEPTED (maintainer, 2026-10-10, C4): a custom
+   role bundles catalogue permissions only, resolves against the grant's own scope, and is checked
+   through permissions — a guard naming a custom role is refused at startup.
 6. **Resolution timing** — per request, memoised by (principal, scope) (default); a bounded
-   cross-request cache with a stated revocation latency; or computed at sign-in into the principal.
+   cross-request cache with a stated revocation latency; or computed at sign-in and stored in the
+   auth session under a PRIVATE key beside the principal — never in `principal.claims`, where a
+   federated token carrying the same claim name would be indistinguishable from it (C3).
 
 **Fixed, not configurable:**
 
-- Fail closed: an unresolved scope, a grant source that rejects or exceeds its deadline (M101a's
-  `withDeadline`), or a permission absent from the catalogue denies — the catalogue check also
-  catches a typo that would otherwise deny forever or slip through a fallback.
+- Fail closed: an unresolved scope, or a grant source that rejects or exceeds its deadline (M101a's
+  `withDeadline`), denies. A permission or role absent from the catalogue is REFUSED AT STARTUP for
+  every route guard and decorator (each is an ability of the built-in policy, so M110a's scan
+  catches a typo); an imperative check naming one rejects rather than silently denying. (Corrected
+  in the plan, C1: a request-time deny cannot tell a typo from an unheld permission.)
 - One evaluator for the guard, the decorator and the yes/no check.
 - Grants only — no deny rules. Deny-overrides is where policy combination gets hard; the plan leaves
   room for it and names it deferred.
@@ -13667,7 +13676,7 @@ configuration alone:
   at sign-in from a remote source.
 - C. An organisation → team → project hierarchy where a grant descends.
 - D. Grants carried in token claims, no store.
-- E. Per-tenant custom roles (or its named deferral).
+- E. Per-tenant custom roles (accepted, C4).
 
 **Security review must cover:** a route-parameter scope that disagrees with the resolved request
 tenant; scope identifiers reaching logs or M98h explanations (aliased, never raw); cache poisoning
@@ -13675,11 +13684,12 @@ across principals; and revocation latency under each timing mode.
 
 **Deliverables**
 
-- [ ] The grant model, the grant-source port with its built-in arms, and the scope resolvers
-- [ ] Scoped forms of the guard and of `@Permissions`/`@Roles`, built on 110a's evaluator
-- [ ] Reference scenarios A–E as integration tests, each with a negative control
-- [ ] A repository grant source driven against a real database in CI
-- [ ] PUBLIC_API.md, the auth-plugin README, and a scoped-RBAC guide
+- [x] The grant model, the grant-source port with its built-in arms, and the scope resolvers
+- [x] Scoped forms of the guard and of `@Permissions`/`@Roles`, built on 110a's evaluator
+      (`requireScopedRole`/`requireScopedPermission`, `@ScopedRoles`/`@ScopedPermissions`)
+- [x] Reference scenarios A–E as integration tests, each with a negative control
+- [x] A repository grant source driven against a real database in CI (PostgreSQL and MongoDB)
+- [x] PUBLIC_API.md, the auth-plugin README, and a scoped-RBAC guide
 - [ ] A design security review in the plan, and a committed-tree audit
 
 **Breaking for implementors:** none expected — the existing global `RbacConfig` path is unchanged.

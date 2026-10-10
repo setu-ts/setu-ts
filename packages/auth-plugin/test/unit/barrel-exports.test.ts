@@ -425,7 +425,15 @@ describe('scoped RBAC exports (M110b)', () => {
       timing,
     };
     const guard: auth.ScopedGuardOptions = { scope: null };
-    expect([options.sources.length, guard.scope]).toEqual([2, null]);
+    const reason: auth.GrantResolutionReason = 'grant-limit';
+    // @ts-expect-error -- only the three source-resolution reasons reach sign-in
+    const wrong: auth.GrantResolutionReason = 'scope-cycle';
+    expect([options.sources.length, guard.scope, reason, wrong]).toEqual([
+      2,
+      null,
+      'grant-limit',
+      'scope-cycle',
+    ]);
   });
 
   it('keeps the scoped internals off the barrel', () => {

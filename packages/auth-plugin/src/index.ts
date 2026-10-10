@@ -85,6 +85,7 @@ export type { PolicyDenial } from './policies/errors.ts';
 export { requireScopedPermission, requireScopedRole } from './scoped/scoped-guards.ts';
 export type { ScopedGuardOptions } from './scoped/scoped-guards.ts';
 export { GrantResolutionError } from './scoped/errors.ts';
+export type { GrantResolutionReason } from './scoped/errors.ts';
 export type {
   ClaimsGrantMapper,
   GrantSourceConfig,

@@ -199,6 +199,66 @@ rejects a denial with `AuthorizationDeniedError`, which `errorHandler` answers w
 policies and the `@RequirePolicy` decorator live in `@setu-ts/decorator-plugin`. The full guide is
 [Authorization](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md).
 
+## Scoped Roles
+
+A role held **in a scope** — one tenant, organisation, team or region — rather than everywhere.
+`scopedRbac` (requires `rbac`) defines one built-in policy, `scoped-rbac`, on the policy evaluator:
+every catalogue permission and role is checkable, and the target is the scope.
+
+```typescript
+import { scopeFromParam } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { AuthPlugin, requireScopedPermission, requireScopedRole } from '@setu-ts/auth-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    AuthPlugin({
+      jwt: { secret: 'replace-with-a-secret-of-32-chars!' },
+      rbac: {
+        roles: {
+          approver: { permissions: ['invoices:approve'] },
+          'org-admin': { permissions: [] },
+        },
+      },
+      scopedRbac: {
+        sources: [{
+          kind: 'static',
+          grants: [{ subject: 'ann', role: 'approver', scope: { type: 'tenant', id: 'acme' } }],
+        }],
+        // A child tenant inherits its parent's grants.
+        inheritsFrom: (scope) => (scope.id === 'acme-eu' ? [{ type: 'tenant', id: 'acme' }] : []),
+      },
+    }),
+  ],
+});
+
+// Default scope: the resolved request tenant (`MultiTenancyPlugin`).
+app.router.post('/invoices/:id/approve', {
+  middleware: [requireScopedPermission('invoices:approve')],
+  handler: (ctx) => ctx.response.json({ ok: true }),
+});
+
+app.router.get('/orgs/:orgId', {
+  middleware: [requireScopedRole('org-admin', { scope: scopeFromParam('orgId', 'organisation') })],
+  handler: (ctx) => ctx.response.json({ ok: true }),
+});
+```
+
+Several roles are any-of, several permissions all-of. A guard naming a permission or role outside
+the catalogue fails `app.start()`. Grant sources (`static`, `claims`, `custom` — including
+`createDatabaseGrantSource` from `@setu-ts/database-plugin`) are unioned, and **one failing source
+denies the whole check**. A route scope naming another tenant than the resolved request tenant
+denies. `grantableIn` limits where a role may be granted; `customRoles` lets a tenant define roles
+that bundle catalogue permissions; `timing` is `'request'` (default — a revocation applies on the
+next request), `{ kind: 'cache', ttlMs, maxEntries }` (within `ttlMs`) or `'sign-in'` (stored in the
+auth session — until sign-out). Every bound (`sourceTimeoutMs`, `maxGrantsPerPrincipal`,
+`maxScopeDepth`, `maxScopeNodes`, `maxCustomRoles`, `maxPermissionsPerRole`) refuses an out-of-range
+value at construction, and exceeding one denies. The decorator form is
+`@ScopedRoles`/`@ScopedPermissions` in `@setu-ts/decorator-plugin`. Full guide:
+[Scoped Roles](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md#scoped-roles).
+
 ## Guards
 
 Guards are free `MiddlewareFunction` factories (imported from the plugin, not methods on
@@ -296,6 +356,7 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 | `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                   | App-supplied credential check.                                                                                                                                                                                                                  |
 | `rbac.roles`                     | `Record<string, RoleDefinition>`                      | -                   | Role → permissions + `inherits` hierarchy.                                                                                                                                                                                                      |
 | `policies`                       | `readonly PolicyDefinition[]`                         | `[]`                | Authorization policies from `definePolicy`, checked when `AuthPlugin(...)` is called (malformed or duplicate names refuse). The policy service is registered whether or not this is set. See [Authorization Policies](#authorization-policies). |
+| `scopedRbac`                     | `ScopedRbacOptions`                                   | -                   | Scoped RBAC: grant sources, scope inheritance, custom roles, timing and bounds. Requires `rbac`.                                                                                                                                                |
 | `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                   | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`.                                                                                                                                                 |
 | `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                                                                                                                                                                 |
 | `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                                                                                                                                                                      |
@@ -1182,8 +1243,11 @@ MIT
 | `requirePermission`                 | function  |
 | `requirePolicy`                     | function  |
 | `requireRole`                       | function  |
+| `requireScopedPermission`           | function  |
+| `requireScopedRole`                 | function  |
 | `AuthorizationDeniedError`          | class     |
 | `AuthPluginConfigurationError`      | class     |
+| `GrantResolutionError`              | class     |
 | `MalformedPasswordHashError`        | class     |
 | `MemoryAccessTokenRevocationStore`  | class     |
 | `MemoryPasskeyStore`                | class     |
@@ -1240,16 +1304,23 @@ MIT
 | `SamlPendingRequest`                | interface |
 | `SamlProfile`                       | interface |
 | `SamlProvider`                      | interface |
+| `ScopedGuardOptions`                | interface |
+| `ScopedRbacOptions`                 | interface |
+| `ScopedRoleLimit`                   | interface |
 | `SessionAuthOptions`                | interface |
 | `SignInConfig`                      | interface |
 | `SignInProviderBase`                | interface |
+| `StaticGrant`                       | interface |
 | `StoredPasskey`                     | interface |
 | `TokenPair`                         | interface |
 | `TotpEnrolment`                     | interface |
 | `TotpServiceOptions`                | interface |
 | `TrustedIssuer`                     | interface |
+| `ClaimsGrantMapper`                 | type      |
 | `ConfirmEnrolmentResult`            | type      |
 | `DisableResult`                     | type      |
+| `GrantResolutionReason`             | type      |
+| `GrantSourceConfig`                 | type      |
 | `IRefreshTokenRotation`             | type      |
 | `IssuerAlgorithm`                   | type      |
 | `IssuerKeySource`                   | type      |
@@ -1258,6 +1329,7 @@ MIT
 | `RecoveryCodesResult`               | type      |
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |
+| `ScopedRbacTiming`                  | type      |
 | `SignInProvider`                    | type      |
 | `TokenEndpointAuth`                 | type      |
 | `TotpCompleteSignInResult`          | type      |

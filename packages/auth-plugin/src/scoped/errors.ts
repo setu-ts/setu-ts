@@ -4,7 +4,15 @@
  * @module
  */
 import { withHttpStatusHint } from '@setu-ts/common';
-import type { DenyReason } from './model.ts';
+
+/**
+ * Why sign-in-timing grant resolution failed: a source rejected or threw
+ * (`source-failed`), exceeded `sourceTimeoutMs` (`source-timeout`), or
+ * answered more than `maxGrantsPerPrincipal` (`grant-limit`).
+ *
+ * @since 0.9.0
+ */
+export type GrantResolutionReason = 'source-failed' | 'source-timeout' | 'grant-limit';
 
 /**
  * Rejection of `IAuthSessionService.signIn` under `scopedRbac.timing:
@@ -23,7 +31,7 @@ export class GrantResolutionError extends Error {
   /** Stable discriminant for consumers that cannot use `instanceof` across realms. */
   override readonly name = 'GrantResolutionError';
   /** Why resolution failed (`source-failed`, `source-timeout`, `grant-limit`). */
-  readonly reason: DenyReason;
+  readonly reason: GrantResolutionReason;
   /** The failing source's configured name, when one failed. */
   readonly source: string | undefined;
 
@@ -33,7 +41,7 @@ export class GrantResolutionError extends Error {
    * @param reason - Why resolution failed
    * @param source - The failing source's configured name
    */
-  constructor(reason: DenyReason, source?: string) {
+  constructor(reason: GrantResolutionReason, source?: string) {
     super(
       `auth-plugin: scoped RBAC grants could not be resolved at sign-in (${reason}` +
         `${source === undefined ? '' : `, source ${JSON.stringify(source)}`})`,

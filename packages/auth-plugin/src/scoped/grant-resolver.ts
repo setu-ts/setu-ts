@@ -42,11 +42,12 @@ import {
   scopeKey,
 } from './model.ts';
 import type { Bounded, Failure } from './model.ts';
+import type { GrantResolutionReason } from './errors.ts';
 
 /** A resolved grant list, or why it could not be resolved. */
 export type GrantsOutcome =
   | { readonly ok: true; readonly grants: readonly ScopedGrant[]; readonly dropped: number }
-  | Failure;
+  | (Failure & { readonly reason: GrantResolutionReason });
 
 /** Custom roles by defining scope key, then by role name. */
 export type CustomRoleIndex = ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>;

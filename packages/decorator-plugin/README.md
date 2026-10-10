@@ -335,6 +335,56 @@ but before validation — so an extractor reading the body sees the unvalidated 
 `enforceRoles` does not affect `@RequirePolicy`. See
 [Authorization](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md).
 
+## Scoped roles
+
+`@ScopedRoles(roles, scope?)` (any-of) and `@ScopedPermissions(permissions, scope?)` (all-of)
+require a catalogue role or permission **in the request's scope** — the class form of AuthPlugin's
+`requireScopedRole` / `requireScopedPermission`. The scope defaults to the resolved request tenant;
+pass a `ScopeSource` from `@setu-ts/common` to read it elsewhere:
+
+```typescript
+import { scopeFromParam } from '@setu-ts/common';
+import {
+  Controller,
+  DecoratorPlugin,
+  Get,
+  Post,
+  ScopedPermissions,
+  ScopedRoles,
+} from '@setu-ts/decorator-plugin';
+
+@Controller('/invoices')
+@ScopedRoles(['viewer'])
+class InvoiceController {
+  @Get('/')
+  list(): string[] {
+    return [];
+  }
+
+  // A method decorator overrides the class default.
+  @Post('/:id/approve')
+  @ScopedPermissions(['invoices:approve'])
+  approve(): { readonly approved: boolean } {
+    return { approved: true };
+  }
+
+  @Get('/orgs/:orgId')
+  @ScopedRoles(['org-admin'], scopeFromParam('orgId', 'organisation'))
+  forOrg(): string[] {
+    return [];
+  }
+}
+
+export const decorators = DecoratorPlugin({ controllers: [InvoiceController] });
+```
+
+They need `AuthPlugin({ rbac, scopedRbac })`: `register()` fails, naming the route, when no policy
+service is registered or a name is outside the catalogue (a role a tenant defines at runtime is
+checked through the permissions it bundles). They run after `@Roles`/`@Permissions` and
+`@RequirePolicy`, answer `401`/`403` with the same bodies as the guards, and are not governed by
+`enforceRoles`. See
+[Scoped Roles](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md#scoped-roles).
+
 ## Exports
 
 | Export                       | Kind      |
@@ -344,7 +394,6 @@ but before validation — so an extractor reading the body sees the unvalidated 
 | `ApiResponse`                | function  |
 | `ApiTags`                    | function  |
 | `Body`                       | function  |
-| `RequirePolicy`              | function  |
 | `clearParameterResolvers`    | function  |
 | `CommandHandler`             | function  |
 | `Controller`                 | function  |
@@ -379,10 +428,13 @@ but before validation — so an extractor reading the body sees the unvalidated 
 | `Redirect`                   | function  |
 | `registerParameterResolver`  | function  |
 | `Render`                     | function  |
+| `RequirePolicy`              | function  |
 | `resolveParameter`           | function  |
 | `resolveParameters`          | function  |
 | `ResponseHeader`             | function  |
 | `Roles`                      | function  |
+| `ScopedPermissions`          | function  |
+| `ScopedRoles`                | function  |
 | `Subscribe`                  | function  |
 | `UseFilters`                 | function  |
 | `UseGuards`                  | function  |

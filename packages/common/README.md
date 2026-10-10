@@ -161,6 +161,7 @@ package fits the plugin architecture.
 | `isNone`                              | function  |
 | `isOk`                                | function  |
 | `isPromiseLike`                       | function  |
+| `isScopeType`                         | function  |
 | `isSome`                              | function  |
 | `isValidPublishId`                    | function  |
 | `isWebSocketUpgradeRequest`           | function  |
@@ -189,6 +190,10 @@ package fits the plugin architecture.
 | `respondWithAuthorizationFailure`     | function  |
 | `respondWithError`                    | function  |
 | `responseMetadataOf`                  | function  |
+| `scopedPermissionAbility`             | function  |
+| `scopedRoleAbility`                   | function  |
+| `scopeFromParam`                      | function  |
+| `scopeFromTenant`                     | function  |
 | `sealRequestIdentity`                 | function  |
 | `securityMetadataOf`                  | function  |
 | `serializeCookie`                     | function  |
@@ -224,12 +229,14 @@ package fits the plugin architecture.
 | `MAX_PUBLISH_HEADER_VALUE_BYTES`      | const     |
 | `MAX_PUBLISH_HEADERS`                 | const     |
 | `MAX_PUBLISH_ID_BYTES`                | const     |
+| `MAX_SCOPE_ID_LENGTH`                 | const     |
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
 | `PLUGIN_PRIORITY`                     | const     |
 | `RESERVED_HEADER_NAMES`               | const     |
 | `RESERVED_HEADER_PREFIXES`            | const     |
 | `RESPONSE_METADATA`                   | const     |
+| `SCOPED_RBAC_POLICY`                  | const     |
 | `SECURITY_METADATA`                   | const     |
 | `SESSION_STATE_KEY`                   | const     |
 | `SESSION_TENANT_BINDING_KEY`          | const     |
@@ -330,6 +337,7 @@ package fits the plugin architecture.
 | `IFeatureFlags`                       | interface |
 | `IFileSystem`                         | interface |
 | `IGauge`                              | interface |
+| `IGrantSource`                        | interface |
 | `IGraphqlService`                     | interface |
 | `IGrpcService`                        | interface |
 | `IHealthApi`                          | interface |
@@ -389,6 +397,7 @@ package fits the plugin architecture.
 | `IRuntimeServices`                    | interface |
 | `IScheduler`                          | interface |
 | `ISchedulerDiagnosticsSource`         | interface |
+| `IScopedRoleSource`                   | interface |
 | `ISecretManager`                      | interface |
 | `IServiceDiscovery`                   | interface |
 | `IServiceRegistry`                    | interface |
@@ -486,6 +495,10 @@ package fits the plugin architecture.
 | `SchedulerDiagnosticsRecord`          | interface |
 | `SchedulerDiagnosticsResponse`        | interface |
 | `SchedulerDiagnosticsSnapshot`        | interface |
+| `ScopedGrant`                         | interface |
+| `ScopedRbacTarget`                    | interface |
+| `ScopedRoleDefinition`                | interface |
+| `ScopeRef`                            | interface |
 | `SerializedError`                     | interface |
 | `ServiceInstance`                     | interface |
 | `SignedUrlOptions`                    | interface |
@@ -567,6 +580,7 @@ package fits the plugin architecture.
 | `FilterOperator`                      | type      |
 | `FormEncoding`                        | type      |
 | `FormValue`                           | type      |
+| `GrantQuery`                          | type      |
 | `GraphqlSubscriptionOutcome`          | type      |
 | `GrpcServingStatus`                   | type      |
 | `HardenedCall`                        | type      |
@@ -636,6 +650,7 @@ package fits the plugin architecture.
 | `SchedulerBackoff`                    | type      |
 | `SchedulerDiagnosticsOperation`       | type      |
 | `SchedulerJobHandler`                 | type      |
+| `ScopeSource`                         | type      |
 | `SecurityRequirement`                 | type      |
 | `ServerHandle`                        | type      |
 | `ServiceFactory`                      | type      |
