@@ -17,7 +17,12 @@ import type {
 import { resolveDynamoAccessPath } from './dynamo-access-path.ts';
 import type { DynamoEntityMapping } from './dynamo-mapping.ts';
 import { resolveDynamoTarget } from './dynamo-mapping.ts';
-import { marshalDynamoItem, marshalDynamoValue, unmarshalDynamoItem } from './dynamo-marshal.ts';
+import {
+  assertWritableAttributeName,
+  marshalDynamoItem,
+  marshalDynamoValue,
+  unmarshalDynamoItem,
+} from './dynamo-marshal.ts';
 import { createDynamoExpressionBuilder } from './dynamo-expression.ts';
 import type { IDynamoTransactionBuffer } from './dynamo-transaction-buffer.ts';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
@@ -229,6 +234,7 @@ export function createDynamoDataSource(
     },
     async update(id, data): Promise<Record<string, unknown>> {
       const identifier = key(id, 'update');
+      for (const name of Object.keys(data)) assertWritableAttributeName(name);
       const entries = Object.entries(data).filter(([name, value]) =>
         value !== undefined && !target.keyColumns.includes(name)
       );

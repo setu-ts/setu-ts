@@ -1657,6 +1657,12 @@ writes by key, so a delete-and-recreate under a reused caller-supplied key in be
 write onto another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back
 separately; the tenant bridge checks the returned tenant on both paths before returning it.
 
+**`__proto__` fields.** The conditional members refuse an own `__proto__` field in the predicate and
+the payload on every adapter. Cosmos DB and DynamoDB also refuse one in a plain `create`/`update`
+payload (DynamoDB at any depth, because the AWS SDK returns such an attribute without a value), and
+neither lets a stored `__proto__` field set a read row's prototype: Cosmos returns it as an ordinary
+field, DynamoDB omits the attribute the SDK cannot deliver.
+
 **Stored representation.** Predicate scalars compare with the stored representation. DynamoDB date
 attributes encoded as ISO strings require the ISO string; Bigtable's typed/json codecs use their
 configured scalar encoding. Neither member translates a `Date` or allows a document path or operator

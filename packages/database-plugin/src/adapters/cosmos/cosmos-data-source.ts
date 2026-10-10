@@ -40,7 +40,13 @@ import type {
   ICosmosDatabase,
 } from './cosmos-client-types.ts';
 import type { CosmosTarget } from './cosmos-mapping.ts';
-import { ETAG_PROPERTY, fromDocument, readPath, toDocument } from './cosmos-mapping.ts';
+import {
+  assertNoPrototypeField,
+  ETAG_PROPERTY,
+  fromDocument,
+  readPath,
+  toDocument,
+} from './cosmos-mapping.ts';
 import type { PartitionKeyResolver, ResolvedPartitionKey } from './cosmos-partition-key.ts';
 import { renderPaths } from './cosmos-partition-key.ts';
 import { buildCountQuery, buildIdLookupQuery, buildQuery } from './cosmos-query.ts';
@@ -339,6 +345,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     resolved: ResolvedPartitionKey,
     data: Partial<Record<string, unknown>>,
   ): Record<string, unknown> => {
+    assertNoPrototypeField(data as Record<string, unknown>);
     const payload = { ...data } as Record<string, unknown>;
     delete payload[target.primaryKey];
     delete payload[DOCUMENT_ID_FIELD];

@@ -670,6 +670,15 @@ All notable changes to this project are documented here. The format follows
   reached the driver filter and was read as a query operator, addressing other documents. Every
   keyed operation now rejects a key value that is not a string or number, before any driver call,
   without quoting it.
+- **Cosmos DB and DynamoDB refuse a `__proto__` payload field (`@setu-ts/database-plugin`, M105).**
+  A JSON payload carrying an own `"__proto__"` key reached `create`/`update` unchecked. On Cosmos
+  (since M81) every row read back then carried that object as its prototype on Node and Bun
+  (`row.isAdmin === true`), because the read mapping assigned keys; on DynamoDB (since M80) the row
+  became permanently unreadable on every runtime, because the AWS SDK returns a `__proto__`
+  attribute with no value. Both adapters now refuse such a field on write without quoting it — at
+  any depth on DynamoDB, whose SDK drops nested ones too — and their read paths no longer let a
+  stored one (written by anything) inject a prototype or crash the read: Cosmos keeps it as an
+  ordinary field and DynamoDB skips the attribute the SDK cannot deliver.
 - **Bigtable and DynamoDB field maps read own entries only (`@setu-ts/database-plugin`, M105).** A
   field named after an inherited member (`constructor`, `toString`) resolved the inherited function
   as a column address or date encoding; Bigtable then threw a `TypeError`. Both maps are now
