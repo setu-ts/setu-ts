@@ -73,7 +73,7 @@ describe('IMongoDatabase facade static type fixture (M95b §3.5)', () => {
 });
 
 describe('MongoAdapter against a real MongoDB server (guarded)', () => {
-  it('M105 conditional writes match, miss and conjoin mapped keys, including in a session', {
+  it('M105 conditional writes match, miss and conjoin mapped keys', {
     ignore: skipReal,
   }, async () => {
     const adapter = new MongoAdapter({
@@ -93,6 +93,24 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
         { role: 'owner' },
         { name: 'new' },
       );
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+  // A session needs a replica set; CI's `MONGODB_URI` is a standalone server,
+  // so this half reports as ignored there rather than failing or passing vacuously.
+  it('M105 conditional writes match, miss and conjoin mapped keys inside a session', {
+    ignore: skipTx,
+  }, async () => {
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m78',
+      collections: {
+        Widget: { collection: `m105_${crypto.randomUUID().replaceAll('-', '')}`, primaryKey: 'id' },
+      },
+    });
+    await adapter.connect();
+    try {
       const tx = await adapter.beginTransaction();
       try {
         await conditionalContract(
