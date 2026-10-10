@@ -41,6 +41,7 @@ lived in the session scratchpad and is not committed.
 | Version JSON imports                  | 45 files `import denoJson from '…/deno.json' with { type: 'json' }`                             | Only `denoJson.version` is read (44 reads + `cli/src/constants.ts:16`). Outside `rootDir: src`, and `deno.json` would not ship in an npm tarball.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `Deno` global in `src`                | `runtime/src/adapters/deno/*.ts`, `cli/src/main.ts`                                             | The only non-comment, non-template-string uses. `Bun.` appears only in comments.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | TC39 decorator emit (tsc 5.9/6.0/7.0) | probe: emitted `__esDecorate` helper                                                            | `const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(null) : void 0;` — on Node 24 `Symbol.metadata` is `undefined`, so `context.metadata` is `undefined` and a member decorator writing to it throws `TypeError`. With `Symbol.metadata ??= Symbol.for('Symbol.metadata')` evaluated first, the probe's class and member decorators share one carrier, readable as `Class[Symbol.for('Symbol.metadata')]`.                                                                                                                                                                                                                            |
+| TC39 decorator metadata on Bun 1.4.2  | probe                                                                                           | No native `Symbol.metadata`. Bun compiling `.ts` itself, and `bun build` output (also run on Node), store metadata under `Symbol.for('Symbol.metadata')`. `tsc` output on Bun crashes exactly as on Node without the polyfill and works with it; with the polyfill installed, Bun's own compiler uses the same key.                                                                                                                                                                                                                                                                                                                                                  |
 | decorator-plugin metadata read        | `packages/decorator-plugin/src/metadata/context-bridge.ts:109,127,152,157`                      | Reads `context.metadata`; the M76 fallback reads `Symbol.metadata ?? Symbol.for('Symbol.metadata')`, so the polyfill key agrees with the existing read side.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `rewriteRelativeImportExtensions`     | probe                                                                                           | Rewrites static and literal dynamic `./x.ts` → `./x.js`; a non-literal `import(p)` is wrapped in `__rewriteRelativeImportExtension(p)` (rewrites only `./`/`../` strings). `.d.ts` output keeps `./x.ts`, and a consumer resolves it (verified with TS 5.9 and TS 7.0.2).                                                                                                                                                                                                                                                                                                                                                                                            |
 | Non-literal `import()` sites          | `cli/src/schematics/custom.ts:34`, `decorator-plugin/src/discovery/controller-discovery.ts:167` | `custom.ts` passes an absolute `file:` URL (untouched by the helper). Discovery's default importer is wrapped; see §3.9.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -53,12 +54,12 @@ lived in the session scratchpad and is not committed.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                  | Resolution (picked side)                                                                                                                                                                 | Doc deliverable (same PR)                                                                                                  |
-| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| C1 | ROADMAP 111a: "`jsr:@std/jsonc` in `cli` is replaced". Source: `cli` imports no `@std/jsonc`; the string is part of an emitted Dockerfile for generated Deno projects.                    | Source. Nothing to replace in 111a; the emitted Dockerfile belongs to the generated-Deno-target surface 111d owns.                                                                       | ROADMAP 111a bullet corrected; 111d bullet gains "the emitted Deno Dockerfile's `jsr:@std/jsonc` step".                    |
-| C2 | ROADMAP 111a lists `sideEffects` in every manifest. A wrong `"sideEffects": false` makes a consumer's bundler silently drop module code, and no audit of top-level side effects exists.   | Omit `sideEffects` in 111a (npm's default: has side effects — correct, merely less tree-shakeable). Decided with an audit in 111c, before the first publish.                             | ROADMAP 111a bullet drops `sideEffects`; 111c gains "decide `sideEffects` per package behind a top-level-statement audit". |
-| C3 | AI_GUIDELINES §11.5 ("no code at module top level that modifies global state") vs. the decorator polyfill (§3.4), which tsc-compiled decorators on Node require at class-definition time. | **Requires maintainer approval (§10.2).** Proposed: a named, single-module exception for installing a spec-defined well-known symbol the runtime has not shipped, write-if-absent only.  | AI_GUIDELINES §11.5 gains the exception paragraph naming `decorator-plugin/src/metadata/symbol-metadata.ts`.               |
-| C4 | AI_GUIDELINES §12.2: "JSR has no peer-dependency concept, so the npm 'peer dependency' pattern does not apply" and "lazily load … via dynamic `import()` of an `npm:` specifier".         | The pattern becomes optional `peerDependencies` + bare literal `import()` (ROADMAP 111a). §12.2 rewording is a 111f deliverable, but the two sentences are false the moment this merges. | §12.2's two sentences corrected in THIS PR (minimal wording); the full §12.2 rewrite stays in 111f.                        |
+| #  | Conflict                                                                                                                                                                                  | Resolution (picked side)                                                                                                                                                                                                   | Doc deliverable (same PR)                                                                                                  |
+| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| C1 | ROADMAP 111a: "`jsr:@std/jsonc` in `cli` is replaced". Source: `cli` imports no `@std/jsonc`; the string is part of an emitted Dockerfile for generated Deno projects.                    | Source. Nothing to replace in 111a; the emitted Dockerfile belongs to the generated-Deno-target surface 111d owns.                                                                                                         | ROADMAP 111a bullet corrected; 111d bullet gains "the emitted Deno Dockerfile's `jsr:@std/jsonc` step".                    |
+| C2 | ROADMAP 111a lists `sideEffects` in every manifest. A wrong `"sideEffects": false` makes a consumer's bundler silently drop module code, and no audit of top-level side effects exists.   | Omit `sideEffects` in 111a (npm's default: has side effects — correct, merely less tree-shakeable). Decided with an audit in 111c, before the first publish.                                                               | ROADMAP 111a bullet drops `sideEffects`; 111c gains "decide `sideEffects` per package behind a top-level-statement audit". |
+| C3 | AI_GUIDELINES §11.5 ("no code at module top level that modifies global state") vs. the decorator polyfill (§3.4), which tsc-compiled decorators on Node require at class-definition time. | **Approved by the maintainer 2026-10-11 (§10.2), route 1 with two safeguards (§3.4).** A named, single-module exception for installing a spec-defined well-known symbol the runtime has not shipped, write-if-absent only. | AI_GUIDELINES §11.5 gains the exception paragraph naming `decorator-plugin/src/metadata/symbol-metadata.ts`.               |
+| C4 | AI_GUIDELINES §12.2: "JSR has no peer-dependency concept, so the npm 'peer dependency' pattern does not apply" and "lazily load … via dynamic `import()` of an `npm:` specifier".         | The pattern becomes optional `peerDependencies` + bare literal `import()` (ROADMAP 111a). §12.2 rewording is a 111f deliverable, but the two sentences are false the moment this merges.                                   | §12.2's two sentences corrected in THIS PR (minimal wording); the full §12.2 rewrite stays in 111f.                        |
 
 ## 3. Design decisions
 
@@ -114,7 +115,7 @@ lived in the session scratchpad and is not committed.
 - **Test home:** the rewritten audit (§3.8) refuses any remaining `npm:`/`jsr:` literal in an
   `import()`/`from`; existing loader-seam tests assert the new error text.
 
-### 3.4 `Symbol.metadata` on Node (needs approval — C3)
+### 3.4 `Symbol.metadata` on Node and Bun (approved — C3, route 1 with two safeguards)
 
 - **Decision:** new internal module `packages/decorator-plugin/src/metadata/symbol-metadata.ts`
   exporting `installSymbolMetadata(target: { metadata?: symbol }): void` (write-if-absent:
@@ -122,14 +123,35 @@ lived in the session scratchpad and is not committed.
   `Symbol`. Every module under `src/decorators/` imports it first (side-effect import), so it has
   run before any class using a framework decorator is evaluated. Not exported from `src/index.ts`.
   On Deno, which defines `Symbol.metadata`, the call is a no-op.
-- **Why:** measured in §1 — without it, every decorated controller crashes at class definition on
-  Node from tsc output. `Symbol.for('Symbol.metadata')` is the key tsx/esbuild already use and the
-  key `context-bridge.ts` already falls back to (M76), so all three agree. The TypeScript handbook
-  prescribes exactly this polyfill for TC39 decorator metadata.
+- **Safeguard 1 — a named failure instead of a crash in TypeScript's helper.** Every site in
+  `decorator-plugin` that reads `context.metadata` goes through one internal
+  `requireDecoratorMetadata(context)` (same module). When the carrier is still `undefined` (a
+  bundler dropped the side-effect import, or a decorated class was evaluated before this package),
+  it throws `DecoratorMetadataUnavailableError` (`name` set, NOT barrel-exported — no consumer can
+  act on the type, only on the message) naming the two remedies: import `@setu-ts/decorator-plugin`
+  before the decorated module, or compile with a toolchain that supplies the carrier (tsx, esbuild,
+  Bun).
+- **Safeguard 2 — bundlers may not drop it.** In 111a no package declares `sideEffects` (C2), which
+  npm reads as "every file has side effects", so the import is safe today. The guard is for 111c:
+  the manifest drift gate (§3.1) refuses a `decorator-plugin` manifest whose `sideEffects` is
+  `false` or a list that omits `./dist/metadata/symbol-metadata.js`.
+- **Why:** measured in §1 — without it, a decorated class compiled by `tsc` crashes at definition on
+  Node 24 AND on Bun 1.4.2
+  (`TypeError: undefined is not an object (evaluating
+  'ctx.metadata.m = 1')`); with it, both work.
+  `Symbol.for('Symbol.metadata')` is the key tsx, esbuild and Bun's own compiler already use and the
+  key `context-bridge.ts` already falls back to (M76), so all of them agree; on Deno the write is a
+  no-op. TypeScript's 5.2 release notes give this polyfill (with `Symbol(...)`; `Symbol.for` is used
+  here so two copies of the package agree). Rejected with cause: an explicit opt-in import (fails on
+  first use for every `tsc` user), a module-level carrier without the global (a method decorator
+  never receives its class, so a class with member decorators but no class decorator loses its
+  routes), and dropping `tsc` support (excludes it on two of three server runtimes).
 - **Test home:** `decorator-plugin/test/unit/symbol-metadata.test.ts` (install on a fresh object; no
-  overwrite of an existing symbol; idempotent); the Node pack-and-boot gate (§3.10) serves a
-  decorated controller compiled by tsc — negative control: remove the side-effect import → that step
-  fails with the `TypeError`.
+  overwrite of an existing symbol; idempotent; `requireDecoratorMetadata` throws the named error for
+  an undefined carrier and returns it otherwise); `scripts/test/node-manifests.test.ts` (safeguard
+  2); the Node pack-and-boot gate (§3.10) serves a decorated controller compiled by tsc on Node and
+  Bun — negative control: remove the side-effect import → that step fails with the named error, not
+  the `TypeError`.
 
 ### 3.5 Version constant
 
@@ -190,17 +212,17 @@ lived in the session scratchpad and is not committed.
 ### 3.10 Node pack-and-boot gate
 
 - **Decision:** `scripts/check-node-build.ts` (Deno script,
-  `--allow-run=pnpm,npm,node,npx
-  --allow-read --allow-write=.tmp`) runs:
+  `--allow-run=pnpm,npm,node,npx,bun --allow-read --allow-write=.tmp`) runs:
   `pnpm install --frozen-lockfile`; `pnpm -r build`; `pnpm pack` for every member into
   `.tmp/node-pack/`; fails if any packed `package.json` still contains `workspace:`; then in an
   empty temp project, `npm install` of the `kernel`, `runtime`, `common`, `decorator-plugin`
   tarballs (plain npm, deliberately not pnpm) and runs a committed fixture
-  (`scripts/fixtures/node-boot/`) on Node 24 and on Node 22 (`npx -y node@22`): (1) boots `kernel` +
-  `runtime`, `app.start({ port })`, `fetch` returns 200 with the expected JSON; (2) compiles a
-  decorated controller with the repo's tsc and serves it (proves §3.4). A new `node-build` job in
-  `ci.yml` runs it on `actions/setup-node@v4` (Node 24) + corepack pnpm. `packageManager` is pinned
-  to `pnpm@12.11.2` (the version corepack resolved).
+  (`scripts/fixtures/node-boot/`) on Node 24, on Node 22 (`npx -y node@22`) and on Bun: (1) boots
+  `kernel` + `runtime`, `app.start({ port })`, `fetch` returns 200 with the expected JSON; (2)
+  compiles a decorated controller with the repo's tsc and serves it (proves §3.4). A new
+  `node-build` job in `ci.yml` runs it on `actions/setup-node@v4` (Node 24) + corepack pnpm +
+  `oven-sh/setup-bun` for the Bun leg. `packageManager` is pinned to `pnpm@12.11.2` (the version
+  corepack resolved).
 - **Why:** the exit criterion in ROADMAP 111a; without a CI job the Node build rots before 111b.
 - **Test home:** the CI job itself; its decidable half (tarball scan for `workspace:`) is a pure
   function unit-tested in `scripts/test/check-node-build.test.ts`.
@@ -300,8 +322,8 @@ deno task release:verify 0.8.0
 4. **Consumer TypeScript floor**: `.d.ts` files keep `./x.ts` specifiers → §3.10 fixture compiles
    against the packed tarballs with the pinned TS; a consumer floor is measured and recorded in
    111c.
-5. **Bun and Workers lack the §3.4 verification here** → 111c's `compat/` repointing covers Bun;
-   Workers bundles with esbuild, which supplies its own metadata helper.
+5. **Workers lacks the §3.4 verification here** (Bun was probed: same as Node) → Workers bundles
+   with esbuild, which supplies its own metadata carrier; 111c's `compat/` repointing re-checks.
 6. **Codemod over-rewrites a string** (e.g. inside `cli` template text that must keep `npm:` for
    generated Deno projects) → the codemod uses the audit's masking and touches only import arguments
    and the listed loader-seam constants; the diff is reviewed file by file.
