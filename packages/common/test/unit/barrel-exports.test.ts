@@ -735,3 +735,31 @@ describe('@setu-ts/common barrel — M108 inbox port', () => {
     expect(typeof store.stats).toBe('function');
   });
 });
+
+describe('@setu-ts/common barrel — authorization policies (M110a)', () => {
+  it('exports authorizationFailureInit beside respondWithAuthorizationFailure', () => {
+    expect(typeof common.authorizationFailureInit).toBe('function');
+    expect(typeof common.respondWithAuthorizationFailure).toBe('function');
+    expect(common.authorizationFailureInit('insufficient-privileges').status).toBe(403);
+  });
+
+  it('exports the policy contract types', () => {
+    // Compile-time: each type must be importable from the barrel.
+    const info: common.PolicyAbilityInfo = { anonymous: false };
+    const ability: common.PolicyAbility<never> = () => true;
+    const check: common.PolicyCheck<never> = () => true;
+    const anonymous: common.AnonymousPolicyCheck<never> = () => false;
+    const ref: common.PolicyRef<'read', never> = 'post';
+    const policy: common.PolicyDefinition = { name: 'post', abilities: { read: ability } };
+    const service: Pick<common.IAuthorizationPolicyService, 'describe'> = {
+      describe: () => info,
+    };
+    expect([typeof check, typeof anonymous, ref, policy.name]).toEqual([
+      'function',
+      'function',
+      'post',
+      'post',
+    ]);
+    expect(service.describe('post', 'read')).toEqual({ anonymous: false });
+  });
+});

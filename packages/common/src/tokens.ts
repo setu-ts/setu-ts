@@ -57,6 +57,16 @@ export const CAPABILITIES = {
   AUTH: 'authentication',
   /** Authorization service (RBAC, permissions). */
   AUTHORIZATION: 'authorization',
+  /**
+   * Authorization policies — an `IAuthorizationPolicyService` the AuthPlugin
+   * always registers: an asynchronous, target-aware check over named
+   * policies, beside (never replacing) the synchronous RBAC service under
+   * `AUTHORIZATION`. Consumed by the `requirePolicy` guard and by
+   * DecoratorPlugin's `@Can` and class-form policies.
+   *
+   * @since 0.9.0
+   */
+  AUTHORIZATION_POLICIES: 'authorization-policies',
   /** JWT sign/verify service. */
   JWT: 'jwt',
   /**

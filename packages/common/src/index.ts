@@ -27,7 +27,10 @@ export type {
   ErrorResponseInit,
   IErrorResponder,
 } from './errors/error-responder.ts';
-export { respondWithAuthorizationFailure } from './errors/authorization-responder.ts';
+export {
+  authorizationFailureInit,
+  respondWithAuthorizationFailure,
+} from './errors/authorization-responder.ts';
 export type { AuthorizationFailure } from './errors/authorization-responder.ts';
 // Error serialization for structured logging (M70f, X2-5)
 export { causeMessage, serializeError } from './errors/serialize-error.ts';
@@ -254,6 +257,15 @@ export type {
   RbacConfig,
   RoleDefinition,
 } from './services/auth.ts';
+export type {
+  AnonymousPolicyCheck,
+  IAuthorizationPolicyService,
+  PolicyAbility,
+  PolicyAbilityInfo,
+  PolicyCheck,
+  PolicyDefinition,
+  PolicyRef,
+} from './services/authorization-policies.ts';
 export type {
   AuthMethod,
   IAuthSessionService,
