@@ -26,9 +26,18 @@ export function createFieldMatcher(
       segment,
     ) => (caseSensitive ? segment : segment.toLowerCase()));
     if (typeof value === 'string') return { segments, classification: value };
-    return value.redactor === undefined
-      ? { segments, classification: value.classification }
-      : { segments, classification: value.classification, redactor: value.redactor };
+    // Own properties only: an inherited `redactor` (from a polluted
+    // `Object.prototype` or an entry built with `Object.create`) must never
+    // replace a redactor the policy did not declare.
+    // A missing own `classification` is reachable only from an untyped caller;
+    // it stays `undefined` at runtime exactly as a plain read did before, so
+    // the classification lookup misses and selection falls to the default.
+    const classification = Object.hasOwn(value, 'classification')
+      ? value.classification
+      : (undefined as unknown as DataClassification);
+    return Object.hasOwn(value, 'redactor') && value.redactor !== undefined
+      ? { segments, classification, redactor: value.redactor }
+      : { segments, classification };
   });
   return (path: string): CompiledFieldPattern | undefined => {
     const segments = path.split('.').map((

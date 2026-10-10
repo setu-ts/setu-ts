@@ -219,4 +219,48 @@ describe('createRedactionService', () => {
     expect(service.redactValue('auth.token', 'value')).toBe('specific');
     expect(service.redactValue('profile.email', 'value')).toBe('broad');
   });
+  describe('ignores inherited redactor properties (M101h audit S1)', () => {
+    const identity: Redactor = (value) => value;
+
+    it('a polluted Object.prototype.redactor never replaces selection', () => {
+      const proto = Object.prototype as Record<string, unknown>;
+      proto['redactor'] = identity;
+      try {
+        const stringOnly = createRedactionService({ fields: { password: 'secret' } });
+        expect(stringOnly.redactRecord({ password: 'hunter2' })).toEqual({
+          password: '[Redacted]',
+        });
+
+        const objectArm = createRedactionService({
+          fields: { email: { classification: 'pii' } },
+          redactors: { pii: () => 'class-level' },
+        });
+        expect(objectArm.redactValue('email', 'jane@example.com')).toBe('class-level');
+      } finally {
+        delete proto['redactor'];
+      }
+    });
+
+    it('an entry that only inherits redactor falls through to the class redactor', () => {
+      const entry = Object.assign(Object.create({ redactor: identity }), {
+        classification: 'pii',
+      }) as { classification: string };
+      const service = createRedactionService({
+        fields: { email: entry },
+        redactors: { pii: () => 'class-level' },
+      });
+
+      expect(service.redactValue('email', 'jane@example.com')).toBe('class-level');
+    });
+
+    it('an entry that only inherits classification fails closed to erase', () => {
+      const entry = Object.create({ classification: 'pii' }) as { classification: string };
+      const service = createRedactionService({
+        fields: { email: entry },
+        redactors: { pii: identity },
+      });
+
+      expect(service.redactValue('email', 'jane@example.com')).toBe('[Redacted]');
+    });
+  });
 });

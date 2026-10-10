@@ -11402,7 +11402,8 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 — the value arm that lets one classification carry two treatments. For every matched field,
 `redactValue`/`redactRecord` select a redactor in this order: the matched field's own `redactor`
 (when it has one), then `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`.
-`RedactionContext.classification` always reports the matched classification.
+`RedactionContext.classification` always reports the matched classification. A field's `redactor`
+and `classification` are read as own properties only, so an inherited value is ignored.
 
 `DataClassification` is one of four framework constants or any application-defined string (which
 reaches `redactors[<string>]`):
