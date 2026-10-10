@@ -12642,9 +12642,11 @@ or its harness — the M60 "generated code that is wired" bar, applied to what h
 
 ### Milestone 101h: Documentation, Plus Redaction Setup That Takes Extra Work
 
-**Package(s):** `packages/common` (the only `src` change), plus the READMEs of `storage-plugin`,
-`auth-plugin`, `events-plugin` and the five further diagnostics-carrying plugins, `PUBLIC_API.md`
-and docs
+**Package(s):** `packages/common` (the only `src` change), plus the READMEs of `common`,
+`storage-plugin`, `multi-tenancy-plugin`, `telemetry-plugin`, `logger-plugin`, `auth-plugin` and
+`events-plugin`, `PUBLIC_API.md` and docs. The five further diagnostics-carrying plugins this line
+named before are out: health, config, queue, scheduler and telemetry already document their option
+under their own headings, and V8-44 names only auth and events (plan C6)
 
 **Objective:** the code is correct and a reader following the documentation still cannot set it up.
 
