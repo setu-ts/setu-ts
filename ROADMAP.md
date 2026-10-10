@@ -13516,7 +13516,7 @@ each one.
 - [x] M57 brand on `requirePolicy`/`@RequirePolicy` routes so `deriveSecurity` documents them
 - [x] PUBLIC_API.md, the auth-plugin and decorator-plugin READMEs, and the ABAC guidance page
       (`docs/authorization.md`)
-- [ ] A design security review in the plan (written — plan §10), and a committed-tree audit
+- [x] A design security review in the plan (written — plan §10), and a committed-tree audit
 
 **Breaking for implementors:** none expected — a new token and new exports. The plan confirms it.
 
@@ -13851,5 +13851,5 @@ patch by construction and gains nothing new here.
 | 109       | ✅     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |
 | 109b      | ✅     | common + idempotency-plugin + database-plugin + sdk — idempotency tier C (`within`) and the SDK idempotency key ([#438](https://github.com/setu-ts/setu-ts/pull/438))                                                                         |
-| 110a      | ⬜     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
+| 110a      | ✅     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
 | 110b      | ⬜     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |
