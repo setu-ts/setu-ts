@@ -6017,6 +6017,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it closed on real PostgreSQL with Drizzle `bigint` columns and found a Low (an unsafe `bigint`
   `createdAt` left as a `bigint` made the health indicator throw), fixed afterwards by converting
   every `bigint` and NOT re-audited, the maintainer proceeding to the PR — complete (PR #441).
+- **Milestone 110b** (`packages/common` + `packages/auth-plugin` + `packages/decorator-plugin` +
+  `packages/database-plugin` — scoped RBAC): a role granted IN a scope (tenant, organisation, team,
+  region). `scopedRbac` (requires `rbac`) makes AuthPlugin define ONE built-in policy,
+  `scoped-rbac`, on the M110a evaluator — catalogue permissions as `perm:` abilities, roles as
+  `role:` abilities, the scope as target — so no capability token is added and a guard or decorator
+  naming a name outside the catalogue fails at startup through M110a's scan, which now reads a
+  multi-ability brand. `requireScopedRole` (any-of) / `requireScopedPermission` (all-of) and
+  `@ScopedRoles` / `@ScopedPermissions` take a `ScopeSource` (`scopeFromTenant()` default,
+  `scopeFromParam`); grant sources (`static`, `claims`, `custom`, `createDatabaseGrantSource`) are
+  unioned and one failing source denies; `inheritsFrom` is one resolver for parents and delegation,
+  walked with cycle refusal and bounds (child requests inherit parent grants); a route scope naming
+  another tenant than the resolved request tenant denies; `grantableIn` limits where a role counts;
+  per-scope custom roles bundle catalogue permissions and resolve against the grant's own scope;
+  timing is `'request'`, a TTL cache, or `'sign-in'` under a private session key carried through a
+  pending second factor. Negative controls found two tests that could not fail — the custom-role
+  collision test never put both scopes' definitions in the index, and the `hasOwn` test used
+  `Object.prototype` names, which carry no permissions — both strengthened. The JSDoc lint ratchet
+  caught `GrantResolutionError.reason` typed by an internal type; it is now the exported
+  `GrantResolutionReason`. Verified through real kernel apps for scenarios A–E, against real
+  PostgreSQL and MongoDB for the database sources, and by a 17-check behavioural probe including
+  revocation on the next request — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
