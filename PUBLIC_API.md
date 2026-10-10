@@ -1623,11 +1623,15 @@ and, when supplied, a non-empty plain update payload. Each field is read once in
 copy is what gets validated and written, so an input that changes between reads (a `Proxy`) cannot
 send something other than what passed. An own `__proto__` key is refused, in the predicate and in
 the payload, because Node and Bun drop it from any object a backend rebuilds by assignment. Every
-implementation validates direct calls as well as repository calls. No refusal from the conditional
-members quotes a caller value or field name, except D1's unknown-column refusal, which is SQLite's
-own diagnostic as for every D1 statement; Prisma's validation message is replaced with a fixed
-sentence. Invalid inputs reject with `UnsupportedQueryFeatureError` feature `'write-precondition'`
-(unbranded) — except a direct call to the D1 data source, which rejects with
+implementation validates direct calls as well as repository calls. Refusals of the predicate and the
+payload — validation, an unknown or invalid predicate column, and Prisma's validation message, which
+is replaced with a fixed sentence — quote no caller value or field name, except D1's unknown-column
+refusal, which is SQLite's own diagnostic as for every D1 statement. Refusals of the KEY are shared
+with `findById`/`update`/`delete` and may quote it (a scalar key for a composite target in Prisma,
+Drizzle and Bigtable; a Bigtable key segment holding the separator or a payload that would change
+the key; a Cosmos record key missing its primary-key field). Responses mask all of these (X12-3), so
+they reach server logs only. Invalid inputs reject with `UnsupportedQueryFeatureError` feature
+`'write-precondition'` (unbranded) — except a direct call to the D1 data source, which rejects with
 `CloudflareUnsupportedError`, since `cloudflare-plugin` cannot import `database-plugin`'s error.
 Through a repository the check runs in `BaseRepository` first, so every backend answers
 `'write-precondition'` there. `BaseRepository` rejects missing support with
