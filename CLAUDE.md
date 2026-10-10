@@ -6037,7 +6037,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   caught `GrantResolutionError.reason` typed by an internal type; it is now the exported
   `GrantResolutionReason`. Verified through real kernel apps for scenarios A–E, against real
   PostgreSQL and MongoDB for the database sources, and by a 17-check behavioural probe including
-  revocation on the next request — complete (PR pending).
+  revocation on the next request. The committed-tree security audit ran three fresh-context rounds.
+  Round 1 found a Medium: grants from a `claims` source were memoised, coalesced and cached by
+  principal id and issuer, so a narrow token for one user passed in a scope only that user's broad
+  token granted; a `claims` source is now mapped per credential and never shared. It also found a
+  non-string principal id reaching a Prisma filter as an operator, a guide example that skipped
+  tenant consistency, an id reaching a log as an error name, and silent truncation at `limit`. Round
+  2 found the same sharing through a `custom` source reading claims — a custom source now receives
+  only the id and `iss` — and a `null` id compared as `IS NULL`. Round 3 passed on `6fe0a973`; its
+  observation that `iss` was read twice was fixed afterwards and NOT re-audited, at the maintainer's
+  direction — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
