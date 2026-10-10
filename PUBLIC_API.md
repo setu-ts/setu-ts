@@ -11399,9 +11399,9 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | `defaultRedactor` | `Redactor`                                                       | Fallback when `redactors` has no entry for that classification            |
 
 `FieldRedaction` is `{ readonly classification: DataClassification; readonly redactor?: Redactor }`
-— the value arm that lets one classification carry two treatments. When a matched field carries its
-own `redactor`, `redactValue`/`redactRecord` select a redactor in this order: the matched field's
-own `redactor`, then `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`.
+— the value arm that lets one classification carry two treatments. For every matched field,
+`redactValue`/`redactRecord` select a redactor in this order: the matched field's own `redactor`
+(when it has one), then `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`.
 `RedactionContext.classification` always reports the matched classification.
 
 `DataClassification` is one of four framework constants or any application-defined string (which

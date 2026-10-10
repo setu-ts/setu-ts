@@ -1,7 +1,10 @@
 # Milestone 101h — documentation, plus redaction setup that takes extra work
 
-> **Status:** Planning. Branch: `feat/m101h-docs-and-redaction`, cut from `origin/develop` in its
-> own worktree. `develop` and `main` are both protected — all work (implementation + fixes) stays on
+> **Status:** Complete (archived). Implementation diverged from this plan in three places, recorded
+> in §11.
+>
+> **Originally:** Branch: `feat/m101h-docs-and-redaction`, cut from `origin/develop` in its own
+> worktree. `develop` and `main` are both protected — all work (implementation + fixes) stays on
 > this one branch until it merges into `develop` via a single PR (`gh pr create --base develop`).
 >
 > **Refreshed 2026-10-10 against `develop` at `bd063034`** (34 merges after the plan was written at
@@ -358,3 +361,17 @@ diff:
   `(await import('@setu-ts/…')).…` expression.
 - **Coverage baseline:** measured, not assumed; the original 100% claim was false (§6).
 - **Citations:** every §1 line number re-read; the auth fence count is 18 (M110a/M110b added two).
+
+## 11. Implementation deviations (recorded at archive time)
+
+- **Upgrade guide (§3.1):** §3.1 said no upgrade-guide step was needed. The branch adds a
+  `docs/upgrading.md` entry under `## Unreleased`, stated as a note rather than a required
+  migration, so a reader who reads policies back finds the narrowing where readers look. §5 already
+  listed the file.
+- **CHANGELOG section (§8):** §8 said `Changed`. The entry is under `Added`, beside the
+  `FieldRedaction` export it announces, with the reader-side narrowing sentence §3.1 required. §5
+  named `Added`.
+- **Logger test (§3.2):** §3.2 said the test leaves `user.name` intact. The shipped test gives
+  `user.name` a `pii` classification with no field redactor and asserts it falls through to
+  `redactors.pii` (`'class-level'`). That is stronger: it exercises both precedence steps in one
+  consumer.

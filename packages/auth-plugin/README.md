@@ -1243,16 +1243,17 @@ explicit: the option is absent by default, and when supplied `enabled` must be `
 
 | Field            | Type                     | Meaning                                                        |
 | ---------------- | ------------------------ | -------------------------------------------------------------- |
-| `enabled`        | `true`                   | Explicit opt-in; must be the literal `true`.                   |
+| `enabled`        | `boolean`                | Explicit opt-in; must be `true` (`false` throws).              |
 | `roles`          | `Record<string, string>` | Exact role name → approved display alias. At most 128 entries. |
 | `permissions`    | `Record<string, string>` | Exact permission name → approved display alias. At most 128.   |
 | `policyRevision` | `string`                 | Approved alias for the policy revision; only when configured.  |
 
 Only the exact role and permission names in the allowlists are observed, each under its approved
 alias; a decision whose requested rules are not all approved is dropped before buffering and counted
-as `droppedUnapproved`. Request bodies, headers, claim values and the requested rules themselves are
-never captured. `setu devtool enable` writes this option for you; this section is for the reader who
-configures it by hand. Enable only on an approved development dataset.
+as `droppedUnapproved`. A recorded decision names its rules only by their approved aliases; raw role
+and permission names, request bodies, headers and claim values are never captured.
+`setu devtool enable` writes this option for you; this section is for the reader who configures it
+by hand. Enable only on an approved development dataset.
 
 ```typescript
 import { AuthPlugin } from '@setu-ts/auth-plugin';
