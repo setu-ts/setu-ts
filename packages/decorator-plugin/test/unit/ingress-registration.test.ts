@@ -136,6 +136,7 @@ describe('non-HTTP ingress registration', () => {
     expect(plugin.optionalDependencies).toEqual([
       CAPABILITIES.VALIDATION,
       CAPABILITIES.AUTHORIZATION,
+      CAPABILITIES.AUTHORIZATION_POLICIES,
       CAPABILITIES.VIEW,
       CAPABILITIES.IDEMPOTENCY,
     ]);

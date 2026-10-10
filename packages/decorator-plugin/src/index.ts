@@ -76,6 +76,10 @@ export { Permissions, Public, Roles } from './decorators/security.ts';
 export { HttpCode, Redirect, ResponseHeader } from './decorators/response.ts';
 export { Idempotent } from './decorators/idempotency.ts';
 
+// --- Authorization policies (M110a) ---
+export { Ability, Can, Policy } from './decorators/policy.ts';
+export type { AbilityOptions, PolicyClassAbility, PolicyClassTarget } from './decorators/policy.ts';
+
 // --- View decorators ---
 export { Render } from './decorators/view.ts';
 export type { RenderDecorator } from './decorators/view.ts';

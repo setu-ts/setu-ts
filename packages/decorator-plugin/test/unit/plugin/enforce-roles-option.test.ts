@@ -185,6 +185,7 @@ describe('enforceRoles option (§3.4, §3.5)', () => {
     expect(plugin.optionalDependencies).toEqual([
       CAPABILITIES.VALIDATION,
       CAPABILITIES.AUTHORIZATION,
+      CAPABILITIES.AUTHORIZATION_POLICIES,
       CAPABILITIES.VIEW,
       CAPABILITIES.IDEMPOTENCY,
       CAPABILITIES.QUEUE,
