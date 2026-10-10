@@ -1,22 +1,36 @@
 /** Internal compiled matcher for redaction field paths. */
 
 import type { DataClassification } from './classification.ts';
+import type { FieldRedaction } from './policy.ts';
+import type { Redactor } from './redactors.ts';
 
-interface Pattern {
-  readonly segments: readonly string[];
+/** The classification and optional pattern-specific redactor a match carries. */
+export interface CompiledFieldPattern {
+  /** Classification reported for the matched value. */
   readonly classification: DataClassification;
+  /** Redactor declared on the matched pattern, when one was supplied. */
+  readonly redactor?: Redactor;
+}
+
+interface Pattern extends CompiledFieldPattern {
+  readonly segments: readonly string[];
 }
 
 /** Compiles dot-path patterns that support `*` and `**`. */
 export function createFieldMatcher(
-  fields: Readonly<Record<string, DataClassification>>,
+  fields: Readonly<Record<string, DataClassification | FieldRedaction>>,
   caseSensitive: boolean,
-): (path: string) => DataClassification | undefined {
-  const patterns: readonly Pattern[] = Object.entries(fields).map(([path, classification]) => ({
-    segments: path.split('.').map((segment) => (caseSensitive ? segment : segment.toLowerCase())),
-    classification,
-  }));
-  return (path: string): DataClassification | undefined => {
+): (path: string) => CompiledFieldPattern | undefined {
+  const patterns: readonly Pattern[] = Object.entries(fields).map(([path, value]) => {
+    const segments = path.split('.').map((
+      segment,
+    ) => (caseSensitive ? segment : segment.toLowerCase()));
+    if (typeof value === 'string') return { segments, classification: value };
+    return value.redactor === undefined
+      ? { segments, classification: value.classification }
+      : { segments, classification: value.classification, redactor: value.redactor };
+  });
+  return (path: string): CompiledFieldPattern | undefined => {
     const segments = path.split('.').map((
       segment,
     ) => (caseSensitive ? segment : segment.toLowerCase()));
@@ -29,7 +43,7 @@ export function createFieldMatcher(
         selected = pattern;
       }
     }
-    return selected?.classification;
+    return selected;
   };
 }
 
