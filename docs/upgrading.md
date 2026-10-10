@@ -12,6 +12,14 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### `RedactionPolicy.fields` values may now be a `FieldRedaction`
+
+No action is required for a policy that supplies classification strings — every existing policy
+behaves identically. Only code that READS a policy's `fields` values back as a `DataClassification`
+is affected: the member is now `DataClassification | FieldRedaction`, so narrow with
+`typeof value === 'string'` before using the value as a classification. No released framework code
+path reads a policy back, so this is a note rather than a required migration.
+
 ### Set `maxWorkers` to size worker pools across task modules
 
 WorkerPoolPlugin now caps the sum of worker slots across modules. The default is the largest of

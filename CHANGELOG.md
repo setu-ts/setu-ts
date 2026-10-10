@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Per-field redaction in a policy (`@setu-ts/common`, M101h).** `RedactionPolicy.fields` accepts a
+  `FieldRedaction` — `{ classification, redactor? }` — as well as a classification string, so one
+  classification can carry two treatments (mask the email, erase the name, both `pii`) without an
+  invented classification string. A new `FieldRedaction` export names the object arm, and
+  `createRedactionService` selects a redactor in this order: the field's own `redactor`, then
+  `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`. Every existing
+  string-valued policy behaves byte-identically. One reader-side change: code that READS
+  `policy.fields[path]` as a `DataClassification` now sees the union and must narrow with
+  `typeof value === 'string'`. A field's `redactor` and `classification` are read only as own
+  properties: an inherited `redactor` (a polluted `Object.prototype`, or an entry built with
+  `Object.create`) is ignored, and an entry without its own string `classification` is erased.
+
 - **Conditional repository writes (M105).** Optional `updateWhere` and `deleteWhere` on
   `IRepository` and `IDataSource`, with shared `WritePrecondition` and `checkWritePrecondition`
   validation (`WritePreconditionCheck`), native adapter conditions, bounded Cosmos version guards

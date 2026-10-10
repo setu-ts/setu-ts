@@ -18,11 +18,14 @@ for what that means on npm versus Deno.
 The plugin always registers JWT and authentication services. It registers authorization only when
 the optional `rbac` configuration is supplied:
 
-| Service                | Token              | Interface                                           |
-| ---------------------- | ------------------ | --------------------------------------------------- |
-| JWT sign/verify/decode | `'jwt'`            | `IJwtService`                                       |
-| Authentication         | `'authentication'` | `IAuthService`                                      |
-| Authorization (RBAC)   | `'authorization'`  | `IAuthorizationService` (when `rbac` is configured) |
+| Service                | Token               | Interface                                           |
+| ---------------------- | ------------------- | --------------------------------------------------- |
+| JWT sign/verify/decode | `'jwt'`             | `IJwtService`                                       |
+| Authentication         | `CAPABILITIES.AUTH` | `IAuthService`                                      |
+| Authorization (RBAC)   | `'authorization'`   | `IAuthorizationService` (when `rbac` is configured) |
+
+The authentication capability is named `CAPABILITIES.AUTH` (value `'authentication'`) — there is no
+`CAPABILITIES.AUTHENTICATION` member.
 
 Without `rbac`, the four authorization guards answer **`501 Not Implemented`** rather than throwing
 — see [Guards](#guards). A configured policy that the caller fails answers
@@ -77,10 +80,11 @@ app.register(AuthPlugin({
 JWT with the separate `IJwtService` resolved from `'jwt'`.
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
 import type { IAuthService, IJwtService } from '@setu-ts/common';
 
 app.router.post('/auth/login', async (ctx) => {
-  const auth = ctx.services.get<IAuthService>('authentication');
+  const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
   const jwt = ctx.services.get<IJwtService>('jwt');
   const { username, password } = await ctx.request.json<{ username: string; password: string }>();
 
@@ -124,6 +128,15 @@ is therefore authenticated by the JWT, because the explicit credential runs firs
 strategies come from the `strategies` option and run last; a `name` colliding with any other
 strategy in the assembled chain makes `register()` throw, because a strategy's `name` is its only
 identity.
+
+Every strategy resolves to an `IPrincipal`:
+
+| Field         | Type                                | Meaning                                 |
+| ------------- | ----------------------------------- | --------------------------------------- |
+| `id`          | `string`                            | Stable subject identifier (required).   |
+| `roles`       | `readonly string[]`                 | Role names held by the principal.       |
+| `permissions` | `readonly string[]`                 | Permission names held by the principal. |
+| `claims`      | `Readonly<Record<string, unknown>>` | Additional claims from the credential.  |
 
 ## RBAC
 
@@ -1162,6 +1175,14 @@ The default key resolves in this order: the authenticated principal, the client 
 `ipSecurityMiddleware` (see `http-security-plugin`), `IRequest.ip`, and only then one global
 `'anonymous'` bucket — shared by every caller for whom none of the three resolved.
 
+<!-- assert:js -->
+
+| Expression                                                                                                          | Value              |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `(await import('@setu-ts/auth-plugin')).defaultRateLimitKey({ request: { user: { id: 'u1' } }, state: new Map() })` | `"user:u1"`        |
+| `(await import('@setu-ts/auth-plugin')).defaultRateLimitKey({ request: { ip: '203.0.113.7' }, state: new Map() })`  | `"ip:203.0.113.7"` |
+| `(await import('@setu-ts/auth-plugin')).defaultRateLimitKey({ request: {}, state: new Map() })`                     | `"anonymous"`      |
+
 `IRequest.ip` is the step worth knowing about: **no first-party adapter can populate it**, because a
 web `Request` carries no peer address, so it is set only by a custom `IHttpAdapter`. On the shipped
 runtimes, then, an unauthenticated request with no `ipSecurityMiddleware` reaches the shared bucket
@@ -1204,15 +1225,48 @@ rateLimitMiddleware({
 });
 ```
 
-| Option            | Type                     | Default                 | Description                                                              |
-| ----------------- | ------------------------ | ----------------------- | ------------------------------------------------------------------------ |
-| `windowMs`        | `number`                 | -                       | Window length in ms.                                                     |
-| `max`             | `number`                 | -                       | Max requests per window per key.                                         |
-| `store`           | `RateLimitStore`         | `MemoryRateLimitStore`  | Counter backend.                                                         |
-| `keyGenerator`    | `(ctx) => string`        | `ip ?? 'anonymous'`     | Caller identity for the counter.                                         |
-| `message`         | `string`                 | `'Rate limit exceeded'` | 429 body message.                                                        |
-| `standardHeaders` | `boolean`                | `true`                  | Emit `RateLimit-*` headers.                                              |
-| `exclude`         | `readonly PathPattern[]` | six operational paths   | Paths skipped entirely; strings match exactly and regexps test the path. |
+| Option            | Type                     | Default                                               | Description                                                              |
+| ----------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| `windowMs`        | `number`                 | -                                                     | Window length in ms.                                                     |
+| `max`             | `number`                 | -                                                     | Max requests per window per key.                                         |
+| `store`           | `RateLimitStore`         | `MemoryRateLimitStore`                                | Counter backend.                                                         |
+| `keyGenerator`    | `(ctx) => string`        | principal → client IP → `IRequest.ip` → `'anonymous'` | Caller identity for the counter.                                         |
+| `message`         | `string`                 | `'Rate limit exceeded'`                               | 429 body message.                                                        |
+| `standardHeaders` | `boolean`                | `true`                                                | Emit `RateLimit-*` headers.                                              |
+| `exclude`         | `readonly PathPattern[]` | six operational paths                                 | Paths skipped entirely; strings match exactly and regexps test the path. |
+
+## Diagnostics
+
+`AuthPlugin({ authorizationDiagnostics })` opts into minimized authorization-decision explanations
+for the local diagnostics connector's `GET /v1/authorization` (`@setu-ts/diagnostics-plugin`). It is
+explicit: the option is absent by default, and when supplied `enabled` must be `true`.
+
+| Field            | Type                     | Meaning                                                        |
+| ---------------- | ------------------------ | -------------------------------------------------------------- |
+| `enabled`        | `boolean`                | Explicit opt-in; must be `true` (`false` throws).              |
+| `roles`          | `Record<string, string>` | Exact role name → approved display alias. At most 128 entries. |
+| `permissions`    | `Record<string, string>` | Exact permission name → approved display alias. At most 128.   |
+| `policyRevision` | `string`                 | Approved alias for the policy revision; only when configured.  |
+
+Only the exact role and permission names in the allowlists are observed, each under its approved
+alias; a decision whose requested rules are not all approved is dropped before buffering and counted
+as `droppedUnapproved`. A recorded decision names its rules only by their approved aliases; raw role
+and permission names, request bodies, headers and claim values are never captured.
+`setu devtool enable` writes this option for you; this section is for the reader who configures it
+by hand. Enable only on an approved development dataset.
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+AuthPlugin({
+  authorizationDiagnostics: {
+    enabled: true,
+    roles: { admin: 'Administrator' },
+    permissions: { 'users:write': 'Modify users' },
+    policyRevision: 'rev-2026-01',
+  },
+});
+```
 
 ## Guards and OpenAPI
 

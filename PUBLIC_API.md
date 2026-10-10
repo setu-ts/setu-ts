@@ -2903,10 +2903,11 @@ JWT with the separate `IJwtService` resolved from `'jwt'` (or issue an access + 
 `RefreshTokenService` — see Refresh Tokens below).
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
 import type { IAuthService, IJwtService } from '@setu-ts/common';
 
 app.router.post('/auth/login', async (ctx) => {
-  const auth = ctx.services.get<IAuthService>('authentication');
+  const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
   const jwt = ctx.services.get<IJwtService>('jwt');
   const { username, password } = await ctx.request.json();
 
@@ -10743,6 +10744,8 @@ app.middleware.add(rateLimit({ max: 100, windowMs: 60000 }));
 ### Middleware Class
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+
 class AuthMiddleware implements IMiddleware {
   constructor(private authService: IAuthService) {}
 
@@ -10764,7 +10767,7 @@ class AuthMiddleware implements IMiddleware {
 }
 
 // Register
-const auth = app.services.get<IAuthService>('authentication');
+const auth = app.services.get<IAuthService>(CAPABILITIES.AUTH);
 app.middleware.add(new AuthMiddleware(auth));
 ```
 
@@ -11387,6 +11390,32 @@ metadata, preserves unclassified subtrees by identity, and descends only into pl
 arrays. The logger, telemetry, and audit plugins accept either a policy or an `IRedactionService`
 through their `redaction` option; this is an option-passed pure utility, not a capability token.
 
+`RedactionPolicy` has three members:
+
+| Member            | Type                                                             | Purpose                                                                   |
+| ----------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `fields`          | `Readonly<Record<string, DataClassification \| FieldRedaction>>` | Dot-path patterns and the classification or `FieldRedaction` each carries |
+| `redactors`       | `Readonly<Record<string, Redactor>>`                             | Redactor selected by the matched classification                           |
+| `defaultRedactor` | `Redactor`                                                       | Fallback when `redactors` has no entry for that classification            |
+
+`FieldRedaction` is `{ readonly classification: DataClassification; readonly redactor?: Redactor }`
+— the value arm that lets one classification carry two treatments. For every matched field,
+`redactValue`/`redactRecord` select a redactor in this order: the matched field's own `redactor`
+(when it has one), then `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`.
+`RedactionContext.classification` always reports the matched classification. A field's `redactor`
+and `classification` are read as own properties only: an inherited `redactor` is ignored, and an
+entry without its own string `classification` is erased.
+
+`DataClassification` is one of four framework constants or any application-defined string (which
+reaches `redactors[<string>]`):
+
+| Constant                      | Value      |
+| ----------------------------- | ---------- |
+| `DATA_CLASSIFICATIONS.PII`    | `'pii'`    |
+| `DATA_CLASSIFICATIONS.PHI`    | `'phi'`    |
+| `DATA_CLASSIFICATIONS.PCI`    | `'pci'`    |
+| `DATA_CLASSIFICATIONS.SECRET` | `'secret'` |
+
 ### Values (runtime exports)
 
 | Export                                                 | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -11465,7 +11494,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | Validation             | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Health                 | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`, `ConnectionErrorReporter`, `ConnectionErrorReporterOptions`, `ConnectionErrorLogger`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Metrics                | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Auth                   | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Auth                   | `IPrincipal`, `IJwtService`, `JwtSignOptions` — `IPrincipal` is `{ id: string; roles?: readonly string[]; permissions?: readonly string[]; claims?: Readonly<Record<string, unknown>> }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Database               | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection`, `TransactionOptions`, `TransactionIsolationLevel`, `ITransactionIsolationSupport` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first); the last three carry portable transaction isolation (M90g)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Cache                  | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Events                 | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |

@@ -6047,8 +6047,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   only the id and `iss` — and a `null` id compared as `IS NULL`. Round 3 passed on `6fe0a973`; its
   observation that `iss` was read twice was fixed afterwards and NOT re-audited, at the maintainer's
   direction — complete (PR #444).
-- **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
-  ROADMAP.md.
+- **Milestone 101h** (`packages/common` + the READMEs of `common`, `storage-plugin`,
+  `multi-tenancy-plugin`, `telemetry-plugin`, `logger-plugin`, `auth-plugin` and `events-plugin`,
+  `PUBLIC_API.md`, CHANGELOG and the upgrade guide — documentation, plus the one additive redaction
+  change): `RedactionPolicy.fields` accepts a `FieldRedaction` (`{ classification, redactor? }`)
+  beside a classification string, and `createRedactionService` selects a redactor in the documented
+  order — the matched field's own `redactor`, then `redactors[classification]`, then
+  `defaultRedactor`, then `eraseRedactor` — so one classification can carry two treatments without
+  an invented classification string, and a string-valued policy is byte-identical in behaviour
+  (V8-30). The documentation half: the `RedactionPolicy` shape and the `DATA_CLASSIFICATIONS` table
+  now live in the common README and `PUBLIC_API.md`; the logger example classifies with
+  `DATA_CLASSIFICATIONS.PII` instead of the unknown `'private'`; the storage `rootDir`, five
+  multi-tenancy resolver rows and three telemetry rows are documented; `IPrincipal` has a shape
+  table; the auth rate-limit key cell matches the source's four-step order and is asserted
+  executable by an `assert:js` table; the authentication capability is named `CAPABILITIES.AUTH`
+  everywhere; and auth and events gain `## Diagnostics` sections whose field tables are tied to
+  compiling fences by a new docs-gate case, with the events README moved into the gated fence table
+  and its two non-compiling fences fixed (V8-42/43/44). Verified through real kernel apps (logger,
+  audit read-back, telemetry span). The design security review was recorded after implementation;
+  the fresh-context audit failed round 1 on a Medium — `redactor` was read through the prototype
+  chain, so a polluted `Object.prototype.redactor` disabled redaction everywhere, including the
+  logger's default secret list — fixed by own-property reads, plus a Low review gap
+  (`idempotency-plugin` unlisted). The fixes were NOT re-audited, at the maintainer's direction —
+  complete (PR #445).
+- **Next milestone** — M111a, the first of the M111 toolchain letters (a Node build: pnpm
+  workspaces, `tsc` to `dist/`, `npm:` lazy imports as optional peers); M104 — the `v0.9.0`
+  client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

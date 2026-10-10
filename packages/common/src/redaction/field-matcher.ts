@@ -1,22 +1,46 @@
 /** Internal compiled matcher for redaction field paths. */
 
 import type { DataClassification } from './classification.ts';
+import type { FieldRedaction } from './policy.ts';
+import { eraseRedactor, type Redactor } from './redactors.ts';
 
-interface Pattern {
-  readonly segments: readonly string[];
+/** The classification and optional pattern-specific redactor a match carries. */
+export interface CompiledFieldPattern {
+  /** Classification reported for the matched value. */
   readonly classification: DataClassification;
+  /** Redactor declared on the matched pattern, when one was supplied. */
+  readonly redactor?: Redactor;
+}
+
+interface Pattern extends CompiledFieldPattern {
+  readonly segments: readonly string[];
 }
 
 /** Compiles dot-path patterns that support `*` and `**`. */
 export function createFieldMatcher(
-  fields: Readonly<Record<string, DataClassification>>,
+  fields: Readonly<Record<string, DataClassification | FieldRedaction>>,
   caseSensitive: boolean,
-): (path: string) => DataClassification | undefined {
-  const patterns: readonly Pattern[] = Object.entries(fields).map(([path, classification]) => ({
-    segments: path.split('.').map((segment) => (caseSensitive ? segment : segment.toLowerCase())),
-    classification,
-  }));
-  return (path: string): DataClassification | undefined => {
+): (path: string) => CompiledFieldPattern | undefined {
+  const patterns: readonly Pattern[] = Object.entries(fields).map(([path, value]) => {
+    const segments = path.split('.').map((
+      segment,
+    ) => (caseSensitive ? segment : segment.toLowerCase()));
+    if (typeof value === 'string') return { segments, classification: value };
+    // Own properties only: an inherited `redactor` (from a polluted
+    // `Object.prototype` or an entry built with `Object.create`) must never
+    // replace a redactor the policy did not declare.
+    // An entry without its own string `classification` (reachable only from an
+    // untyped caller) is erased outright. Handing `undefined` to the class
+    // lookup would read `redactors['undefined']`, a key a policy may define.
+    if (!Object.hasOwn(value, 'classification') || typeof value.classification !== 'string') {
+      return { segments, classification: '', redactor: eraseRedactor };
+    }
+    const classification = value.classification;
+    return Object.hasOwn(value, 'redactor') && value.redactor !== undefined
+      ? { segments, classification, redactor: value.redactor }
+      : { segments, classification };
+  });
+  return (path: string): CompiledFieldPattern | undefined => {
     const segments = path.split('.').map((
       segment,
     ) => (caseSensitive ? segment : segment.toLowerCase()));
@@ -29,7 +53,7 @@ export function createFieldMatcher(
         selected = pattern;
       }
     }
-    return selected?.classification;
+    return selected;
   };
 }
 

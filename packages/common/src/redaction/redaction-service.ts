@@ -28,13 +28,19 @@ export function createRedactionService(
   const match = createFieldMatcher(policy.fields, options?.caseSensitive ?? false);
   const defaultRedactor = policy.defaultRedactor ?? eraseRedactor;
   const redactValue = (path: string, value: unknown): unknown => {
-    const classification = match(path);
-    if (classification === undefined) return value;
+    const matched = match(path);
+    if (matched === undefined) return value;
+    const classification = matched.classification;
     const context: RedactionContext = { path, classification };
-    const redactor: Redactor = policy.redactors !== undefined &&
-        Object.hasOwn(policy.redactors, classification)
-      ? policy.redactors[classification]!
-      : defaultRedactor;
+    // Precedence: the field pattern's own redactor, then the redactor keyed by
+    // its classification, then the policy default, then erase.
+    // `matched.redactor` is read as an OWN property: a plain read would reach
+    // a polluted `Object.prototype.redactor` and emit every matched value raw.
+    const fieldRedactor = Object.hasOwn(matched, 'redactor') ? matched.redactor : undefined;
+    const redactor: Redactor = fieldRedactor ??
+      (policy.redactors !== undefined && Object.hasOwn(policy.redactors, classification)
+        ? policy.redactors[classification]!
+        : defaultRedactor);
     return redactor(value, context);
   };
   return {

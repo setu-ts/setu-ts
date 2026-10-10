@@ -116,9 +116,60 @@ omitted. Classifier strings are capped at 512 Unicode code points, aggregate err
 eight direct members, and the complete serialized tree is bounded to 64 nodes. An aggregate that is
 truncated reports `omittedErrorCount`.
 
+## Redaction
+
+Classification and redaction live in `@setu-ts/common` so every egress plugin shares one policy
+shape. A `RedactionPolicy` maps dot-path field patterns to a classification, and classifications to
+redactors:
+
+| Member            | Meaning                                                                     |
+| ----------------- | --------------------------------------------------------------------------- |
+| `fields`          | Dot-path patterns, each mapped to a classification or to a `FieldRedaction` |
+| `redactors`       | Redactor selected by the classification a matched pattern carries           |
+| `defaultRedactor` | Fallback used when `redactors` has no entry for that classification         |
+
+A `fields` value is either a classification string (`'pii'`) or a `FieldRedaction`
+(`{ classification, redactor? }`). The object form lets one classification carry two treatments —
+mask the email, erase the name — without inventing a second classification string. `redactValue` and
+`redactRecord` select a redactor in this order: the matched field's own `redactor`, then
+`redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`.
+
+The framework knows four classifications — `DATA_CLASSIFICATIONS.PII` (`'pii'`), `PHI` (`'phi'`),
+`PCI` (`'pci'`) and `SECRET` (`'secret'`) — and accepts any other string, which reaches
+`redactors[<string>]`.
+
+```typescript
+import { createMaskRedactor, createRedactionService, DATA_CLASSIFICATIONS } from '@setu-ts/common';
+
+const service = createRedactionService({
+  fields: {
+    'user.email': {
+      classification: DATA_CLASSIFICATIONS.PII,
+      redactor: createMaskRedactor({ keep: 4 }),
+    },
+    'user.name': DATA_CLASSIFICATIONS.PII,
+    'auth.token': DATA_CLASSIFICATIONS.SECRET,
+  },
+});
+
+service.redactRecord({ user: { email: 'jane@example.com', name: 'Jane' } });
+```
+
+The precedence above is executable:
+
+<!-- assert:js -->
+
+| Expression                                                                                                                                                                                                                                     | Value                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `(await import('@setu-ts/common')).createRedactionService({ fields: { email: { classification: 'pii', redactor: () => 'field' } }, redactors: { pii: () => 'class' } }).redactValue('email', 'x')`                                             | `"field"`            |
+| `(await import('@setu-ts/common')).createRedactionService({ fields: { name: { classification: 'pii' } }, redactors: { pii: () => 'class' } }).redactValue('name', 'x')`                                                                        | `"class"`            |
+| `(await import('@setu-ts/common')).createRedactionService({ fields: { name: { classification: 'pii' } }, defaultRedactor: () => 'default' }).redactValue('name', 'x')`                                                                         | `"default"`          |
+| `(await import('@setu-ts/common')).createRedactionService({ fields: { token: { classification: 'secret' } } }).redactValue('token', 'x')`                                                                                                      | `"[Redacted]"`       |
+| `(await import('@setu-ts/common')).createRedactionService({ fields: { 'user.email': { classification: 'pii', redactor: (await import('@setu-ts/common')).createMaskRedactor({ keep: 4 }) } } }).redactValue('user.email', 'jane@example.com')` | `"************.com"` |
+
 See the repository's
-[`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#api-reference-setu-tscommon)
-for the full API contract and
+[`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#redaction) for the
+`FieldRedaction` type, the classification table, and the full contract, and
 [`ARCHITECTURE.md`](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) for how this
 package fits the plugin architecture.
 
@@ -283,6 +334,7 @@ package fits the plugin architecture.
 | `EventDiagnosticsResponse`            | interface |
 | `EventDiagnosticsSnapshot`            | interface |
 | `FactoryProvider`                     | interface |
+| `FieldRedaction`                      | interface |
 | `FlagContext`                         | interface |
 | `FormBody`                            | interface |
 | `FormFile`                            | interface |

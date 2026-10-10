@@ -144,6 +144,29 @@ describe('@setu-ts/common barrel — M96 redaction', () => {
     expect('createFieldMatcher' in common).toBe(false);
     expect('REDACTION' in common.CAPABILITIES).toBe(false);
   });
+
+  it('exports FieldRedaction and accepts both policy field value forms (M101h)', () => {
+    // Compile-time: both arms assign to `RedactionPolicy.fields`, and the type
+    // resolves from the BARREL — dropping the re-export stops this compiling.
+    const stringValued: import('../../src/index.ts').RedactionPolicy = {
+      fields: { 'user.email': 'pii' },
+    };
+    const objectValued: import('../../src/index.ts').RedactionPolicy = {
+      fields: {
+        'user.email': { classification: 'pii', redactor: common.createMaskRedactor({ keep: 4 }) },
+        'user.name': { classification: 'pii' },
+      },
+    };
+    const fieldRedaction: import('../../src/index.ts').FieldRedaction = {
+      classification: 'secret',
+    };
+
+    expect(stringValued.fields['user.email']).toBe('pii');
+    expect(objectValued.fields['user.name']).toEqual({ classification: 'pii' });
+    expect(fieldRedaction.classification).toBe('secret');
+    // `FieldRedaction` is a type-only export, so it has no runtime presence.
+    expect('FieldRedaction' in common).toBe(false);
+  });
 });
 
 describe('@setu-ts/common barrel — M94b form body', () => {

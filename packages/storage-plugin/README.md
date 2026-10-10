@@ -94,6 +94,12 @@ optional only on the memory arm, which is the default.
 | `'gcs'`         | `GcsProviderOptions`          | `bucket`        |
 | `'azure'`       | `AzureBlobProviderOptions`    | `containerName` |
 
+The `'local'` provider's `LocalStorageProviderOptions` has one optional field:
+
+| Field     | Type     | Default | Description                                                                                                                                                        |
+| --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rootDir` | `string` | `'.'`   | Root directory objects are written under. It must be **writable** — see [The `local` provider needs write permission](#the-local-provider-needs-write-permission). |
+
 ### Upload middleware options
 
 | Option             | Type       | Default   | Description                                                |
