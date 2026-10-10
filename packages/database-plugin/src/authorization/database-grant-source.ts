@@ -225,6 +225,11 @@ export function createDatabaseGrantSource(
         signal: AbortSignal,
       ): Promise<readonly ScopedGrant[]> => {
         assertLive(signal);
+        // The subject is never the global clause's `null`: a `null` id would
+        // compare as `IS NULL` and read every subject-less row.
+        if (typeof principal.id !== 'string' || principal.id.length === 0) {
+          throw new TypeError(`${factory}: a principal id must be a non-empty string`);
+        }
         const bySubject = eq(subject, principal.id);
         const filter: FilterExpression = query.kind === 'all' ? bySubject : {
           type: 'and',

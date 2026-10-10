@@ -34,20 +34,21 @@ All notable changes to this project are documented here. The format follows
   tenant denies; `grantableIn` limits where a role counts; `customRoles` lets a scope define roles
   bundling catalogue permissions; `timing` is `'request'` (default), a TTL cache, or `'sign-in'`
   (stored under a private session key, never in claims, and carried through a pending second
-  factor); a `claims` source is mapped from the credential on every check and never memoised, cached
-  or shared, because two tokens for one principal can carry different claims. A scoped guard or
-  decorator naming a permission or role outside the catalogue fails at startup. `common` adds
-  `ScopeRef`, `ScopedGrant`, `GrantQuery`, `IGrantSource`, `IScopedRoleSource`,
-  `ScopedRoleDefinition`, `ScopedRbacTarget`, `ScopeSource`, `SCOPED_RBAC_POLICY`,
-  `scopedPermissionAbility`, `scopedRoleAbility`, `isScopeType`, `MAX_SCOPE_ID_LENGTH`,
-  `scopeFromTenant` and `scopeFromParam`; `database-plugin` adds `createDatabaseGrantSource` and
-  `createDatabaseRoleSource` with `DatabaseGrantSourceOptions`, `DatabaseRoleSourceOptions`,
-  `GrantFields` and `RoleFields` (verified against real PostgreSQL and MongoDB). `auth-plugin`
-  exports the option types `ScopedRbacOptions`, `GrantSourceConfig`, `StaticGrant`,
-  `ClaimsGrantMapper`, `ScopedRoleLimit`, `ScopedRbacTiming` and `ScopedGuardOptions`, and
-  `GrantResolutionError` (a `503` hint, with a `GrantResolutionReason`), which a sign-in-timing
-  source failure rejects with. The name `scoped-rbac` is reserved: `AuthPlugin({ policies })`
-  refuses a policy of that name. Nothing existing changes, so there is no upgrade step.
+  factor); a `custom` source receives only the principal's id and `iss` claim, and a `claims` source
+  is mapped from the credential on every check and never memoised, cached or shared, because two
+  tokens for one principal can carry different claims. A scoped guard or decorator naming a
+  permission or role outside the catalogue fails at startup. `common` adds `ScopeRef`,
+  `ScopedGrant`, `GrantQuery`, `IGrantSource`, `IScopedRoleSource`, `ScopedRoleDefinition`,
+  `ScopedRbacTarget`, `ScopeSource`, `SCOPED_RBAC_POLICY`, `scopedPermissionAbility`,
+  `scopedRoleAbility`, `isScopeType`, `MAX_SCOPE_ID_LENGTH`, `scopeFromTenant` and `scopeFromParam`;
+  `database-plugin` adds `createDatabaseGrantSource` and `createDatabaseRoleSource` with
+  `DatabaseGrantSourceOptions`, `DatabaseRoleSourceOptions`, `GrantFields` and `RoleFields`
+  (verified against real PostgreSQL and MongoDB). `auth-plugin` exports the option types
+  `ScopedRbacOptions`, `GrantSourceConfig`, `StaticGrant`, `ClaimsGrantMapper`, `ScopedRoleLimit`,
+  `ScopedRbacTiming` and `ScopedGuardOptions`, and `GrantResolutionError` (a `503` hint, with a
+  `GrantResolutionReason`), which a sign-in-timing source failure rejects with. The name
+  `scoped-rbac` is reserved: `AuthPlugin({ policies })` refuses a policy of that name. Nothing
+  existing changes, so there is no upgrade step.
 
 - **Authorization policies — an asynchronous, target-aware check (`@setu-ts/auth-plugin`,
   `@setu-ts/decorator-plugin`, `@setu-ts/common`, M110a).** Roles answer "does this principal hold

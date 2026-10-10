@@ -17,6 +17,8 @@
  *   abandoned but keeps running on the database, so this is what stops a slow
  *   backend receiving one more copy of the same query per concurrent request.
  *
+ * A custom source is handed only the principal's id and `iss` claim
+ * ({@linkcode keyedPrincipal}), so the key describes everything it can read.
  * A `claims` source is outside all three. Its grants come from the
  * credential, not the principal: two tokens for one `sub` and `iss` can carry
  * different claims, and a result keyed by the principal would hand one
@@ -89,6 +91,26 @@ export interface GrantResolverDeps {
 export function principalKey(principal: IPrincipal): string {
   const iss = principal.claims?.iss;
   return JSON.stringify([principal.id, typeof iss === 'string' ? iss : null]);
+}
+
+/**
+ * The principal a custom source is handed: exactly the fields its shared
+ * result is keyed by — the id and, when present, the `iss` claim. Every other
+ * claim, and the roles and permissions, come from the credential, so a source
+ * reading them would answer one token's question for another (the result is
+ * memoised, coalesced and cached per {@linkcode principalKey}). Grants that
+ * depend on the credential belong in a `claims` source.
+ *
+ * @param principal - The principal being checked
+ * @returns A frozen principal carrying only its key fields
+ */
+export function keyedPrincipal(principal: IPrincipal): IPrincipal {
+  const iss = principal.claims?.iss;
+  return Object.freeze(
+    typeof iss === 'string'
+      ? { id: principal.id, claims: Object.freeze({ iss }) }
+      : { id: principal.id },
+  );
 }
 
 function queryKey(query: GrantQuery): string {
@@ -180,7 +202,7 @@ function bindSource(entry: CompiledSource, services: IServiceRegistry, index: nu
     name,
     kind: 'custom',
     fetch: (principal, query, bounded) =>
-      bounded((signal) => source.grantsFor(principal, query, signal)),
+      bounded((signal) => source.grantsFor(keyedPrincipal(principal), query, signal)),
   };
 }
 

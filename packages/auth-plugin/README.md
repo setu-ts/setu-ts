@@ -253,7 +253,8 @@ denies the whole check**. A route scope naming another tenant than the resolved 
 denies. `grantableIn` limits where a role may be granted; `customRoles` lets a tenant define roles
 that bundle catalogue permissions; `timing` is `'request'` (default — a revocation applies on the
 next request), `{ kind: 'cache', ttlMs, maxEntries }` (within `ttlMs`) or `'sign-in'` (stored in the
-auth session — until sign-out); a `claims` source is mapped from the credential on every check and
+auth session — until sign-out); a `custom` source sees only the principal's id and `iss`, so its
+answer is safe to share, while a `claims` source is mapped from the credential on every check and
 never cached, since two tokens for one principal can carry different claims. A direct
 `policies.can(...)` call made while serving a request passes the request as the target's `context`,
 or the tenant comparison is skipped. Every bound (`sourceTimeoutMs`, `maxGrantsPerPrincipal`,

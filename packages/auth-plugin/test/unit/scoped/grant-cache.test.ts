@@ -345,3 +345,72 @@ describe('claims sources are read per credential, never shared', () => {
     });
   });
 });
+
+describe('custom sources see only what their shared answer is keyed by', () => {
+  const O1: ScopeRef = { type: 'organisation', id: 'o1' };
+  const ORG: GrantQuery = { kind: 'chain', scopes: [O1] };
+  const ISS = 'https://idp.example';
+
+  function claimsReadingSource() {
+    const seen: IPrincipal[] = [];
+    const source: IGrantSource = {
+      name: 'idp',
+      grantsFor: (who: IPrincipal) => {
+        seen.push(who);
+        const orgs = (who.claims?.orgs as string[] | undefined) ?? [];
+        return Promise.resolve(
+          orgs.map((id) => ({ role: 'viewer', scope: { type: 'organisation', id } })),
+        );
+      },
+    };
+    return { source, seen };
+  }
+
+  it('hands a custom source only the id and iss — never other claims, roles or permissions', async () => {
+    const { source, seen } = claimsReadingSource();
+    const { resolver } = harness(source);
+    await resolver.grantsFor(
+      principal('ann', {
+        roles: ['admin'],
+        permissions: ['*'],
+        claims: { iss: ISS, orgs: ['o1'], sub: 'ann' },
+      }),
+      ORG,
+      requestContext(),
+    );
+    expect(seen).toEqual([{ id: 'ann', claims: { iss: ISS } }]);
+    expect(Object.isFrozen(seen[0])).toBe(true);
+    await resolver.grantsFor(principal('bob'), ORG, requestContext());
+    expect(seen[1]).toEqual({ id: 'bob' });
+  });
+
+  it('so a source reading claims cannot leak one token’s grants to another of the same principal', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { source } = claimsReadingSource();
+    const gated: IGrantSource = {
+      name: 'idp',
+      grantsFor: async (who, query, signal) => {
+        await gate;
+        return await source.grantsFor(who, query, signal);
+      },
+    };
+    const { resolver } = harness(gated);
+    const both = Promise.all([
+      resolver.grantsFor(
+        principal('ann', { claims: { iss: ISS, orgs: ['o1'] } }),
+        ORG,
+        requestContext(),
+      ),
+      resolver.grantsFor(
+        principal('ann', { claims: { iss: ISS, orgs: [] } }),
+        ORG,
+        requestContext(),
+      ),
+    ]);
+    release();
+    const [broad, narrow] = await both;
+    expect(broad).toMatchObject({ ok: true, grants: [] });
+    expect(narrow).toMatchObject({ ok: true, grants: [] });
+  });
+});

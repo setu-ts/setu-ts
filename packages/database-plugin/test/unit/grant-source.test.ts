@@ -133,9 +133,12 @@ describe('createDatabaseGrantSource', () => {
     const roles = createDatabaseRoleSource({ entity: 'roles' })(registry(service));
     // Prisma reads `{ not: 'nobody' }` as an operator matching every other subject's rows.
     const operator = { not: 'nobody' } as unknown as string;
-    await expect(grants.grantsFor({ id: operator }, { kind: 'all' }, live)).rejects.toThrow(
-      'subject must be compared with a string',
-    );
+    // A `null` id would compare as `IS NULL` and read every subject-less row.
+    for (const id of [operator, null as unknown as string, '']) {
+      await expect(grants.grantsFor({ id }, { kind: 'all' }, live)).rejects.toThrow(
+        'a principal id must be a non-empty string',
+      );
+    }
     await expect(
       grants.grantsFor(
         { id: 'u1' },
@@ -147,6 +150,21 @@ describe('createDatabaseGrantSource', () => {
       'scopeType must be compared with a string',
     );
     expect(queried).toBe(0);
+  });
+
+  it('never reads a subject-less row for a null principal id (real memory adapter)', async () => {
+    const service = await seededGrants();
+    await service.getRepository<Record<string, unknown>>('grants').create({
+      id: 'g9',
+      subject: null,
+      role: 'owner',
+      scopeType: 'tenant',
+      scopeId: 't1',
+    });
+    const source = createDatabaseGrantSource({ entity: 'grants' })(registry(service));
+    await expect(
+      source.grantsFor({ id: null as unknown as string }, { kind: 'chain', scopes: [T1] }, live),
+    ).rejects.toThrow(TypeError);
   });
 
   it('refuses to start a query once the deadline has passed', async () => {

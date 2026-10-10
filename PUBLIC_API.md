@@ -2632,12 +2632,13 @@ to `ttlMs`) and `'sign-in'` (requires `signIn`; resolved once by `IAuthSessionSe
 stored under a PRIVATE session key — never in `claims`, so a token carrying a same-named claim
 grants nothing — carried through a pending second factor, and in force until sign-out or session
 expiry; a source failure rejects sign-in with `GrantResolutionError`, a `503` status hint). A
-`claims` source is mapped on every check from the credential being checked and is never memoised,
-cached or coalesced, because two tokens for one principal can carry different claims (under
-`'sign-in'` it is mapped once, from the credential that signed in). Every bound refuses an
-out-of-range value, `NaN` included, when `AuthPlugin(...)` is called. Scoped decisions are NOT
-observed by M98h `authorizationDiagnostics` — its collector watches only the global RBAC evaluator —
-so no scope identifier reaches the diagnostics connector. See
+`custom` source is handed only the principal's id and `iss` claim — the fields its shared answer is
+keyed by — never other claims, roles or permissions. A `claims` source is mapped on every check from
+the credential being checked and is never memoised, cached or coalesced, because two tokens for one
+principal can carry different claims (under `'sign-in'` it is mapped once, from the credential that
+signed in). Every bound refuses an out-of-range value, `NaN` included, when `AuthPlugin(...)` is
+called. Scoped decisions are NOT observed by M98h `authorizationDiagnostics` — its collector watches
+only the global RBAC evaluator — so no scope identifier reaches the diagnostics connector. See
 [Authorization](docs/authorization.md#scoped-roles).
 
 `jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `issuers`,

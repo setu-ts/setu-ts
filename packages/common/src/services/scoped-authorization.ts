@@ -87,6 +87,13 @@ export type GrantQuery =
  * Every returned value is validated and copied by the evaluator; an invalid
  * grant is dropped, never coerced.
  *
+ * The answer is SHARED between every credential of one principal: AuthPlugin
+ * memoises, coalesces and caches it by the principal's id and `iss` claim. So
+ * the principal a source receives carries only those two fields — no other
+ * claims, roles or permissions, which come from the credential and can differ
+ * between two tokens for the same user. Grants derived from the credential
+ * belong in AuthPlugin's `claims` source, which is mapped per credential.
+ *
  * @since 0.9.0
  */
 export interface IGrantSource {
@@ -95,7 +102,8 @@ export interface IGrantSource {
   /**
    * Answers the grants a principal holds.
    *
-   * @param principal - The signed-in principal
+   * @param principal - The signed-in principal's id and, when present, its
+   *   `iss` claim — nothing else
    * @param query - The scopes asked about, or every scope
    * @param signal - Aborted when the evaluator's deadline expires
    * @returns The grants
