@@ -232,15 +232,38 @@ them, and a store that cannot write conditionally is refused at startup by name.
 - **Decision:** no relay coordination beyond the claim. `relay.schedule` is unchanged; every replica
   may sweep every interval, and `dispatch()` sweeps keep running outside any lock. The README states
   that a shared scheduler lock now only saves redundant scans, and that the
-  `sweepDeadlineMs ≤ ttlMs − 10 000` rule no longer bears on correctness. The construction relation
-  becomes `publishTimeoutMs + 2 × storeTimeoutMs ≤ sweepDeadlineMs` (the claim is a third bounded
-  call per row; the defaults, 5 000 + 2 × 5 000 = 15 000, still pass), and `stopReason` reserves the
-  same sum.
+  `sweepDeadlineMs ≤ ttlMs − 10 000` rule no longer bears on correctness. `stopReason` reserves
+  `publishTimeoutMs + 2 × storeTimeoutMs` (the claim is a third bounded call per row).
+
+  **Deadline and headroom (corrected at implementation, Codex real-runtime run 2026-10-10).** The
+  first version of this decision kept the default `sweepDeadlineMs` at 15 000 and allowed the
+  reserve to EQUAL it. `SweepBudget.remaining()` subtracts elapsed monotonic time
+  (`relay.ts:109-111`), so once any time has passed the remaining budget is below a reserve equal to
+  the whole deadline, and the first `stopReason` check ends the sweep with `deadline` before any
+  store read. Measured: 200 rows left pending on PostgreSQL, a MongoDB replica set, DynamoDB Local
+  and D1 alike; the manual- clock unit tests passed only because their monotonic clock never moved.
+  So:
+  - The default `sweepDeadlineMs` becomes **30 000**. With the default per-call bounds the reserve
+    is 15 000, so rows start during the first 15 000 ms of a sweep — three times M107's 5 000 ms
+    window — and the whole sweep still ends within 30 s.
+  - The construction relation is **strict**:
+    `publishTimeoutMs + 2 × storeTimeoutMs <
+    sweepDeadlineMs` is required, and equality is
+    refused naming the three options. Equality was also a latent M107 defect (its
+    `publishTimeoutMs + storeTimeoutMs > sweepDeadlineMs` check accepted the same degenerate
+    configuration), fixed by the same change. `sweepDeadlineMs −
+    reserve` is the window in which
+    rows start; the README says so.
+  - The purge job's bound, which is `sweepDeadlineMs` (`outbox-service.ts:265-282`), rises with it
+    to 30 s; purge is unaffected otherwise.
 - **Why:** with a per-row compare-and-set nothing else is needed for safety, and relays contending
   for the head of the pending set spread across rows by losing claims. No shard assignment is added
   (§9).
 - **Test home:** `relay-multi.test.ts` (§3.8); `relay-budget.test.ts` (no row starts below the new
-  reserve).
+  reserve; and, under the DEFAULT options, with a fake monotonic clock that advances by 1 ms on
+  every store call, a sweep publishes its rows — the case whose absence let the equality ship);
+  `outbox-options.test.ts` (equality refused naming the options; the default deadline is 30 000);
+  the real-runtime §3.8 case 2 on every backend is the proof that defaults drain.
 
 ### 3.7 The bridge: verify refuses a store that cannot write conditionally; the fallback goes
 
@@ -379,12 +402,12 @@ Removed (unreleased, so a CHANGELOG note in the M107 entry rather than a migrati
 
 ### 4.1 Options — every option names its consumer
 
-| Option                   | Consumer                    | Behavior (per implementation)                                                                                                       |
-| ------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `relay.claimLeaseMs`     | `relay.ts` claim and fence  | Default 30 000, integer in [1, 3 600 000]; must be ≥ `publishTimeoutMs + 2 × storeTimeoutMs + maxClockSkewMs`. Same on every store. |
-| `relay.maxClockSkewMs`   | `relay.ts` steps 4 and 8    | Default 5 000, integer in [0, 60 000]. `0` assumes perfectly agreeing clocks — accepted and documented as unsafe across hosts.      |
-| `health.overlapWindowMs` | `outbox-service.ts` signals | Unchanged default 600 000; now windows `relay-overlap`.                                                                             |
-| `relay.sweepDeadlineMs`  | `stopReason`, construction  | Unchanged default; the relation now includes the claim call (§3.6).                                                                 |
+| Option                   | Consumer                                | Behavior (per implementation)                                                                                                       |
+| ------------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `relay.claimLeaseMs`     | `relay.ts` claim and fence              | Default 30 000, integer in [1, 3 600 000]; must be ≥ `publishTimeoutMs + 2 × storeTimeoutMs + maxClockSkewMs`. Same on every store. |
+| `relay.maxClockSkewMs`   | `relay.ts` steps 4 and 8                | Default 5 000, integer in [0, 60 000]. `0` assumes perfectly agreeing clocks — accepted and documented as unsafe across hosts.      |
+| `health.overlapWindowMs` | `outbox-service.ts` signals             | Unchanged default 600 000; now windows `relay-overlap`.                                                                             |
+| `relay.sweepDeadlineMs`  | `stopReason`, construction, purge bound | Default **30 000** (was 15 000); must be STRICTLY greater than `publishTimeoutMs + 2 × storeTimeoutMs` (§3.6).                      |
 
 ## 5. Implementation files
 
@@ -451,6 +474,8 @@ No `src/index.ts` barrel changes in any package: every changed symbol is already
    and `relay-multi` duplicates.
 6. Drop `leaseUntil: 0` from `markFailure` → a failed-then-backed-off row stays blocked for the
    whole lease after its backoff ends (`relay-claim`).
+7. Restore the non-strict relation with a 15 000 default deadline → the default-options case in
+   `relay-budget.test.ts` and §3.8 case 2 leave every row pending.
 
 ## 7. Verification gates
 
@@ -520,8 +545,9 @@ A committed-tree security audit runs before merge, in a fresh context, per
 ## 11. Documentation deliverables
 
 - ROADMAP M107b section (C1–C3) and the Progress row at completion; `CLAUDE.md` status entry.
-- messaging README: "The promise", crash table, the lock section (C4), the DynamoDB paragraph (C5),
-  the health and metrics tables, the two options.
+- messaging README: "The promise", crash table, the "One deadline per sweep" paragraph (the 30 000
+  default, the strict relation, and the row-start window it leaves — §3.6), the lock section (C4),
+  the DynamoDB paragraph (C5), the health and metrics tables, the two options.
 - database README: the transitions paragraph (C7), the verdict table's new reason, the DDL.
 - PUBLIC_API: the outbox store port, the bridge, the messaging outbox section.
 - CHANGELOG `[Unreleased]`: an M107b entry, and the M107 entry amended where it names
