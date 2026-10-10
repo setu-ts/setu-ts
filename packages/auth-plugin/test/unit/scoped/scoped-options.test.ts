@@ -76,6 +76,17 @@ describe('compileScopedRbac — defaults', () => {
     expect([...config.roles.get('a')!.permissions]).toEqual(['pa']);
   });
 
+  it("never inherits a role definition from the roles object's prototype", () => {
+    // `Object.keys` skips the inherited `admin`, so it is not a role; the
+    // closure must not reach it through `a`'s `inherits` either.
+    const roles = Object.assign(Object.create({ admin: { permissions: ['everything'] } }), {
+      a: { permissions: ['pa'], inherits: ['admin'] },
+    });
+    const config = compileScopedRbac({ sources: [SOURCE] }, { roles }, true);
+    expect(config.roles.has('admin')).toBe(false);
+    expect([...config.roles.get('a')!.permissions]).toEqual(['pa']);
+  });
+
   it('compiles a cache timing, a limit and the custom-role source', () => {
     const roles = { name: 'r', rolesFor: () => Promise.resolve([]) };
     const config = compile({

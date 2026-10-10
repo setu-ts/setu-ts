@@ -91,6 +91,25 @@ describe('custom roles', () => {
     expect(await allows(scoped, 'invoices:approve', TEAM)).toBe(false);
   });
 
+  it('keys a grant to its own scope even when the other scope is also fetched', async () => {
+    // Both scopes hold a custom-role grant, so both definitions are in the
+    // index; only the lookup keyed by the grant's own scope keeps them apart.
+    const scoped = harness(
+      [
+        { subject: 'u1', role: 'lead', scope: TEAM },
+        { subject: 'u1', role: 'auditor', scope: ORG },
+      ],
+      roleSource([
+        { scope: TEAM, role: 'lead', permissions: ['invoices:read'] },
+        { scope: ORG, role: 'lead', permissions: ['invoices:approve'] },
+        { scope: ORG, role: 'auditor', permissions: ['invoices:read'] },
+      ]),
+      { inheritsFrom: (scope) => scope.type === 'team' ? [ORG] : [] },
+    );
+    expect(await allows(scoped, 'invoices:read', TEAM)).toBe(true);
+    expect(await allows(scoped, 'invoices:approve', TEAM)).toBe(false);
+  });
+
   it('asks once per check, batched, and only for scopes holding a non-catalogue grant', async () => {
     const calls: (readonly ScopeRef[])[] = [];
     const scoped = harness(
