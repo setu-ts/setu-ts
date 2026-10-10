@@ -96,7 +96,7 @@ export class PolicyService implements IAuthorizationPolicyService {
     ability: A,
     target?: T,
   ): Promise<boolean> {
-    return (await this.#evaluate(principal, policy, ability, target)) === null;
+    return (await this.#evaluate(principal ?? null, refName(policy), ability, target)) === null;
   }
 
   /** @inheritdoc */
@@ -106,9 +106,13 @@ export class PolicyService implements IAuthorizationPolicyService {
     ability: A,
     target?: T,
   ): Promise<void> {
-    const denial = await this.#evaluate(principal, policy, ability, target);
+    // The name is read ONCE: a reference whose `name` getter answered
+    // differently on a second read would otherwise make the rejection name a
+    // policy other than the one evaluated (audit F3).
+    const name = refName(policy);
+    const denial = await this.#evaluate(principal ?? null, name, ability, target);
     if (denial !== null) {
-      throw new AuthorizationDeniedError(denial, refName(policy), ability);
+      throw new AuthorizationDeniedError(denial, name, ability);
     }
   }
 
@@ -138,16 +142,19 @@ export class PolicyService implements IAuthorizationPolicyService {
   /**
    * Evaluates one ability.
    *
+   * `principal` is already normalised by the caller: `undefined` — reachable
+   * from JavaScript or through a cast — is anonymous, never a signed-in
+   * principal (audit F2).
+   *
    * @returns `null` when allowed, otherwise why it was denied
    * @throws {UnknownPolicyError} — as a rejection — for an unknown policy or ability
    */
   async #evaluate(
     principal: IPrincipal | null,
-    policy: unknown,
+    name: string,
     ability: unknown,
     target: unknown,
   ): Promise<PolicyDenial | null> {
-    const name = refName(policy);
     const found = this.#ability(name, ability);
     if (found === undefined) {
       throw this.#policies.has(name)

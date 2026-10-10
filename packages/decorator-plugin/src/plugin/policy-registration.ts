@@ -137,6 +137,26 @@ function policyName(
   return typeof policy.name === 'string' ? policy.name : undefined;
 }
 
+/**
+ * What the referenced policy itself declares about an ability's `anonymous`
+ * flag — read from the `@Policy` class's metadata or the definition object —
+ * or `undefined` when it does not declare the ability at all.
+ */
+function declaredAnonymous(
+  store: MetadataStore,
+  policy: Constructor | PolicyDefinition,
+  ability: string,
+): boolean | undefined {
+  if (typeof policy === 'function') {
+    return store.getPolicyClass(policy)?.abilities.get(ability);
+  }
+  const abilities: unknown = policy.abilities;
+  if (typeof abilities !== 'object' || abilities === null || !Object.hasOwn(abilities, ability)) {
+    return undefined;
+  }
+  return typeof (abilities as Record<string, unknown>)[ability] !== 'function';
+}
+
 /** Labels a policy reference for a refusal message. */
 function policyLabel(store: MetadataStore, policy: Constructor | PolicyDefinition): string {
   const name = policyName(store, policy);
@@ -168,13 +188,20 @@ export function createCanMiddleware(
       respondWithAuthorizationFailure(ctx, 'not-configured');
       return;
     }
+    const user = ctx.request.user ?? null;
+    // Refuse an anonymous request to an ability that needs a principal BEFORE
+    // the extractor runs (audit F1) — the same order AuthPlugin's
+    // `requirePolicy` uses, so the two cannot disagree.
+    if (user === null && !anonymous) {
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
+      return;
+    }
     const service = ctx.services.get<IAuthorizationPolicyService>(
       CAPABILITIES.AUTHORIZATION_POLICIES,
     );
     const resolved = typeof target === 'function'
       ? await (target as (ctx: IRequestContext) => unknown)(ctx)
       : target;
-    const user = ctx.request.user ?? null;
     if (!(await service.can(user, name, ability, resolved))) {
       respondWithAuthorizationFailure(
         ctx,
@@ -225,6 +252,19 @@ export function appendPolicyMiddleware(
         `${label} is decorated with @Can(${policyLabel(store, requirement.policy)}, ` +
           `${JSON.stringify(requirement.ability)}), but no such policy ability is registered. ` +
           'Register the policy through AuthPlugin({ policies }) or DecoratorPlugin({ policies }).',
+      );
+    }
+    // The same refusal AuthPlugin's startup scan applies to `requirePolicy`
+    // (audit F4): a referenced policy that does not declare this ability, or
+    // declares it differently on `anonymous`, is a DIFFERENT policy sharing the
+    // registered one's name — evaluating the registered one silently would
+    // enforce rules the route's author never wrote.
+    if (declaredAnonymous(store, requirement.policy, requirement.ability) !== info.anonymous) {
+      throw new Error(
+        `${label} is decorated with @Can(${policyLabel(store, requirement.policy)}, ` +
+          `${JSON.stringify(requirement.ability)}), but the registered ` +
+          `${JSON.stringify(name)} policy declares that ability differently — a different policy ` +
+          'is registered under the same name.',
       );
     }
     authenticated ||= !info.anonymous;

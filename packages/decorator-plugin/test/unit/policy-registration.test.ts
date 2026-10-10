@@ -211,7 +211,9 @@ describe('appendPolicyMiddleware', () => {
         metadataStore,
         'Route',
         [{ policy: DocPolicy, ability: 'view' }, {
-          policy: { name: 'doc', abilities: {} } as PolicyDefinition,
+          // A definition referenced by @Can must DECLARE the ability it names,
+          // matching the registered one on `anonymous` (audit F4).
+          policy: { name: 'doc', abilities: { edit: () => true } } as unknown as PolicyDefinition,
           ability: 'edit',
         }],
         both,
@@ -319,5 +321,87 @@ describe('createCanMiddleware', () => {
     ).catch((e: unknown) => e);
     expect(thrown).toBe(outage);
     expect(ran).toBe(false);
+  });
+});
+
+describe('audit F1: @Can refuses anonymous before running the extractor', () => {
+  it('answers 401 without calling the extractor for a non-anonymous ability', async () => {
+    const recorded = { status: 0 };
+    const response = {
+      status(code: number) {
+        recorded.status = code;
+        return response;
+      },
+      json: () => ({}) as HandlerResult,
+    } as unknown as IResponse;
+    const service = fakeService(() => true);
+    const ctx = {
+      request: {},
+      response,
+      services: { has: () => true, get: () => service } as unknown as IServiceRegistry,
+      state: new Map<string, unknown>(),
+      params: {},
+    } as unknown as IRequestContext;
+    let extracted = 0;
+    const extractor = () => {
+      extracted += 1;
+      return Promise.reject(new Error('not found'));
+    };
+    let ran = false;
+    await createCanMiddleware('doc', 'edit', extractor, false)(ctx, () => {
+      ran = true;
+      return Promise.resolve();
+    });
+    expect([recorded.status, extracted, ran]).toEqual([401, 0, false]);
+  });
+});
+
+describe('audit F4: @Can refuses a policy that disagrees with the registered one', () => {
+  const described = { 'doc.edit': { anonymous: false }, 'doc.view': { anonymous: true } } as const;
+  const call = (policy: unknown, ability: string) => () =>
+    appendPolicyMiddleware(
+      metadataStore,
+      'Route GET /x (C.m)',
+      [{ policy: policy as typeof DocPolicy, ability }],
+      [],
+      fakeService(() => true, described),
+    );
+
+  it('refuses a same-named definition whose ability disagrees on anonymous', () => {
+    const impostor = {
+      name: 'doc',
+      abilities: { view: () => true },
+    } as unknown as PolicyDefinition;
+    expect(call(impostor, 'view')).toThrow(
+      'a different policy is registered under the same name',
+    );
+  });
+
+  it('refuses a same-named definition that does not declare the ability', () => {
+    const impostor = {
+      name: 'doc',
+      abilities: { other: () => true },
+    } as unknown as PolicyDefinition;
+    expect(call(impostor, 'edit')).toThrow('a different policy is registered under the same name');
+  });
+
+  it('refuses a same-named class whose ability disagrees on anonymous', () => {
+    @Policy('doc')
+    class Impostor {
+      @Ability()
+      view(): boolean {
+        return true;
+      }
+    }
+    expect(call(Impostor, 'view')).toThrow('a different policy is registered under the same name');
+  });
+
+  it('accepts the registered class and a matching definition', () => {
+    expect(call(DocPolicy, 'view')).not.toThrow();
+    const matching = {
+      name: 'doc',
+      abilities: { edit: () => true, view: { anonymous: true, check: () => true } },
+    } as unknown as PolicyDefinition;
+    expect(call(matching, 'edit')).not.toThrow();
   });
 });

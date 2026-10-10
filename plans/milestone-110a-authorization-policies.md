@@ -515,3 +515,20 @@ application):
    run); `define` after `start()` throws; a duplicate name is refused.
 6. Prove no provider → `501` for both entry points, with the handler not run.
 7. Confirm each §6 negative control exists and fails when its guard is removed.
+
+### 10.1 Committed-tree audit, round 1 — five findings, all fixed on this branch
+
+Round 1 (fresh subagent, commit `cfd087ce`) held all seven obligations and failed on five findings
+the T-table had not covered or had overstated. Each fix shipped with a test written first and
+observed failing:
+
+| Finding                                                                                                                                     | Fix                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 (Medium) — the target extractor ran before an anonymous refusal: a lookup per unauthenticated request, and a 401-vs-404 existence oracle | `requirePolicy` and `@Can` refuse `401` for an anonymous request to a non-anonymous ability BEFORE extracting (the evaluator would deny it without calling the check anyway) |
+| F2 (Low) — an `undefined` principal counted as signed in                                                                                    | `can`/`authorize` normalise `principal ?? null`; an anonymous check receives `null`                                                                                          |
+| F3 (Low) — T9 overstated: the anonymous arm's `check` getter was read twice; `authorize` re-read `policy.name`                              | `anonymousCheckOf` reads each member once and returns what it read; `authorize` reads the name once and passes it through                                                    |
+| F4 (Low) — `@Can` skipped T7's same-name refusal                                                                                            | `appendPolicyMiddleware` refuses a referenced class or definition that does not declare the ability with the registered `anonymous` flag                                     |
+| F5 (Low) — T13 covered escaping but not length: an attacker-chosen name was copied unbounded into `UnknownPolicyError`                      | Names are truncated to 128 characters in the message and fields, with the removed length noted                                                                               |
+
+One pre-existing unit fixture referenced an ability through a definition that did not declare it —
+the F4 case itself — and was corrected rather than left relying on the gap.

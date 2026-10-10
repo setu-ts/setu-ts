@@ -88,9 +88,11 @@ export function policyGuardOf(middleware: MiddlewareFunction): PolicyGuardBrand 
  * guard added as global middleware; an unknown name there rejects per request
  * (fail closed).
  *
- * A target extractor's throw propagates unchanged, so `errorHandler` answers
- * a database outage `503` rather than a misleading `403`; the handler never
- * runs.
+ * An anonymous request to an ability that needs a principal is refused `401`
+ * BEFORE the extractor runs, so an unauthenticated caller can neither cost a
+ * record lookup nor learn from the extractor whether a record exists. A target
+ * extractor's throw propagates unchanged, so `errorHandler` answers a database
+ * outage `503` rather than a misleading `403`; the handler never runs.
  *
  * @param policy - The policy object (from `definePolicy`)
  * @param ability - One of the policy's ability names
@@ -130,13 +132,24 @@ export function requirePolicy<A extends string, T>(
       respondWithAuthorizationFailure(ctx, 'not-configured');
       return;
     }
+    const user = ctx.request.user ?? null;
+    // Refuse an anonymous request to an ability that needs a principal BEFORE
+    // the extractor runs (audit F1): otherwise every unauthenticated request
+    // pays for the record lookup, and an extractor that throws not-found turns
+    // the 401/404 difference into an existence oracle for anonymous callers.
+    // The evaluator would deny the same request without calling the check, so
+    // this only moves the refusal earlier; the startup scan guarantees the
+    // registered ability agrees with this object on `anonymous`.
+    if (user === null && !anonymous) {
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
+      return;
+    }
     const service = ctx.services.get<IAuthorizationPolicyService>(
       CAPABILITIES.AUTHORIZATION_POLICIES,
     );
     const resolved = typeof target === 'function'
       ? await (target as (ctx: IRequestContext) => T | undefined | Promise<T | undefined>)(ctx)
       : target;
-    const user = ctx.request.user ?? null;
     if (!(await service.can(user, name, ability, resolved))) {
       respondWithAuthorizationFailure(
         ctx,

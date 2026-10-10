@@ -222,3 +222,28 @@ describe('requirePolicy — construction and brands', () => {
     }).toThrow(TypeError);
   });
 });
+
+describe('requirePolicy — audit F1: anonymous refusal precedes the extractor', () => {
+  it('refuses an anonymous request to a non-anonymous ability without running the extractor', async () => {
+    const harness = context(registered());
+    let extracted = 0;
+    const guard = requirePolicy(docPolicy, 'edit', () => {
+      extracted += 1;
+      return Promise.reject(new Error('not found'));
+    });
+    expect(await run(guard, harness)).toBe(false);
+    expect(harness.recorded.status).toBe(401);
+    expect(extracted).toBe(0);
+  });
+
+  it('still runs the extractor for an anonymous ability, which decides with the target', async () => {
+    const harness = context(registered());
+    let extracted = 0;
+    const guard = requirePolicy(docPolicy, 'view', () => {
+      extracted += 1;
+      return { owner: 'x' };
+    });
+    expect(await run(guard, harness)).toBe(true);
+    expect(extracted).toBe(1);
+  });
+});

@@ -367,3 +367,74 @@ describe('PolicyService — describe, define and seal', () => {
     expect(await service.can(ALICE, 'doc', 'edit')).toBe(true);
   });
 });
+
+describe('PolicyService — audit F2: an undefined principal is anonymous', () => {
+  it('denies authentication-required without calling before or the check', async () => {
+    let calls = 0;
+    const { service } = serviceWith(() => {
+      calls += 1;
+      return true;
+    }, () => {
+      calls += 1;
+      return true;
+    });
+    const loose = undefined as unknown as IPrincipal | null;
+    expect(await service.can(loose, 'doc', 'edit')).toBe(false);
+    const rejection = await service.authorize(loose, 'doc', 'edit').catch((e) => e);
+    expect((rejection as AuthorizationDeniedError).failure).toBe('authentication-required');
+    expect(calls).toBe(0);
+  });
+
+  it('hands an anonymous check null, never undefined', async () => {
+    const seen: unknown[] = [];
+    const service = new PolicyService(() => undefined);
+    service.define({
+      name: 'doc',
+      abilities: {
+        view: { anonymous: true, check: (p: IPrincipal | null) => (seen.push(p), true) },
+      },
+    } as unknown as PolicyDefinition);
+    await service.can(undefined as unknown as null, 'doc', 'view');
+    expect(seen).toEqual([null]);
+  });
+});
+
+describe('PolicyService — audit F3: authorize names the policy it evaluated', () => {
+  it('reads a definition reference name once', async () => {
+    const { service } = serviceWith(() => false);
+    let reads = 0;
+    const reference = {
+      get name() {
+        reads += 1;
+        return reads === 1 ? 'doc' : 'other';
+      },
+      abilities: {},
+    } as unknown as PolicyDefinition;
+    const rejection = await service.authorize(ALICE, reference, 'edit').catch((e) => e);
+    expect((rejection as AuthorizationDeniedError).policy).toBe('doc');
+    expect(reads).toBe(1);
+  });
+});
+
+describe('PolicyService — audit F5: unknown names are bounded in the rejection', () => {
+  it('truncates a huge attacker-chosen ability and policy name', async () => {
+    const { service } = serviceWith(() => true);
+    const huge = 'a'.repeat(200_000);
+    const byAbility = (await service.can(ALICE, 'doc', huge).catch((e) => e)) as UnknownPolicyError;
+    const byPolicy = (await service.can(ALICE, huge, 'edit').catch((e) => e)) as UnknownPolicyError;
+    for (const error of [byAbility, byPolicy]) {
+      expect(error).toBeInstanceOf(UnknownPolicyError);
+      expect(error.message.length).toBeLessThan(400);
+      expect(error.message).toContain('(+199872 more)');
+    }
+    expect(byAbility.ability?.length).toBeLessThanOrEqual(128);
+    expect(byPolicy.policy.length).toBeLessThanOrEqual(128);
+  });
+
+  it('leaves an ordinary name untouched', async () => {
+    const { service } = serviceWith(() => true);
+    const error = (await service.can(ALICE, 'doc', 'delete').catch((e) => e)) as UnknownPolicyError;
+    expect(error.ability).toBe('delete');
+    expect(error.message).toBe('auth-plugin: authorization policy "doc" has no ability "delete"');
+  });
+});

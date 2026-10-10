@@ -2451,17 +2451,22 @@ error — never the target or the principal. `requirePolicy(policy, ability, tar
 guard: `501` with no policy service, `401` when an anonymous request is denied, `403` when a
 signed-in principal is denied, otherwise `next()`; `target` is a value or an extractor
 `(ctx) => T | undefined | Promise<T | undefined>` (a function is ALWAYS treated as an extractor),
-and an extractor's throw propagates unchanged. It is branded for OpenAPI `deriveSecurity` as
-authenticated unless the ability is anonymous. The service's `can` resolves a boolean and
-`authorize` rejects a denial with `AuthorizationDeniedError`, which carries a `401`/`403` status
-hint whose title and detail are the guards' own, so under `errorHandler` a thrown denial answers the
-guard's exact body (without `errorHandler` the kernel answers `500`). AuthPlugin's `onBootstrap`
-hook scans every registered route and fails `start()` when a `requirePolicy` guard names a policy or
-ability that is not registered, or one whose registered ability disagrees with the guard's policy
-object on `anonymous` (a different policy registered under the same name); it then SEALS the
-registry, so `define` after `start()` throws. Not scanned: a route added after `start()` and a guard
-added as global middleware — an unknown name there rejects per request (fail closed). A policy is
-identified by its NAME. See [Authorization](docs/authorization.md).
+and an extractor's throw propagates unchanged. An anonymous request to an ability that needs a
+principal is refused `401` BEFORE the extractor runs, so it costs no lookup and cannot learn from
+the extractor whether a record exists. An `undefined` principal passed to `can`/`authorize` is
+anonymous, exactly like `null`. A policy or ability name longer than 128 characters is truncated in
+an `UnknownPolicyError`'s message and fields, with the removed length noted. It is branded for
+OpenAPI `deriveSecurity` as authenticated unless the ability is anonymous. The service's `can`
+resolves a boolean and `authorize` rejects a denial with `AuthorizationDeniedError`, which carries a
+`401`/`403` status hint whose title and detail are the guards' own, so under `errorHandler` a thrown
+denial answers the guard's exact body (without `errorHandler` the kernel answers `500`).
+AuthPlugin's `onBootstrap` hook scans every registered route and fails `start()` when a
+`requirePolicy` guard names a policy or ability that is not registered, or one whose registered
+ability disagrees with the guard's policy object on `anonymous` (a different policy registered under
+the same name); it then SEALS the registry, so `define` after `start()` throws. Not scanned: a route
+added after `start()` and a guard added as global middleware — an unknown name there rejects per
+request (fail closed). A policy is identified by its NAME. See
+[Authorization](docs/authorization.md).
 
 `jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `issuers`,
 `apiKey`, `session`, or `strategies`; `local` alone cannot recognize a later request. A JWT-only
@@ -12414,12 +12419,15 @@ Contract notes:
   validation — so a target extractor reading the body sees the UNVALIDATED body. `register()`
   throws, naming the route, when no `CAPABILITIES.AUTHORIZATION_POLICIES` provider is registered or
   when the named policy or ability is not registered (an ordinary method of a policy class
-  type-checks and is refused here). `enforceRoles` does not govern it. Listing `policies` with no
-  provider, a class without `@Policy`, or one without an `@Ability()` method throws too. The
-  middleware is branded authenticated unless the ability is anonymous, and a route's `@Public`
-  OpenAPI marker is omitted when any `@Can` requires a principal. The two packages may not import
-  each other, so `@Can` and `requirePolicy` are two thin middlewares over one service, pinned
-  together by a parity test.
+  type-checks and is refused here), or when the referenced class or definition does not declare that
+  ability with the registered policy's `anonymous` flag (a different policy sharing the registered
+  one's name — the same refusal `requirePolicy` meets at startup). An anonymous request to a
+  non-anonymous ability is refused before the target extractor runs. `enforceRoles` does not govern
+  it. Listing `policies` with no provider, a class without `@Policy`, or one without an `@Ability()`
+  method throws too. The middleware is branded authenticated unless the ability is anonymous, and a
+  route's `@Public` OpenAPI marker is omitted when any `@Can` requires a principal. The two packages
+  may not import each other, so `@Can` and `requirePolicy` are two thin middlewares over one
+  service, pinned together by a parity test.
 - **`Body()`/`Query()`/`Param()` read the VALIDATED value when one exists.** Each checks `ctx.state`
   under `validatedStateKey(target)` first — presence-tested with `has`, so a validated `null` or `0`
   is honoured — and falls back to the raw source when absent. A Zod `transform` or `default`

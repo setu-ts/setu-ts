@@ -14,15 +14,24 @@ const POLICY_NAME = /^[a-z][a-z0-9-]*$/;
 /** The one name an ability may not take — it is the policy's own hook. */
 const RESERVED_ABILITY = 'before';
 
-/** Narrows an ability value to the anonymous object arm. */
-function isAnonymousArm(
-  value: unknown,
-): value is { readonly anonymous: true; readonly check: (...args: never[]) => unknown } {
+/**
+ * Reads the anonymous arm's check, or `undefined` when the value is not a
+ * well-formed `{ anonymous: true, check }`.
+ *
+ * Each member is read EXACTLY ONCE and the value read is the value returned:
+ * a getter answering one function to the validation and another to the copy
+ * would otherwise register a check that was never validated (audit F3).
+ */
+function anonymousCheckOf(value: unknown): ((...args: never[]) => unknown) | undefined {
   if (typeof value !== 'object' || value === null) {
-    return false;
+    return undefined;
   }
   const arm = value as { readonly anonymous?: unknown; readonly check?: unknown };
-  return arm.anonymous === true && typeof arm.check === 'function';
+  if (arm.anonymous !== true) {
+    return undefined;
+  }
+  const check = arm.check;
+  return typeof check === 'function' ? check as (...args: never[]) => unknown : undefined;
 }
 
 /**
@@ -91,10 +100,11 @@ export function validatePolicyDefinition(definition: unknown): PolicyDefinition 
       );
     }
     const value = (abilities as Record<string, unknown>)[key];
+    const anonymousCheck = typeof value === 'function' ? undefined : anonymousCheckOf(value);
     if (typeof value === 'function') {
       copy[key] = value as PolicyAbility<never>;
-    } else if (isAnonymousArm(value)) {
-      copy[key] = Object.freeze({ anonymous: true, check: value.check }) as PolicyAbility<never>;
+    } else if (anonymousCheck !== undefined) {
+      copy[key] = Object.freeze({ anonymous: true, check: anonymousCheck }) as PolicyAbility<never>;
     } else {
       throw new AuthPluginConfigurationError(
         `auth-plugin: ability ${JSON.stringify(key)} of authorization policy ${label} must be a ` +

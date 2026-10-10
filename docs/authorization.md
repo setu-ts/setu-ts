@@ -105,7 +105,9 @@ Two limits are worth knowing. The startup check reads routes registered before `
 added afterwards, or a guard added as global middleware, is not checked and fails closed per request
 instead. And a policy is identified by its **name**: a guard built from a policy object you forgot
 to register, while a different policy with the same name is registered, would evaluate that other
-policy — the startup check catches the case where the two disagree on which abilities are anonymous.
+policy — the startup check (and, for `@Can`, `register()`) refuses the case where the two disagree
+on which abilities are anonymous. An anonymous request to an ability that needs a principal is
+refused before your target extractor runs, so it costs no record lookup and learns nothing from it.
 
 ## Checks Inside a Handler
 

@@ -161,3 +161,21 @@ describe('definePolicy', () => {
     );
   });
 });
+
+describe('validatePolicyDefinition — audit F3: the anonymous check is read once', () => {
+  it('stores the very check it validated', () => {
+    let reads = 0;
+    const denyAll = () => false;
+    const allowAll = () => true;
+    const arm = {
+      anonymous: true as const,
+      get check() {
+        reads += 1;
+        return reads === 1 ? denyAll : allowAll;
+      },
+    };
+    const copy = validatePolicyDefinition({ name: 'doc', abilities: { view: arm } });
+    expect(reads).toBe(1);
+    expect((copy.abilities.view as unknown as { check: unknown }).check).toBe(denyAll);
+  });
+});

@@ -68,6 +68,36 @@ export class AuthorizationDeniedError extends Error {
 }
 
 /**
+ * The longest policy or ability name an {@linkcode UnknownPolicyError} carries.
+ * Registered names are developer-chosen and short; a name longer than this
+ * reached an imperative call from somewhere else — possibly a request — and is
+ * truncated so one request cannot write an arbitrarily large log record
+ * (audit F5: a 200,000-character ability produced a 602,065-character line,
+ * since the message, the stack and the field each carried it).
+ */
+const MAX_NAME_LENGTH = 128;
+
+/** A name cut to {@linkcode MAX_NAME_LENGTH}, and how much was removed. */
+interface BoundedName {
+  readonly value: string;
+  readonly dropped: number;
+}
+
+/** Truncates a name to the bound, recording how many characters were removed. */
+function bound(name: string): BoundedName {
+  return name.length <= MAX_NAME_LENGTH
+    ? { value: name, dropped: 0 }
+    : { value: name.slice(0, MAX_NAME_LENGTH), dropped: name.length - MAX_NAME_LENGTH };
+}
+
+/** Quotes a bounded name for a message, noting a truncation. */
+function quote(name: BoundedName): string {
+  return name.dropped === 0
+    ? JSON.stringify(name.value)
+    : `${JSON.stringify(name.value)}(+${name.dropped} more)`;
+}
+
+/**
  * Rejection of every authorization policy entry point when the policy, or the
  * ability within it, is not registered.
  *
@@ -75,16 +105,17 @@ export class AuthorizationDeniedError extends Error {
  * status hint: under `errorHandler` it answers a masked `500`. A route guard
  * or decorator naming an unknown policy is refused at startup, before any
  * request; this rejection is what an imperative call — or a route added after
- * `start()` — meets instead.
+ * `start()` — meets instead. Names longer than 128 characters are truncated in
+ * the message and in the fields, with the number of removed characters noted.
  *
  * @since 0.9.0
  */
 export class UnknownPolicyError extends Error {
   /** Stable discriminant for consumers that cannot use `instanceof` across realms. */
   override readonly name = 'UnknownPolicyError';
-  /** The policy name that was looked up. */
+  /** The policy name that was looked up (at most 128 characters). */
   readonly policy: string;
-  /** The ability name, when the policy exists but the ability does not. */
+  /** The ability name, when the policy exists but the ability does not (at most 128 characters). */
   readonly ability: string | undefined;
 
   /**
@@ -94,13 +125,15 @@ export class UnknownPolicyError extends Error {
    * @param ability - The missing ability, when the policy itself exists
    */
   constructor(policy: string, ability?: string) {
+    const boundedPolicy = bound(policy);
+    const boundedAbility = ability === undefined ? undefined : bound(ability);
     super(
-      ability === undefined
-        ? `auth-plugin: no authorization policy named ${JSON.stringify(policy)} is registered`
-        : `auth-plugin: authorization policy ${JSON.stringify(policy)} has no ability ` +
-          `${JSON.stringify(ability)}`,
+      boundedAbility === undefined
+        ? `auth-plugin: no authorization policy named ${quote(boundedPolicy)} is registered`
+        : `auth-plugin: authorization policy ${quote(boundedPolicy)} has no ability ` +
+          quote(boundedAbility),
     );
-    this.policy = policy;
-    this.ability = ability;
+    this.policy = boundedPolicy.value;
+    this.ability = boundedAbility?.value;
   }
 }
