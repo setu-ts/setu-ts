@@ -1086,12 +1086,22 @@ reviews:
 ```
 
 So whoever opens a PR from a `feat/…`, `fix/…`, `hotfix/…`, `release/…` or `chore/…` branch requests
-the review **in the same step**, straight after creating it:
+the review **once the PR's head is final** — after creating it AND after any push that follows
+creation, such as the commit recording the PR number (CLAUDE.md "Record the PR number"):
 
 ```bash
 gh pr create --base develop --title '…' --body '…'   # --base main for release/hotfix PRs
+# … commit and push the PR-number edit, if the PR records one …
 gh pr comment <pr> --body '@coderabbitai review'
 ```
+
+**Never push while a review is starting or running.** CodeRabbit pins the head commit when the
+command arrives and aborts if the head moves, replying "⚠️ Action not completed — Head commit
+changed." — the request is then simply dropped, and nothing re-queues it. setu-ts/setu-ts#440 lost
+its first review exactly this way: the trigger was posted at 10:30:35 and the PR-number commit was
+pushed at 10:30:43. That reply's footer ("applicable only when automatic reviews are paused") is
+boilerplate on every command reply, not the reason it stopped. If a push did land during a review,
+post another `@coderabbitai review` once the head is final.
 
 **`docs/…` PRs are excluded — do not request a review on one.** The review exists for code, and a
 documentation-only PR spends a review on prose the doc gates already check. A back-merge PR (`main`

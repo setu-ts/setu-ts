@@ -6527,22 +6527,25 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   opened this way. Do not push or open a PR unprompted, though: finish the milestone, report the
   evidence, and wait for the human to ask. Publishing a branch is outward-facing and their call to
   time.
-- **A new non-`docs/…` PR requests its CodeRabbit review with a comment, straight after it is
-  opened** — `gh pr comment <pr> --body '@coderabbitai review'`. `.coderabbit.yaml` sets
-  `auto_review.enabled: false` with no `labels` or `description_keyword`, so CodeRabbit never
-  reviews on its own. Applies to `feat/…`, `fix/…`, `hotfix/…`, `release/…` and `chore/…` PRs;
-  **`docs/…` PRs are excluded** (the review is for code) and so is a `main` → `develop` back-merge
-  (already-reviewed commits). Automatic review was dropped when `main` became the default branch: it
-  covers the default branch plus `base_branches`, so it would have to be re-scoped to `develop` and
-  would then fire on `docs/…` PRs too — nothing in CodeRabbit's config excludes by HEAD branch.
-  **The failure is silent**: `review_status: false` suppresses the "review skipped" notice, so a PR
-  nobody asked to review looks exactly like one whose review has not arrived — check the comment was
-  posted. A re-review after pushing fixes is another `@coderabbitai review`. Also attach the
-  `maintainer-review` label to every such PR (`gh pr edit <pr> --add-label maintainer-review`) — the
-  maintainer keeps it as the marker of a PR awaiting their review, though it no longer triggers
-  CodeRabbit; the comment does. The repo file overrides the CodeRabbit dashboard, so the web toggle
-  changes nothing. Fork PRs are proposals and are not reviewed (CONTRIBUTING.md). AI_GUIDELINES
-  §16.7 is canonical.
+- **A new non-`docs/…` PR requests its CodeRabbit review with a comment, once its head is final** —
+  `gh pr comment <pr> --body '@coderabbitai review'`, posted AFTER the PR-number commit below has
+  been pushed, never before it. CodeRabbit aborts a review whose head commit moves while it runs
+  ("⚠️ Action not completed — Head commit changed.") and does not retry, which is how
+  setu-ts/setu-ts#440 lost its first review; if a push lands mid-review, trigger it again.
+  `.coderabbit.yaml` sets `auto_review.enabled: false` with no `labels` or `description_keyword`, so
+  CodeRabbit never reviews on its own. Applies to `feat/…`, `fix/…`, `hotfix/…`, `release/…` and
+  `chore/…` PRs; **`docs/…` PRs are excluded** (the review is for code) and so is a `main` →
+  `develop` back-merge (already-reviewed commits). Automatic review was dropped when `main` became
+  the default branch: it covers the default branch plus `base_branches`, so it would have to be
+  re-scoped to `develop` and would then fire on `docs/…` PRs too — nothing in CodeRabbit's config
+  excludes by HEAD branch. **The failure is silent**: `review_status: false` suppresses the "review
+  skipped" notice, so a PR nobody asked to review looks exactly like one whose review has not
+  arrived — check the comment was posted. A re-review after pushing fixes is another
+  `@coderabbitai review`. Also attach the `maintainer-review` label to every such PR
+  (`gh pr edit <pr> --add-label maintainer-review`) — the maintainer keeps it as the marker of a PR
+  awaiting their review, though it no longer triggers CodeRabbit; the comment does. The repo file
+  overrides the CodeRabbit dashboard, so the web toggle changes nothing. Fork PRs are proposals and
+  are not reviewed (CONTRIBUTING.md). AI_GUIDELINES §16.7 is canonical.
 - **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
   the code-quality bot anchor findings to lines; answer in the thread
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with
@@ -6556,7 +6559,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   (Claude, ChatGPT/Codex, Roo).
 - **Record the PR number in the same PR.** The CLAUDE.md "Current status" entry needs the number,
   which does not exist until the PR does, so the order is: commit the status entry as "complete (PR
-  pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again.
-  That second commit lands on the same branch before merge, so the merged history never carries "PR
-  pending". Same for the ROADMAP row and the plan archival — all of it ships in the milestone's own
-  PR (see "Before reporting a task done").
+  pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again →
+  only then post `@coderabbitai review` (see above). That second commit lands on the same branch
+  before merge, so the merged history never carries "PR pending". Same for the ROADMAP row and the
+  plan archival — all of it ships in the milestone's own PR (see "Before reporting a task done").
