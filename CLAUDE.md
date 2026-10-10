@@ -5963,8 +5963,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `__proto__` predicate fields dropped by Mongo and Prisma on Node/Bun (now refused) and two quoted
   keys; rounds 3–4 found the docs still over-claiming which refusals carry no caller input, so they
   now guarantee only the validator's reasons and the replaced Prisma message; round 5 passed on
-  `d36e7c3d`. Pre-existing Cosmos/DynamoDB `__proto__` handling in create/update is left for a
-  `fix/…` branch — complete (PR #439).
+  `d36e7c3d`. Folded in afterwards at the maintainer's direction, NOT re-audited: Cosmos (since M81)
+  and DynamoDB (since M80) now refuse an own `__proto__` payload field, after measurement showed
+  Cosmos rows inheriting it as a prototype on Node and Bun and the AWS SDK returning a DynamoDB
+  `__proto__` attribute with no value (rows became unreadable), and the Mongo session test runs on a
+  replica set only — complete (PR #439).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
