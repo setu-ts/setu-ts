@@ -6046,7 +6046,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   2 found the same sharing through a `custom` source reading claims — a custom source now receives
   only the id and `iss` — and a `null` id compared as `IS NULL`. Round 3 passed on `6fe0a973`; its
   observation that `iss` was read twice was fixed afterwards and NOT re-audited, at the maintainer's
-  direction — complete (PR pending).
+  direction — complete (PR #444).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
