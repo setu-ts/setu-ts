@@ -36,7 +36,11 @@ import type { IIdempotencyService } from '@setu-ts/common';
 
 import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
 import { registerIngresses } from './ingress-registration.ts';
-import { appendPolicyMiddleware, registerPolicyClasses } from './policy-registration.ts';
+import {
+  appendPolicyMiddleware,
+  appendScopedRbacMiddleware,
+  registerPolicyClasses,
+} from './policy-registration.ts';
 import { validateResponseShaping } from '../decorators/response-status.ts';
 import type { ResponseShaping } from '../decorators/response-status.ts';
 
@@ -997,6 +1001,15 @@ function registerController(
       middleware,
       policies,
     );
+    // `@ScopedRoles`/`@ScopedPermissions` (M110b): the same band, after
+    // `@RequirePolicy`, and always enforced for the same reason.
+    const requiresScopedPrincipal = appendScopedRbacMiddleware(
+      routeLabel(target, route, fullPath),
+      ctrlMeta,
+      route,
+      middleware,
+      policies,
+    );
     middleware.push(...composeMiddleware(ctrlMeta, route));
     if (enforceSchemas) {
       appendValidationMiddleware(ctx, target, route, middleware, validation);
@@ -1004,7 +1017,12 @@ function registerController(
     // Appended AFTER the validation band whether or not `enforceSchemas` is on,
     // so a `@ValidateBody` route always runs idempotency last (M109a §3.9).
     appendIdempotencyMiddleware(target, route, fullPath, middleware, idempotency);
-    const schema = buildRouteSchema(ctrlMeta, route, enforceRoles, requiresPolicyPrincipal);
+    const schema = buildRouteSchema(
+      ctrlMeta,
+      route,
+      enforceRoles,
+      requiresPolicyPrincipal || requiresScopedPrincipal,
+    );
     const routeDef: RouteDefinition = {
       handler,
       ...(middleware.length > 0 ? { middleware } : {}),

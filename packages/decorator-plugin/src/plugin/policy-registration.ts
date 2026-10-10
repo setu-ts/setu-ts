@@ -15,6 +15,10 @@
 import {
   CAPABILITIES,
   respondWithAuthorizationFailure,
+  SCOPED_RBAC_POLICY,
+  scopedPermissionAbility,
+  scopedRoleAbility,
+  scopeFromTenant,
   withSecurityMetadata,
 } from '@setu-ts/common';
 import type {
@@ -25,8 +29,16 @@ import type {
   MiddlewareFunction,
   PolicyAbility,
   PolicyDefinition,
+  ScopedRbacTarget,
+  ScopeSource,
 } from '@setu-ts/common';
-import type { MetadataStore, PolicyRequirement } from '../metadata/metadata-store.ts';
+import type {
+  ControllerMetadata,
+  MetadataStore,
+  PolicyRequirement,
+  RouteMetadata,
+  ScopedRequirement,
+} from '../metadata/metadata-store.ts';
 import { className } from '../internal.ts';
 
 /** The one method name that is the policy's hook rather than an ability. */
@@ -273,4 +285,145 @@ export function appendPolicyMiddleware(
     );
   }
   return authenticated;
+}
+
+/** How a scoped decorator's abilities combine. */
+type Combine = 'any' | 'all';
+
+/**
+ * Builds one `@ScopedRoles`/`@ScopedPermissions` middleware (M110b): the same
+ * refusal order as AuthPlugin's `requireScopedRole`/`requireScopedPermission`
+ * — `501` with no policy service; each ability described on the REGISTERED
+ * policy (an unknown one rejects through `can()`); `401` for an anonymous
+ * request BEFORE the scope source runs; the scope resolved once; every
+ * ability evaluated, any-of or all-of; `403` on a deny. A scope source's throw
+ * propagates. This package may not import AuthPlugin (§2.2), so the logic is
+ * restated over the public contract, and the parity test drives both.
+ *
+ * @param abilities - The encoded abilities
+ * @param combine - `any` for roles, `all` for permissions
+ * @param scope - The scope source
+ * @returns The branded middleware
+ */
+export function createScopedRbacMiddleware(
+  abilities: readonly string[],
+  combine: Combine,
+  scope: ScopeSource,
+): MiddlewareFunction {
+  const middleware = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+    if (!ctx.services.has(CAPABILITIES.AUTHORIZATION_POLICIES)) {
+      respondWithAuthorizationFailure(ctx, 'not-configured');
+      return;
+    }
+    const user = ctx.request.user ?? null;
+    const service = ctx.services.get<IAuthorizationPolicyService>(
+      CAPABILITIES.AUTHORIZATION_POLICIES,
+    );
+    let anonymousAllowed = true;
+    for (const ability of abilities) {
+      const registered = service.describe(SCOPED_RBAC_POLICY, ability);
+      if (registered === undefined) {
+        await service.can(user, SCOPED_RBAC_POLICY, ability, undefined);
+        respondWithAuthorizationFailure(
+          ctx,
+          user === null ? 'authentication-required' : 'insufficient-privileges',
+        );
+        return;
+      }
+      anonymousAllowed &&= registered.anonymous === true;
+    }
+    if (user === null && !anonymousAllowed) {
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
+      return;
+    }
+    const resolved = typeof scope === 'function' ? await scope(ctx) : scope;
+    const target = { scope: resolved, context: ctx } as ScopedRbacTarget;
+    let allowed = combine === 'all';
+    for (const ability of abilities) {
+      const granted = await service.can(user, SCOPED_RBAC_POLICY, ability, target);
+      if (combine === 'any' && granted) {
+        allowed = true;
+        break;
+      }
+      if (combine === 'all' && !granted) {
+        allowed = false;
+        break;
+      }
+    }
+    if (!allowed) {
+      respondWithAuthorizationFailure(
+        ctx,
+        user === null ? 'authentication-required' : 'insufficient-privileges',
+      );
+      return;
+    }
+    await next();
+  };
+  return withSecurityMetadata(middleware, { authenticated: true });
+}
+
+/**
+ * Validates a route's effective `@ScopedRoles`/`@ScopedPermissions` (method
+ * overrides class) against the registered scoped policy and appends their
+ * middleware — roles first, then permissions, ALL-of across the two.
+ *
+ * @param label - The route label for refusals (`Route GET /x (C.m)`)
+ * @param ctrl - The controller metadata (class-level defaults)
+ * @param route - The route metadata
+ * @param middleware - The route's middleware chain, appended to
+ * @param service - The registration-time policy service, if any
+ * @returns Whether anything was appended (each requires a principal)
+ * @throws {Error} When no policy service is registered, or a name is not in
+ *   the scoped RBAC catalogue
+ */
+export function appendScopedRbacMiddleware(
+  label: string,
+  ctrl: ControllerMetadata,
+  route: RouteMetadata,
+  middleware: MiddlewareFunction[],
+  service: IAuthorizationPolicyService | undefined,
+): boolean {
+  const declared: readonly (readonly [
+    ScopedRequirement | undefined,
+    string,
+    Combine,
+    (name: string) => string,
+  ])[] = [
+    [route.scopedRoles ?? ctrl.scopedRoles, 'ScopedRoles', 'any', scopedRoleAbility],
+    [
+      route.scopedPermissions ?? ctrl.scopedPermissions,
+      'ScopedPermissions',
+      'all',
+      scopedPermissionAbility,
+    ],
+  ];
+  let appended = false;
+  for (const [requirement, decorator, combine, encode] of declared) {
+    if (requirement === undefined) {
+      continue;
+    }
+    if (service === undefined) {
+      throw new Error(
+        `${label} is decorated with @${decorator}, but no CAPABILITIES.AUTHORIZATION_POLICIES ` +
+          'provider is registered. Register AuthPlugin({ rbac, scopedRbac }) from @setu-ts/auth-plugin.',
+      );
+    }
+    const abilities = requirement.names.map(encode);
+    for (const [index, ability] of abilities.entries()) {
+      if (service.describe(SCOPED_RBAC_POLICY, ability) === undefined) {
+        throw new Error(
+          `${label} is decorated with @${decorator}(${
+            JSON.stringify(requirement.names[index])
+          }), ` +
+            'which is not in the scoped RBAC catalogue — configure AuthPlugin({ scopedRbac }) with ' +
+            'an rbac role granting it.',
+        );
+      }
+    }
+    middleware.push(
+      createScopedRbacMiddleware(abilities, combine, requirement.scope ?? scopeFromTenant()),
+    );
+    appended = true;
+  }
+  return appended;
 }
