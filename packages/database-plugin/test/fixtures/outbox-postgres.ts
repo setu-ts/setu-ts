@@ -30,6 +30,8 @@ export const outboxTable = pgTable('setu_outbox', {
   status: text('status').notNull(),
   attempts: integer('attempts').notNull(),
   availableAt: bigint('available_at', { mode: 'number' }).notNull(),
+  claimVersion: bigint('claim_version', { mode: 'number' }).notNull(),
+  leaseUntil: bigint('lease_until', { mode: 'number' }).notNull(),
   lastError: text('last_error'),
   settledAt: bigint('settled_at', { mode: 'number' }),
   sentBy: text('sent_by'),

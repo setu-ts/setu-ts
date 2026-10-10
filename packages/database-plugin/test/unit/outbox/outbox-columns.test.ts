@@ -14,6 +14,33 @@ import { DatabaseOutboxStore } from '../../../src/outbox/database-outbox-store.t
 import { allRows, ENTITY, memoryService, record, seed } from '../../fixtures/outbox-store.ts';
 
 describe('DatabaseOutboxStore — column mapping', () => {
+  it('round-trips claim numbers exactly and passes missing claim fields to the relay', async () => {
+    const service = await memoryService();
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    await service.transaction((uow) =>
+      store.append(
+        uow,
+        record(1, {
+          claimVersion: Number.MAX_SAFE_INTEGER - 1,
+          leaseUntil: 1_700_000_030_000,
+        }),
+      )
+    );
+    expect((await store.scanPending(undefined, 10))[0]).toMatchObject({
+      claimVersion: Number.MAX_SAFE_INTEGER - 1,
+      leaseUntil: 1_700_000_030_000,
+    });
+    for (const field of ['claimVersion', 'leaseUntil']) {
+      const malformed: Record<string, unknown> = {
+        ...record(2 + (field === 'leaseUntil' ? 1 : 0)),
+      };
+      delete malformed[field];
+      await seed(service, [malformed]);
+    }
+    const read = await store.scanPending(undefined, 10);
+    expect(read[1].claimVersion).toBeUndefined();
+    expect(read[2].leaseUntil).toBeUndefined();
+  });
   it('writes kind and stores each absent optional field as null', async () => {
     const service = await memoryService();
     const store = new DatabaseOutboxStore(service, ENTITY);

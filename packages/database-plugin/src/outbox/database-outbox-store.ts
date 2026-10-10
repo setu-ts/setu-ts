@@ -16,7 +16,7 @@
  *
  * **Transitions use native conditional writes.** The expected kind and status
  * guard each write, preventing a stale failure from regressing a sent row.
- * Sources lacking the member keep the read-then-write fallback and its race.
+ * Sources lacking native conditional writes are refused at startup.
  *
  * **Absent optional columns are written as `null`** and read back as absent.
  * A SQL column has no "absent" state, and the memory adapter refuses a
@@ -79,6 +79,8 @@ const REQUIRED_FIELDS = [
   'status',
   'attempts',
   'availableAt',
+  'claimVersion',
+  'leaseUntil',
 ] as const;
 
 /** The optional record fields: written as `null` when absent, read back as absent. */
@@ -98,6 +100,9 @@ const STATUSES: ReadonlySet<string> = new Set<OutboxStatus>([
   'failed',
   'discarded',
 ]);
+
+/** Not a UUID: the conditional capability probe never matches an envelope id. */
+const CLAIM_PROBE_ID = 'setu-outbox-claim-probe';
 
 /** A row as the adapter hands it back. */
 type Row = Record<string, unknown>;
@@ -147,6 +152,7 @@ function unavailableReason(error: unknown): OutboxStoreUnavailableError['reason'
   const chain = causeChain(error);
   for (const member of chain) {
     if (member instanceof UnsupportedQueryFeatureError) {
+      if (member.feature === 'conditional-write') return 'conditional-writes-unsupported';
       if (member.adapter === 'bigtable') return 'bigtable';
       if (member.adapter === 'dynamodb' && member.feature === 'orderBy') return 'dynamodb-index';
     }
@@ -232,7 +238,12 @@ export class DatabaseOutboxStore implements IOutboxStore {
   /** @inheritdoc */
   async markSent(
     id: string,
-    update: { readonly settledAt: number; readonly sentBy: string; readonly deleteNow: boolean },
+    update: {
+      readonly claimVersion: number;
+      readonly settledAt: number;
+      readonly sentBy: string;
+      readonly deleteNow: boolean;
+    },
   ): Promise<OutboxTransition> {
     return await this.#transition(
       id,
@@ -242,6 +253,7 @@ export class DatabaseOutboxStore implements IOutboxStore {
         settledAt: update.settledAt,
         sentBy: update.sentBy,
       },
+      update.claimVersion,
     );
   }
 
@@ -249,13 +261,36 @@ export class DatabaseOutboxStore implements IOutboxStore {
   async markFailure(
     id: string,
     update: {
+      readonly claimVersion: number;
       readonly attempts: number;
       readonly lastError: string;
       readonly availableAt: number;
       readonly status: 'pending' | 'failed';
     },
   ): Promise<OutboxTransition> {
-    return await this.#transition(id, 'pending', { ...update });
+    const { claimVersion, ...failure } = update;
+    return await this.#transition(id, 'pending', { ...failure, leaseUntil: 0 }, claimVersion);
+  }
+
+  /** @inheritdoc */
+  async claim(
+    id: string,
+    update: { readonly claimVersion: number; readonly leaseUntil: number },
+  ): Promise<OutboxTransition> {
+    return await this.#transition(id, 'pending', {
+      claimVersion: update.claimVersion + 1,
+      leaseUntil: update.leaseUntil,
+    }, update.claimVersion);
+  }
+
+  /** @inheritdoc */
+  async markInvalid(id: string, now: number): Promise<OutboxTransition> {
+    return await this.#transition(id, 'pending', {
+      status: 'failed',
+      lastError: 'invalid-row',
+      availableAt: now,
+      leaseUntil: 0,
+    });
   }
 
   /** @inheritdoc */
@@ -264,35 +299,39 @@ export class DatabaseOutboxStore implements IOutboxStore {
       id,
       'failed',
       action === 'retry'
-        ? { status: 'pending', attempts: 0, availableAt: now }
+        ? { status: 'pending', attempts: 0, availableAt: now, leaseUntil: 0 }
         : { status: 'discarded', settledAt: now },
     );
   }
 
-  /** Native transition, with bounded classifying re-reads and the legacy fallback. */
+  /** Native transition, with bounded classifying re-reads and an optional claim guard. */
   async #transition(
     id: string,
     expected: 'pending' | 'failed',
     data?: Row,
+    claimVersion?: number,
   ): Promise<OutboxTransition> {
     const repo = this.#repo();
-    const where = { kind: OUTBOX_RECORD_KIND, status: expected };
+    const where = {
+      kind: OUTBOX_RECORD_KIND,
+      status: expected,
+      ...(claimVersion === undefined ? {} : { claimVersion }),
+    };
     for (let round = 0; round < 3; round += 1) {
       const result = data === undefined
         ? await conditionalDelete(repo, id, where)
         : await conditionalUpdate(repo, id, where, data);
       if (result.outcome === 'applied') return { outcome: 'applied' };
+      if (result.outcome === 'unsupported') {
+        throw new OutboxStoreUnavailableError(this.#entity, 'conditional-writes-unsupported');
+      }
       const row = await this.#find(id);
       if (row === null) return { outcome: 'missing' };
       const status = statusOf(row, id);
-      if (expected === 'pending' && status !== 'pending') return notPending(status, row);
+      if (expected === 'pending' && status !== 'pending') return { outcome: 'not-pending', status };
       if (expected === 'failed' && status !== 'failed') return { outcome: 'not-failed', status };
-      if (result.outcome === 'unsupported') {
-        if (data === undefined) {
-          return (await repo.delete(id)) ? { outcome: 'applied' } : { outcome: 'missing' };
-        }
-        await repo.update(id, data);
-        return { outcome: 'applied' };
+      if (claimVersion !== undefined && row.claimVersion !== claimVersion) {
+        return { outcome: 'claim-lost' };
       }
     }
     throw new Error(
@@ -347,19 +386,25 @@ export class DatabaseOutboxStore implements IOutboxStore {
           limit: 1,
         })
       );
+      const repo = this.#repo();
+      if (repo.updateWhere === undefined) {
+        throw new UnsupportedQueryFeatureError(
+          'conditional-write',
+          'database-plugin',
+          'The bound repository lacks updateWhere.',
+        );
+      }
+      await repo.updateWhere(CLAIM_PROBE_ID, {
+        kind: OUTBOX_RECORD_KIND,
+        status: 'pending',
+        claimVersion: 0,
+      }, { claimVersion: 1 });
     } catch (error) {
       throw new OutboxStoreUnavailableError(this.#entity, unavailableReason(error), {
         cause: error,
       });
     }
   }
-}
-
-/** The `not-pending` outcome, carrying `sentBy` when the row has one. */
-function notPending(status: Exclude<OutboxStatus, 'pending'>, row: Row): OutboxTransition {
-  return typeof row.sentBy === 'string'
-    ? { outcome: 'not-pending', status, sentBy: row.sentBy }
-    : { outcome: 'not-pending', status };
 }
 
 /**

@@ -59,6 +59,88 @@ export function describeOutboxStoreContract(
       await (await make()).store.verify();
     });
 
+    it('claims by compare-and-set and guards both settlement paths with the held version', async () => {
+      const store = await holding([record(1)]);
+      const outcomes = await Promise.all(
+        Array.from(
+          { length: 8 },
+          () => store.claim('row-1', { claimVersion: 0, leaseUntil: 9000 }),
+        ),
+      );
+      expect(outcomes.filter((r) => r.outcome === 'applied')).toHaveLength(1);
+      expect(outcomes.filter((r) => r.outcome === 'claim-lost')).toHaveLength(7);
+      expect((await store.scanPending(undefined, 1))[0]).toMatchObject({
+        claimVersion: 1,
+        leaseUntil: 9000,
+      });
+      expect(
+        await store.markSent('row-1', {
+          claimVersion: 0,
+          settledAt: 5,
+          sentBy: 'r',
+          deleteNow: true,
+        }),
+      ).toEqual({ outcome: 'claim-lost' });
+      expect(
+        await store.markFailure('row-1', {
+          claimVersion: 0,
+          attempts: 10,
+          lastError: 'stale',
+          availableAt: 5,
+          status: 'failed',
+        }),
+      ).toEqual({ outcome: 'claim-lost' });
+      expect(
+        await store.markFailure('row-1', {
+          claimVersion: 1,
+          attempts: 1,
+          lastError: 'down',
+          availableAt: 5,
+          status: 'pending',
+        }),
+      ).toEqual({ outcome: 'applied' });
+      expect((await store.scanPending(undefined, 1))[0]).toMatchObject({
+        claimVersion: 1,
+        leaseUntil: 0,
+        attempts: 1,
+      });
+      expect(await store.claim('row-1', { claimVersion: 1, leaseUntil: 10000 })).toEqual({
+        outcome: 'applied',
+      });
+      expect((await store.scanPending(undefined, 1))[0].claimVersion).toBe(2);
+      expect(
+        await store.markSent('row-1', {
+          claimVersion: 2,
+          settledAt: 5,
+          sentBy: 'r',
+          deleteNow: false,
+        }),
+      ).toEqual({ outcome: 'applied' });
+      expect(await store.claim('row-1', { claimVersion: 2, leaseUntil: 10000 }))
+        .toEqual({ outcome: 'not-pending', status: 'sent' });
+      expect(await store.claim('nope', { claimVersion: 0, leaseUntil: 10000 })).toEqual({
+        outcome: 'missing',
+      });
+    });
+
+    it('poisons without changing attempts or version and retry clears the lease', async () => {
+      const store = await holding([record(1, { attempts: 3, claimVersion: 4, leaseUntil: 9000 })]);
+      expect(await store.markInvalid('row-1', 10)).toEqual({ outcome: 'applied' });
+      expect(await store.markInvalid('row-1', 10)).toEqual({
+        outcome: 'not-pending',
+        status: 'failed',
+      });
+      expect(await store.markInvalid('nope', 10)).toEqual({ outcome: 'missing' });
+      await store.release('row-1', 'retry', 11);
+      expect((await store.scanPending(undefined, 1))[0]).toMatchObject({
+        attempts: 0,
+        claimVersion: 4,
+        leaseUntil: 0,
+        lastError: 'invalid-row',
+        availableAt: 11,
+      });
+    });
+
     it('scans pending rows in position order and the cursor is exclusive', async () => {
       const store = await holding([record(3), record(1), record(2)]);
       expect((await store.scanPending(undefined, 10)).map((r) => r.id)).toEqual([
@@ -73,15 +155,15 @@ export function describeOutboxStoreContract(
 
     it('a row transitions only from its expected status', async () => {
       const store = await holding([record(1)]);
-      const sent = { settledAt: 5, sentBy: 'relay/scheduled', deleteNow: false };
+      const sent = { claimVersion: 0, settledAt: 5, sentBy: 'relay/scheduled', deleteNow: false };
       expect(await store.markSent('row-1', sent)).toEqual({ outcome: 'applied' });
       expect(await store.markSent('row-1', sent)).toEqual({
         outcome: 'not-pending',
         status: 'sent',
-        sentBy: 'relay/scheduled',
       });
       expect(
         await store.markFailure('row-1', {
+          claimVersion: 0,
           attempts: 1,
           lastError: 'late',
           availableAt: 9,
@@ -98,6 +180,7 @@ export function describeOutboxStoreContract(
     it('a failed row blocks until released, and retry returns it to pending', async () => {
       const store = await holding([record(1)]);
       await store.markFailure('row-1', {
+        claimVersion: 0,
         attempts: 10,
         lastError: 'gave up',
         availableAt: 9,
@@ -111,10 +194,18 @@ export function describeOutboxStoreContract(
 
     it('an unknown id is missing for every transition', async () => {
       const store = (await make()).store;
-      expect(await store.markSent('nope', { settledAt: 1, sentBy: 'r', deleteNow: false }))
+      expect(
+        await store.markSent('nope', {
+          claimVersion: 0,
+          settledAt: 1,
+          sentBy: 'r',
+          deleteNow: false,
+        }),
+      )
         .toEqual({ outcome: 'missing' });
       expect(
         await store.markFailure('nope', {
+          claimVersion: 0,
           attempts: 1,
           lastError: 'x',
           availableAt: 1,
@@ -126,8 +217,14 @@ export function describeOutboxStoreContract(
 
     it('stats and purge agree with the rows', async () => {
       const store = await holding([record(1), record(2), record(3)]);
-      await store.markSent('row-1', { settledAt: 10, sentBy: 'r', deleteNow: false });
+      await store.markSent('row-1', {
+        claimVersion: 0,
+        settledAt: 10,
+        sentBy: 'r',
+        deleteNow: false,
+      });
       await store.markFailure('row-2', {
+        claimVersion: 0,
         attempts: 10,
         lastError: 'x',
         availableAt: 1,

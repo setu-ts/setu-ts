@@ -12,6 +12,7 @@ import { expect } from '@std/expect';
 import type { EntityKey, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES, OUTBOX_RECORD_KIND } from '@setu-ts/common';
 import { UnsupportedQueryFeatureError } from '../../../src/errors.ts';
+import { DatabaseService, MemoryAdapter } from '../../../src/index.ts';
 import type { FindOptions, IDatabaseService } from '../../../src/interfaces/index.ts';
 import {
   createDatabaseOutboxStore,
@@ -70,6 +71,40 @@ async function refusalOf(service: IDatabaseService): Promise<OutboxStoreUnavaila
 }
 
 describe('DatabaseOutboxStore.verify', () => {
+  it('refuses a source without conditional writes by name before any transition', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const source = adapter.createDataSource(ENTITY);
+    delete source.updateWhere;
+    delete source.deleteWhere;
+    const service = new DatabaseService(adapter, () => source, 'memory');
+    const error = await refusalOf(service);
+    expect(error.reason).toBe('conditional-writes-unsupported');
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    for (
+      const transition of [
+        store.claim('nope', { claimVersion: 0, leaseUntil: 1 }),
+        store.markSent('nope', { claimVersion: 0, settledAt: 1, sentBy: 'r', deleteNow: true }),
+      ]
+    ) {
+      await expect(transition).rejects.toMatchObject({ reason: 'conditional-writes-unsupported' });
+    }
+  });
+
+  it('the capability probe changes neither outbox rows nor a business row at the probe id', async () => {
+    const service = await memoryService();
+    const repo = service.getRepository(ENTITY);
+    await repo.create({ ...record(1) });
+    await repo.create({
+      id: 'setu-outbox-claim-probe',
+      kind: 'business',
+      status: 'pending',
+      claimVersion: 0,
+    });
+    const before = await repo.findAll();
+    await new DatabaseOutboxStore(service, ENTITY).verify();
+    expect(await repo.findAll()).toEqual(before);
+  });
   it('passes on the memory adapter, after the relay query and a transactional probe', async () => {
     const { service, calls } = recordingService(await memoryService());
 
@@ -88,6 +123,14 @@ describe('DatabaseOutboxStore.verify', () => {
       {
         method: 'findAll',
         args: [{ where: { kind: OUTBOX_RECORD_KIND, status: 'pending' }, limit: 1 }],
+      },
+      {
+        method: 'updateWhere',
+        args: ['setu-outbox-claim-probe', {
+          kind: OUTBOX_RECORD_KIND,
+          status: 'pending',
+          claimVersion: 0,
+        }, { claimVersion: 1 }],
       },
     ]);
   });

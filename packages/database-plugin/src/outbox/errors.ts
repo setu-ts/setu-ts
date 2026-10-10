@@ -13,6 +13,7 @@ const REASON_TEXT: Readonly<Record<OutboxStoreUnavailableError['reason'], string
     'configured for the outbox entity',
   'mongodb-replica-set': 'MongoDB transactions need a replica set',
   'entity-unavailable': 'the outbox entity is missing or unreadable',
+  'conditional-writes-unsupported': 'the outbox requires native conditional writes',
 };
 
 /**
@@ -61,8 +62,15 @@ export class OutboxStoreUnavailableError extends Error {
    *   `IllegalOperation`): MongoDB transactions need a replica set.
    * - `'entity-unavailable'` — anything else: the outbox entity is missing or
    *   unreadable.
+   * - `'conditional-writes-unsupported'` — the source cannot take and guard
+   *   claims with native conditional writes.
    */
-  readonly reason: 'bigtable' | 'dynamodb-index' | 'mongodb-replica-set' | 'entity-unavailable';
+  readonly reason:
+    | 'bigtable'
+    | 'dynamodb-index'
+    | 'mongodb-replica-set'
+    | 'entity-unavailable'
+    | 'conditional-writes-unsupported';
 
   /**
    * Creates the error.

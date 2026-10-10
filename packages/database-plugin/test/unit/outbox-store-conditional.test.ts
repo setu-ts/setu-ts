@@ -36,12 +36,14 @@ describe('outbox conditional transitions', () => {
         ? await store.release('row-1', 'retry', 99)
         : operation === 'failure'
         ? await store.markFailure('row-1', {
+          claimVersion: 0,
           attempts: 1,
           lastError: 'late',
           availableAt: 99,
           status: 'failed',
         })
         : await store.markSent('row-1', {
+          claimVersion: 0,
           settledAt: 99,
           sentBy: 'loser',
           deleteNow: operation === 'delete',
@@ -72,6 +74,7 @@ describe('outbox conditional transitions', () => {
         },
       }), 'memory');
       const result = new DatabaseOutboxStore(service, ENTITY).markSent('row-1', {
+        claimVersion: 0,
         settledAt: 99,
         sentBy: 'r',
         deleteNow: false,
