@@ -13833,8 +13833,13 @@ runner, before anything is published to npm.
   retired with a reason.
 - `compat/` switches from `@jsr/setu-ts__*` to `@setu-ts/*` and becomes the post-publish proof on
   Node and Bun.
-- **Version:** the first npm release is a MINOR (`0.10.0`) even if nothing else in it is breaking,
-  because the install path changes for every consumer (the Versioning Policy below).
+- **Version:** the first npm release is `v0.9.0`, already a minor under the Versioning Policy below;
+  the install path changes for every consumer, so its release notes lead with the migration.
+- **Bootstrap publish.** npm trusted publishing can only be configured on a package that already
+  exists, so the 51 packages are created once by a manual first publish (maintainer, locally, with
+  `npm login` and 2FA), then each is configured to trust `release.yml`. Every later release is
+  tokenless. The JSR precedent: `release:create-packages` + `release:link-repos` played the same
+  role there.
 - **Exit:** a bare `npm install @setu-ts/kernel @setu-ts/runtime` in an empty directory serves a
   request on Node 24 and Bun; `npm view` shows provenance on all packages.
 
@@ -13887,9 +13892,10 @@ own tests and the Deno-target CLI gate.
 suite runs on Node. 111d and 111e can proceed in parallel after 111b. Deno keeps receiving security
 releases throughout, so the Deno gates stay authoritative until each letter replaces them.
 
-**Open decision — the last JSR release.** `v0.9.0` is ready on `develop` and M104 (the client-brief
-run) is defined against it. The recommendation is to cut `v0.9.0` on JSR as the final JSR release,
-then make `0.10.0` the first npm release. The alternative is to hold `v0.9.0` until 111c.
+**Decision — `v0.9.0` is the first npm release (maintainer, 2026-10-10).** `v0.8.0` stays the last
+JSR release; `v0.9.0` is held until 111c and ships to npm, so it is the version that moves the
+install path. M104 (the client-brief run) is re-pointed at the npm artifacts. The `0.10.0` sentence
+in 111c is superseded by this decision.
 
 ---
 
