@@ -13055,12 +13055,12 @@ isolation lets it through, and D1, DynamoDB and Cosmos defer writes until commit
 
 **Deliverables**
 
-- [ ] The two members, implemented natively by every built-in adapter or omitted and refused by name
-- [ ] A per-adapter conformance table (the `filter-conformance.test.ts` shape) driving a predicate
+- [x] The two members, implemented natively by every built-in adapter or omitted and refused by name
+- [x] A per-adapter conformance table (the `filter-conformance.test.ts` shape) driving a predicate
       that fails between read and write, against the real backend where CI has one
-- [ ] The tenant bridge switched over, with a negative control reproducing the M101c race
-- [ ] The outbox and inbox stores switched over, with a negative control for each race
-- [ ] PUBLIC_API.md, the database-plugin README, and the bridge JSDoc updated
+- [x] The tenant bridge switched over, with a negative control reproducing the M101c race
+- [x] The outbox and inbox stores switched over, with a negative control for each race
+- [x] PUBLIC_API.md, the database-plugin README, and the bridge JSDoc updated
 
 ---
 
@@ -13903,7 +13903,7 @@ patch by construction and gains nothing new here.
 | 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |
 | 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |
 | 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
-| 105       | ⬜     | database-plugin + cloudflare-plugin + common — conditional writes on `IRepository` (closes the M101c tenant-bridge, outbox-transition and inbox-count check-then-write races)                                                                 |
+| 105       | ✅     | database-plugin + cloudflare-plugin + common — conditional writes on `IRepository` (closes the M101c tenant-bridge, outbox-transition and inbox-count check-then-write races)                                                                 |
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
 | 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
 | 107b      | ⬜     | messaging-plugin + common + database-plugin — outbox relay fencing and multi-relay sweeping (depends on M105)                                                                                                                                 |
