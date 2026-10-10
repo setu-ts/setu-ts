@@ -289,7 +289,10 @@ export class GrantResolver {
       const stored = context === undefined ? null : this.#stored?.(context, principal) ?? null;
       return Promise.resolve({ ok: true, grants: stored ?? [], dropped: 0 });
     }
-    const shared = this.#sharedGrantsFor(principal, query, context, timing);
+    // `iss` is read ONCE, here: the key and what a custom source sees are both
+    // derived from this frozen copy, so a getter answering differently on each
+    // read cannot key one value and hand the source another.
+    const shared = this.#sharedGrantsFor(keyedPrincipal(principal), query, context, timing);
     const claims = this.#claimsSources;
     if (claims === undefined || claims.length === 0) {
       return shared;
@@ -300,16 +303,16 @@ export class GrantResolver {
 
   /**
    * The static and custom sources' grants, through the memo, cache and
-   * coalescing. Keyed by the principal, which is sound for these sources:
-   * neither reads the credential.
+   * coalescing. `keyed` is the {@linkcode keyedPrincipal} copy, so the key
+   * and the sources read the same frozen id and `iss`.
    */
   #sharedGrantsFor(
-    principal: IPrincipal,
+    keyed: IPrincipal,
     query: GrantQuery,
     context: IRequestContext | undefined,
     timing: Exclude<CompiledTiming, { readonly kind: 'sign-in' }>,
   ): Promise<GrantsOutcome> {
-    const key = `grants:${principalKey(principal)}:${queryKey(query)}`;
+    const key = `grants:${principalKey(keyed)}:${queryKey(query)}`;
     return memoised(context, key, this.#grantsInflight, async () => {
       if (timing.kind === 'cache') {
         const cached = this.#cache.get(key);
@@ -324,7 +327,7 @@ export class GrantResolver {
       }
       const outcome = this.#sharedSources === undefined
         ? unbound()
-        : await this.#collect(principal, query, this.#sharedSources);
+        : await this.#collect(keyed, query, this.#sharedSources);
       if (outcome.ok && timing.kind === 'cache') {
         this.#cache.set(key, {
           expiresAt: this.#deps.hrtime() + timing.ttlMs,

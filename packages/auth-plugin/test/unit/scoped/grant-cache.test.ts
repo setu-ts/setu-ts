@@ -413,4 +413,19 @@ describe('custom sources see only what their shared answer is keyed by', () => {
     expect(broad).toMatchObject({ ok: true, grants: [] });
     expect(narrow).toMatchObject({ ok: true, grants: [] });
   });
+
+  it('reads iss once, so the key and the source cannot see two different values', async () => {
+    const { source, seen } = claimsReadingSource();
+    const { resolver } = harness(source);
+    let reads = 0;
+    const claims = {
+      get iss(): string {
+        reads += 1;
+        return reads === 1 ? 'https://first.example' : 'https://second.example';
+      },
+    };
+    await resolver.grantsFor(principal('ann', { claims }), ORG, requestContext());
+    expect(reads).toBe(1);
+    expect(seen).toEqual([{ id: 'ann', claims: { iss: 'https://first.example' } }]);
+  });
 });
