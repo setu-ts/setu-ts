@@ -2421,15 +2421,17 @@ const store = createDatabaseOutboxStore({ entity: 'Outbox', database: 'orders' }
 - **`verify()`** runs `scanPending(undefined, 1)`, then
   `transaction(uow => uow.getRepository(entity).findAll({ where: { kind, status: 'pending' }, limit: 1 }))`,
   then
-  `updateWhere('setu-outbox-claim-probe', { kind, status: 'pending', claimVersion: 0 }, { claimVersion: 1 })`.
-  The fixed non-UUID probe matches no envelope and also refuses the old SQL schema without
-  `claim_version`. A `conditional-write` refusal is `conditional-writes-unsupported`. An
-  `UnsupportedQueryFeatureError` from `bigtable` is `'bigtable'`; one from `dynamodb` for `orderBy`
-  is `'dynamodb-index'` (a GSI `{ partitionKey: 'status', sortKey: 'position' }`, projection `ALL`,
-  is required); a cause chain carrying `code: 20` with `codeName: 'IllegalOperation'` — what a
-  standalone MongoDB answers at the first operation inside a transaction — is
-  `'mongodb-replica-set'`; anything else is `'entity-unavailable'`. On memory and MongoDB a missing
-  entity cannot be detected (both create lazily). Every refusal is a rejected promise.
+  `updateWhere('setu-outbox-claim-probe', { kind, status: 'pending', claimVersion: 0 }, { claimVersion: 1 })`
+  and `deleteWhere` with the same id and predicate — both, because `retainSentMs: 0` deletes a sent
+  row conditionally after it is published. The fixed non-UUID probe matches no envelope and also
+  refuses the old SQL schema without `claim_version`. A `conditional-write` refusal is
+  `conditional-writes-unsupported`. An `UnsupportedQueryFeatureError` from `bigtable` is
+  `'bigtable'`; one from `dynamodb` for `orderBy` is `'dynamodb-index'` (a GSI
+  `{ partitionKey: 'status', sortKey: 'position' }`, projection `ALL`, is required); a cause chain
+  carrying `code: 20` with `codeName: 'IllegalOperation'` — what a standalone MongoDB answers at the
+  first operation inside a transaction — is `'mongodb-replica-set'`; anything else is
+  `'entity-unavailable'`. On memory and MongoDB a missing entity cannot be detected (both create
+  lazily). Every refusal is a rejected promise.
 
 ### Consumer inbox store (M108)
 

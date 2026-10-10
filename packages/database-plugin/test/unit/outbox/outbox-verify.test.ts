@@ -91,6 +91,21 @@ describe('DatabaseOutboxStore.verify', () => {
     }
   });
 
+  for (const missing of ['updateWhere', 'deleteWhere'] as const) {
+    it(`refuses a source lacking only ${missing}, before any row is published`, async () => {
+      // The two members are independent optional capabilities. Without
+      // `deleteWhere`, a `retainSentMs: 0` relay would publish a row and then
+      // fail to delete it, leaving it pending to be published again.
+      const adapter = new MemoryAdapter();
+      await adapter.connect();
+      const source = adapter.createDataSource(ENTITY);
+      delete source[missing];
+      const service = new DatabaseService(adapter, () => source, 'memory');
+      const error = await refusalOf(service);
+      expect(error.reason).toBe('conditional-writes-unsupported');
+    });
+  }
+
   it('the capability probe changes neither outbox rows nor a business row at the probe id', async () => {
     const service = await memoryService();
     const repo = service.getRepository(ENTITY);
@@ -131,6 +146,14 @@ describe('DatabaseOutboxStore.verify', () => {
           status: 'pending',
           claimVersion: 0,
         }, { claimVersion: 1 }],
+      },
+      {
+        method: 'deleteWhere',
+        args: ['setu-outbox-claim-probe', {
+          kind: OUTBOX_RECORD_KIND,
+          status: 'pending',
+          claimVersion: 0,
+        }],
       },
     ]);
   });

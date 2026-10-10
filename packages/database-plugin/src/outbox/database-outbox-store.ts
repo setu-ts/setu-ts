@@ -421,19 +421,22 @@ export class DatabaseOutboxStore implements IOutboxStore {
           limit: 1,
         })
       );
+      // Both conditional operations are probed: they are independent optional
+      // members, and `markSent` with `deleteNow` (`retainSentMs: 0`) needs the
+      // conditional DELETE after a row is already published — a store lacking
+      // it would leave every published row pending, to be published again
+      // once its claim expired.
       const repo = this.#repo();
-      if (repo.updateWhere === undefined) {
+      if (repo.updateWhere === undefined || repo.deleteWhere === undefined) {
         throw new UnsupportedQueryFeatureError(
           'conditional-write',
           'database-plugin',
-          'The bound repository lacks updateWhere.',
+          'The bound repository lacks updateWhere or deleteWhere.',
         );
       }
-      await repo.updateWhere(CLAIM_PROBE_ID, {
-        kind: OUTBOX_RECORD_KIND,
-        status: 'pending',
-        claimVersion: 0,
-      }, { claimVersion: 1 });
+      const probe = { kind: OUTBOX_RECORD_KIND, status: 'pending', claimVersion: 0 };
+      await repo.updateWhere(CLAIM_PROBE_ID, probe, { claimVersion: 1 });
+      await repo.deleteWhere(CLAIM_PROBE_ID, probe);
     } catch (error) {
       throw new OutboxStoreUnavailableError(this.#entity, unavailableReason(error), {
         cause: error,

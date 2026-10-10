@@ -191,10 +191,12 @@ optional columns are written as `NULL` and read back as absent. `sentBy` is an o
 only.
 
 **Startup check.** `verify()`, run by the outbox before it schedules the relay or accepts a write,
-runs the relay's first query, a transactional read, and a conditional capability probe on the fixed
-non-UUID id `setu-outbox-claim-probe` with `{ kind, status: 'pending', claimVersion: 0 }` and
-`{ claimVersion: 1 }`. It matches no envelope row and rejects with `OutboxStoreUnavailableError`
-(`reason`, `entity`, the adapter error as `cause`) when any step fails:
+runs the relay's first query, a transactional read, and two conditional capability probes on the
+fixed non-UUID id `setu-outbox-claim-probe` with `{ kind, status: 'pending', claimVersion: 0 }`: an
+`updateWhere` writing `{ claimVersion: 1 }` and a `deleteWhere` (needed because `retainSentMs: 0`
+deletes a sent row conditionally after publishing it). They match no envelope row and rejects with
+`OutboxStoreUnavailableError` (`reason`, `entity`, the adapter error as `cause`) when any step
+fails:
 
 | Backend               | Verdict                                                                                                                                              |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
