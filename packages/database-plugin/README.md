@@ -207,7 +207,7 @@ fails:
 | MongoDB               | supported on a replica set; a standalone server is refused (`reason: 'mongodb-replica-set'`)                                                         |
 | DynamoDB              | supported with a GSI `{ partitionKey: 'status', sortKey: 'position' }`, projection `ALL`; refused without it (`'dynamodb-index'`)                    |
 | Cosmos                | supported when the outbox entity maps to the business container and its partition-key path is a column the row carries (`tenantId` or `orderingKey`) |
-| No conditional writes | refused (`'conditional-writes-unsupported'`): `updateWhere` is absent or rejects `conditional-write`                                                 |
+| No conditional writes | refused (`'conditional-writes-unsupported'`): `updateWhere` or `deleteWhere` is absent, or either rejects `conditional-write`                        |
 | Bigtable              | refused (`'bigtable'`): no secondary index, so the relay query cannot run — use a change-data-capture relay                                          |
 
 Any other refusal — a missing or unreadable table — is `reason: 'entity-unavailable'`. On the memory
