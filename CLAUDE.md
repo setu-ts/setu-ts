@@ -6063,8 +6063,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   executable by an `assert:js` table; the authentication capability is named `CAPABILITIES.AUTH`
   everywhere; and auth and events gain `## Diagnostics` sections whose field tables are tied to
   compiling fences by a new docs-gate case, with the events README moved into the gated fence table
-  and its two non-compiling fences fixed (V8-42/43/44). Verified by a 17-check behavioural probe
-  through a real kernel application — complete (PR pending).
+  and its two non-compiling fences fixed (V8-42/43/44). Verified through real kernel apps (logger,
+  audit read-back, telemetry span). The design security review was recorded after implementation;
+  the fresh-context audit failed round 1 on a Medium — `redactor` was read through the prototype
+  chain, so a polluted `Object.prototype.redactor` disabled redaction everywhere, including the
+  logger's default secret list — fixed by own-property reads, plus a Low review gap
+  (`idempotency-plugin` unlisted). The fixes were NOT re-audited, at the maintainer's direction —
+  complete (PR #445).
 - **Next milestone** — M111a, the first of the M111 toolchain letters (a Node build: pnpm
   workspaces, `tsc` to `dist/`, `npm:` lazy imports as optional peers); M104 — the `v0.9.0`
   client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
