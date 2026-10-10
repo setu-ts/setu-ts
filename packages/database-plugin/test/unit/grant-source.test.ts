@@ -85,7 +85,7 @@ describe('createDatabaseGrantSource', () => {
     expect(grants).toEqual([]);
   });
 
-  it('reads overridden column names and honours the row limit', async () => {
+  it('reads overridden column names, and refuses rather than truncates past the limit', async () => {
     const service = await memoryService();
     const repo = service.getRepository<Record<string, unknown>>('acl');
     await repo.create({ id: 'a', who: 'u1', grant: 'viewer', kind: null, ref: null });
@@ -93,11 +93,30 @@ describe('createDatabaseGrantSource', () => {
     const source = createDatabaseGrantSource({
       entity: 'acl',
       fields: { subject: 'who', role: 'grant', scopeType: 'kind', scopeId: 'ref' },
-      limit: 1,
+      limit: 2,
     })(registry(service));
     expect(await source.grantsFor({ id: 'u1' }, { kind: 'chain', scopes: [] }, live)).toEqual([
       { role: 'viewer', scope: null },
+      { role: 'owner', scope: null },
     ]);
+    // A third matching row exceeds the limit: the question is refused, never
+    // answered with an arbitrary two of the three.
+    await repo.create({ id: 'c', who: 'u1', grant: 'auditor', kind: null, ref: null });
+    await expect(source.grantsFor({ id: 'u1' }, { kind: 'chain', scopes: [] }, live)).rejects
+      .toThrow('createDatabaseGrantSource: more than 2 rows match; the question is refused');
+  });
+
+  it('the role source refuses rather than truncates past its limit', async () => {
+    const service = await memoryService();
+    const repo = service.getRepository<Record<string, unknown>>('roles');
+    const T = { type: 'tenant', id: 't1' };
+    await repo.create({ id: '1', scopeType: 't', scopeId: 'x', role: 'r', permission: 'a' });
+    await repo.create({ id: '2', scopeType: 't', scopeId: 'x', role: 'r', permission: 'b' });
+    const source = createDatabaseRoleSource({ entity: 'roles', limit: 1 })(registry(service));
+    await expect(source.rolesFor([{ type: 't', id: 'x' }], live)).rejects.toThrow(
+      'createDatabaseRoleSource: more than 1 rows match',
+    );
+    expect(await source.rolesFor([T], live)).toEqual([]);
   });
 
   it('refuses to start a query once the deadline has passed', async () => {

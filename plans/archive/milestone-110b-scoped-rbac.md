@@ -514,6 +514,11 @@ and this plan moved to `plans/archive/`. Every new symbol carries `@since 0.9.0`
   refused a public member typed by a private type, and only those three reasons reach sign-in.
 - A deny reason `evaluation-failed` was added for an unexpected throw inside the check, so the check
   still never throws (§3.14).
+- The database sources read `limit + 1` rows against their own `limit` option (default 10 001
+  grants, 100 000 role rows) rather than `maxGrantsPerPrincipal + 1`, which a factory resolved
+  before AuthPlugin compiles its options cannot see. More than `limit` matching rows reject the
+  question (so the check denies), keeping §3.13's refuse-rather-than-truncate rule; the first
+  implementation silently truncated and its test asserted it, caught in verification.
 - Scenario B is asserted in `scoped-sign-in.test.ts`, where the sign-in harness lives; the MFA path
   is driven through `promotePending`, the one funnel TOTP, recovery codes and passkeys all call.
 

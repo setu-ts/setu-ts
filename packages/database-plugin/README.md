@@ -323,8 +323,8 @@ export const auth = AuthPlugin({
 ```
 
 A check's question is one query: the subject's rows that are global or in one of the asked scopes.
-Keep the grant source's `limit` (default 10 001) above `scopedRbac.maxGrantsPerPrincipal`, so an
-over-limit principal is refused by AuthPlugin rather than truncated here.
+More than `limit` matching rows (default 10 001 for grants, 100 000 for role rows) refuse the
+question, so the check denies, rather than answering with an arbitrary subset.
 
 ## Options
 

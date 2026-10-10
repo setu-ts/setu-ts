@@ -2495,14 +2495,15 @@ const auth = AuthPlugin({
 | `entity` | Required: one row per grant                                                   | Required: one row per (scope, role, permission)                                 |
 | `fields` | `GrantFields` — `subject` / `role` / `scopeType` / `scopeId` (those defaults) | `RoleFields` — `scopeType` / `scopeId` / `role` / `permission` (those defaults) |
 | `name`   | Log name (default `'database-grants'`)                                        | Log name (default `'database-roles'`)                                           |
-| `limit`  | Rows per query, 1–10 001 (default 10 001)                                     | Rows per query, 1–100 000 (default 100 000)                                     |
+| `limit`  | Most matching rows, 1–10 001 (default 10 001); more refuses the question      | Most matching rows, 1–100 000 (default 100 000); more refuses the question      |
 
 A grant row whose `scopeType` and `scopeId` are both `null` is a GLOBAL grant; a row with only one
 `null` is passed through and dropped by AuthPlugin's validator. A `chain` question is ONE query —
 the subject, and either a global row or a row in one of the asked scopes; an `all` question (sign-in
-timing) reads every row of the subject. Keep the grant source's `limit` above
-`scopedRbac.maxGrantsPerPrincipal` so an over-limit principal is refused by AuthPlugin rather than
-truncated here. The role source groups rows into one definition per (scope, role) and skips a row
+timing) reads every row of the subject. Each question reads at most `limit + 1` rows, and more than
+`limit` matching rows REJECT it — the check then denies — rather than returning an arbitrary subset,
+which would under-grant unpredictably; AuthPlugin's own `maxGrantsPerPrincipal` bounds the union
+afterwards. The role source groups rows into one definition per (scope, role) and skips a row
 missing any column. Every field name must be an identifier (`[A-Za-z_][A-Za-z0-9_]*`), so it can
 never be read as an operator; an empty `entity`, a non-identifier field, or an out-of-range `limit`
 throws `TypeError` when the factory is called. A query does not start once the evaluator's deadline
@@ -2628,8 +2629,9 @@ to `ttlMs`) and `'sign-in'` (requires `signIn`; resolved once by `IAuthSessionSe
 stored under a PRIVATE session key — never in `claims`, so a token carrying a same-named claim
 grants nothing — carried through a pending second factor, and in force until sign-out or session
 expiry; a source failure rejects sign-in with `GrantResolutionError`, a `503` status hint). Every
-bound refuses an out-of-range value, `NaN` included, when `AuthPlugin(...)` is called. With M98h
-`authorizationDiagnostics` configured, scoped decisions are recorded through the same observer. See
+bound refuses an out-of-range value, `NaN` included, when `AuthPlugin(...)` is called. Scoped
+decisions are NOT observed by M98h `authorizationDiagnostics` — its collector watches only the
+global RBAC evaluator — so no scope identifier reaches the diagnostics connector. See
 [Authorization](docs/authorization.md#scoped-roles).
 
 `jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `issuers`,

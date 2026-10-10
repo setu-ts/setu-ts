@@ -62,9 +62,9 @@ export interface DatabaseGrantSourceOptions {
   /** Column names, when they differ from the defaults. */
   readonly fields?: GrantFields;
   /**
-   * The most rows one query reads, 1–10 001 (default 10 001). Keep it above
-   * `scopedRbac.maxGrantsPerPrincipal`, so an over-limit principal is refused
-   * by AuthPlugin rather than silently truncated here.
+   * The most rows one question may match, 1–10 001 (default 10 001). More
+   * matching rows REJECT the question (so the check denies) rather than
+   * returning an arbitrary subset, which would under-grant unpredictably.
    */
   readonly limit?: number;
 }
@@ -93,7 +93,11 @@ export interface DatabaseRoleSourceOptions {
   readonly name?: string;
   /** Column names, when they differ from the defaults. */
   readonly fields?: RoleFields;
-  /** The most rows one query reads, 1–100 000 (default 100 000). */
+  /**
+   * The most rows one question may match, 1–100 000 (default 100 000). More
+   * matching rows REJECT the question (so the check denies) rather than
+   * dropping an arbitrary subset of the scopes' role definitions.
+   */
   readonly limit?: number;
 }
 
@@ -140,6 +144,23 @@ function assertLive(signal: AbortSignal): void {
   if (signal.aborted) {
     throw new DOMException('the scoped RBAC deadline expired before the query', 'AbortError');
   }
+}
+
+/**
+ * Reads at most `limit + 1` rows and refuses more than `limit`, so a
+ * truncation never reaches the evaluator as a complete answer. The message
+ * names the factory only — never an entity value.
+ */
+async function boundedRows(
+  rows: Promise<readonly Record<string, unknown>[]>,
+  limit: number,
+  factory: string,
+): Promise<readonly Record<string, unknown>[]> {
+  const read = await rows;
+  if (read.length > limit) {
+    throw new RangeError(`${factory}: more than ${limit} rows match; the question is refused`);
+  }
+  return read;
 }
 
 function text(value: unknown): string | null {
@@ -207,10 +228,14 @@ export function createDatabaseGrantSource(
             },
           ],
         };
-        const rows = await service.getRepository<Record<string, unknown>>(entity).findAll({
-          filter,
+        const rows = await boundedRows(
+          service.getRepository<Record<string, unknown>>(entity).findAll({
+            filter,
+            limit: limit + 1,
+          }),
           limit,
-        });
+          factory,
+        );
         return rows.map((row) => {
           const type = text(row[scopeType]);
           const id = text(row[scopeId]);
@@ -263,13 +288,17 @@ export function createDatabaseRoleSource(
         if (scopes.length === 0) {
           return [];
         }
-        const rows = await service.getRepository<Record<string, unknown>>(entity).findAll({
-          filter: {
-            type: 'or',
-            filters: scopes.map((scope) => scopeClause(scopeType, scopeId, scope)),
-          },
+        const rows = await boundedRows(
+          service.getRepository<Record<string, unknown>>(entity).findAll({
+            filter: {
+              type: 'or',
+              filters: scopes.map((scope) => scopeClause(scopeType, scopeId, scope)),
+            },
+            limit: limit + 1,
+          }),
           limit,
-        });
+          factory,
+        );
         const grouped = new Map<string, { scope: ScopeRef; role: string; permissions: string[] }>();
         for (const row of rows) {
           const type = text(row[scopeType]);
