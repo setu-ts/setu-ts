@@ -1164,7 +1164,10 @@ The DynamoDB table needs `id` as its hash key and the GSI `by-status-position` (
 `position`, both `S`) with `"Projection": { "ProjectionType": "ALL" }` — a narrower projection is
 not detected by `verify()`. A Prisma model maps the PostgreSQL columns with `@map`
 (`orderingKey String? @map("ordering_key")`, `createdAt BigInt @map("created_at")`, …) and
-`@@map("setu_outbox")`; the Prisma path is not driven in this repository.
+`@@map("setu_outbox")`. Prisma Client returns a `BigInt` column as a JS `bigint`; the bridge
+converts every integer column it reads to a number when the value is a safe integer, and leaves an
+unsafe one as it is, so the relay refuses it as `invalid-row`. The Prisma path is not driven in this
+repository.
 
 ### The relay
 

@@ -3,8 +3,11 @@
  *
  * Every numeric option must be a finite integer in its range — `NaN` and a
  * fraction are refused (the M90a fail-open class) — and the refusal names the
- * option. `publishTimeoutMs + storeTimeoutMs > sweepDeadlineMs` is refused,
- * because no row could ever start. All refusals are synchronous: they run at
+ * option. `publishTimeoutMs + 2 * storeTimeoutMs >= sweepDeadlineMs` is
+ * refused, because no row could ever start (the claim, the publish and the
+ * status write must all fit, with headroom), and `claimLeaseMs` below
+ * `publishTimeoutMs + 2 * storeTimeoutMs + maxClockSkewMs` is refused. All
+ * refusals are synchronous: they run at
  * plugin construction, before any application starts.
  *
  * @module

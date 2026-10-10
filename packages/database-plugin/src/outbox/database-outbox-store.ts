@@ -93,6 +93,40 @@ const OPTIONAL_FIELDS = [
   'sentBy',
 ] as const;
 
+/**
+ * The integer fields a 64-bit column may hand back as a JS `bigint`: Prisma
+ * Client returns a `BigInt` column as `bigint`, and Prisma's only 64-bit
+ * integer type is `BigInt`. The relay reads these as numbers.
+ */
+const INTEGER_FIELDS = [
+  'createdAt',
+  'attempts',
+  'availableAt',
+  'claimVersion',
+  'leaseUntil',
+  'settledAt',
+] as const;
+
+/**
+ * Converts a `bigint` the safe-integer range can hold exactly into a number.
+ * Anything else — including an unsafe `bigint`, which a number cannot hold
+ * without losing precision — is passed through unchanged for the relay to
+ * refuse.
+ */
+function exactNumber(value: unknown): unknown {
+  return typeof value === 'bigint' && value >= BigInt(Number.MIN_SAFE_INTEGER) &&
+      value <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(value)
+    : value;
+}
+
+/** A stored row with every integer field a safe `bigint` normalized to a number. */
+function normalizeIntegers(row: Row): Row {
+  const normalized: Row = { ...row };
+  for (const field of INTEGER_FIELDS) normalized[field] = exactNumber(row[field]);
+  return normalized;
+}
+
 /** The four statuses a row may carry. */
 const STATUSES: ReadonlySet<string> = new Set<OutboxStatus>([
   'pending',
@@ -125,7 +159,8 @@ function toRow(record: OutboxRecord): Row {
  * field omitted. Values are passed through as stored — the relay decodes and
  * refuses a malformed row by itself, which needs the row's id to mark it.
  */
-function fromRow(row: Row): OutboxRecord {
+function fromRow(stored: Row): OutboxRecord {
+  const row = normalizeIntegers(stored);
   const record: Row = {};
   for (const field of REQUIRED_FIELDS) record[field] = row[field];
   for (const field of OPTIONAL_FIELDS) {
@@ -199,7 +234,7 @@ export class DatabaseOutboxStore implements IOutboxStore {
   async #find(id: string): Promise<Row | null> {
     const row = await this.#repo().findById(id);
     if (row === null || row.kind !== OUTBOX_RECORD_KIND) return null;
-    return row;
+    return normalizeIntegers(row);
   }
 
   /** @inheritdoc */
