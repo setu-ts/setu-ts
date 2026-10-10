@@ -1006,7 +1006,7 @@ export type OutboxStoreEntry = IOutboxStore | RegistryFactory<IOutboxStore>;
  * The outbox relay's schedule, budgets and failure policy (M107 §3.6–§3.8).
  *
  * Every numeric option must be a finite integer in its range, and
- * `publishTimeoutMs + storeTimeoutMs` must not exceed `sweepDeadlineMs`;
+ * `publishTimeoutMs + 2 * storeTimeoutMs` must be less than `sweepDeadlineMs`;
  * a violation is refused at construction, naming the option.
  *
  * @since 0.9.0
@@ -1036,7 +1036,9 @@ export interface OutboxRelayOptions {
   readonly maxBackoffMs?: number;
   /**
    * One deadline over the whole sweep, measured on the monotonic clock.
-   * Default `15000`. Must cover publishTimeoutMs + 2 * storeTimeoutMs.
+   * Default `30000`. Must be greater than publishTimeoutMs + 2 * storeTimeoutMs.
+   * Rows start while the remaining budget covers that reserve: the first
+   * `15000` ms with default options.
    */
   readonly sweepDeadlineMs?: number;
   /** Bound on one publish. Default `5000`. */

@@ -26,6 +26,19 @@ function track(promise: Promise<OutboxSweepResult>): { settled: () => boolean } 
 const hang = (): Promise<void> => new Promise<void>(() => {});
 
 describe('relay deadline', () => {
+  it('default options publish with a monotonic clock advancing on every store call', async () => {
+    const h = await outboxHarness();
+    for (let n = 1; n <= 3; n++) await h.write({ key: 'K', n });
+    // Startup and each bounded call consume time, as they do on a real runtime.
+    h.clock.step(1);
+    for (const method of ['failedKeys', 'scanPending', 'claim', 'markSent'] as const) {
+      h.store.faults[method] = () => h.clock.step(1);
+    }
+    expect((await h.sweep()).endedBy).toBe('complete');
+    expect(h.broker.sequence()).toEqual([1, 2, 3]);
+    expect(await h.store.stats()).toMatchObject({ pending: 0, failed: 0 });
+  });
+
   it('a hung claim ends the sweep at its store bound without publishing', async () => {
     const h = await outboxHarness({ options: { relay: RELAY } });
     await h.write({ n: 1 });
@@ -98,7 +111,7 @@ describe('relay deadline', () => {
     expect(h.broker.sequence()).toEqual([1]);
   });
 
-  it('starts no row once the deadline leaves less than publish + store', async () => {
+  it('starts no row once the deadline leaves less than claim + publish + mark', async () => {
     const h = await outboxHarness({ options: { relay: RELAY } });
     for (let n = 1; n <= 6; n++) await h.write({ n });
     h.broker.behaviour = () => {
@@ -106,7 +119,7 @@ describe('relay deadline', () => {
       return undefined;
     };
     const result = await h.sweep();
-    // Rows start at 1000, 700 and 400 ms remaining; at 100 the 200 reserve is gone.
+    // Rows start at 1000, 700 and 400 ms remaining; at 100 the 300 reserve is gone.
     expect(result.endedBy).toBe('deadline');
     expect(h.broker.sequence()).toEqual([1, 2, 3]);
     await h.sweep();

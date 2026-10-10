@@ -109,7 +109,7 @@ function resolveStores(options: OutboxOptions): ResolvedOutboxOptions['stores'] 
  * @param options - The `outbox` option arm
  * @returns The resolved options
  * @throws {RangeError} When a numeric option is out of range, or the per-call
- *   bounds exceed the sweep deadline
+ *   bounds leave no headroom in the sweep deadline
  * @throws {TypeError} When the store form or `background` is malformed
  */
 export function resolveOutboxOptions(options: OutboxOptions): ResolvedOutboxOptions {
@@ -125,7 +125,7 @@ export function resolveOutboxOptions(options: OutboxOptions): ResolvedOutboxOpti
   const sweepDeadlineMs = integer(
     'relay.sweepDeadlineMs',
     relay.sweepDeadlineMs,
-    15_000,
+    30_000,
     1,
     MAX_TIMER_MS,
   );
@@ -143,9 +143,9 @@ export function resolveOutboxOptions(options: OutboxOptions): ResolvedOutboxOpti
     1,
     MAX_TIMER_MS,
   );
-  if (publishTimeoutMs + 2 * storeTimeoutMs > sweepDeadlineMs) {
+  if (publishTimeoutMs + 2 * storeTimeoutMs >= sweepDeadlineMs) {
     throw new RangeError(
-      'outbox: relay.publishTimeoutMs + 2 * relay.storeTimeoutMs must not exceed ' +
+      'outbox: relay.publishTimeoutMs + 2 * relay.storeTimeoutMs must be less than ' +
         'relay.sweepDeadlineMs, or no row could ever start',
     );
   }

@@ -36,7 +36,7 @@ describe('resolveOutboxOptions', () => {
       maxAttempts: 10,
       baseBackoffMs: 1000,
       maxBackoffMs: 300_000,
-      sweepDeadlineMs: 15_000,
+      sweepDeadlineMs: 30_000,
       publishTimeoutMs: 5000,
       storeTimeoutMs: 5000,
       claimLeaseMs: 30000,
@@ -106,19 +106,23 @@ describe('resolveOutboxOptions', () => {
       .toThrow('relay.maxBackoffMs');
   });
 
-  it('refuses publishTimeoutMs + 2 * storeTimeoutMs above sweepDeadlineMs, and accepts equality', () => {
-    expect(() =>
-      resolveOutboxOptions({
-        store,
-        relay: { sweepDeadlineMs: 14999, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
-      })
-    ).toThrow('must not exceed relay.sweepDeadlineMs');
+  it('refuses reserve equality and overflow naming all three options, and accepts headroom', () => {
+    for (const sweepDeadlineMs of [14999, 15000]) {
+      expect(() =>
+        resolveOutboxOptions({
+          store,
+          relay: { sweepDeadlineMs, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
+        })
+      ).toThrow(
+        'relay.publishTimeoutMs + 2 * relay.storeTimeoutMs must be less than relay.sweepDeadlineMs',
+      );
+    }
     expect(
       resolveOutboxOptions({
         store,
-        relay: { sweepDeadlineMs: 15_000, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
+        relay: { sweepDeadlineMs: 15_001, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
       }).sweepDeadlineMs,
-    ).toBe(15_000);
+    ).toBe(15_001);
   });
 
   it('pins lease and clock-skew ranges and the construction relation on both sides', () => {
