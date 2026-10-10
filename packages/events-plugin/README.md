@@ -55,7 +55,7 @@ base class or publishing while its persistence policy is unresolved:
 
 ```typescript
 import { createDomainEvents, type IDomainEvent } from '@setu-ts/events-plugin';
-import type { IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES, type IEventBus, type IRuntimeServices } from '@setu-ts/common';
 
 class Order {
   readonly events = createDomainEvents();
@@ -66,9 +66,10 @@ class Order {
   }
 }
 
-async function dispatchAfterSave(event: IDomainEvent<unknown>): Promise<void> {
-  // Publish through the bus, or persist to an outbox, once the aggregate is saved.
-  await Promise.resolve(event);
+async function dispatchAfterSave(bus: IEventBus, event: IDomainEvent<unknown>): Promise<void> {
+  // Runs after the aggregate is saved. A rejection leaves the event pending, so
+  // the loop below removes it only once it has been published.
+  await bus.publish(event);
 }
 
 function orderPlaced(
@@ -83,6 +84,7 @@ function orderPlaced(
   };
 }
 
+const bus = app.services.get<IEventBus>(CAPABILITIES.EVENTS);
 const order = new Order();
 order.place(orderPlaced(runtime, 'order-1'));
 
@@ -90,7 +92,7 @@ order.place(orderPlaced(runtime, 'order-1'));
 // persist the pending facts. Remove or clear only after its chosen policy succeeds.
 const pending = order.events.pending();
 for (const domainEvent of pending) {
-  await dispatchAfterSave(domainEvent);
+  await dispatchAfterSave(bus, domainEvent);
   order.events.remove(domainEvent);
 }
 ```

@@ -262,5 +262,17 @@ describe('createRedactionService', () => {
 
       expect(service.redactValue('email', 'jane@example.com')).toBe('[Redacted]');
     });
+
+    it('a missing classification is erased, never looked up as the key "undefined"', () => {
+      const inherited = Object.create({ classification: 'pii' }) as { classification: string };
+      const nonString = { classification: 7 } as unknown as { classification: string };
+      const service = createRedactionService({
+        fields: { email: inherited, phone: nonString },
+        redactors: { undefined: identity, '7': identity },
+      });
+
+      expect(service.redactValue('email', 'jane@example.com')).toBe('[Redacted]');
+      expect(service.redactValue('phone', '555-0100')).toBe('[Redacted]');
+    });
   });
 });

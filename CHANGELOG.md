@@ -17,8 +17,8 @@ All notable changes to this project are documented here. The format follows
   string-valued policy behaves byte-identically. One reader-side change: code that READS
   `policy.fields[path]` as a `DataClassification` now sees the union and must narrow with
   `typeof value === 'string'`. A field's `redactor` and `classification` are read only as own
-  properties, so an inherited value (a polluted `Object.prototype`, or an entry built with
-  `Object.create`) is ignored and selection falls through as if it were absent.
+  properties: an inherited `redactor` (a polluted `Object.prototype`, or an entry built with
+  `Object.create`) is ignored, and an entry without its own string `classification` is erased.
 
 - **Conditional repository writes (M105).** Optional `updateWhere` and `deleteWhere` on
   `IRepository` and `IDataSource`, with shared `WritePrecondition` and `checkWritePrecondition`

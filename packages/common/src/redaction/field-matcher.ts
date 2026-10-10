@@ -2,7 +2,7 @@
 
 import type { DataClassification } from './classification.ts';
 import type { FieldRedaction } from './policy.ts';
-import type { Redactor } from './redactors.ts';
+import { eraseRedactor, type Redactor } from './redactors.ts';
 
 /** The classification and optional pattern-specific redactor a match carries. */
 export interface CompiledFieldPattern {
@@ -29,12 +29,13 @@ export function createFieldMatcher(
     // Own properties only: an inherited `redactor` (from a polluted
     // `Object.prototype` or an entry built with `Object.create`) must never
     // replace a redactor the policy did not declare.
-    // A missing own `classification` is reachable only from an untyped caller;
-    // it stays `undefined` at runtime exactly as a plain read did before, so
-    // the classification lookup misses and selection falls to the default.
-    const classification = Object.hasOwn(value, 'classification')
-      ? value.classification
-      : (undefined as unknown as DataClassification);
+    // An entry without its own string `classification` (reachable only from an
+    // untyped caller) is erased outright. Handing `undefined` to the class
+    // lookup would read `redactors['undefined']`, a key a policy may define.
+    if (!Object.hasOwn(value, 'classification') || typeof value.classification !== 'string') {
+      return { segments, classification: '', redactor: eraseRedactor };
+    }
+    const classification = value.classification;
     return Object.hasOwn(value, 'redactor') && value.redactor !== undefined
       ? { segments, classification, redactor: value.redactor }
       : { segments, classification };
