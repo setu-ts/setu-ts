@@ -13699,6 +13699,212 @@ add a behaviour. Opened by M110a as the named owner of that gap; not scheduled.
 
 ---
 
+## Milestone 111: Node-First Toolchain and npm Publishing
+
+**Package(s):** every workspace member; root tooling (`deno.json`, `scripts/`, `.github/workflows/`,
+`compat/`); the governing documents (`CLAUDE.md`, `AI_GUIDELINES.md`, `ARCHITECTURE.md`,
+`PUBLIC_API.md`, `README.md`, `docs/`). Six letters, `111a`–`111f`, in dependency order.
+
+**Objective:** move the framework's development toolchain, test suite and package registry off Deno,
+onto Node, pnpm and npm, while every gate stays green at every step. Deno stays a SUPPORTED RUNTIME;
+it stops being the toolchain the repository is built, tested and published with.
+
+**Why now.** On 2026-10-09 the Deno team announced it is joining Cloudflare
+([deno.com/blog/cloudflare](https://deno.com/blog/cloudflare)). Three commitments matter here:
+
+- the Deno runtime gets "another year with monthly releases containing bug fixes and security
+  updates", after which development ends, so roughly October 2027;
+- Deno Deploy shuts down after six months, which affects nothing here (nothing deploys there);
+- "JSR will continue operating, with its infrastructure moving to Cloudflare", so every version
+  already published stays installable, including through JSR's npm mirror (`@jsr/setu-ts__*`), which
+  is how Node and Bun consumers install the framework today.
+
+So this is a **planned** migration with a twelve-month runway, not an outage. What cannot continue
+is a toolchain — formatter, linter, type-checker, test runner, coverage, publisher, task runner —
+that lives on a runtime whose development is ending.
+
+**Decisions (maintainer, 2026-10-10):**
+
+| Question                    | Decision                                    | Rejected                                                |
+| --------------------------- | ------------------------------------------- | ------------------------------------------------------- |
+| Test runner                 | **Vitest**                                  | `node:test` (a different assertion API in ~1,500 files) |
+| Workspace / package manager | **pnpm workspaces**                         | npm workspaces (loose hoisting hides missing deps)      |
+| Registry                    | **npm only**; JSR keeps published versions  | dual npm + JSR publishing until Deno's end of life      |
+| Deno as a runtime           | **kept** — the Deno adapter stays supported | dropping Deno support outright                          |
+| Formatter / linter          | **Prettier + ESLint** (`typescript-eslint`) | Biome                                                   |
+
+**Measured coupling (2026-10-10, `develop` at `329c689b`).** Package SOURCE is barely coupled to
+Deno: the toolchain is what is coupled.
+
+| Area                     | Measurement                                                                                                                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Deno.*` in `src`        | `runtime` (6 files, the Deno adapter — stays) and `cli` (19 files). Elsewhere only in comments.                                                                                                             |
+| `npm:` specifiers in src | ~100 `import('npm:<pkg>@<range>')` sites across ~45 distinct packages (the AI_GUIDELINES §12.2 lazy-import pattern). Node resolves none of them.                                                            |
+| `jsr:` specifiers in src | 6 inline `jsr:@setu-ts/common` specifiers in `packages/sdk`; `@std/jsonc`, `@std/testing` and `@std/expect` inline in `cli`.                                                                                |
+| Cross-package imports    | ~1,050 `@setu-ts/*` bare imports resolved by the Deno import map; `@hono/hono` from JSR (npm name: `hono`).                                                                                                 |
+| Relative imports         | 2,975 end in `.ts`. TypeScript 5.7's `rewriteRelativeImportExtensions` emits them as `.js`, so they are NOT rewritten by hand.                                                                              |
+| Tests                    | 1,683 files. ~1,520 import `describe`/`it` from `@std/testing/bdd` (built on `Deno.test`) and `expect` from `@std/expect`; 188 use `Deno.*` directly (subprocesses, env, temp dirs, `Deno.connect`).        |
+| Permission-scoped tests  | 30 packages declare `test.permissions` (e.g. M53's endpoint-scoped `net` grants, M63's boot-without-`-A`). Node has no equivalent sandbox for tests, so those properties need a different proof (see 111b). |
+| Scripts                  | 33 of 39 `scripts/*.ts` use `Deno.*`.                                                                                                                                                                       |
+| CI                       | `ci.yml`, `release.yml`, `drift.yml`, `website.yml` run Deno; `compat.yml` already runs Node 24 and Bun against the PUBLISHED packages.                                                                     |
+| CLI                      | Deno is the default target of every generated project; `src/main.ts` is the Deno process boundary; `--runtime node` projects install `@jsr/…` packages through `.npmrc`.                                    |
+| npm scope                | `@setu-ts` is unclaimed on npm (`@setu-ts/kernel` → 404). **Claiming it is a maintainer action and blocks 111c.**                                                                                           |
+
+**What the move changes in meaning, not only in syntax** — each needs a decision inside its letter,
+not a silent loss:
+
+- **The coverage gate starts failing for real.** Vitest's per-file `thresholds` (`perFile: true`)
+  fail the run, which retires the long-standing "`deno task test:coverage` exits 0 with a file under
+  the bar" caveat in CLAUDE.md — a gain, recorded so the caveat is removed rather than kept stale.
+- **The test permission sandbox disappears.** Tests that proved "this code needs no more than X" by
+  running under a scoped Deno grant need either Node's `--permission` model (experimental; covers fs
+  and child processes, not network) run as a subprocess, or an explicit assertion of what the code
+  touches. The CLI's boot-without-`-A` gate keeps its meaning for GENERATED Deno projects only.
+- **JSR's publish-time rules stop applying.** Slow types (M51), `@module`-first entrypoints
+  (`release:verify` check 5) and JSR README rendering no longer constrain the source. Explicit
+  return types on exports stay mandatory — enforced by `isolatedDeclarations`, which keeps `.d.ts`
+  generation cheap and per-file.
+- **`deno compile`** (`apps/compiled-binary`) has no Node equivalent of the same weight. Node's
+  single-executable applications are the candidate; whether the example survives is 111e's call.
+- **The release tooling's checks move registry.** Version agreement, specifier resolvability,
+  workspace coverage, `@since` against the registry (M95d), the changelog shape check — each is
+  re-pointed at npm or retired with a stated reason, never dropped silently.
+
+### Milestone 111a: A Node Build for Every Package
+
+**Objective:** every package builds to `dist/` with `tsc` and installs and imports on Node, while
+the existing Deno gates still pass on the same sources.
+
+- `pnpm-workspace.yaml` + a `package.json` per member (`"type": "module"`, `exports` pointing at
+  `dist/*.js` + `dist/*.d.ts`, `files`, `sideEffects`, `engines`), with `workspace:^` internal deps.
+- One shared `tsconfig.base.json` carrying today's `compilerOptions` (`strict`,
+  `exactOptionalPropertyTypes`, …) plus `module: nodenext`, `rewriteRelativeImportExtensions`,
+  `isolatedDeclarations`, `declaration`; one project reference per member so `tsc -b` builds the
+  graph in dependency order.
+- The ~100 `import('npm:<pkg>@<range>')` sites become bare `import('<pkg>')`, each package listed as
+  an OPTIONAL `peerDependency` (`peerDependenciesMeta`) carrying today's range. The §12.2 rule
+  stays: never a hard dependency. `scripts/npm-specifier-audit.ts` (M70e) is rewritten to require a
+  LITERAL bare specifier — the property it exists for (bundlers and static analysis can see the
+  import) is unchanged.
+- `sdk`'s inline `jsr:` specifiers and `@hono/hono` → `hono` from npm. `jsr:@std/jsonc` in `cli` is
+  replaced (`jsonc-parser` or an internal parser).
+- **Exit:** `pnpm -r build` clean; a throwaway Node 24 project installing the packed tarballs
+  (`pnpm pack`) boots `kernel` + `runtime` and serves a request; a decorated controller serves on
+  Node from compiled output (proves TC39 decorator emit and the `Symbol.metadata` fallback M76
+  measured); the four Deno gates still pass.
+- **To probe first:** that `tsc`'s decorator emit and the decorator-plugin metadata bridge agree on
+  Node 24; that `rewriteRelativeImportExtensions` covers the dynamic `import()` sites too.
+
+### Milestone 111b: The Test Suite on Node
+
+**Objective:** the whole suite runs on Node under Vitest, with the per-file 90% bar enforced by the
+runner, before anything is published to npm.
+
+- A codemod for the ~1,520 import-only files (`@std/testing/bdd` → `vitest`, `@std/expect` →
+  `vitest`), committed under `scripts/` so the change is reproducible, then hand conversion of the
+  188 files using `Deno.*` — `Deno.Command` → `node:child_process`, `Deno.makeTempDir` →
+  `fs.mkdtemp`, `Deno.connect` → `node:net` (M73's raw RFC 6455 client and the forbidden-header
+  probes depend on a raw socket; `fetch` is not a substitute).
+- `@std/expect` → Vitest `expect` is not 1:1 everywhere; the codemod lists the matchers it could not
+  map rather than guessing.
+- Vitest coverage (`v8`) with
+  `thresholds: { perFile: true, branches: 90, functions: 90, lines: 90 }` — the gate CLAUDE.md has
+  asked a human to enforce by reading a table becomes a failing exit code. The per-file tables
+  before and after are compared so the swap itself cannot drop a file below the bar unnoticed.
+- The guarded real-backend suites keep their `ignore`/skip guards and their CI-reachability pins in
+  `test/apps-gate.test.ts`; the env block that un-skips them is unchanged.
+- Permission-scoped proofs (see above) are each given a Node-side replacement or are listed, by
+  test, as retired with the reason.
+- **To probe first:** that Vitest's transformer handles TC39 decorators (esbuild does; confirm the
+  version Vitest ships), and that the suite's subprocess-heavy CLI e2e runs within CI time.
+- **Exit:** `pnpm test` and `pnpm test:coverage` green on Node 24; the test COUNT matches the Deno
+  run (a converted suite that silently collects fewer tests is the failure this guards against); one
+  run under Bun as a smoke, not a gate.
+
+### Milestone 111c: First npm Publish
+
+**Objective:** the framework is installable as `@setu-ts/*` from npm, published by CI.
+
+- **Blocked on the maintainer claiming the `@setu-ts` npm organization.**
+- Trusted publishing (GitHub OIDC, `npm publish --provenance`) from `release.yml`; no long-lived
+  token. The JSR lesson applies: the first real publish exercises paths a dry run skips.
+- `scripts/release-packages.ts`'s dependency-ordered allow-list is reused; pnpm rewrites
+  `workspace:^` to the real version at pack time, so packages are packed with `pnpm pack`, never a
+  bare `npm publish` from the workspace. A release check refuses any tarball whose `package.json`
+  still carries a `workspace:` specifier, which would install for nobody.
+- **pnpm is the repository's tool, not the consumer's.** Published packages are ordinary npm
+  tarballs; `npm install`, Yarn, pnpm and Bun all install them, and the exit proof below uses plain
+  `npm`, deliberately not pnpm.
+- `release:verify` checks re-pointed at npm (`npm view` for already-published and `@since`), or
+  retired with a reason.
+- `compat/` switches from `@jsr/setu-ts__*` to `@setu-ts/*` and becomes the post-publish proof on
+  Node and Bun.
+- **Version:** the first npm release is `v0.9.0`, already a minor under the Versioning Policy below;
+  the install path changes for every consumer, so its release notes lead with the migration.
+- **Bootstrap publish.** npm trusted publishing can only be configured on a package that already
+  exists, so the 51 packages are created once by a manual first publish (maintainer, locally, with
+  `npm login` and 2FA), then each is configured to trust `release.yml`. Every later release is
+  tokenless. The JSR precedent: `release:create-packages` + `release:link-repos` played the same
+  role there.
+- **Exit:** a bare `npm install @setu-ts/kernel @setu-ts/runtime` in an empty directory serves a
+  request on Node 24 and Bun; `npm view` shows provenance on all packages.
+
+### Milestone 111d: The CLI Goes Node-First
+
+**Objective:** `npx @setu-ts/cli new` (or `npm create setu`) on Node is the documented first run.
+
+- `setu` ships as an npm `bin`; `src/main.ts` becomes a Node process boundary.
+- The default `--runtime` becomes `node`; generated Node projects depend on `@setu-ts/*` from npm
+  (no `.npmrc`, no `@jsr/` aliases) and run with `tsx`/compiled output as today. Deno, Bun and
+  Workers targets stay, their projects also installing from npm.
+- The scaffold e2e gates (`scaffold-runs-e2e`, the hostile-name sweep, the drift gate) run the NODE
+  target first; the Deno target keeps one boot gate.
+- **Exit:** every template scaffolds, installs, type-checks, lints and boots on Node from a clean
+  checkout.
+
+### Milestone 111e: Tooling, Scripts and CI
+
+**Objective:** nothing in the repository requires a `deno` binary except the Deno runtime adapter's
+own tests and the Deno-target CLI gate.
+
+- Prettier and ESLint with `typescript-eslint`, configured to keep the rules the gates enforce
+  today: `no-explicit-any`, `consistent-type-imports` (in place of `verbatim-module-syntax`),
+  `no-console` outside `cli`/`scripts`, unused-variable errors with no underscore escape, and a
+  restricted-syntax rule for `new Function` (which `deno lint` never caught — a gain).
+- The 33 Deno scripts ported to Node (`tsx` or compiled); the doc gates (`check:docs`, `check:plan`,
+  fence compilers, `@since`, doc-lint ratchet) re-pointed. The JSDoc ratchet's baseline is
+  re-measured on the new linter, not carried over as a number.
+- `ci.yml`, `release.yml`, `drift.yml`, `website.yml` rewritten on `actions/setup-node` + pnpm; the
+  service containers and emulator steps are unchanged.
+- `apps/*` move to pnpm; `check:apps` runs them on Node; `apps/compiled-binary` moves to Node SEA or
+  is retired with the reason recorded.
+- **Exit:** `deno.json`, `deno.lock` and every `deno task` are gone from the root; CI green.
+
+### Milestone 111f: Governing Documents and the JSR Sunset
+
+**Objective:** the documents describe the toolchain the repository actually uses.
+
+- `CLAUDE.md`, `AI_GUIDELINES.md` (the Deno-first statement, §12.2's `npm:` lazy-import wording, the
+  test-style rule), `ARCHITECTURE.md`, `PUBLIC_API.md` install lines, every package README, `docs/`,
+  and `docs/releasing.md`.
+- `docs/upgrading.md` entry: switching an existing project from `jsr:@setu-ts/*` / `@jsr/setu-ts__*`
+  to `@setu-ts/*`.
+- Each JSR package's README and description point to npm; the JSR versions stay (JSR versions are
+  immutable, and yanking them would break every existing lockfile).
+- **Exit:** `check:docs` green and a repo-wide search for `deno task`, `jsr:@setu-ts` and
+  `Deno-first` returns only historical records and the Deno adapter.
+
+**Sequencing.** 111a → 111b → 111c is the critical path: nothing is published to npm before the
+suite runs on Node. 111d and 111e can proceed in parallel after 111b. Deno keeps receiving security
+releases throughout, so the Deno gates stay authoritative until each letter replaces them.
+
+**Decision — `v0.9.0` is the first npm release (maintainer, 2026-10-10).** `v0.8.0` stays the last
+JSR release; `v0.9.0` is held until 111c and ships to npm, so it is the version that moves the
+install path. M104 (the client-brief run) is re-pointed at the npm artifacts. The `0.10.0` sentence
+in 111c is superseded by this decision.
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -13941,3 +14147,9 @@ patch by construction and gains nothing new here.
 | 109b      | ✅     | common + idempotency-plugin + database-plugin + sdk — idempotency tier C (`within`) and the SDK idempotency key ([#438](https://github.com/setu-ts/setu-ts/pull/438))                                                                         |
 | 110a      | ✅     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
 | 110b      | ⬜     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |
+| 111a      | ⬜     | every member — a Node build: pnpm workspaces, `tsc` to `dist/`, `npm:` lazy imports as optional peers                                                                                                                                         |
+| 111b      | ⬜     | every member — the test suite on Node under Vitest, per-file 90% enforced by the runner                                                                                                                                                       |
+| 111c      | ⬜     | every member + release tooling — first npm publish (`@setu-ts`, trusted publishing, provenance)                                                                                                                                               |
+| 111d      | ⬜     | cli — Node-first: npm `bin`, Node as the default generated target                                                                                                                                                                             |
+| 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |
+| 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                 |
