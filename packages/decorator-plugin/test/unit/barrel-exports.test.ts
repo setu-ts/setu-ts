@@ -37,6 +37,10 @@ const _moduleOptions: ModuleOptions = {};
 /** The complete published surface, in barrel order. */
 const EXPECTED_VALUES = [
   'MetadataStore',
+  // M110a authorization policies
+  'Ability',
+  'RequirePolicy',
+  'Policy',
   'metadataStore',
   'Controller',
   'Version',
@@ -171,5 +175,36 @@ describe('published barrel surface', () => {
       [_classDecorator, _methodDecorator, _classOrMethod].every((f) => typeof f === 'function'),
     )
       .toBe(true);
+  });
+});
+
+describe('@setu-ts/decorator-plugin barrel — authorization policies (M110a)', () => {
+  it('exports @Policy, @Ability and @RequirePolicy with their helper types', () => {
+    expect(typeof barrel.Policy).toBe('function');
+    expect(typeof barrel.Ability).toBe('function');
+    expect(typeof barrel.RequirePolicy).toBe('function');
+    const options: barrel.AbilityOptions = { anonymous: true };
+    class Sample {
+      go(): boolean {
+        return true;
+      }
+    }
+    const ability: barrel.PolicyClassAbility<typeof Sample> = 'go';
+    const target: barrel.PolicyClassTarget<typeof Sample, 'go'> = undefined as never;
+    expect([options.anonymous, ability, target]).toEqual([true, 'go', undefined]);
+  });
+
+  it('keeps the policy internals off the barrel', () => {
+    const names = Object.keys(barrel);
+    for (
+      const internal of [
+        'toPolicyDefinition',
+        'registerPolicyClasses',
+        'appendPolicyMiddleware',
+        'createPolicyMiddleware',
+      ]
+    ) {
+      expect(names).not.toContain(internal);
+    }
   });
 });

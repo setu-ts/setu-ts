@@ -20,6 +20,7 @@ import type {
   IMetadataStore,
   IPipelineBehavior,
   MiddlewareFunction,
+  PolicyDefinition,
   ProcessOptions,
   ScheduleOptions,
   SubscribeOptions,
@@ -276,6 +277,41 @@ export interface RouteMetadata {
   readonly responseHeaders?: readonly ResponseHeaderMetadata[];
   /** Idempotency options declared by `@Idempotent(options?)` (M109a). */
   readonly idempotent?: IdempotentRouteOptions;
+  /** Policy requirements declared by `@RequirePolicy`, top to bottom (M110a). */
+  readonly policies?: readonly PolicyRequirement[];
+}
+
+/**
+ * One `@RequirePolicy(policy, ability, target?)` requirement on a route (M110a).
+ *
+ * `policy` is a `@Policy` class or a `PolicyDefinition`; both are resolved to a
+ * policy NAME at `register()`. `target` is a value, or an extractor called per
+ * request.
+ *
+ * @since 0.9.0
+ */
+export interface PolicyRequirement {
+  /** The policy: a `@Policy` class or a definition. */
+  readonly policy: Constructor | PolicyDefinition;
+  /** The ability name. */
+  readonly ability: string;
+  /**
+   * The target value or extractor, when supplied. An omitted target and an
+   * explicit `undefined` evaluate identically.
+   */
+  readonly target?: unknown;
+}
+
+/**
+ * What `@Policy` and `@Ability` record about a policy class (M110a).
+ *
+ * @since 0.9.0
+ */
+export interface PolicyClassMetadata {
+  /** The policy name from `@Policy(name)`; absent when only `@Ability` ran. */
+  readonly name?: string;
+  /** Ability method names → whether each opted in to anonymous principals. */
+  readonly abilities: ReadonlyMap<string, boolean>;
 }
 
 /**
@@ -327,6 +363,12 @@ export interface MethodMeta {
   responseHeaders?: ResponseHeaderMetadata[];
   /** Idempotency options declared by `@Idempotent(options?)` (mutable twin, M109a). */
   idempotent?: IdempotentRouteOptions;
+  /**
+   * Policy requirements declared by `@RequirePolicy` (mutable twin, M110a). Decorators
+   * apply bottom-up, so each `@RequirePolicy` PREPENDS — the list reads top to bottom,
+   * which is the order the requirements are evaluated in.
+   */
+  policies?: PolicyRequirement[];
 }
 
 /**
@@ -386,6 +428,10 @@ export class MetadataStore implements IMetadataStore {
   private readonly _ctorOptional = new Map<Constructor, Set<number>>();
   private readonly _modules = new Map<Constructor, ModuleMetadata>();
   private readonly _ingress = new Map<Constructor, IngressMetadata[]>();
+  private readonly _policyClasses = new Map<
+    Constructor,
+    { name?: string; readonly abilities: Map<string, boolean> }
+  >();
 
   /** Controllers keyed by class. */
   get controllers(): Map<Constructor, Readonly<Record<string, unknown>>> {
@@ -638,6 +684,51 @@ export class MetadataStore implements IMetadataStore {
   }
 
   /**
+   * Records a policy class's name (`@Policy`).
+   *
+   * @param target - The policy class
+   * @param name - The policy name
+   * @internal
+   */
+  setPolicyName(target: Constructor, name: string): void {
+    this.#policyClass(target).name = name;
+  }
+
+  /**
+   * Records one ability method of a policy class (`@Ability`).
+   *
+   * @param target - The policy class
+   * @param method - The ability method name
+   * @param anonymous - Whether it opted in to anonymous principals
+   * @internal
+   */
+  addPolicyAbility(target: Constructor, method: string, anonymous: boolean): void {
+    this.#policyClass(target).abilities.set(method, anonymous);
+  }
+
+  /**
+   * Returns what `@Policy`/`@Ability` recorded for a class.
+   *
+   * @param target - The class to inspect
+   * @returns The policy metadata, or `undefined` when neither decorator ran
+   * @internal
+   */
+  getPolicyClass(target: Constructor): PolicyClassMetadata | undefined {
+    this.#drain(target);
+    return this._policyClasses.get(target);
+  }
+
+  /** Returns the mutable policy-class record, creating it if absent. */
+  #policyClass(target: Constructor): { name?: string; readonly abilities: Map<string, boolean> } {
+    let entry = this._policyClasses.get(target);
+    if (entry === undefined) {
+      entry = { abilities: new Map() };
+      this._policyClasses.set(target, entry);
+    }
+    return entry;
+  }
+
+  /**
    * Returns the (mutable) method accumulator for a controller method,
    * creating it if absent.
    *
@@ -774,6 +865,7 @@ export class MetadataStore implements IMetadataStore {
     this._ctorOptional.clear();
     this._modules.clear();
     this._ingress.clear();
+    this._policyClasses.clear();
   }
 
   /**
@@ -800,6 +892,7 @@ export class MetadataStore implements IMetadataStore {
       ...(meta.idempotent !== undefined ? { idempotent: meta.idempotent } : {}),
       ...(meta.redirect !== undefined ? { redirect: meta.redirect } : {}),
       ...(meta.responseHeaders !== undefined ? { responseHeaders: [...meta.responseHeaders] } : {}),
+      ...(meta.policies !== undefined ? { policies: [...meta.policies] } : {}),
     };
   }
 }

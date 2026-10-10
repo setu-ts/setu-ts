@@ -9,6 +9,7 @@ import type {
   IAuthStrategy,
   IPrincipal,
   PathPattern,
+  PolicyDefinition,
   RbacConfig,
   SessionView,
 } from '@setu-ts/common';
@@ -284,6 +285,18 @@ export interface AuthPluginOptions {
    * only and does not provide the authorization capability.
    */
   readonly rbac?: RbacConfig;
+  /**
+   * Authorization policies — asynchronous, target-aware checks registered
+   * under `CAPABILITIES.AUTHORIZATION_POLICIES` (M110a). Build each with
+   * `definePolicy`. Validated when `AuthPlugin(...)` is called: a malformed
+   * policy or two policies sharing a name refuse before any application
+   * exists. The policy service is registered whether or not this is set, so
+   * DecoratorPlugin's class-form policies have a registry too; it is sealed
+   * once the application starts.
+   *
+   * @since 0.9.0
+   */
+  readonly policies?: readonly PolicyDefinition[];
   /**
    * Authorization decision-explanation observation (M98h). When present, the
    * plugin attaches a collector to its own `RbacService` and registers an

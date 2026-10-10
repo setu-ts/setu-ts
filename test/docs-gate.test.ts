@@ -419,6 +419,7 @@ describe('documentation gate — required guides', () => {
       'docs/migration-fastify.md',
       'docs/examples.md',
       'docs/runtime-deployment.md',
+      'docs/authorization.md',
     ];
 
     const findings = checkRequiredGuides(files);

@@ -5968,6 +5968,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Cosmos rows inheriting it as a prototype on Node and Bun and the AWS SDK returning a DynamoDB
   `__proto__` attribute with no value (rows became unreadable), and the Mongo session test runs on a
   replica set only — complete (PR #439).
+- **Milestone 110a** (`packages/common` + `packages/auth-plugin` + `packages/decorator-plugin` —
+  authorization policies): an async, target-aware check under the new
+  `CAPABILITIES.AUTHORIZATION_POLICIES`, always provided by `AuthPlugin`.
+  `IAuthorizationPolicyService` (`can`/`authorize`/`describe`/`define`) evaluates `definePolicy`
+  definitions: only a literal `true` allows, a throwing check denies and is logged once without the
+  target or principal, an anonymous principal is refused `401` unless the ability opts in with
+  `{ anonymous: true, check }`, and `before` runs for signed-in principals only. Two entry points
+  share one evaluator: the `requirePolicy(policy, ability, target?)` route guard, refused at
+  `start()` by a scan of every route's guards before the registry seals, and the class form
+  `@Policy`/`@Ability` plus `@RequirePolicy`, validated at `register()`. The decorator was first
+  named `@Can` and renamed at the maintainer's direction to match the `requireXxx` guards. A thrown
+  `AuthorizationDeniedError` answers the guard's exact body under `errorHandler`, through
+  `authorizationFailureInit` in `common`, the one owner of those bodies. The design security review
+  is plan §10. The committed-tree audit ran four fresh-context rounds. Round 1 found five defects;
+  the worst (Medium) ran the target extractor before the anonymous refusal, a lookup per
+  unauthenticated request and a 401-vs-404 existence oracle. Round 2 found a guard deciding that
+  refusal from its own policy object, which only the startup scan checks; it now reads the
+  registered policy per request. Round 3 found the OpenAPI brand documented as following the
+  registered policy, which it does not, so the docs are scoped. Round 4 passed on `e6d71601` —
+  complete (PR #440).
 - **Milestone 107b** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` —
   outbox relay fencing and multi-relay sweeping): every row a relay publishes is a row it holds a
   claim on — a per-row lease taken by an M105 conditional write on a `claimVersion` that only

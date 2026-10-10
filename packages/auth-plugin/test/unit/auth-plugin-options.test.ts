@@ -187,7 +187,10 @@ describe('AuthPlugin', () => {
       CAPABILITIES.JWT,
       CAPABILITIES.AUTH,
       CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+      // M110a: the policy service is provided whether or not rbac is set.
+      CAPABILITIES.AUTHORIZATION_POLICIES,
     ]);
+    expect(registered.has(CAPABILITIES.AUTHORIZATION_POLICIES)).toBe(true);
     expect(registered.has(CAPABILITIES.JWT)).toBe(true);
     expect(registered.has(CAPABILITIES.AUTH)).toBe(true);
     expect(registered.has(CAPABILITIES.AUTHORIZATION)).toBe(false);

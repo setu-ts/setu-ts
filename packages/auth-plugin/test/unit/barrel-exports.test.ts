@@ -372,3 +372,39 @@ describe('barrel exports', () => {
     }
   });
 });
+
+describe('@setu-ts/auth-plugin barrel — authorization policies (M110a)', () => {
+  it('exports the policy entry points and errors', () => {
+    expect(typeof auth.definePolicy).toBe('function');
+    expect(typeof auth.requirePolicy).toBe('function');
+    expect(new auth.UnknownPolicyError('doc')).toBeInstanceOf(Error);
+    const denied = new auth.AuthorizationDeniedError('insufficient-privileges', 'doc', 'edit');
+    const failure: auth.PolicyDenial = denied.failure;
+    expect(failure).toBe('insufficient-privileges');
+  });
+
+  it('re-exports IAuthorizationPolicyService and accepts policies in AuthPluginOptions', () => {
+    const policy = auth.definePolicy({ name: 'doc', abilities: { edit: () => true } });
+    const options: AuthPluginOptions = { jwt: { secret: 'x'.repeat(40) }, policies: [policy] };
+    const describeOnly: Pick<auth.IAuthorizationPolicyService, 'describe'> = {
+      describe: () => ({ anonymous: false }),
+    };
+    expect(options.policies).toHaveLength(1);
+    expect(describeOnly.describe('doc', 'edit')).toEqual({ anonymous: false });
+  });
+
+  it('keeps the internals off the barrel', () => {
+    const names = Object.keys(auth);
+    for (
+      const internal of [
+        'PolicyService',
+        'validatePolicyDefinition',
+        'policyGuardOf',
+        'scanPolicyGuards',
+        'isAnonymousAbility',
+      ]
+    ) {
+      expect(names).not.toContain(internal);
+    }
+  });
+});
