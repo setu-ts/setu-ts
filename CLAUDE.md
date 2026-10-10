@@ -5957,7 +5957,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   refusal from its own policy object, which only the startup scan checks; it now reads the
   registered policy per request. Round 3 found the OpenAPI brand documented as following the
   registered policy, which it does not, so the docs are scoped. Round 4 passed on `e6d71601` —
-  complete (PR pending).
+  complete (PR #440).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
