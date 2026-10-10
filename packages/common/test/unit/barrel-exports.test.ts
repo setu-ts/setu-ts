@@ -630,6 +630,8 @@ describe('@setu-ts/common barrel — M107 outbox port', () => {
       status,
       attempts: 0,
       availableAt: 1,
+      claimVersion: 0,
+      leaseUntil: 0,
     };
     const key: common.OutboxKey = { orderingKey: 'order-1' };
     const applied: common.OutboxTransition = { outcome: 'applied' };
@@ -649,6 +651,8 @@ describe('@setu-ts/common barrel — M107 outbox port', () => {
       },
       scanPending: () => Promise.resolve([record]),
       failedKeys: () => Promise.resolve([key]),
+      claim: () => Promise.resolve(applied),
+      markInvalid: () => Promise.resolve(applied),
       markSent: () => Promise.resolve(applied),
       markFailure: () => Promise.resolve(applied),
       release: () => Promise.resolve({ outcome: 'not-failed', status: 'sent' }),

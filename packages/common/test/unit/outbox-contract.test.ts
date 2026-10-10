@@ -33,6 +33,8 @@ describe('outbox port contract', () => {
       status: 'pending',
       attempts: 0,
       availableAt: 0,
+      claimVersion: 0,
+      leaseUntil: 0,
     };
     // @ts-expect-error — any other kind is a compile error.
     const wrong: OutboxRecord = { ...record, kind: 'business' };
@@ -44,13 +46,14 @@ describe('outbox port contract', () => {
     const sent: OutboxTransition = {
       outcome: 'not-pending',
       status: 'sent',
-      sentBy: 'r1/scheduled',
     };
     // @ts-expect-error — `pending` is the expected status, never the reported one.
     const badPending: OutboxTransition = { outcome: 'not-pending', status: 'pending' };
     // @ts-expect-error — `failed` is the expected status, never the reported one.
     const badFailed: OutboxTransition = { outcome: 'not-failed', status: 'failed' };
     expect(sent.outcome).toBe('not-pending');
+    const lost: OutboxTransition = { outcome: 'claim-lost' };
+    expect(lost.outcome).toBe('claim-lost');
     expect([badPending.outcome, badFailed.outcome]).toEqual(['not-pending', 'not-failed']);
   });
 });
