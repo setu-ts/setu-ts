@@ -15,10 +15,11 @@ All notable changes to this project are documented here. The format follows
   and payload, and every implementation writes the copies, so the predicate the backend receives is
   the one that was validated. Non-finite numbers and an own `__proto__` field (in the predicate or
   the payload, which Node and Bun drop when MongoDB or Prisma rebuild the object) are refused.
-  Predicate and payload refusals quote no caller value or field name; Prisma's validation message,
-  which renders the whole query, is replaced with a fixed sentence there. Key refusals shared with
-  `findById`/`update`/`delete` may still quote the key, in server logs only. Tenant, outbox and
-  inbox bridges use conditional writes when supported and retain their fallback for other sources.
+  `checkWritePrecondition`'s refusal reasons quote no caller field name or value, and Prisma's
+  validation message, which renders the whole query, is replaced with a fixed sentence; other
+  adapter and driver refusals may quote caller input, in server logs only, as for every repository
+  operation. Tenant, outbox and inbox bridges use conditional writes when supported and retain their
+  fallback for other sources.
 
 - **Idempotency tier C — the work and its record committed together (`@setu-ts/idempotency-plugin`,
   `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/sdk`, M109b).** A new
