@@ -2619,19 +2619,25 @@ grants, never the reverse); the walk is depth-first with cycle refusal and the `
 `grantableIn[role]` restricts the role to `scopeTypes` (and `global: false`, the default). Tenant
 consistency: a check whose OWN scope has `tenantScopeType` (default `'tenant'`) and names a tenant
 other than the resolved request tenant denies — a route parameter cannot reach outside the caller's
-tenant. Per-scope custom roles (`customRoles`, an `IScopedRoleSource`) bundle CATALOGUE permissions
-only, resolve against the roles defined in the grant's OWN scope, cannot shadow a catalogue role,
-and are checked through permissions — a guard naming a custom role is refused at startup. `timing`
-decides revocation latency: `'request'` (default; memoised per request),
+tenant. That comparison needs the request: the guards and decorators pass it, and a direct
+`policies.can(...)` call made while serving a request must pass it as the target's `context` —
+without it the scope is checked against the grants alone. Per-scope custom roles (`customRoles`, an
+`IScopedRoleSource`) bundle CATALOGUE permissions only, resolve against the roles defined in the
+grant's OWN scope, cannot shadow a catalogue role, and are checked through permissions — a guard
+naming a custom role is refused at startup. `timing` decides revocation latency for `static` and
+`custom` sources: `'request'` (default; memoised per request),
 `{ kind: 'cache', ttlMs,
 maxEntries }` (an LRU on the monotonic clock with in-flight coalescing; up
 to `ttlMs`) and `'sign-in'` (requires `signIn`; resolved once by `IAuthSessionService.signIn`,
 stored under a PRIVATE session key — never in `claims`, so a token carrying a same-named claim
 grants nothing — carried through a pending second factor, and in force until sign-out or session
-expiry; a source failure rejects sign-in with `GrantResolutionError`, a `503` status hint). Every
-bound refuses an out-of-range value, `NaN` included, when `AuthPlugin(...)` is called. Scoped
-decisions are NOT observed by M98h `authorizationDiagnostics` — its collector watches only the
-global RBAC evaluator — so no scope identifier reaches the diagnostics connector. See
+expiry; a source failure rejects sign-in with `GrantResolutionError`, a `503` status hint). A
+`claims` source is mapped on every check from the credential being checked and is never memoised,
+cached or coalesced, because two tokens for one principal can carry different claims (under
+`'sign-in'` it is mapped once, from the credential that signed in). Every bound refuses an
+out-of-range value, `NaN` included, when `AuthPlugin(...)` is called. Scoped decisions are NOT
+observed by M98h `authorizationDiagnostics` — its collector watches only the global RBAC evaluator —
+so no scope identifier reaches the diagnostics connector. See
 [Authorization](docs/authorization.md#scoped-roles).
 
 `jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `issuers`,

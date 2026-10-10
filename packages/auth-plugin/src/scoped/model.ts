@@ -133,19 +133,26 @@ export class ScopedDeadlineError extends Error {
 export type Bounded = <T>(run: (signal: AbortSignal) => Promise<T>) => Promise<T>;
 
 /**
+ * An error class name: PascalCase ending in `Error` or `Exception`
+ * (`TypeError`, `AbortError`, `PrismaClientKnownRequestError`). Any other
+ * `name` is a label, never copied: a source can reject with a row-shaped
+ * value whose `name` is a principal or scope id.
+ */
+const ERROR_CLASS_NAME = /^(?:[A-Z][A-Za-z0-9]{0,55})?(?:Error|Exception)$/;
+
+/**
  * The `name` of a thrown value, read without converting it (a `String(value)`
- * or a getter can throw).
+ * or a getter can throw). Only an error class name is returned; anything else
+ * is reported as a type label.
  *
  * @param error - The thrown value
- * @returns Its `name`, or a type label
+ * @returns Its error class name, or a type label
  */
 export function errorNameOf(error: unknown): string {
   try {
     if (typeof error === 'object' && error !== null) {
       const name = (error as { readonly name?: unknown }).name;
-      // An identifier only: a `name` is library-controlled, and anything
-      // looser could carry a scope or subject id into a log record.
-      if (typeof name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name)) {
+      if (typeof name === 'string' && ERROR_CLASS_NAME.test(name)) {
         return name;
       }
     }

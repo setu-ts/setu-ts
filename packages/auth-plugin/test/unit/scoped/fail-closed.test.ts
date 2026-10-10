@@ -202,6 +202,49 @@ describe('scoped evaluator — fail closed', () => {
     assertNoCanary(scoped.logger.records);
   });
 
+  it('labels a row-shaped rejection whose name is an identifier, so no id reaches a log', async () => {
+    const scoped = scopedHarness({
+      sources: [{
+        kind: 'custom',
+        source: { name: 'db', grantsFor: () => Promise.reject({ name: 'canaryPrincipalZ3k' }) },
+      }],
+    });
+    await scoped.evaluator.allows(principal(), { scope: SCOPE }, { kind: 'role', name: 'viewer' });
+    expect(scoped.logger.records[0].fields).toMatchObject({ errorName: '[object]' });
+    expect(JSON.stringify(scoped.logger.records)).not.toContain('canaryPrincipalZ3k');
+  });
+
+  it('keeps an error class name, library and platform ones included', async () => {
+    for (
+      const name of [
+        'Error',
+        'TypeError',
+        'AbortError',
+        'PrismaClientKnownRequestError',
+        'MongoServerException',
+      ]
+    ) {
+      const scoped = scopedHarness({
+        sources: [{
+          kind: 'custom',
+          source: {
+            name: 'db',
+            grantsFor: () => {
+              const error = new Error('x');
+              error.name = name;
+              return Promise.reject(error);
+            },
+          },
+        }],
+      });
+      await scoped.evaluator.allows(principal(), { scope: SCOPE }, {
+        kind: 'role',
+        name: 'viewer',
+      });
+      expect(scoped.logger.records[0].fields).toMatchObject({ errorName: name });
+    }
+  });
+
   it('keeps the deny when the logger itself throws', async () => {
     const config = compileScopedRbac({ sources: [failingSource] }, CATALOGUE, true);
     const throwing = recordingLogger();

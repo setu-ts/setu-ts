@@ -8,7 +8,13 @@
  */
 import { afterEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { scopeFromParam } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  SCOPED_RBAC_POLICY,
+  scopedPermissionAbility,
+  scopeFromParam,
+} from '@setu-ts/common';
+import type { IAuthorizationPolicyService, MiddlewareFunction } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { requireScopedPermission } from '../../src/index.ts';
 import { startScopedApp, status } from '../fixtures/scoped-app.ts';
@@ -20,6 +26,28 @@ afterEach(async () => {
   await app?.stop();
   app = undefined;
 });
+
+/**
+ * The guide's imperative check (docs/authorization.md, "Inside a handler"),
+ * with and without the request passed as `context`.
+ */
+function imperative(withContext: boolean): MiddlewareFunction {
+  return async (ctx) => {
+    const policies = ctx.services.get<IAuthorizationPolicyService>(
+      CAPABILITIES.AUTHORIZATION_POLICIES,
+    );
+    const allowed = await policies.can(
+      ctx.request.user ?? null,
+      SCOPED_RBAC_POLICY,
+      scopedPermissionAbility('invoices:approve'),
+      {
+        scope: { type: 'tenant', id: ctx.params.tenantId ?? '' },
+        ...(withContext ? { context: ctx } : {}),
+      },
+    );
+    return ctx.response.status(allowed ? 200 : 403).json({ allowed });
+  };
+}
 
 async function start(logger = recordingLogger()): Promise<IKernelApplication> {
   return await startScopedApp({
@@ -43,6 +71,14 @@ async function start(logger = recordingLogger()): Promise<IKernelApplication> {
       guard: requireScopedPermission('invoices:approve', {
         scope: scopeFromParam('tenantId', 'tenant'),
       }),
+    }, {
+      method: 'get',
+      path: '/with-context/:tenantId',
+      guard: imperative(true),
+    }, {
+      method: 'get',
+      path: '/without-context/:tenantId',
+      guard: imperative(false),
     }],
   });
 }
@@ -104,5 +140,15 @@ describe('tenant consistency', () => {
         'POST',
       ),
     ).toBe(403);
+  });
+
+  it('applies to a direct can() call only when the request is passed as context', async () => {
+    app = await start();
+    const eveInAcme = { 'x-user': 'eve', 'x-tenant-id': 'acme' };
+    expect(await status(app, '/with-context/globex', eveInAcme)).toBe(403);
+    // The documented consequence of leaving context out: grants alone decide.
+    expect(await status(app, '/without-context/globex', eveInAcme)).toBe(200);
+    expect(await status(app, '/with-context/globex', { 'x-user': 'eve', 'x-tenant-id': 'globex' }))
+      .toBe(200);
   });
 });

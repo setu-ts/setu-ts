@@ -119,6 +119,36 @@ describe('createDatabaseGrantSource', () => {
     expect(await source.rolesFor([T], live)).toEqual([]);
   });
 
+  it('refuses a non-string principal or scope id before querying, so no object reaches a filter', async () => {
+    let queried = 0;
+    const service = {
+      getRepository: () => ({
+        findAll: () => {
+          queried += 1;
+          return Promise.resolve([]);
+        },
+      }),
+    } as unknown as IDatabaseService;
+    const grants = createDatabaseGrantSource({ entity: 'grants' })(registry(service));
+    const roles = createDatabaseRoleSource({ entity: 'roles' })(registry(service));
+    // Prisma reads `{ not: 'nobody' }` as an operator matching every other subject's rows.
+    const operator = { not: 'nobody' } as unknown as string;
+    await expect(grants.grantsFor({ id: operator }, { kind: 'all' }, live)).rejects.toThrow(
+      'subject must be compared with a string',
+    );
+    await expect(
+      grants.grantsFor(
+        { id: 'u1' },
+        { kind: 'chain', scopes: [{ type: 'tenant', id: operator }] },
+        live,
+      ),
+    ).rejects.toThrow('scopeId must be compared with a string');
+    await expect(roles.rolesFor([{ type: operator, id: 't1' }], live)).rejects.toThrow(
+      'scopeType must be compared with a string',
+    );
+    expect(queried).toBe(0);
+  });
+
   it('refuses to start a query once the deadline has passed', async () => {
     const source = createDatabaseGrantSource({ entity: 'grants' })(registry(await seededGrants()));
     const controller = new AbortController();

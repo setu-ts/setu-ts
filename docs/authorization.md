@@ -423,32 +423,39 @@ export class InvoiceController {
 
 The decorators answer exactly what the guards answer, and run after `@Roles`/`@Permissions`. A name
 outside the catalogue, or no `AuthPlugin({ rbac, scopedRbac })` registered, fails
-`DecoratorPlugin`'s `register()`, naming the route. Inside a handler or a queue job, ask the policy
-service directly:
+`DecoratorPlugin`'s `register()`, naming the route. Inside a handler, ask the policy service
+directly, and pass the request as `context`:
 
 ```typescript
 import {
   type IAuthorizationPolicyService,
-  type IPrincipal,
+  type IRequestContext,
   SCOPED_RBAC_POLICY,
   scopedPermissionAbility,
 } from '@setu-ts/common';
 
 export async function canApprove(
   policies: IAuthorizationPolicyService,
-  principal: IPrincipal,
+  ctx: IRequestContext,
   tenantId: string,
 ): Promise<boolean> {
   return await policies.can(
-    principal,
+    ctx.request.user ?? null,
     SCOPED_RBAC_POLICY,
     scopedPermissionAbility('invoices:approve'),
     {
       scope: { type: 'tenant', id: tenantId },
+      context: ctx,
     },
   );
 }
 ```
+
+`context` is what makes the check compare the scope against the request's resolved tenant. Without
+it, a check for a tenant other than the one the request resolved to is answered from the grants
+alone, so a principal holding a role in tenant B passes a check for B made while serving tenant A. A
+queue job or a scheduled task has no request and so no tenant to compare; leave `context` out there,
+and pass the scope the job itself is about.
 
 ## OpenAPI
 

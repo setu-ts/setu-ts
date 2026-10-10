@@ -158,7 +158,12 @@ export interface IScopedRoleSource {
 export interface ScopedRbacTarget {
   /** The scope the check is about, or `null` for global grants only. */
   readonly scope: ScopeRef | null;
-  /** The request being authorized, when there is one. */
+  /**
+   * The request being authorized, when there is one. Pass it whenever the
+   * check serves a request: without it the scope is not compared against the
+   * request's resolved tenant, so a check for another tenant is answered from
+   * the grants alone.
+   */
   readonly context?: IRequestContext;
 }
 

@@ -6,7 +6,7 @@
  * answers a non-array or outlives the deadline fails the whole resolution.
  * Every grant is validated and copied; an invalid one is dropped and counted.
  *
- * Three layers keep the sources from being asked twice:
+ * Three layers keep the static and custom sources from being asked twice:
  *
  * - a per-request memo keyed by the request's `ctx.state` map — module-private,
  *   so a caller cannot hand the evaluator a memo of its own;
@@ -16,6 +16,12 @@
  *   asked concurrently, share one call. A timed-out repository query is
  *   abandoned but keeps running on the database, so this is what stops a slow
  *   backend receiving one more copy of the same query per concurrent request.
+ *
+ * A `claims` source is outside all three. Its grants come from the
+ * credential, not the principal: two tokens for one `sub` and `iss` can carry
+ * different claims, and a result keyed by the principal would hand one
+ * token's grants to the other. So it is mapped on every resolution from the
+ * claims being checked, which costs only the application's `map` call.
  *
  * Internal: not exported from the package barrel.
  *
@@ -32,7 +38,7 @@ import type {
   ScopedGrant,
   ScopeRef,
 } from '@setu-ts/common';
-import type { CompiledScopedRbac, CompiledSource } from './options.ts';
+import type { CompiledScopedRbac, CompiledSource, CompiledTiming } from './options.ts';
 import {
   errorNameOf,
   readGrant,
@@ -87,6 +93,10 @@ export function principalKey(principal: IPrincipal): string {
 
 function queryKey(query: GrantQuery): string {
   return query.kind === 'all' ? 'all' : JSON.stringify(query.scopes.map(scopeKey));
+}
+
+function unbound(): GrantsOutcome {
+  return { ok: false, reason: 'source-failed', source: 'unbound' };
 }
 
 function isFactory<T extends object>(value: T | RegistryFactory<T>): value is RegistryFactory<T> {
@@ -179,6 +189,10 @@ export class GrantResolver {
   readonly #config: CompiledScopedRbac;
   readonly #deps: GrantResolverDeps;
   #sources: readonly BoundSource[] | undefined;
+  /** The static and custom sources: memoised, cached and coalesced. */
+  #sharedSources: readonly BoundSource[] | undefined;
+  /** The claims sources: mapped on every resolution, never shared. */
+  #claimsSources: readonly BoundSource[] | undefined;
   #roleSource: IScopedRoleSource | undefined;
   readonly #cache = new Map<
     string,
@@ -208,6 +222,8 @@ export class GrantResolver {
    */
   bind(services: IServiceRegistry): void {
     this.#sources = this.#config.sources.map((entry, index) => bindSource(entry, services, index));
+    this.#sharedSources = this.#sources.filter((source) => source.kind !== 'claims');
+    this.#claimsSources = this.#sources.filter((source) => source.kind === 'claims');
     const roles = this.#config.customRoles;
     if (roles !== undefined) {
       const resolved = isFactory(roles) ? roles(services) : roles;
@@ -251,6 +267,26 @@ export class GrantResolver {
       const stored = context === undefined ? null : this.#stored?.(context, principal) ?? null;
       return Promise.resolve({ ok: true, grants: stored ?? [], dropped: 0 });
     }
+    const shared = this.#sharedGrantsFor(principal, query, context, timing);
+    const claims = this.#claimsSources;
+    if (claims === undefined || claims.length === 0) {
+      return shared;
+    }
+    return Promise.all([shared, this.#collect(principal, query, claims)])
+      .then(([fromShared, fromClaims]) => this.#union(fromShared, fromClaims));
+  }
+
+  /**
+   * The static and custom sources' grants, through the memo, cache and
+   * coalescing. Keyed by the principal, which is sound for these sources:
+   * neither reads the credential.
+   */
+  #sharedGrantsFor(
+    principal: IPrincipal,
+    query: GrantQuery,
+    context: IRequestContext | undefined,
+    timing: Exclude<CompiledTiming, { readonly kind: 'sign-in' }>,
+  ): Promise<GrantsOutcome> {
     const key = `grants:${principalKey(principal)}:${queryKey(query)}`;
     return memoised(context, key, this.#grantsInflight, async () => {
       if (timing.kind === 'cache') {
@@ -264,7 +300,9 @@ export class GrantResolver {
           }
         }
       }
-      const outcome = await this.resolveFromSources(principal, query);
+      const outcome = this.#sharedSources === undefined
+        ? unbound()
+        : await this.#collect(principal, query, this.#sharedSources);
       if (outcome.ok && timing.kind === 'cache') {
         this.#cache.set(key, {
           expiresAt: this.#deps.hrtime() + timing.ttlMs,
@@ -286,11 +324,34 @@ export class GrantResolver {
    * @param query - The question
    * @returns The grants, or the failure
    */
-  async resolveFromSources(principal: IPrincipal, query: GrantQuery): Promise<GrantsOutcome> {
+  resolveFromSources(principal: IPrincipal, query: GrantQuery): Promise<GrantsOutcome> {
     const sources = this.#sources;
-    if (sources === undefined) {
-      return { ok: false, reason: 'source-failed', source: 'unbound' };
+    return sources === undefined
+      ? Promise.resolve(unbound())
+      : this.#collect(principal, query, sources);
+  }
+
+  /** Unions two resolutions: either failure wins, and the limit spans both. */
+  #union(a: GrantsOutcome, b: GrantsOutcome): GrantsOutcome {
+    if (!a.ok) {
+      return a;
     }
+    if (!b.ok) {
+      return b;
+    }
+    const grants = [...a.grants, ...b.grants];
+    if (grants.length > this.#config.maxGrants) {
+      return { ok: false, reason: 'grant-limit', source: 'claims' };
+    }
+    return { ok: true, grants, dropped: a.dropped + b.dropped };
+  }
+
+  /** Asks `sources`, unions and validates the answers. */
+  async #collect(
+    principal: IPrincipal,
+    query: GrantQuery,
+    sources: readonly BoundSource[],
+  ): Promise<GrantsOutcome> {
     const answers = await Promise.all(sources.map(async (source) => {
       try {
         return { source, value: await source.fetch(principal, query, this.#deps.bounded) };

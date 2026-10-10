@@ -222,3 +222,126 @@ describe("'sign-in' timing", () => {
     expect(calls.length).toBe(0);
   });
 });
+
+describe('claims sources are read per credential, never shared', () => {
+  const O1: ScopeRef = { type: 'organisation', id: 'o1' };
+  const ORG: GrantQuery = { kind: 'chain', scopes: [O1] };
+  const ISS = 'https://idp.example';
+  /** Two tokens for one `sub` and `iss`: only the broad one carries `o1`. */
+  const broad = principal('ann', { claims: { iss: ISS, orgs: ['o1'] } });
+  const narrow = principal('ann', { claims: { iss: ISS, orgs: [] } });
+
+  function claimsHarness(timing?: ScopedRbacTiming, shared?: IGrantSource) {
+    let maps = 0;
+    const scoped = scopedHarness({
+      sources: [
+        ...(shared === undefined ? [] : [{ kind: 'custom' as const, source: shared }]),
+        {
+          kind: 'claims',
+          map: (claims) => {
+            maps += 1;
+            return (claims.orgs as string[]).map((id) => ({
+              role: 'viewer',
+              scope: { type: 'organisation', id },
+            }));
+          },
+        },
+      ],
+      ...(timing === undefined ? {} : { timing }),
+    });
+    return { scoped, maps: () => maps };
+  }
+
+  it('does not hand one token’s cached claims grants to another token of the same principal', async () => {
+    const { scoped, maps } = claimsHarness({ kind: 'cache', ttlMs: 60_000, maxEntries: 10 });
+    expect(await scoped.resolver.grantsFor(broad, ORG, requestContext())).toMatchObject({
+      grants: [{ role: 'viewer', scope: O1 }],
+    });
+    expect(await scoped.resolver.grantsFor(narrow, ORG, requestContext())).toMatchObject({
+      ok: true,
+      grants: [],
+    });
+    // And the reverse order: the narrow token does not deny the broad one.
+    expect(await scoped.resolver.grantsFor(broad, ORG, requestContext())).toMatchObject({
+      grants: [{ role: 'viewer', scope: O1 }],
+    });
+    expect(maps()).toBe(3);
+  });
+
+  it('does not coalesce concurrent resolutions for two tokens of one principal', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { source, calls } = countingSource({ gate });
+    const { scoped } = claimsHarness(undefined, source);
+    const both = Promise.all([
+      scoped.resolver.grantsFor(broad, ORG, requestContext()),
+      scoped.resolver.grantsFor(narrow, ORG, requestContext()),
+    ]);
+    release();
+    const [fromBroad, fromNarrow] = await both;
+    expect(fromBroad).toMatchObject({
+      ok: true,
+      grants: [{ role: 'viewer', scope: T1 }, { role: 'viewer', scope: O1 }],
+    });
+    expect(fromNarrow).toMatchObject({ ok: true, grants: [{ role: 'viewer', scope: T1 }] });
+    // The custom source is still shared: one call for both.
+    expect(calls.length).toBe(1);
+  });
+
+  it('does not reuse a request memo across two credentials in one request', async () => {
+    const { scoped, maps } = claimsHarness();
+    const ctx = requestContext();
+    await scoped.resolver.grantsFor(broad, ORG, ctx);
+    expect(await scoped.resolver.grantsFor(narrow, ORG, ctx)).toMatchObject({ grants: [] });
+    expect(maps()).toBe(2);
+  });
+
+  it('counts the limit across shared and claims grants together', async () => {
+    const shared: IGrantSource = {
+      name: 'shared',
+      grantsFor: () => Promise.resolve([{ role: 'viewer', scope: T1 }]),
+    };
+    const scoped = scopedHarness({
+      sources: [
+        { kind: 'custom', source: shared },
+        { kind: 'claims', map: () => [{ role: 'viewer', scope: O1 }] },
+      ],
+      maxGrantsPerPrincipal: 1,
+    });
+    expect(await scoped.resolver.grantsFor(broad, ORG, requestContext())).toEqual({
+      ok: false,
+      reason: 'grant-limit',
+      source: 'claims',
+    });
+  });
+
+  it('denies when the claims source fails, even with shared grants', async () => {
+    const { source } = countingSource();
+    const scoped = scopedHarness({
+      sources: [
+        { kind: 'custom', source },
+        {
+          kind: 'claims',
+          map: () => {
+            throw new TypeError('bad claim');
+          },
+        },
+      ],
+    });
+    expect(await scoped.resolver.grantsFor(broad, ORG, requestContext())).toMatchObject({
+      ok: false,
+      reason: 'source-failed',
+      errorName: 'TypeError',
+    });
+  });
+
+  it('reports a failing shared source before the claims grants', async () => {
+    const { source } = countingSource({ fail: true });
+    const { scoped } = claimsHarness(undefined, source);
+    expect(await scoped.resolver.grantsFor(broad, ORG, requestContext())).toMatchObject({
+      ok: false,
+      reason: 'source-failed',
+      source: 'counted',
+    });
+  });
+});

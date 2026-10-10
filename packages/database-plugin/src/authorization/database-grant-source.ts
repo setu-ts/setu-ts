@@ -9,9 +9,10 @@
  * precedent — so `DatabasePlugin` may be registered in any order.
  *
  * **Only scalar strings reach a filter.** Field names are validated as
- * identifiers when the factory is built, and every value is a principal id or
- * a scope reference the evaluator has already validated — never an object,
- * which MongoDB would read as a query operator.
+ * identifiers when the factory is built, and every compared value is checked
+ * to be a string before the query is built — a principal id from an
+ * application strategy is typed by contract only, and an object value would
+ * be read as a query operator by Prisma or MongoDB.
  *
  * **A query is abandoned, not cancelled, on the evaluator's deadline.**
  * `IRepository.findAll` takes no `AbortSignal`, so the signal is checked
@@ -131,7 +132,17 @@ function entityOf(value: unknown, factory: string): string {
   return value;
 }
 
+/**
+ * An equality on `fieldName`. A value that is not a string (or the `null` of
+ * the global clause) is refused: the evaluator only ever passes strings, but
+ * a principal id from an application strategy is typed by contract only, and
+ * Prisma reads an object value such as `{ not: 'x' }` as an operator that
+ * would match other subjects' rows. The message names the field only.
+ */
 function eq(fieldName: string, value: string | null): FilterExpression {
+  if (value !== null && typeof value !== 'string') {
+    throw new TypeError(`scoped RBAC source: ${fieldName} must be compared with a string`);
+  }
   return { type: 'comparison', field: fieldName, operator: 'eq', value };
 }
 
