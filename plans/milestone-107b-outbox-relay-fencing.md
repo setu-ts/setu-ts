@@ -8,15 +8,16 @@
 
 M107's relay is correct for one relay at a time and only time-bounded for more: a relay paused past
 the scheduler lock's TTL — a GC pause, a frozen container, a slow broker call — can publish a row a
-second relay has already sent, and `dispatch()` sweeps already run on every replica outside any lock
-(`outbox-service.ts:223-244`), so overlapping relays are the normal case, not an edge. This
-milestone makes every row a relay publishes a row it holds a **claim** on: a per-row lease taken
-with an M105 conditional write, checked again immediately before the publish, and required by every
-status write afterwards. A relay that has lost its claim cannot publish the row (beyond one bounded,
-stated window), cannot mark it, and cannot count a failure against it. Because a claim is per row
-and is taken by compare-and-set, any number of relays may sweep one outbox at once without
-publishing a row twice, and per-key order is kept by treating a row claimed elsewhere exactly as
-M107 treats a row in backoff: its key is blocked for the rest of the lap.
+second relay has already sent, and `dispatch()` sweeps run on every replica outside any lock
+(`outbox-service.ts:223-244`), so an application that calls `dispatch()` already runs overlapping
+relays in normal operation, not only after a pause. This milestone makes every row a relay publishes
+a row it holds a **claim** on: a per-row lease taken with an M105 conditional write, checked again
+immediately before the publish, and required by every status write afterwards. A relay that has lost
+its claim cannot publish the row (beyond one bounded, stated window), cannot mark it, and cannot
+count a failure against it. Because a claim is per row and is taken by compare-and-set, any number
+of relays may sweep one outbox at once without publishing a row twice, and per-key order is kept by
+treating a row claimed elsewhere exactly as M107 treats a row in backoff: its key is blocked for the
+rest of the lap.
 
 **One mechanism on every supported backend.** The ROADMAP section proposed two arms — a
 `FOR UPDATE SKIP LOCKED` claim on SQL and an epoch fence elsewhere. Neither survived the source (§2
@@ -132,8 +133,11 @@ them, and a store that cannot write conditionally is refused at startup by name.
      This includes this instance's own unexpired claim from an earlier sweep.
   5. Decode — unchanged; undecodable → `markInvalid`.
   6. **Claim** at the read version, bounded by `storeTimeoutMs`, with
-     `leaseUntil = now + claimLeaseMs` (`now` read immediately before the call). `claim-lost`,
-     `not-pending` and `missing` → skip and block a keyed row's key. A rejected or expired claim →
+     `leaseUntil = now + claimLeaseMs` (`now` read immediately before the call). `claim-lost`, and
+     `not-pending` with status `failed`, → skip and block a keyed row's key (an earlier row of the
+     key is still unsent). `not-pending` with status `sent` or `discarded`, and `missing`, → skip
+     WITHOUT blocking: the row is settled, so a later row of its key may go — blocking there would
+     stall a hot key behind every stale page under several relays. A rejected or expired claim →
      block the key, end the sweep (`store-failure`), exactly as a rejected status write does.
   7. `attempted += 1` (the publish budget counts claimed rows and poisoned rows, as before).
   8. **The fence** (§3.4).
@@ -145,8 +149,10 @@ them, and a store that cannot write conditionally is refused at startup by name.
   before another relay's claim can never lead to a second publish; it leads to `claim-lost`.
   Claiming after decode means no relay ever holds a claim on a row it cannot publish.
 - **Test home:** `packages/messaging-plugin/test/unit/outbox/relay-claim.test.ts` (each step; a
-  stale page whose row was claimed meanwhile answers `claim-lost` and blocks the key; the row's
-  later row is not published in that lap).
+  stale page whose row was claimed meanwhile answers `claim-lost` and blocks the key, and the row's
+  later row is not published in that lap; a stale page whose row was SENT meanwhile answers
+  `not-pending`, and the later row IS published in that lap; one whose row was poisoned meanwhile
+  blocks the key).
 
 ### 3.3 Expiry, takeover and the clock
 
@@ -167,18 +173,31 @@ them, and a store that cannot write conditionally is refused at startup by name.
 ### 3.4 The fence before the publish, and the window that remains
 
 - **Decision:** after a successful claim and before the publish, the relay re-reads `runtime.now()`
-  and publishes only if `now + publishTimeoutMs + maxClockSkewMs ≤ leaseUntil`. Otherwise it is
-  **fenced**: it publishes nothing and writes nothing (the claim expires and another relay takes
-  it), blocks the key, reports `overlap('fenced')`, and continues.
+  and publishes only if `now + publishTimeoutMs + storeTimeoutMs + maxClockSkewMs ≤ leaseUntil` —
+  room for the publish AND the `markSent` that must follow it. Otherwise it is **fenced**: it
+  publishes nothing and writes nothing (the claim expires and another relay takes it), blocks the
+  key, reports `overlap('fenced')`, and continues.
 - **Why:** a pause between claim and publish is exactly the paused-relay case; the wall clock keeps
-  moving through a freeze, so the woken relay sees its lease gone. The remaining window is stated,
-  not implied: **a pause after the fence check and before the broker receives the publish** can
-  still deliver that one row after its lease expired. It is at most one row per relay (the row being
-  published), never a batch, and it is a duplicate with the same envelope and deduplication id, not
-  a loss. No portable broker accepts a fencing token, so nothing closes it (§0).
+  moving through a freeze, so the woken relay sees its lease gone. The margin must cover the status
+  write too: with only `publishTimeoutMs` in it, a relay that is NOT paused but whose publish and
+  `markSent` both run long could lose the row to a takeover between the two and cause a duplicate
+  with no pause at all. With both bounds in it, the fence agrees with §3.3's construction relation:
+  the claim call, the publish and the status write all fit in the lease.
+
+  Two windows remain, stated, not implied, and both are duplicates with the same envelope and
+  deduplication id, never a loss:
+  1. **A pause after the fence check and before the broker receives the publish** can deliver that
+     one row after its lease expired — at most one row per relay, never a batch.
+  2. **A publish abandoned at `publishTimeoutMs` that the broker accepts late** (M107's existing
+     "late publish" crash row): the relay records the failure, which releases the lease, and the row
+     is retried after its backoff, so the broker holds two copies.
+
+  No portable broker accepts a fencing token, so nothing closes them (§0).
 - **Test home:** `relay-claim.test.ts` — a `FaultStore` whose `claim` advances the relay's wall
-  clock past `leaseUntil` before resolving: the relay publishes nothing and the row stays claimable;
-  and `outbox-fencing-real.test.ts` (§3.8).
+  clock past `leaseUntil` before resolving: the relay publishes nothing, writes nothing, and the row
+  is taken over once its lease and the skew have passed; the boundary is pinned on both sides (a
+  remaining lease of exactly `publishTimeoutMs + storeTimeoutMs + maxClockSkewMs` publishes, one
+  millisecond less is fenced); and `outbox-fencing-real.test.ts` (§3.8).
 
 ### 3.5 `markInvalid`: poisoning a row nobody can claim
 
@@ -220,10 +239,18 @@ them, and a store that cannot write conditionally is refused at startup by name.
     on the fixed id `'setu-outbox-claim-probe'`, which no envelope id can equal (envelope ids are
     UUIDs). A `null` answer passes; a rejection with `UnsupportedQueryFeatureError` whose `feature`
     is `'conditional-write'` becomes `OutboxStoreUnavailableError` with the new reason
-    `'conditional-writes-unsupported'`; any other rejection keeps M107's classification.
+    `'conditional-writes-unsupported'`; any other rejection keeps M107's classification. Because the
+    probe's predicate names `claimVersion`, it also refuses an SQL table created from the M107 DDL,
+    which lacks the column: Drizzle refuses a column its table definition does not map, and the
+    database refuses one the table does not have — both `'entity-unavailable'`, at startup rather
+    than at the first claim.
   - `#transition` loses its `unsupported` fallback: after `verify`, an `unsupported` answer can only
-    mean a store driven before `onInit`, which the outbox never does, so it throws a named `Error`.
-    The bounded three-round classifying loop stays (Cosmos can miss on `_etag` and re-match).
+    mean a store driven before `onInit`, which the outbox never does, so it throws the same
+    `OutboxStoreUnavailableError` with reason `'conditional-writes-unsupported'` — one owner for
+    that refusal. The bounded three-round classifying loop stays (Cosmos can miss on `_etag` and
+    re-match).
+  - `markSent` with `deleteNow` (`retainSentMs: 0`) uses `conditionalDelete` with the same
+    claim-guarded predicate.
   - `claim`, `markSent` and `markFailure` put `claimVersion` in the predicate; a miss is re-read and
     classified: missing → `missing`; not pending → `not-pending { status }`; pending at another
     version → `claim-lost`; pending at the expected version → another round.
@@ -235,9 +262,11 @@ them, and a store that cannot write conditionally is refused at startup by name.
   ROADMAP asked for ("a store capability, refused by name"). Deleting the fallback also removes
   M107's residual stale-overwrite window for good.
 - **Test home:** `packages/database-plugin/test/unit/outbox/outbox-verify.test.ts` (a source without
-  `updateWhere` is refused with the new reason; the probe writes nothing on memory);
-  `outbox-store-ops.test.ts` (each classification; release resets the lease and keeps the version);
-  `outbox-store-contract.test.ts` (the contract extended with the claim semantics).
+  `updateWhere` is refused with the new reason; the probe writes nothing on memory; a Drizzle table
+  definition without `claimVersion` is refused as `'entity-unavailable'`);
+  `outbox-store-real.test.ts` (a real PostgreSQL table built from the M107 DDL is refused at
+  `verify()`); `outbox-store-ops.test.ts` (each classification; release resets the lease and keeps
+  the version); `outbox-store-contract.test.ts` (the contract extended with the claim semantics).
 
 ### 3.8 The real-backend proofs
 
@@ -271,16 +300,22 @@ them, and a store that cannot write conditionally is refused at startup by name.
 
 - **Decision:** README "The promise", the `IOutbox` JSDoc and PUBLIC_API state: at-least-once
   delivery of every committed row; at most one relay holds a claim on a row at a time, provided the
-  relays' wall clocks agree within `relay.maxClockSkewMs`; a relay publishes a row only while it
-  holds the claim, except for one row per relay paused after its fence check (§3.4); per-key order
-  among first publishes across any number of relays, under M107's two existing conditions. Crash
-  table changes: "after publish, before the status write" and "the status write rejects after a
-  successful publish" are republished after the claim expires (up to
-  `claimLeaseMs + maxClockSkewMs`), not at the next lap; a new row "a relay pauses past its claim" —
-  fenced, publishes nothing.
+  relays' wall clocks agree within `relay.maxClockSkewMs`; a relay starts a publish only while it
+  holds the claim with room for the publish and its status write, and the two windows of §3.4 (a
+  pause after the fence check; a publish the broker accepts after it was abandoned) are the only
+  ways a row reaches the broker twice from the relays; per-key order among first publishes across
+  any number of relays, under M107's two existing conditions. Crash table changes:
+  - "after publish, before the status write" and "the status write rejects after a successful
+    publish" are republished after the claim expires (up to `claimLeaseMs + maxClockSkewMs`), not at
+    the next lap;
+  - "the application stops mid-sweep": a row whose publish failed because of the shutdown keeps its
+    claim (a failure while closing writes nothing, M107 §3.7), so it is retried by another process
+    only once that claim expires;
+  - new: "a relay pauses past its claim" — fenced, publishes nothing.
 - **Why:** a promise stated once and nowhere stronger is M107 §3.13's rule.
 - **Test home:** `outbox-crash.test.ts` (the two changed rows assert the lease delay with the manual
-  wall clock).
+  wall clock); `outbox-plugin.test.ts` (a publish rejected after `closing` leaves the claim in place
+  and writes no attempt).
 
 ### 3.10 Signals: `relay-overlap`, and the overlap kinds
 
@@ -289,7 +324,9 @@ them, and a store that cannot write conditionally is refused at startup by name.
     (§3.4); `claim-lost` — a `markSent` or `markFailure` answered `claim-lost`, so another relay
     took over a row this one held (after a publish, a duplicate is likely); `duplicate` — a
     `markSent` found the row `sent`, so this relay's publish was a second one. A claim LOST AT CLAIM
-    TIME is contention, not an overlap, and is not reported.
+    TIME is contention, not an overlap, and is not reported — no counter, metric or result field
+    carries it. The contention ratio §8 asks review to see is counted by the tests' own store
+    wrapper, not by shipped code.
   - `OutboxTransition`'s `not-pending.sentBy` is removed: `overlapKind`, its only reader, is
     deleted, and `duplicate` needs only `status === 'sent'`. The `sentBy` COLUMN stays — it is an
     operator diagnostic like `lastError`, documented as such.
@@ -313,17 +350,17 @@ them, and a store that cannot write conditionally is refused at startup by name.
 **Breaking for implementors:** none — every changed member is on surface that first ships in 0.9.0,
 which is not cut (§1).
 
-| Exported symbol                                                                           | Kind         | Consumer / real code path that READS it                                                                             |
-| ----------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `OutboxRecord.claimVersion` (common)                                                      | field        | the relay's step 3 and the claim predicate (`relay.ts`); the bridge's `fromRow`                                     |
-| `OutboxRecord.leaseUntil` (common)                                                        | field        | the relay's steps 3–4 and the fence (`relay.ts`)                                                                    |
-| `IOutboxStore.claim` (common)                                                             | method       | `relay.ts` step 6; implemented by `DatabaseOutboxStore`                                                             |
-| `IOutboxStore.markInvalid` (common)                                                       | method       | `relay.ts` §3.5; implemented by `DatabaseOutboxStore`                                                               |
-| `markSent`/`markFailure` `claimVersion`                                                   | parameter    | the bridge's predicate                                                                                              |
-| `OutboxTransition` `claim-lost` (common)                                                  | union arm    | `relay.ts` (blocks the key; `overlap('claim-lost')` on a status write)                                              |
-| `OutboxStoreUnavailableError.reason` `'conditional-writes-unsupported'` (database-plugin) | union member | thrown by `verify()`; read by the messaging plugin's startup failure path and by applications switching on `reason` |
-| `OutboxRelayOptions.claimLeaseMs` (messaging-plugin)                                      | option       | `resolveOutboxOptions` → the claim's `leaseUntil` and the fence                                                     |
-| `OutboxRelayOptions.maxClockSkewMs` (messaging-plugin)                                    | option       | `resolveOutboxOptions` → steps 4 and 8                                                                              |
+| Exported symbol                                                                           | Kind         | Consumer / real code path that READS it                                                                                                                                                             |
+| ----------------------------------------------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OutboxRecord.claimVersion` (common)                                                      | field        | the relay's step 3 and the claim predicate (`relay.ts`); the bridge's `fromRow`                                                                                                                     |
+| `OutboxRecord.leaseUntil` (common)                                                        | field        | the relay's steps 3–4 and the fence (`relay.ts`)                                                                                                                                                    |
+| `IOutboxStore.claim` (common)                                                             | method       | `relay.ts` step 6; implemented by `DatabaseOutboxStore`                                                                                                                                             |
+| `IOutboxStore.markInvalid` (common)                                                       | method       | `relay.ts` §3.5; implemented by `DatabaseOutboxStore`                                                                                                                                               |
+| `markSent`/`markFailure` `claimVersion`                                                   | parameter    | the bridge's predicate                                                                                                                                                                              |
+| `OutboxTransition` `claim-lost` (common)                                                  | union arm    | `relay.ts` (blocks the key; `overlap('claim-lost')` on a status write)                                                                                                                              |
+| `OutboxStoreUnavailableError.reason` `'conditional-writes-unsupported'` (database-plugin) | union member | thrown by `verify()` and by `#transition`; the messaging plugin propagates it unread (`start()` rejects with it), so its reader is an application switching on `reason`, as for M107's four reasons |
+| `OutboxRelayOptions.claimLeaseMs` (messaging-plugin)                                      | option       | `resolveOutboxOptions` → the claim's `leaseUntil` and the fence                                                                                                                                     |
+| `OutboxRelayOptions.maxClockSkewMs` (messaging-plugin)                                    | option       | `resolveOutboxOptions` → steps 4 and 8                                                                                                                                                              |
 
 Removed (unreleased, so a CHANGELOG note in the M107 entry rather than a migration):
 `OutboxTransition` `not-pending.sentBy`; the `scheduled-overlap` reason; the `origin` metric label.
@@ -352,6 +389,8 @@ Removed (unreleased, so a CHANGELOG note in the M107 entry rather than a migrati
 | `packages/messaging-plugin/src/outbox/outbox-collector.ts`                                              | the `kind` label                                                                                              |
 | `packages/messaging-plugin/src/interfaces/index.ts`                                                     | the two options' JSDoc; `sweepDeadlineMs` and `overlapWindowMs` JSDoc; `IOutbox` promise                      |
 | `packages/database-plugin/test/fixtures/outbox-postgres.sql`, `outbox-sqlite.sql`, `outbox-postgres.ts` | `claim_version`/`claimVersion` integer NOT NULL, `lease_until`/`leaseUntil` bigint NOT NULL                   |
+| `packages/database-plugin/test/fixtures/outbox-store.ts`, `outbox-store-contract.ts`                    | `record()` carries the two fields; the contract gains the claim cases a custom store must pass                |
+| `packages/messaging-plugin/test/fixtures/outbox.ts`                                                     | `FaultStore` delegates and faults `claim` and `markInvalid`; `countingObserver` records the three kinds       |
 
 No `src/index.ts` barrel changes in any package: every changed symbol is already exported.
 
@@ -378,6 +417,14 @@ No `src/index.ts` barrel changes in any package: every changed symbol is already
 | `messaging-plugin/test/unit/outbox/readme-ddl.test.ts` (unchanged)          | —                                       | the READMEs carry the new fixtures verbatim                                                                                                                                              |
 | `messaging-plugin/test/integration/outbox-fencing-real.test.ts` (new)       | everything above, real backends         | §3.8 cases 1 and 2 on PostgreSQL, a MongoDB replica set, DynamoDB Local                                                                                                                  |
 | `messaging-plugin/test/integration/outbox-workers.test.ts` (extended)       | D1 path                                 | §3.8 cases 1 and 2 over `SqliteD1`                                                                                                                                                       |
+| `database-plugin/test/unit/outbox-store-conditional.test.ts` (rewritten)    | `database-outbox-store.ts`              | the native-miss classification cases kept, with `claim-lost` added; the fallback cases DELETED with the fallback, replaced by the named refusal                                          |
+| `database-plugin/test/unit/outbox/outbox-discriminator.test.ts` (extended)  | `database-outbox-store.ts`              | `claim` and `markInvalid` never touch a business document carrying `status: 'pending'`                                                                                                   |
+| `messaging-plugin/test/unit/outbox/outbox-release.test.ts` (extended)       | `relay.ts`, bridge                      | a retried row is claimable at once (`leaseUntil: 0`) and keeps its `claimVersion`                                                                                                        |
+| `messaging-plugin/test/unit/outbox/outbox-retention.test.ts` (extended)     | bridge                                  | `retainSentMs: 0` deletes only at the held version                                                                                                                                       |
+| `messaging-plugin/test/unit/outbox/outbox-dispatch.test.ts` (extended)      | `outbox-service.ts`                     | a dispatch sweep and a scheduled sweep of two instances never publish one row twice                                                                                                      |
+| `messaging-plugin/test/integration/outbox-plugin.test.ts` (extended)        | plugin, relay                           | §3.9 shutdown row                                                                                                                                                                        |
+| `messaging-plugin/test/integration/outbox-real.test.ts` (adjusted)          | real PostgreSQL + RabbitMQ / Redis      | `FAST_BUDGET` gains a short `claimLeaseMs` and `maxClockSkewMs`; the crash case's republish waits for the lease and still yields `[1, 2, 2, 3, 4]`                                       |
+| `messaging-plugin/test/integration/inbox-real.test.ts` (adjusted)           | M108's outbox end-to-end case           | its forced re-send must also reset `lease_until`, or the row stays held by the first sweep's claim and is (correctly) not re-sent                                                        |
 | `messaging-plugin/test/integration/outbox-backends-real.test.ts` (extended) | Cosmos path                             | §3.8 case 2 on the local-only emulator                                                                                                                                                   |
 
 **Negative controls**, each observed failing and reverted during verification:
@@ -422,6 +469,14 @@ deno task release:verify 0.8.0
   visible in review.
 - **Cosmos's three-round bound** could reject a claim under unrelated concurrent writes to the same
   item → it surfaces as `store-failure`, which already ends the sweep with the key blocked.
+- **Read load multiplies with replicas.** Without a shared scheduler lock every replica now scans
+  the pending set every `intervalMs`, and the README stops calling the shared lock necessary → the
+  README says the lock is still the way to keep scans at one per interval, and the verification
+  measurement records scan queries per second at one and four relays.
+- **Rows written on `develop` before this milestone** carry no claim fields and are poisoned as
+  `invalid-row` on first sight → acceptable only because the outbox is unreleased; the CHANGELOG
+  M107b entry says so, and the M107 DDL is refused at `verify()` (§3.7) before any such row is read
+  on SQL.
 
 ## 9. Out of scope
 
@@ -468,3 +523,7 @@ A committed-tree security audit runs before merge, in a fresh context, per
   against DynamoDB Local by §3.8, which is not the service.
 - The MassTransit, Wolverine and CAP descriptions are the ROADMAP's research, not re-read here.
 - The claim's cost per row (§8) is unmeasured until verification.
+- Cloudflare Workers advances `Date.now()` only across I/O, not during CPU work. The claim and the
+  fence check are separated by I/O (the claim itself), so the fence should read a fresh time there,
+  but no workerd run of the relay exists (M107 left the D1 binding undriven on workerd, and this
+  milestone does not add it).
