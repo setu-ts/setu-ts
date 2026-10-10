@@ -2275,3 +2275,86 @@ describe('docs/upgrading.md release attribution', () => {
     expect(checked).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('documentation gate — diagnostics field tables match their fences (M101h)', () => {
+  const DIAGNOSTIC_READMES: readonly string[] = [
+    'packages/auth-plugin/README.md',
+    'packages/events-plugin/README.md',
+  ];
+
+  /**
+   * Splits one `## Diagnostics` section into its table's field names and the
+   * text of its fenced example. A field row is any table row whose first cell
+   * is a lone inline-code identifier, which excludes the header and separator.
+   */
+  function diagnosticsSection(source: string): { fields: readonly string[]; fence: string } {
+    const lines = source.split('\n');
+    const start = lines.findIndex((line) => line.trim() === '## Diagnostics');
+    expect(start).toBeGreaterThanOrEqual(0);
+
+    let end = lines.length;
+    for (let index = start + 1; index < lines.length; index++) {
+      if (/^##\s/.test(lines[index] as string)) {
+        end = index;
+        break;
+      }
+    }
+
+    const fields: string[] = [];
+    const fenceLines: string[] = [];
+    let inFence = false;
+    for (const line of lines.slice(start + 1, end)) {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) {
+        fenceLines.push(line);
+        continue;
+      }
+      const cell = /^\|\s*`([A-Za-z][A-Za-z0-9]*)`\s*\|/.exec(line);
+      if (cell !== null) fields.push(cell[1] as string);
+    }
+    return { fields, fence: fenceLines.join('\n') };
+  }
+
+  /** Whether the fence sets `field` as an object key. */
+  function setsField(fence: string, field: string): boolean {
+    return new RegExp(`(^|[\\s{,])${field}\\s*:`, 'm').test(fence);
+  }
+
+  for (const readme of DIAGNOSTIC_READMES) {
+    it(`${readme} lists only fields its ## Diagnostics fence sets`, async () => {
+      const { fields, fence } = diagnosticsSection(await Deno.readTextFile(readme));
+      expect(fields.length).toBeGreaterThan(0);
+      for (const field of fields) {
+        expect(
+          setsField(fence, field),
+          `${readme} lists \`${field}\` in its ## Diagnostics table, but the section's fence ` +
+            `never sets it — the table has drifted from the real options interface`,
+        ).toBe(true);
+      }
+    });
+  }
+
+  it('flags a table field the fence omits (negative control)', () => {
+    const source = [
+      '## Diagnostics',
+      '',
+      '| Field     | Type     | Meaning |',
+      '| --------- | -------- | ------- |',
+      '| `enabled` | `true`   | opt-in  |',
+      '| `alias`   | `string` | label   |',
+      '',
+      '```typescript',
+      'EventsPlugin({ diagnostics: { enabled: true } });',
+      '```',
+      '',
+      '## Next',
+    ].join('\n');
+
+    const { fields, fence } = diagnosticsSection(source);
+    expect(fields).toEqual(['enabled', 'alias']);
+    expect(fields.filter((field) => !setsField(fence, field))).toEqual(['alias']);
+  });
+});

@@ -85,13 +85,15 @@ const READMES: Readonly<Record<string, number>> = {
   // engine deliberately skips.
   // M110a: +1 for the Authorization Policies example.
   // M110b: +1 for the Scoped Roles example.
-  'packages/auth-plugin/README.md': 18,
+  // M101h: +1 for the authorization-diagnostics registration example.
+  'packages/auth-plugin/README.md': 19,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
   'packages/session-plugin/README.md': 12,
   'packages/audit-plugin/README.md': 3,
-  'packages/common/README.md': 2,
+  // M101h: +1 for the Redaction policy-shape example.
+  'packages/common/README.md': 3,
   // M92: +1 for the @Render example.
   // M99d: +1 for the Non-HTTP ingress example (the `ingress` option the README
   // previously documented nowhere).
@@ -121,6 +123,9 @@ const READMES: Readonly<Record<string, number>> = {
   // producing false failures of its own; the nine still outstanding are named
   // in the ungated-coverage assertion below so the gap cannot be forgotten.
   'packages/cache-plugin/README.md': 2,
+  // M101h: the events README is born gated — installation, usage, the
+  // aggregate-local recorder and the new dispatch-diagnostics example.
+  'packages/events-plugin/README.md': 4,
   'packages/config-plugin/README.md': 6,
   'packages/di-plugin/README.md': 2,
   'packages/exceptions/README.md': 3,
@@ -177,7 +182,6 @@ const UNGATED: readonly string[] = [
   'packages/cloudflare-plugin/README.md',
   'packages/cqrs-plugin/README.md',
   'packages/database-plugin/README.md',
-  'packages/events-plugin/README.md',
   'packages/notification-plugin/README.md',
   'packages/openapi-plugin/README.md',
   'packages/secrets-plugin/README.md',
@@ -212,7 +216,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(42);
+    expect(Object.keys(READMES)).toHaveLength(43);
 
     // And pin the COVERAGE: every package README is gated or explicitly named
     // as a known gap. Half of them were in neither before v0.6.0, which is how
