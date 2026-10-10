@@ -375,3 +375,82 @@ diff:
   `user.name` a `pii` classification with no field redactor and asserts it falls through to
   `redactors.pii` (`'class-level'`). That is stronger: it exercises both precedence steps in one
   consumer.
+
+## 12. Design security review (recorded after implementation, at the maintainer's direction)
+
+This plan had no design review, but its one code change sits in the policy evaluator that decides
+what the logger, telemetry spans and audit trail send out of the process. That is a trust boundary
+under `.roo/skills/security-audit/SKILL.md`. This section is recorded after implementation (the
+M101a §11 / M101b §10 precedent) and does not claim to have guided the design.
+
+**Flows reviewed.**
+
+- A `RedactionPolicy` supplied by application code reaches `createRedactionService` in one of three
+  ways:
+  - directly;
+  - through `LoggerPlugin({ redaction })`, applied on both the console and Pino transports;
+  - through `TelemetryPlugin({ redaction, queryParameters: 'redact' })` (query values under
+    `query.<name>`) or `AuditPlugin({ redaction })` (`before`/`after`/`metadata`).
+- The compiled matcher picks one pattern per dot path.
+- The service then picks one redactor per matched path: the field's own `redactor`, then
+  `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`.
+- That redactor's output is what leaves the process.
+- The values being redacted are request-derived application data; the policy itself is
+  configuration.
+
+**Assets.**
+
+- The confidentiality of every classified value on every egress path that accepts a policy.
+- The logger's default secret-field redaction (M96/M99a), which must keep applying alongside an
+  application policy.
+- The integrity of the application's own records: redaction never mutates the caller's object.
+
+**Attackers.**
+
+- A remote client controlling the values being logged, traced or audited, and their key names
+  (including `__proto__`, `constructor`, dotted or case-varied keys, and deep nesting).
+- A misconfiguration reaching the policy from a JavaScript caller or an untyped config file: an
+  object entry with no `classification`, a non-string `classification`, a `redactor` that is not a
+  function, or a redactor that throws.
+- A reader of the resulting logs, spans and audit rows.
+- The policy author is trusted: an application that installs an identity redactor has chosen to emit
+  that value. That is not a finding.
+
+**Approved budgets.**
+
+- No extra work for a string-valued field: one property read per match beyond the M96 path.
+- Policy compilation still happens once per service, never per record.
+
+**Obligations.**
+
+1. **Unchanged behaviour for existing policies.** A policy whose `fields` values are all strings
+   behaves exactly as before for every input: same pattern chosen, same redactor, same output.
+2. **Pattern choice does not depend on the value's form.** Specificity alone decides which pattern
+   wins (literal over `*` over `**`, then length, then declaration order). Whether a field's value
+   is a string or a `FieldRedaction` cannot change which pattern matches a path.
+3. **The field's own redactor is first.** It is preferred over `redactors[classification]`, and only
+   for the pattern that declared it.
+4. **Fail closed on a malformed object entry.** If an entry is malformed at runtime (no
+   `classification`, a non-string `classification`, `redactor: null`, or `redactor: undefined`), a
+   matched value must never leave unredacted: it falls through to `defaultRedactor` or erase.
+5. **A non-function `redactor`, or a redactor that throws, never emits the raw value.** Whatever the
+   egress plugin does — throw at the call site, drop the record, or substitute — the original value
+   must not appear in its output. Whether startup refuses such a policy is a design choice; the
+   audit reports which happens.
+6. **No prototype-chain lookup.** Selecting a redactor by classification does not reach the
+   prototype chain: a classification named `__proto__`, `constructor` or `toString` resolves only to
+   an own `redactors` entry.
+7. **No mutation.** Neither the caller's record nor the caller's policy object is changed, and
+   compiling a policy does not freeze or rewrite it.
+8. **Default secret redaction still applies.** With an application policy supplied to
+   `LoggerPlugin`, its default secret patterns still redact (for example `password` and
+   `authorization`). A per-field redactor on a different path does not disable them.
+
+**Findings.**
+
+| #  | Finding                                                                                                                                             | Disposition                                                                                  |
+| -- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| V1 | Verification: obligations 1, 3, 7 and 8 driven through real kernel apps (logger console transport, audit row read back, telemetry span `http.url`)  | Held; 20-check probe, `.verify/milestone-101h-verification.md`                               |
+| V2 | Verification: removing the per-field branch fails the common and logger suites                                                                      | Negative control observed, reverted                                                          |
+| V3 | Verification: the auth Diagnostics table typed `enabled` as literal `true` while `AuthorizationDiagnosticsOptions.enabled` is `boolean`             | Fixed in `759557a4` (documentation only)                                                     |
+| R1 | Design review: obligation 5 — a non-function `redactor` from a JavaScript caller is not refused when the service is created; it throws on first use | Open for the audit: whether the throw leaks, drops or fails the egress call decides severity |
