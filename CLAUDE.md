@@ -5968,6 +5968,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Cosmos rows inheriting it as a prototype on Node and Bun and the AWS SDK returning a DynamoDB
   `__proto__` attribute with no value (rows became unreadable), and the Mongo session test runs on a
   replica set only — complete (PR #439).
+- **Milestone 107b** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` —
+  outbox relay fencing and multi-relay sweeping): every row a relay publishes is a row it holds a
+  claim on — a per-row lease taken by an M105 conditional write on a `claimVersion` that only
+  increases, checked again before the publish
+  (`now + publishTimeoutMs + storeTimeoutMs +
+  maxClockSkewMs ≤ leaseUntil`) and required by every
+  status write, so a relay paused past its lease publishes nothing and any number of relays drain
+  one outbox without double-sending, keeping per-key first-publish order by blocking a key behind a
+  row claimed elsewhere. One mechanism on every supported backend: the ROADMAP's `SKIP LOCKED` and
+  lock-epoch arms were not buildable through the portable surface, and the "deferred-write" backends
+  defer only inside a transaction the relay never opens. A store without native conditional writes,
+  and an SQL table from the M107 schema, are refused at startup; the read-then-write fallback is
+  deleted. Two windows remain and are stated: a pause after the fence check, and a publish the
+  broker accepts after it was abandoned. Implemented by Codex, whose three stops each corrected the
+  plan: a PostgreSQL `integer` version column refused the claim past `2147483647` (now 64-bit
+  everywhere, valid to `MAX_SAFE_INTEGER − 1`); a per-row reserve equal to the 15 000 ms default
+  deadline ended every default sweep before its first read — 200 rows left pending on all four
+  backends while the manual-clock tests passed (the default is now 30 000 and the relation strict,
+  which also closes the same equality M107 accepted); and the suite's environment restarted RabbitMQ
+  and Redis through existing outage suites. The extra write per row roughly doubled a 1 000-row
+  PostgreSQL sweep (1.16 s → 2.33 s). Verified on real PostgreSQL, a MongoDB replica set, DynamoDB
+  Local and D1's engine: a relay frozen past its lease published nothing while a second took over
+  once, and four relays drained every row once in per-key order — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 

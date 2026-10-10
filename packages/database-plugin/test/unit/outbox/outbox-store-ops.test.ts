@@ -416,6 +416,7 @@ describe('DatabaseOutboxStore — release', () => {
       status: 'pending',
       attempts: 0,
       availableAt: 500,
+      lastError: null,
     });
   });
 

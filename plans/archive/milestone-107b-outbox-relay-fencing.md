@@ -106,8 +106,10 @@ them, and a store that cannot write conditionally is refused at startup by name.
     already), Drizzle `bigint(…, { mode: 'number' })`, and the JSON-number backends as they are.
     **Exhaustion** is a stored value at `MAX_SAFE_INTEGER` (or anything outside the range): the
     relay never computes an increment for it — it is an invalid claim field, poisoned through
-    `markInvalid` (§3.5) and released by an operator like any `invalid-row`. Reaching it honestly
-    takes 2^53 claims of one row, so in practice it is reachable only by an edit.
+    `markInvalid` (§3.5). **Corrected at verification:** `release('retry')` keeps the version (no
+    ABA), so the next sweep poisons such a row again; `release('discard')` or an edit of the row are
+    the only ways out, and the database README says so. Reaching it honestly takes 2^53 claims of
+    one row, so in practice it is reachable only by an edit.
   - `leaseUntil` — epoch milliseconds before which another relay must not take the row; `0` when
     unclaimed. Written by `claim`; reset to `0` by `markFailure`, `markInvalid` and
     `release('retry')`.

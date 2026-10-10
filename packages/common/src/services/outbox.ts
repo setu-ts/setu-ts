@@ -312,7 +312,7 @@ export interface IOutboxStore {
 
   /**
    * Releases a `failed` row: `retry` returns it to `pending` with
-   * `attempts: 0`, `availableAt: now` and `leaseUntil: 0`, keeping its version;
+   * `attempts: 0`, `availableAt: now`, `leaseUntil: 0` and no `lastError`, keeping its version;
    * `discard` makes it `discarded` with
    * `settledAt: now`.
    *

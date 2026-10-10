@@ -123,7 +123,7 @@ export function describeOutboxStoreContract(
       });
     });
 
-    it('poisons without changing attempts or version and retry clears the lease', async () => {
+    it('poisons without changing attempts or version and retry clears the lease and error', async () => {
       const store = await holding([record(1, { attempts: 3, claimVersion: 4, leaseUntil: 9000 })]);
       expect(await store.markInvalid('row-1', 10)).toEqual({ outcome: 'applied' });
       expect(await store.markInvalid('row-1', 10)).toEqual({
@@ -132,13 +132,15 @@ export function describeOutboxStoreContract(
       });
       expect(await store.markInvalid('nope', 10)).toEqual({ outcome: 'missing' });
       await store.release('row-1', 'retry', 11);
-      expect((await store.scanPending(undefined, 1))[0]).toMatchObject({
+      const [retried] = await store.scanPending(undefined, 1);
+      expect(retried).toMatchObject({
         attempts: 0,
         claimVersion: 4,
         leaseUntil: 0,
-        lastError: 'invalid-row',
         availableAt: 11,
       });
+      // A retry starts the row's history over: attempts AND the last error.
+      expect(retried?.lastError).toBeUndefined();
     });
 
     it('scans pending rows in position order and the cursor is exclusive', async () => {

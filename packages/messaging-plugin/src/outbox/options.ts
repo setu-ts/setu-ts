@@ -12,6 +12,7 @@
 import { publishIdProblem } from '@setu-ts/common';
 
 import type { OutboxOptions, OutboxStoreEntry } from '../interfaces/index.ts';
+import { MAX_CLAIM_LEASE_MS, MAX_CLOCK_SKEW_MS } from './record-codec.ts';
 
 /** The largest delay a runtime timer accepts. */
 const MAX_TIMER_MS = 2_147_483_647;
@@ -149,8 +150,20 @@ export function resolveOutboxOptions(options: OutboxOptions): ResolvedOutboxOpti
         'relay.sweepDeadlineMs, or no row could ever start',
     );
   }
-  const claimLeaseMs = integer('relay.claimLeaseMs', relay.claimLeaseMs, 30_000, 1, 3_600_000);
-  const maxClockSkewMs = integer('relay.maxClockSkewMs', relay.maxClockSkewMs, 5000, 0, 60_000);
+  const claimLeaseMs = integer(
+    'relay.claimLeaseMs',
+    relay.claimLeaseMs,
+    30_000,
+    1,
+    MAX_CLAIM_LEASE_MS,
+  );
+  const maxClockSkewMs = integer(
+    'relay.maxClockSkewMs',
+    relay.maxClockSkewMs,
+    5000,
+    0,
+    MAX_CLOCK_SKEW_MS,
+  );
   if (claimLeaseMs < publishTimeoutMs + 2 * storeTimeoutMs + maxClockSkewMs) {
     throw new RangeError(
       'outbox: relay.claimLeaseMs must cover relay.publishTimeoutMs + ' +

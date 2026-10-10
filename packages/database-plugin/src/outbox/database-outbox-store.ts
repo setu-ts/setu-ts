@@ -299,7 +299,7 @@ export class DatabaseOutboxStore implements IOutboxStore {
       id,
       'failed',
       action === 'retry'
-        ? { status: 'pending', attempts: 0, availableAt: now, leaseUntil: 0 }
+        ? { status: 'pending', attempts: 0, availableAt: now, leaseUntil: 0, lastError: null }
         : { status: 'discarded', settledAt: now },
     );
   }

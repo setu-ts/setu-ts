@@ -182,10 +182,13 @@ increments the version once and writes the lease. `markSent` and `markFailure` r
 version; `deleteNow` uses the same predicate through `deleteWhere`. A version miss on a pending row
 answers `claim-lost` and writes nothing. `markFailure` clears the lease; `markInvalid` requires only
 `kind` and `pending`, writes `failed`/`invalid-row`, clears the lease and preserves attempts.
-`release('retry')` requires `failed`, resets attempts and the lease, and keeps the version. A miss
-is re-read for classification; unexplained misses retry at most three rounds. Sources without native
-conditional support are refused; there is no fallback. Absent optional columns are written as `NULL`
-and read back as absent. `sentBy` is an operator diagnostic only.
+`release('retry')` requires `failed`, resets attempts, the lease and `lastError`, and keeps the
+version — so a row poisoned for an exhausted `claimVersion` (`MAX_SAFE_INTEGER`, reachable only by
+editing the row) is poisoned again by the next sweep; `release('discard')` or editing the row are
+the only ways out. A miss is re-read for classification; unexplained misses retry at most three
+rounds. Sources without native conditional support are refused; there is no fallback. Absent
+optional columns are written as `NULL` and read back as absent. `sentBy` is an operator diagnostic
+only.
 
 **Startup check.** `verify()`, run by the outbox before it schedules the relay or accepts a write,
 runs the relay's first query, a transactional read, and a conditional capability probe on the fixed
@@ -214,24 +217,24 @@ uses `bigint`, SQLite/D1 use 64-bit `INTEGER`, and JSON backends store the numbe
 
 ```sql
 CREATE TABLE setu_outbox (
-  id           text    PRIMARY KEY,
-  kind         text    NOT NULL,
-  topic        text    NOT NULL,
-  envelope     text    NOT NULL,
-  options      text    NOT NULL,
-  ordering_key text,
-  tenant_id    text,
-  traceparent  text,
-  position     text    NOT NULL,
-  created_at   bigint  NOT NULL,
-  status       text    NOT NULL,
-  attempts     integer NOT NULL,
-  available_at bigint  NOT NULL,
-  claim_version bigint NOT NULL,
-  lease_until  bigint  NOT NULL,
-  last_error   text,
-  settled_at   bigint,
-  sent_by      text
+  id            text    PRIMARY KEY,
+  kind          text    NOT NULL,
+  topic         text    NOT NULL,
+  envelope      text    NOT NULL,
+  options       text    NOT NULL,
+  ordering_key  text,
+  tenant_id     text,
+  traceparent   text,
+  position      text    NOT NULL,
+  created_at    bigint  NOT NULL,
+  status        text    NOT NULL,
+  attempts      integer NOT NULL,
+  available_at  bigint  NOT NULL,
+  claim_version bigint  NOT NULL,
+  lease_until   bigint  NOT NULL,
+  last_error    text,
+  settled_at    bigint,
+  sent_by       text
 );
 CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
 CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settled_at);

@@ -28,8 +28,18 @@ const MAX_TOPIC_BYTES = 255;
 
 const UTF8 = new TextEncoder();
 
-/** Largest legal lease plus largest legal clock skew, shared across relay configurations. */
-export const MAX_CLAIM_HORIZON_MS = 3_600_000 + 60_000;
+/** The largest `relay.claimLeaseMs` the options accept. */
+export const MAX_CLAIM_LEASE_MS = 3_600_000;
+
+/** The largest `relay.maxClockSkewMs` the options accept. */
+export const MAX_CLOCK_SKEW_MS = 60_000;
+
+/**
+ * Largest legal lease plus largest legal clock skew. Derived from the option
+ * ceilings, never from one relay's own options, so replicas running different
+ * lease settings never poison each other's live claims.
+ */
+export const MAX_CLAIM_HORIZON_MS = MAX_CLAIM_LEASE_MS + MAX_CLOCK_SKEW_MS;
 
 /**
  * Reads usable claim fields without incrementing an exhausted version.

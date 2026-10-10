@@ -13297,21 +13297,34 @@ promises more than at-least-once:
 - **NServiceBus** has no separate relay — the outbox is dispatched while handling the incoming
   message — and deduplicates by message id on the receiving side.
 
-**Scope — approved in `plans/milestone-107b-outbox-relay-fencing.md`.**
+**Scope — approved in `plans/archive/milestone-107b-outbox-relay-fencing.md`.**
 
 One per-row versioned lease on every supported backend, using M105's native conditional writes
 outside a transaction: `claimVersion` increases once per claim, `leaseUntil` gates takeover, and
-each status write compares the held version. No lock epoch or `SKIP LOCKED` arm is needed; deferred
-writes apply only inside transactions. Bigtable stays refused. A pre-publish fence requires time for
-the publish, status write and clock skew; a pause after that check and a late broker acceptance
-remain duplicate windows, inside at-least-once delivery. Multiple relays keep per-key first-publish
-order under M107's commit-order and writer-clock conditions.
+each status write compares the held version. The two arms first proposed here were not built, for
+reasons established from source by the plan:
+
+- **No `SKIP LOCKED` arm.** `IUnitOfWork` exposes neither raw SQL nor a lock option, so it would
+  need a portable-query widening that Prisma's builder, MongoDB, DynamoDB, Cosmos and D1 cannot
+  honour. It would not fence any better: a paused relay's session is killed by the server, its lock
+  released, and it can still publish on waking. And it holds a pooled connection and an open
+  transaction across every broker call.
+- **No lock epoch.** The outbox cannot observe the scheduler's lock — `IScheduler` has no lock
+  accessor, and `IDistributedLock` lives in `scheduler-plugin` with no epoch — so the fence lives in
+  the row.
+- **No separate arm for the deferred-write backends.** D1, DynamoDB and Cosmos defer writes only
+  inside a transaction; every relay write runs outside one, where each has a native `updateWhere`.
+
+Bigtable stays refused. A pre-publish fence requires time for the publish, status write and clock
+skew; a pause after that check and a late broker acceptance remain duplicate windows, inside
+at-least-once delivery. Multiple relays keep per-key first-publish order under M107's commit-order
+and writer-clock conditions.
 
 **Deliverables**
 
-- [ ] Versioned claims and a pre-publish fence, proven with a relay paused past its lease
-- [ ] Four relays draining 200 rows once each, preserving per-key first-publish order
-- [ ] README and PUBLIC_API.md stating the shared protocol and exact promise
+- [x] Versioned claims and a pre-publish fence, proven with a relay paused past its lease
+- [x] Four relays draining 200 rows once each, preserving per-key first-publish order
+- [x] README and PUBLIC_API.md stating the shared protocol and exact promise
 
 ---
 
@@ -13899,7 +13912,7 @@ patch by construction and gains nothing new here.
 | 105       | ✅     | database-plugin + cloudflare-plugin + common — conditional writes on `IRepository` (closes the M101c tenant-bridge, outbox-transition and inbox-count check-then-write races)                                                                 |
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
 | 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
-| 107b      | ⬜     | messaging-plugin + common + database-plugin — outbox relay fencing and multi-relay sweeping (depends on M105)                                                                                                                                 |
+| 107b      | ✅     | messaging-plugin + common + database-plugin — outbox relay fencing and multi-relay sweeping (depends on M105)                                                                                                                                 |
 | 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, topic, envelope id), in the handler's transaction                                                                               |
 | 109       | ✅     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |

@@ -159,7 +159,7 @@ All notable changes to this project are documented here. The format follows
   removed, while the stored diagnostic remains. Health uses `relay-overlap` for `fenced`,
   `claim-lost`, `duplicate`, and `outbox_overlaps_total` uses `kind` instead of `origin`. A shared
   scheduler lock now saves redundant scans; its TTL rule no longer bears on correctness. Retry
-  clears the lease and keeps the version; shutdown failures preserve the claim.
+  clears the lease and `lastError` and keeps the version; shutdown failures preserve the claim.
 
 - **Transactional outbox (M107, `@setu-ts/messaging-plugin`).** `MessagingPlugin({ outbox })` writes
   an integration event as a row in the SAME database transaction as the business change —
