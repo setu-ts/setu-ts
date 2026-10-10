@@ -1,14 +1,14 @@
 /**
  * One policy, four entry points, one answer (M110a §3.12).
  *
- * AuthPlugin's `requirePolicy` guard, DecoratorPlugin's `@Can`, the service's
+ * AuthPlugin's `requirePolicy` guard, DecoratorPlugin's `@RequirePolicy`, the service's
  * boolean `can`, and a thrown `authorize` (answered by `errorHandler`) are
  * driven for the SAME policy, principal and target under a NON-default
  * configuration — `rfc9457`, a `before` hook, an anonymous ability. They must
  * agree on allow/deny, and the three HTTP refusals must be byte-identical
  * (after removing `instance`, which echoes the path).
  *
- * The two packages may not import each other, so `@Can` and the guard are two
+ * The two packages may not import each other, so `@RequirePolicy` and the guard are two
  * thin middlewares over one service; this test is what catches them drifting.
  *
  * @module
@@ -28,7 +28,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { AuthPlugin, definePolicy, requirePolicy } from '@setu-ts/auth-plugin';
 import { errorHandler } from '@setu-ts/exceptions';
 
-import { Can, Controller, Get } from '../../src/index.ts';
+import { Controller, Get, RequirePolicy } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 
 interface Note {
@@ -61,13 +61,13 @@ const SECRET = 'policy-parity-secret-at-least-32-characters!!';
 @Controller('/decorated')
 class NoteController {
   @Get('/:id/edit')
-  @Can(notePolicy, 'edit', load)
+  @RequirePolicy(notePolicy, 'edit', load)
   edit(): { readonly ok: boolean } {
     return { ok: true };
   }
 
   @Get('/:id/read')
-  @Can(notePolicy, 'read', load)
+  @RequirePolicy(notePolicy, 'read', load)
   read(): { readonly ok: boolean } {
     return { ok: true };
   }
@@ -158,7 +158,7 @@ const CASES: readonly {
   { who: 'root', id: 'ann', ability: 'edit', status: 200 },
 ];
 
-describe('policy parity across requirePolicy, @Can, can() and authorize()', () => {
+describe('policy parity across requirePolicy, @RequirePolicy, can() and authorize()', () => {
   for (const row of CASES) {
     it(`${row.who} → ${row.ability} ${row.id}: ${row.status} everywhere`, async () => {
       const who = row.who === 'anonymous' ? null : row.who;

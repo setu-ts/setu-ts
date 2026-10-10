@@ -196,7 +196,7 @@ per request.
 Inside a handler, `can(principal, policy, ability, target)` resolves a boolean and `authorize(...)`
 rejects a denial with `AuthorizationDeniedError`, which `errorHandler` answers with the guard's own
 `401`/`403` body. An unknown policy or ability rejects both with `UnknownPolicyError`. Class-form
-policies and the `@Can` decorator live in `@setu-ts/decorator-plugin`. The full guide is
+policies and the `@RequirePolicy` decorator live in `@setu-ts/decorator-plugin`. The full guide is
 [Authorization](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md).
 
 ## Guards

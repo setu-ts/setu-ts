@@ -1,5 +1,5 @@
 /**
- * Class-form policy conversion, `@Can` validation, and the `@Can` middleware
+ * Class-form policy conversion, `@RequirePolicy` validation, and the `@RequirePolicy` middleware
  * (M110a §3.10–§3.11), against a recording stand-in for the policy service so
  * every register-time refusal and per-request status is reachable here.
  *
@@ -24,7 +24,7 @@ import { Ability, Policy } from '../../src/index.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 import {
   appendPolicyMiddleware,
-  createCanMiddleware,
+  createPolicyMiddleware,
   registerPolicyClasses,
   toPolicyDefinition,
 } from '../../src/plugin/policy-registration.ts';
@@ -158,7 +158,7 @@ describe('appendPolicyMiddleware', () => {
     expect(middleware).toHaveLength(0);
   });
 
-  it('refuses @Can when no policy service is registered', () => {
+  it('refuses @RequirePolicy when no policy service is registered', () => {
     expect(() =>
       appendPolicyMiddleware(
         metadataStore,
@@ -168,7 +168,7 @@ describe('appendPolicyMiddleware', () => {
         undefined,
       )
     ).toThrow(
-      'Route GET /x (C.m) is decorated with @Can, but no CAPABILITIES.AUTHORIZATION_POLICIES',
+      'Route GET /x (C.m) is decorated with @RequirePolicy, but no CAPABILITIES.AUTHORIZATION_POLICIES',
     );
   });
 
@@ -182,12 +182,14 @@ describe('appendPolicyMiddleware', () => {
         [],
         service,
       );
-    expect(call(DocPolicy, 'delete')).toThrow('@Can("doc", "delete"), but no such policy ability');
-    expect(call({ name: 'invoice', abilities: {} }, 'approve')).toThrow(
-      '@Can("invoice", "approve")',
+    expect(call(DocPolicy, 'delete')).toThrow(
+      '@RequirePolicy("doc", "delete"), but no such policy ability',
     );
-    expect(call(Unmarked, 'go')).toThrow('@Can(Unmarked (no @Policy), "go")');
-    expect(call({ abilities: {} }, 'go')).toThrow('@Can([unnamed policy], "go")');
+    expect(call({ name: 'invoice', abilities: {} }, 'approve')).toThrow(
+      '@RequirePolicy("invoice", "approve")',
+    );
+    expect(call(Unmarked, 'go')).toThrow('@RequirePolicy(Unmarked (no @Policy), "go")');
+    expect(call({ abilities: {} }, 'go')).toThrow('@RequirePolicy([unnamed policy], "go")');
   });
 
   it('appends one middleware per requirement and reports whether any needs a principal', () => {
@@ -211,7 +213,7 @@ describe('appendPolicyMiddleware', () => {
         metadataStore,
         'Route',
         [{ policy: DocPolicy, ability: 'view' }, {
-          // A definition referenced by @Can must DECLARE the ability it names,
+          // A definition referenced by @RequirePolicy must DECLARE the ability it names,
           // matching the registered one on `anonymous` (audit F4).
           policy: { name: 'doc', abilities: { edit: () => true } } as unknown as PolicyDefinition,
           ability: 'edit',
@@ -227,7 +229,7 @@ describe('appendPolicyMiddleware', () => {
   });
 });
 
-describe('createCanMiddleware', () => {
+describe('createPolicyMiddleware', () => {
   function context(service: IAuthorizationPolicyService | null, user?: IPrincipal) {
     const recorded = { status: 0, body: undefined as unknown };
     const response = {
@@ -265,7 +267,7 @@ describe('createCanMiddleware', () => {
 
   it('answers 501 while no policy service is registered', async () => {
     const { ctx, recorded } = context(null, { id: 'ann' });
-    expect(await run(createCanMiddleware('doc', 'edit', undefined, false), ctx)).toBe(false);
+    expect(await run(createPolicyMiddleware('doc', 'edit', undefined, false), ctx)).toBe(false);
     expect(recorded).toEqual({
       status: 501,
       body: { error: 'Not Implemented', detail: 'Authorization is not configured' },
@@ -275,12 +277,12 @@ describe('createCanMiddleware', () => {
   it('answers 401 for a denied anonymous request and 403 for a denied principal', async () => {
     const deny = fakeService(() => false);
     const anonymous = context(deny);
-    expect(await run(createCanMiddleware('doc', 'edit', undefined, false), anonymous.ctx)).toBe(
+    expect(await run(createPolicyMiddleware('doc', 'edit', undefined, false), anonymous.ctx)).toBe(
       false,
     );
     expect(anonymous.recorded.status).toBe(401);
     const signedIn = context(deny, { id: 'bob' });
-    expect(await run(createCanMiddleware('doc', 'edit', undefined, false), signedIn.ctx)).toBe(
+    expect(await run(createPolicyMiddleware('doc', 'edit', undefined, false), signedIn.ctx)).toBe(
       false,
     );
     expect(signedIn.recorded).toEqual({
@@ -296,12 +298,13 @@ describe('createCanMiddleware', () => {
       return true;
     });
     const fixed = context(service, { id: 'ann' });
-    expect(await run(createCanMiddleware('doc', 'edit', { owner: 'ann' }, false), fixed.ctx)).toBe(
-      true,
-    );
+    expect(await run(createPolicyMiddleware('doc', 'edit', { owner: 'ann' }, false), fixed.ctx))
+      .toBe(
+        true,
+      );
     const extracted = context(service, { id: 'ann' });
     const extractor = (ctx: IRequestContext) => Promise.resolve({ owner: ctx.params.id });
-    expect(await run(createCanMiddleware('doc', 'edit', extractor, false), extracted.ctx)).toBe(
+    expect(await run(createPolicyMiddleware('doc', 'edit', extractor, false), extracted.ctx)).toBe(
       true,
     );
     expect(seen).toEqual(['ann', 'doc', 'edit', { owner: 'ann' }, 'ann', 'doc', 'edit', {
@@ -314,7 +317,7 @@ describe('createCanMiddleware', () => {
     const outage = new Error('db');
     let ran = false;
     const thrown = await Promise.resolve(
-      createCanMiddleware('doc', 'edit', () => Promise.reject(outage), false)(ctx, () => {
+      createPolicyMiddleware('doc', 'edit', () => Promise.reject(outage), false)(ctx, () => {
         ran = true;
         return Promise.resolve();
       }),
@@ -324,7 +327,7 @@ describe('createCanMiddleware', () => {
   });
 });
 
-describe('audit F1: @Can refuses anonymous before running the extractor', () => {
+describe('audit F1: @RequirePolicy refuses anonymous before running the extractor', () => {
   it('answers 401 without calling the extractor for a non-anonymous ability', async () => {
     const recorded = { status: 0 };
     const response = {
@@ -348,7 +351,7 @@ describe('audit F1: @Can refuses anonymous before running the extractor', () => 
       return Promise.reject(new Error('not found'));
     };
     let ran = false;
-    await createCanMiddleware('doc', 'edit', extractor, false)(ctx, () => {
+    await createPolicyMiddleware('doc', 'edit', extractor, false)(ctx, () => {
       ran = true;
       return Promise.resolve();
     });
@@ -356,7 +359,7 @@ describe('audit F1: @Can refuses anonymous before running the extractor', () => 
   });
 });
 
-describe('audit F4: @Can refuses a policy that disagrees with the registered one', () => {
+describe('audit F4: @RequirePolicy refuses a policy that disagrees with the registered one', () => {
   const described = { 'doc.edit': { anonymous: false }, 'doc.view': { anonymous: true } } as const;
   const call = (policy: unknown, ability: string) => () =>
     appendPolicyMiddleware(

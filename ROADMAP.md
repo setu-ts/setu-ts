@@ -13436,11 +13436,11 @@ ABAC engine. Checked against current documentation (2026-10-09), every comparabl
 this layer and none ships an attribute engine — attribute logic lives in the policies they let you
 write:
 
-| Framework       | The layer                                                                                                | Async | Target                                         |
-| --------------- | -------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------- |
-| ASP.NET Core    | `IAuthorizationService.AuthorizeAsync(user, resource, policy)` + `AuthorizationHandler<TReq, TResource>` | yes   | loaded resource, imperative only               |
-| NestJS          | `@nestjs/authorization`: `@Policy()` classes, `@Can(Policy, 'ability', extractor)`, `authorize()`        | yes   | loaded resource or values extracted from route |
-| Spring Security | `@PreAuthorize("hasPermission(#id, 'Type', 'READ')")` → `PermissionEvaluator`                            | no    | object, or `(targetId, targetType)` unloaded   |
+| Framework       | The layer                                                                                                | Async | Target                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------- |
+| ASP.NET Core    | `IAuthorizationService.AuthorizeAsync(user, resource, policy)` + `AuthorizationHandler<TReq, TResource>` | yes   | loaded resource, imperative only             |
+| NestJS          | documented recipe: `@CheckPolicies(handler)` + a `PoliciesGuard` over a CASL `AbilityFactory`            | no    | subject type; record checks in the handler   |
+| Spring Security | `@PreAuthorize("hasPermission(#id, 'Type', 'READ')")` → `PermissionEvaluator`                            | no    | object, or `(targetId, targetType)` unloaded |
 
 Two surveyed production applications (multi-tenant B2B portals, one TypeScript and one .NET) confirm
 the shape from the other side: each hand-rolled a throwing check plus a non-throwing twin for UI
@@ -13488,9 +13488,9 @@ each one.
   framework's functional-default / class-based-opt-in split (M65).
 - Entry points: a route guard `requirePolicy(policy, ability, target?)` (named by AI_GUIDELINES
   §10.4's `requireXxx` convention, plan C1) where `target` is a value or an extractor
-  `(ctx) => target | undefined | Promise<target | undefined>`; `@Can(...)` in `decorator-plugin`;
-  imperative `authorize()` for checks on records a handler loads (ASP.NET's lesson: a declarative
-  check runs before the record exists).
+  `(ctx) => target | undefined | Promise<target | undefined>`; `@RequirePolicy(...)` in
+  `decorator-plugin`; imperative `authorize()` for checks on records a handler loads (ASP.NET's
+  lesson: a declarative check runs before the record exists).
 - **Fixed semantics, not configuration:** only a literal `true` allows; an anonymous principal that
   is denied gets `401`, a signed-in one `403`, through the existing responder so the body matches
   the guards; a policy that throws or rejects DENIES and is reported to the logger, never answers
@@ -13510,10 +13510,10 @@ each one.
 
 - [x] The contract, the token, and the evaluator, with the guard and the yes/no check proven to
       agree under a non-default configuration
-- [x] Functional and class policy forms, the route guard, `@Can`, and `authorize()`
+- [x] Functional and class policy forms, the route guard, `@RequirePolicy`, and `authorize()`
 - [x] Fixed-semantics tests: literal-`true`, `401`/`403`, throwing policy denies, unknown names
       refused — each with a negative control
-- [x] M57 brand on `requirePolicy`/`@Can` routes so `deriveSecurity` documents them
+- [x] M57 brand on `requirePolicy`/`@RequirePolicy` routes so `deriveSecurity` documents them
 - [x] PUBLIC_API.md, the auth-plugin and decorator-plugin READMEs, and the ABAC guidance page
       (`docs/authorization.md`)
 - [ ] A design security review in the plan (written — plan §10), and a committed-tree audit

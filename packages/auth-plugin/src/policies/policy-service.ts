@@ -1,6 +1,6 @@
 /**
  * The ONE authorization policy evaluator, registered under
- * `CAPABILITIES.AUTHORIZATION_POLICIES`. The route guard, `@Can` and the
+ * `CAPABILITIES.AUTHORIZATION_POLICIES`. The route guard, `@RequirePolicy` and the
  * imperative `can`/`authorize` all reach it through that contract, so they
  * cannot disagree.
  *

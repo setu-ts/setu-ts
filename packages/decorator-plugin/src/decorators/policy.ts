@@ -1,5 +1,5 @@
 /**
- * Class-form authorization policies and the `@Can` route requirement (M110a).
+ * Class-form authorization policies and the `@RequirePolicy` route requirement (M110a).
  *
  * `@Policy(name)` marks a class as a policy; `@Ability()` marks each method
  * that is an ability; an optional `before` method is the policy's `before`
@@ -7,7 +7,7 @@
  * constructs it — with constructor injection, like any controller — and
  * registers it with the authorization policy service AuthPlugin provides.
  *
- * `@Can(policy, ability, target?)` requires an ability on a route. It accepts
+ * `@RequirePolicy(policy, ability, target?)` requires an ability on a route. It accepts
  * a `@Policy` class or a `definePolicy` definition, and is evaluated through
  * the same service as AuthPlugin's `requirePolicy` guard.
  *
@@ -33,7 +33,7 @@ export interface AbilityOptions {
 }
 
 /**
- * The method names of a policy class — the abilities `@Can` may name.
+ * The method names of a policy class — the abilities `@RequirePolicy` may name.
  *
  * The type cannot tell an `@Ability` method from an ordinary one, so naming an
  * ordinary method compiles and is refused at `register()`.
@@ -123,7 +123,7 @@ export function Ability(options?: AbilityOptions): SetuMethodDecorator {
  * (register `AuthPlugin`), or when the policy or ability is not registered.
  * Per request: `401` when the ability denies an anonymous request, `403` when
  * it denies a signed-in principal, otherwise the route continues. Repeatable:
- * every `@Can` on a route must allow, evaluated top to bottom. Runs after
+ * every `@RequirePolicy` on a route must allow, evaluated top to bottom. Runs after
  * guards and `@Roles`/`@Permissions`, and before interceptors, middleware and
  * validation — so a target extractor reading the body sees the UNVALIDATED
  * body; prefer route parameters.
@@ -135,12 +135,12 @@ export function Ability(options?: AbilityOptions): SetuMethodDecorator {
  * @example
  * ```typescript
  * @Patch('/:id')
- * @Can(PostPolicy, 'update', (ctx) => posts.find(ctx.params.id))
+ * @RequirePolicy(PostPolicy, 'update', (ctx) => posts.find(ctx.params.id))
  * update() { … }
  * ```
  * @since 0.9.0
  */
-export function Can<C extends Constructor, K extends PolicyClassAbility<C>>(
+export function RequirePolicy<C extends Constructor, K extends PolicyClassAbility<C>>(
   policy: C,
   ability: K,
   target?: PolicyTarget<PolicyClassTarget<C, K>>,
@@ -154,12 +154,12 @@ export function Can<C extends Constructor, K extends PolicyClassAbility<C>>(
  * @returns A standard method decorator
  * @since 0.9.0
  */
-export function Can<A extends string, T>(
+export function RequirePolicy<A extends string, T>(
   policy: PolicyDefinition<A, T>,
   ability: A,
   target?: PolicyTarget<T>,
 ): SetuMethodDecorator;
-export function Can(
+export function RequirePolicy(
   policy: Constructor | PolicyDefinition,
   ability: string,
   target?: unknown,

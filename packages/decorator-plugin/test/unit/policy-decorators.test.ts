@@ -1,8 +1,8 @@
 /**
- * `@Policy`, `@Ability` and `@Can` record the metadata DecoratorPlugin reads
+ * `@Policy`, `@Ability` and `@RequirePolicy` record the metadata DecoratorPlugin reads
  * (M110a §3.11): the policy name, each ability and whether it is anonymous,
- * and `@Can` requirements in TOP-TO-BOTTOM order (decorators apply bottom-up,
- * so each `@Can` prepends).
+ * and `@RequirePolicy` requirements in TOP-TO-BOTTOM order (decorators apply bottom-up,
+ * so each `@RequirePolicy` prepends).
  *
  * @module
  */
@@ -10,7 +10,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IPrincipal, IRequestContext } from '@setu-ts/common';
 
-import { Ability, Can, Controller, Get, Policy } from '../../src/index.ts';
+import { Ability, Controller, Get, Policy, RequirePolicy } from '../../src/index.ts';
 import type { PolicyClassAbility, PolicyClassTarget } from '../../src/index.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 
@@ -42,8 +42,8 @@ const loadPost = (ctx: IRequestContext): Post => ({ authorId: ctx.params.id ?? '
 @Controller('/posts')
 class PostController {
   @Get('/:id')
-  @Can(PostPolicy, 'read')
-  @Can(PostPolicy, 'update', loadPost)
+  @RequirePolicy(PostPolicy, 'read')
+  @RequirePolicy(PostPolicy, 'update', loadPost)
   show(): string {
     return 'ok';
   }
@@ -81,7 +81,7 @@ describe('@Policy and @Ability', () => {
   });
 });
 
-describe('@Can', () => {
+describe('@RequirePolicy', () => {
   it('records requirements top to bottom, with the target only when given', () => {
     const [route] = metadataStore.getRoutesFor(PostController);
     expect(route?.policies).toEqual([

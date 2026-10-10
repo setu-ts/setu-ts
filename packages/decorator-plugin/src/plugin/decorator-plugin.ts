@@ -107,7 +107,7 @@ export interface DecoratorPluginOptions {
    * `@Policy` classes to register with the authorization policy service
    * AuthPlugin provides (M110a). Each is constructed like a controller — with
    * constructor injection — and registered before any controller, so a
-   * route's `@Can` can name it. Listing a class with no policy service
+   * route's `@RequirePolicy` can name it. Listing a class with no policy service
    * registered, a class without `@Policy`, or one without an `@Ability()`
    * method refuses `register()`.
    *
@@ -608,7 +608,7 @@ function buildRouteSchema(
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
   const restrictions = effectiveRestrictions(ctrl, route);
-  // A `@Can` whose ability requires a signed-in principal is enforcement too,
+  // A `@RequirePolicy` whose ability requires a signed-in principal is enforcement too,
   // independent of `enforceRoles` (M110a §3.10): its branded middleware derives
   // the requirement, so the public marker would contradict it.
   const isPublic = route.isPublic === true && !requiresPolicyPrincipal && (
@@ -986,10 +986,10 @@ function registerController(
     if (enforceRoles) {
       appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
     }
-    // `@Can` (M110a): after `@Roles`/`@Permissions`, before the
+    // `@RequirePolicy` (M110a): after `@Roles`/`@Permissions`, before the
     // interceptor/middleware/filter band and validation. Always enforced —
     // `enforceRoles` governs only the role/permission metadata that shipped
-    // inert before M89a; `@Can` has no inert history to preserve.
+    // inert before M89a; `@RequirePolicy` has no inert history to preserve.
     const requiresPolicyPrincipal = appendPolicyMiddleware(
       metadataStore,
       routeLabel(target, route, fullPath),
@@ -1124,7 +1124,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
         ? ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY)
         : undefined;
       // Authorization policies (M110a): resolved once, to register class-form
-      // policies and to validate every `@Can` at register(). The appended
+      // policies and to validate every `@RequirePolicy` at register(). The appended
       // middleware re-resolves per request, like the role middleware.
       const policyService = ctx.services.has(CAPABILITIES.AUTHORIZATION_POLICIES)
         ? ctx.services.get<IAuthorizationPolicyService>(CAPABILITIES.AUTHORIZATION_POLICIES)
@@ -1180,7 +1180,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // `ctx.container` rather than the registry, so both are consulted.
       const viewEngine = resolveViewEngine(ctx);
       // Policy classes AFTER the service loop (a policy may inject a service
-      // registered there) and BEFORE controllers (a route's `@Can` names them).
+      // registered there) and BEFORE controllers (a route's `@RequirePolicy` names them).
       registerPolicyClasses(metadataStore, dedup(opts.policies ?? []), policyService, (policy) => {
         registerInContainer(ctx, policy, metadataStore.getService(policy));
         return instantiate(policy, ctx);

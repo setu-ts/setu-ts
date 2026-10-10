@@ -37,7 +37,7 @@ building production-ready applications with our plugin-first, runtime-independen
 
 - [Authorization](./authorization.md)
   - Roles versus policies, and where attribute rules go
-  - Route guards, `@Can`, and checks inside a handler
+  - Route guards, `@RequirePolicy`, and checks inside a handler
   - The fixed evaluation rules
 
 - [Localization](./localization.md)

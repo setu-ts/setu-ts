@@ -19,21 +19,22 @@ All notable changes to this project are documented here. The format follows
   gains a `policies` option; `auth-plugin` adds `definePolicy`, the `requirePolicy` route guard, and
   the `AuthorizationDeniedError` (with `PolicyDenial`) and `UnknownPolicyError` rejections, and
   re-exports `IAuthorizationPolicyService`. `decorator-plugin` adds the class form — `@Policy`,
-  `@Ability` (with `AbilityOptions`), `DecoratorPluginOptions.policies` — and `@Can`, typed by
-  `PolicyClassAbility` and `PolicyClassTarget`. The evaluation rules are fixed: only a literal
-  `true` allows; a throwing check denies and is logged once, never with the target; an anonymous
-  request is refused `401` unless the ability opted in with `{ anonymous: true, check }`; for a
-  signed-in principal `before` runs first (`true` allows, `undefined` falls through, anything else
-  denies); a denied signed-in principal gets `403` with the same body `requireRole` writes, and a
-  thrown `authorize` denial gets that body too under `errorHandler`. A `requirePolicy` guard naming
-  an unregistered policy or ability fails `app.start()`, after which the policy registry is sealed;
-  `@Can` is validated at `register()`, including against a same-named policy that declares an
-  ability differently. Both refuse an anonymous request to an ability that needs a principal BEFORE
-  running the target extractor, so an unauthenticated caller costs no lookup and cannot probe which
-  records exist; an `undefined` principal is anonymous; and an `UnknownPolicyError` truncates names
-  over 128 characters. Both are branded for OpenAPI `deriveSecurity`. New guide:
-  `docs/authorization.md`. Not breaking: a new capability, new types and new exports — no existing
-  interface gains a member.
+  `@Ability` (with `AbilityOptions`), `DecoratorPluginOptions.policies` — and `@RequirePolicy`,
+  typed by `PolicyClassAbility` and `PolicyClassTarget`. The evaluation rules are fixed: only a
+  literal `true` allows; a throwing check denies and is logged once, never with the target; an
+  anonymous request is refused `401` unless the ability opted in with `{ anonymous: true, check }`;
+  for a signed-in principal `before` runs first (`true` allows, `undefined` falls through, anything
+  else denies); a denied signed-in principal gets `403` with the same body `requireRole` writes, and
+  a thrown `authorize` denial gets that body too under `errorHandler`. A `requirePolicy` guard
+  naming an unregistered policy or ability fails `app.start()`, after which the policy registry is
+  sealed; `@RequirePolicy` is validated at `register()`, including against a same-named policy that
+  declares an ability differently. Both refuse an anonymous request to an ability that needs a
+  principal BEFORE running the target extractor, so an unauthenticated caller costs no lookup and
+  cannot probe which records exist — the guard reads that from the registered policy on every
+  request, so a route added after `start()` is covered too; an `undefined` principal is anonymous;
+  and an `UnknownPolicyError` truncates names over 128 characters. Both are branded for OpenAPI
+  `deriveSecurity`. New guide: `docs/authorization.md`. Not breaking: a new capability, new types
+  and new exports — no existing interface gains a member.
 
 - **Idempotency tier C — the work and its record committed together (`@setu-ts/idempotency-plugin`,
   `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/sdk`, M109b).** A new

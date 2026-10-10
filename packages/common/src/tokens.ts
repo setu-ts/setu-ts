@@ -62,7 +62,7 @@ export const CAPABILITIES = {
    * always registers: an asynchronous, target-aware check over named
    * policies, beside (never replacing) the synchronous RBAC service under
    * `AUTHORIZATION`. Consumed by the `requirePolicy` guard and by
-   * DecoratorPlugin's `@Can` and class-form policies.
+   * DecoratorPlugin's `@RequirePolicy` and class-form policies.
    *
    * @since 0.9.0
    */

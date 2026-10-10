@@ -2453,19 +2453,22 @@ signed-in principal is denied, otherwise `next()`; `target` is a value or an ext
 `(ctx) => T | undefined | Promise<T | undefined>` (a function is ALWAYS treated as an extractor),
 and an extractor's throw propagates unchanged. An anonymous request to an ability that needs a
 principal is refused `401` BEFORE the extractor runs, so it costs no lookup and cannot learn from
-the extractor whether a record exists. An `undefined` principal passed to `can`/`authorize` is
-anonymous, exactly like `null`. A policy or ability name longer than 128 characters is truncated in
-an `UnknownPolicyError`'s message and fields, with the removed length noted. It is branded for
-OpenAPI `deriveSecurity` as authenticated unless the ability is anonymous. The service's `can`
-resolves a boolean and `authorize` rejects a denial with `AuthorizationDeniedError`, which carries a
-`401`/`403` status hint whose title and detail are the guards' own, so under `errorHandler` a thrown
-denial answers the guard's exact body (without `errorHandler` the kernel answers `500`).
-AuthPlugin's `onBootstrap` hook scans every registered route and fails `start()` when a
-`requirePolicy` guard names a policy or ability that is not registered, or one whose registered
-ability disagrees with the guard's policy object on `anonymous` (a different policy registered under
-the same name); it then SEALS the registry, so `define` after `start()` throws. Not scanned: a route
-added after `start()` and a guard added as global middleware — an unknown name there rejects per
-request (fail closed). A policy is identified by its NAME. See
+the extractor whether a record exists. Whether the ability needs a principal is read from the
+REGISTERED policy on each request, never from the guard's own policy object, so a guard the startup
+scan never saw (a route added after `start()`, a global middleware) behaves the same; a guard naming
+an unregistered policy or ability rejects without running the extractor. An `undefined` principal
+passed to `can`/`authorize` is anonymous, exactly like `null`. A policy or ability name longer than
+128 characters is truncated in an `UnknownPolicyError`'s message and fields, with the removed length
+noted. It is branded for OpenAPI `deriveSecurity` as authenticated unless the ability is anonymous.
+The service's `can` resolves a boolean and `authorize` rejects a denial with
+`AuthorizationDeniedError`, which carries a `401`/`403` status hint whose title and detail are the
+guards' own, so under `errorHandler` a thrown denial answers the guard's exact body (without
+`errorHandler` the kernel answers `500`). AuthPlugin's `onBootstrap` hook scans every registered
+route and fails `start()` when a `requirePolicy` guard names a policy or ability that is not
+registered, or one whose registered ability disagrees with the guard's policy object on `anonymous`
+(a different policy registered under the same name); it then SEALS the registry, so `define` after
+`start()` throws. Not scanned: a route added after `start()` and a guard added as global middleware
+— an unknown name there rejects per request (fail closed). A policy is identified by its NAME. See
 [Authorization](docs/authorization.md).
 
 `jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `issuers`,
@@ -12340,7 +12343,7 @@ carry full JSDoc.
 | `ResponseHeader`                                             | function | Method decorator — one fixed response header; repeatable for DISTINCT names. The same name twice, an invalid name or value, or `Location` alongside `@Redirect` are each refused at `register()`. A multi-valued header wants `ctx.response.appendHeader(...)` through `@Params(Ctx())`. Deliberately NOT derived into the document: an OpenAPI response-header entry needs a schema and description the declaration does not carry (M97b)                                                                                                                                                                                                                                                     |
 | `Redirect`                                                   | function | Method decorator — sets the status and `Location`; `302` by default. The status must be an integer in `[300, 399]`, and the target must be non-blank and a value the runtime will carry as a `Location` header — both refused at `register()`, because an invalid header value throws while the response headers are written (`500` on every request) and a blank one serves a redirect no client can follow. It does NOT short-circuit: a decorator cannot decline to call the method, so the handler still runs and a plain return is still serialised. One handler may not carry both `@Redirect` and `@HttpCode`, since both set the status. Derived into the document as its `3xx` (M97b) |
 | `Idempotent`                                                 | function | Method decorator — marks an UNSAFE route idempotent. Its middleware is appended LAST in the route's chain, after guards, declarative authorization and the validation band, so a refused or invalid request consumes no key. Requires a `CAPABILITIES.IDEMPOTENCY` provider: without one `register()` fails naming the controller and handler, and `@Idempotent` on a safe method (`GET`/`HEAD`/`OPTIONS`) is refused too. The stored response is replayed by whichever store the provider serves (M109a)                                                                                                                                                                                      |
-| `Policy` / `Ability` / `Can`                                 | function | **Since M110a.** `@Policy(name)` marks a class as an authorization policy; `@Ability({ anonymous? })` marks each ability method (a method named `before` is the policy's `before` hook). `DecoratorPlugin({ policies })` constructs each class like a controller — with constructor injection — and registers it with AuthPlugin's `IAuthorizationPolicyService` before any controller. `@Can(policy, ability, target?)` (repeatable, all-of, top to bottom) takes a `@Policy` class or a `definePolicy` definition and requires the ability on a route: `501` with no policy service, `401` / `403` on a denial, the same bodies as AuthPlugin's `requirePolicy`                              |
+| `Policy` / `Ability` / `RequirePolicy`                       | function | **Since M110a.** `@Policy(name)` marks a class as an authorization policy; `@Ability({ anonymous? })` marks each ability method (a method named `before` is the policy's `before` hook). `DecoratorPlugin({ policies })` constructs each class like a controller — with constructor injection — and registers it with AuthPlugin's `IAuthorizationPolicyService` before any controller. `@RequirePolicy(policy, ability, target?)` (repeatable, all-of, top to bottom) takes a `@Policy` class or a `definePolicy` definition and requires the ability on a route: `501` with no policy service, `401` / `403` on a denial, the same bodies as AuthPlugin's `requirePolicy`                    |
 | `RenderDecorator`                                            | type     | The type `Render` returns: a standard method decorator whose `value` parameter is narrowed to `(...args: never[]) => P \| HandlerResult \| Promise<P \| HandlerResult>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `ApiOperation`/`ApiResponse`                                 | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -12358,29 +12361,29 @@ carry full JSDoc.
 
 ### Types
 
-| Export                                                        | Kind | Purpose                                                                                                                                                                     |
-| ------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPluginOptions`                                      | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `ingress?`, `modules?`, `enforceSchemas?`, `enforceRoles?`, `policies?`) |
-| `AbilityOptions` / `PolicyClassAbility` / `PolicyClassTarget` | type | **Since M110a.** `@Ability`'s options, and the helpers typing `@Can`'s ability (a policy class's method names) and target (read off the method's second parameter)          |
-| `InjectableOptions`                                           | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                                                            |
-| `ModuleOptions`                                               | type | Options for `@Module()` (`controllers?`, `providers?`, `imports?`; no `exports`)                                                                                            |
-| `ApiOperationConfig`                                          | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                                                                                   |
-| `ApiResponseConfig`                                           | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                                                           |
-| `HttpMethodDecorator`                                         | type | `(path?: string) => SetuMethodDecorator`                                                                                                                                    |
-| `ParamSource`                                                 | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                                                                  |
-| `SourceValues`                                                | type | Maps a source tuple onto the handler parameter tuple it binds                                                                                                               |
-| `InjectToken`                                                 | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                                                                             |
-| `OptionalToken`                                               | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                                                                                   |
-| `SetuClassDecorator`                                          | type | A standard class decorator that records metadata and leaves the class unchanged                                                                                             |
-| `SetuMethodDecorator`                                         | type | A standard method decorator that records metadata and leaves the method unchanged                                                                                           |
-| `SetuClassOrMethodDecorator`                                  | type | A standard decorator valid in either position, discriminating on `context.kind`                                                                                             |
-| `MiddlewareLike`                                              | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                                                                           |
-| `CustomParameterResolver`                                     | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                                                                           |
-| `ParameterMetadata`                                           | type | Parameter metadata captured by a `@Params(...)` source                                                                                                                      |
-| `ParameterType`                                               | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                                                                          |
-| `DiscoveryOptions`                                            | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                                                                      |
-| `DiscoveryResult`                                             | type | Result of discovery (`controllers`, `services`, `errors`)                                                                                                                   |
-| `ModuleImporter`                                              | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                                                                        |
+| Export                                                        | Kind | Purpose                                                                                                                                                                      |
+| ------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`                                      | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `ingress?`, `modules?`, `enforceSchemas?`, `enforceRoles?`, `policies?`)  |
+| `AbilityOptions` / `PolicyClassAbility` / `PolicyClassTarget` | type | **Since M110a.** `@Ability`'s options, and the helpers typing `@RequirePolicy`'s ability (a policy class's method names) and target (read off the method's second parameter) |
+| `InjectableOptions`                                           | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                                                             |
+| `ModuleOptions`                                               | type | Options for `@Module()` (`controllers?`, `providers?`, `imports?`; no `exports`)                                                                                             |
+| `ApiOperationConfig`                                          | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                                                                                    |
+| `ApiResponseConfig`                                           | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                                                            |
+| `HttpMethodDecorator`                                         | type | `(path?: string) => SetuMethodDecorator`                                                                                                                                     |
+| `ParamSource`                                                 | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                                                                   |
+| `SourceValues`                                                | type | Maps a source tuple onto the handler parameter tuple it binds                                                                                                                |
+| `InjectToken`                                                 | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                                                                              |
+| `OptionalToken`                                               | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                                                                                    |
+| `SetuClassDecorator`                                          | type | A standard class decorator that records metadata and leaves the class unchanged                                                                                              |
+| `SetuMethodDecorator`                                         | type | A standard method decorator that records metadata and leaves the method unchanged                                                                                            |
+| `SetuClassOrMethodDecorator`                                  | type | A standard decorator valid in either position, discriminating on `context.kind`                                                                                              |
+| `MiddlewareLike`                                              | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                                                                            |
+| `CustomParameterResolver`                                     | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                                                                            |
+| `ParameterMetadata`                                           | type | Parameter metadata captured by a `@Params(...)` source                                                                                                                       |
+| `ParameterType`                                               | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                                                                           |
+| `DiscoveryOptions`                                            | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                                                                       |
+| `DiscoveryResult`                                             | type | Result of discovery (`controllers`, `services`, `errors`)                                                                                                                    |
+| `ModuleImporter`                                              | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                                                                         |
 
 Contract notes:
 
@@ -12414,19 +12417,20 @@ Contract notes:
   false` keeps the metadata description-only and
   silences the warning — the pre-M89a behaviour. The appended middleware is M57-branded, so
   `deriveSecurity` documents decorated routes.
-- **`@Can` is validated at `register()` and always enforced (M110a).** Each `@Can` appends one
-  middleware AFTER `@Roles`/`@Permissions` and BEFORE interceptors, ordinary middleware, filters and
-  validation — so a target extractor reading the body sees the UNVALIDATED body. `register()`
-  throws, naming the route, when no `CAPABILITIES.AUTHORIZATION_POLICIES` provider is registered or
-  when the named policy or ability is not registered (an ordinary method of a policy class
-  type-checks and is refused here), or when the referenced class or definition does not declare that
-  ability with the registered policy's `anonymous` flag (a different policy sharing the registered
-  one's name — the same refusal `requirePolicy` meets at startup). An anonymous request to a
-  non-anonymous ability is refused before the target extractor runs. `enforceRoles` does not govern
-  it. Listing `policies` with no provider, a class without `@Policy`, or one without an `@Ability()`
-  method throws too. The middleware is branded authenticated unless the ability is anonymous, and a
-  route's `@Public` OpenAPI marker is omitted when any `@Can` requires a principal. The two packages
-  may not import each other, so `@Can` and `requirePolicy` are two thin middlewares over one
+- **`@RequirePolicy` is validated at `register()` and always enforced (M110a).** Each
+  `@RequirePolicy` appends one middleware AFTER `@Roles`/`@Permissions` and BEFORE interceptors,
+  ordinary middleware, filters and validation — so a target extractor reading the body sees the
+  UNVALIDATED body. `register()` throws, naming the route, when no
+  `CAPABILITIES.AUTHORIZATION_POLICIES` provider is registered or when the named policy or ability
+  is not registered (an ordinary method of a policy class type-checks and is refused here), or when
+  the referenced class or definition does not declare that ability with the registered policy's
+  `anonymous` flag (a different policy sharing the registered one's name — the same refusal
+  `requirePolicy` meets at startup). An anonymous request to a non-anonymous ability is refused
+  before the target extractor runs. `enforceRoles` does not govern it. Listing `policies` with no
+  provider, a class without `@Policy`, or one without an `@Ability()` method throws too. The
+  middleware is branded authenticated unless the ability is anonymous, and a route's `@Public`
+  OpenAPI marker is omitted when any `@RequirePolicy` requires a principal. The two packages may not
+  import each other, so `@RequirePolicy` and `requirePolicy` are two thin middlewares over one
   service, pinned together by a parity test.
 - **`Body()`/`Query()`/`Param()` read the VALIDATED value when one exists.** Each checks `ctx.state`
   under `validatedStateKey(target)` first — presence-tested with `has`, so a validated `null` or `0`

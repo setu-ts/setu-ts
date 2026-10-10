@@ -1,7 +1,7 @@
 /**
- * Class-form policy registration and `@Can` enforcement (M110a §3.11).
+ * Class-form policy registration and `@RequirePolicy` enforcement (M110a §3.11).
  *
- * This package may not import AuthPlugin (AI_GUIDELINES §2.2), so `@Can`
+ * This package may not import AuthPlugin (AI_GUIDELINES §2.2), so `@RequirePolicy`
  * builds its own thin middleware over the PUBLIC
  * `IAuthorizationPolicyService` contract; the evaluation itself stays in the
  * one service AuthPlugin registers. The refusals match the `requirePolicy`
@@ -167,7 +167,7 @@ function policyLabel(store: MetadataStore, policy: Constructor | PolicyDefinitio
 }
 
 /**
- * Builds one `@Can` enforcing middleware: `501` while no policy service is
+ * Builds one `@RequirePolicy` enforcing middleware: `501` while no policy service is
  * registered (re-resolved per request, like the guards), `401`/`403` on a
  * denial, `next()` when allowed. A target extractor's throw propagates.
  *
@@ -177,7 +177,7 @@ function policyLabel(store: MetadataStore, policy: Constructor | PolicyDefinitio
  * @param anonymous - Whether the registered ability is anonymous (for the brand)
  * @returns The branded middleware
  */
-export function createCanMiddleware(
+export function createPolicyMiddleware(
   name: string,
   ability: string,
   target: unknown,
@@ -215,12 +215,12 @@ export function createCanMiddleware(
 }
 
 /**
- * Validates a route's `@Can` requirements against the registry and appends
+ * Validates a route's `@RequirePolicy` requirements against the registry and appends
  * their middleware, top to bottom.
  *
  * @param store - The metadata store
  * @param label - The route label for refusals (`Route GET /x (C.m)`)
- * @param requirements - The route's `@Can` requirements
+ * @param requirements - The route's `@RequirePolicy` requirements
  * @param middleware - The route's middleware chain, appended to
  * @param service - The registration-time policy service, if any
  * @returns Whether any appended requirement requires a signed-in principal
@@ -239,7 +239,7 @@ export function appendPolicyMiddleware(
   }
   if (service === undefined) {
     throw new Error(
-      `${label} is decorated with @Can, but no CAPABILITIES.AUTHORIZATION_POLICIES provider is ` +
+      `${label} is decorated with @RequirePolicy, but no CAPABILITIES.AUTHORIZATION_POLICIES provider is ` +
         'registered. Register AuthPlugin from @setu-ts/auth-plugin.',
     );
   }
@@ -249,7 +249,7 @@ export function appendPolicyMiddleware(
     const info = name === undefined ? undefined : service.describe(name, requirement.ability);
     if (name === undefined || info === undefined) {
       throw new Error(
-        `${label} is decorated with @Can(${policyLabel(store, requirement.policy)}, ` +
+        `${label} is decorated with @RequirePolicy(${policyLabel(store, requirement.policy)}, ` +
           `${JSON.stringify(requirement.ability)}), but no such policy ability is registered. ` +
           'Register the policy through AuthPlugin({ policies }) or DecoratorPlugin({ policies }).',
       );
@@ -261,7 +261,7 @@ export function appendPolicyMiddleware(
     // enforce rules the route's author never wrote.
     if (declaredAnonymous(store, requirement.policy, requirement.ability) !== info.anonymous) {
       throw new Error(
-        `${label} is decorated with @Can(${policyLabel(store, requirement.policy)}, ` +
+        `${label} is decorated with @RequirePolicy(${policyLabel(store, requirement.policy)}, ` +
           `${JSON.stringify(requirement.ability)}), but the registered ` +
           `${JSON.stringify(name)} policy declares that ability differently — a different policy ` +
           'is registered under the same name.',
@@ -269,7 +269,7 @@ export function appendPolicyMiddleware(
     }
     authenticated ||= !info.anonymous;
     middleware.push(
-      createCanMiddleware(name, requirement.ability, requirement.target, info.anonymous),
+      createPolicyMiddleware(name, requirement.ability, requirement.target, info.anonymous),
     );
   }
   return authenticated;

@@ -233,7 +233,8 @@ schema and a description the declaration does not carry.
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
 - **Security** — `@Roles`, `@Permissions` (enforced — see below), `@Public` (unrestricted OpenAPI
   marking)
-- **Authorization policies** — `@Policy`, `@Ability`, `@Can` (see Authorization policies below)
+- **Authorization policies** — `@Policy`, `@Ability`, `@RequirePolicy` (see Authorization policies
+  below)
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
 - **Idempotency** — `@Idempotent(options?)`, appended LAST in a route's middleware (after guards,
@@ -283,18 +284,18 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 
 `@Policy(name)` marks a class as an authorization policy and `@Ability()` marks each ability method;
 a method named `before` is the policy's `before` hook. List the class in `policies`, and require an
-ability on a route with `@Can(policy, ability, target?)` — the target is a value or an extractor
-called per request:
+ability on a route with `@RequirePolicy(policy, ability, target?)` — the target is a value or an
+extractor called per request:
 
 ```typescript
 import type { IPrincipal } from '@setu-ts/common';
 import {
   Ability,
-  Can,
   Controller,
   DecoratorPlugin,
   Patch,
   Policy,
+  RequirePolicy,
 } from '@setu-ts/decorator-plugin';
 
 interface Post {
@@ -313,7 +314,7 @@ class PostPolicy {
 @Controller('/posts')
 class PostController {
   @Patch('/:id')
-  @Can(PostPolicy, 'update', (ctx) => ({ id: ctx.params.id ?? '', authorId: 'ann' }))
+  @RequirePolicy(PostPolicy, 'update', (ctx) => ({ id: ctx.params.id ?? '', authorId: 'ann' }))
   update(): { readonly saved: boolean } {
     return { saved: true };
   }
@@ -326,12 +327,12 @@ export const decorators = DecoratorPlugin({
 ```
 
 The policy service comes from `AuthPlugin` (`@setu-ts/auth-plugin`), which must be registered:
-`register()` fails, naming the route, when it is missing or when a `@Can` names a policy or ability
-that is not registered. `@Can` also accepts a `definePolicy` definition, may be repeated (every one
-must allow, top to bottom), and runs after guards and `@Roles`/`@Permissions` but before validation
-— so an extractor reading the body sees the unvalidated body. Refusals are `401` (anonymous) and
-`403` (signed in), the same bodies as AuthPlugin's `requirePolicy` guard; `enforceRoles` does not
-affect `@Can`. See
+`register()` fails, naming the route, when it is missing or when a `@RequirePolicy` names a policy
+or ability that is not registered. `@RequirePolicy` also accepts a `definePolicy` definition, may be
+repeated (every one must allow, top to bottom), and runs after guards and `@Roles`/`@Permissions`
+but before validation — so an extractor reading the body sees the unvalidated body. Refusals are
+`401` (anonymous) and `403` (signed in), the same bodies as AuthPlugin's `requirePolicy` guard;
+`enforceRoles` does not affect `@RequirePolicy`. See
 [Authorization](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md).
 
 ## Exports
@@ -343,7 +344,7 @@ affect `@Can`. See
 | `ApiResponse`                | function  |
 | `ApiTags`                    | function  |
 | `Body`                       | function  |
-| `Can`                        | function  |
+| `RequirePolicy`              | function  |
 | `clearParameterResolvers`    | function  |
 | `CommandHandler`             | function  |
 | `Controller`                 | function  |

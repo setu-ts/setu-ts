@@ -7,24 +7,24 @@
 ## 0. Objective & scope
 
 One place to answer "may this principal do this, to this target?" — asynchronously, with the target
-as an argument, reachable declaratively from a route (a functional guard and a class-form `@Can`)
-and imperatively from a handler or service, failing closed with the same `401`/`403`/`501` bodies
-the existing role guards answer. `IAuthorizationService` (`common/src/services/auth.ts:152`) is
-synchronous and takes a principal plus a role or permission STRING, so no target can reach a
-decision; today the only home for "the author of this document" is a hand-written middleware that
-re-derives the guards' guarantees by hand. This milestone adds a NEW capability beside
-`CAPABILITIES.AUTHORIZATION`, which stays byte-for-byte unchanged. It is the seam 110b's scoped RBAC
-is built on: a policy is the unit an application — or an external engine such as OpenFGA or Casbin —
-plugs in at.
+as an argument, reachable declaratively from a route (a functional guard and a class-form
+`@RequirePolicy`) and imperatively from a handler or service, failing closed with the same
+`401`/`403`/`501` bodies the existing role guards answer. `IAuthorizationService`
+(`common/src/services/auth.ts:152`) is synchronous and takes a principal plus a role or permission
+STRING, so no target can reach a decision; today the only home for "the author of this document" is
+a hand-written middleware that re-derives the guards' guarantees by hand. This milestone adds a NEW
+capability beside `CAPABILITIES.AUTHORIZATION`, which stays byte-for-byte unchanged. It is the seam
+110b's scoped RBAC is built on: a policy is the unit an application — or an external engine such as
+OpenFGA or Casbin — plugs in at.
 
 - **In scope:** the `common` contract (`IAuthorizationPolicyService`, `PolicyDefinition`,
   `CAPABILITIES.AUTHORIZATION_POLICIES`) plus one shared refusal-init helper; in `auth-plugin` the
   ONE evaluator (`PolicyService`), `definePolicy`, the `policies` option, the `requirePolicy` route
   guard, the throwing `AuthorizationDeniedError` / `UnknownPolicyError`, and the startup scan that
   refuses a guard naming an unregistered policy or ability; in `decorator-plugin` the class form
-  (`@Policy`, `@Ability`, `DecoratorPluginOptions.policies`) and `@Can`; the M57 brand on every
-  policy guard so `deriveSecurity` documents it; `PUBLIC_API.md`, both READMEs, `ARCHITECTURE.md`
-  §14, `CHANGELOG.md`, and a new `docs/authorization.md` ("where does ABAC go").
+  (`@Policy`, `@Ability`, `DecoratorPluginOptions.policies`) and `@RequirePolicy`; the M57 brand on
+  every policy guard so `deriveSecurity` documents it; `PUBLIC_API.md`, both READMEs,
+  `ARCHITECTURE.md` §14, `CHANGELOG.md`, and a new `docs/authorization.md` ("where does ABAC go").
 - **NOT this milestone:** scoped grants (110b); an ingress-behaviour form of the check (named gap,
   §3.13 — owner: proposed M110c); rerouting the six role/permission guards through the evaluator
   (ROADMAP fixes this out); policy decision explanations through M98h's diagnostics connector
@@ -32,29 +32,29 @@ plugs in at.
 
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference                                        | Source (file:line)                                                                                            | Verified surface / fact                                                                                                                                                                                                                                                                     |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IAuthorizationService`                          | `packages/common/src/services/auth.ts:152`                                                                    | Four SYNCHRONOUS members (`hasRole`/`hasPermission`/`hasAnyRole`/`hasAllPermissions`), each `(principal: IPrincipal, string \| string[]) => boolean`. No target parameter, no `null` principal. Unchanged by this milestone.                                                                |
-| `IPrincipal`                                     | `packages/common/src/services/auth.ts:16`                                                                     | `{ id; roles?; permissions?; claims? }`, all readonly. The policy check receives it verbatim.                                                                                                                                                                                               |
-| `CAPABILITIES` / token grammar                   | `packages/common/src/tokens.ts:59,174,295,323,343`                                                            | `AUTHORIZATION: 'authorization'`, `AUTHORIZATION_DIAGNOSTICS`, `IDEMPOTENCY`; `TOKEN_PATTERN` is kebab segments joined by `.` — `'authorization-policies'` matches (one segment, hyphenated).                                                                                               |
-| `respondWithAuthorizationFailure`                | `packages/common/src/errors/authorization-responder.ts:39`                                                    | Four arms; the strings (`401 Unauthorized / Authentication required`, `403 Forbidden / Insufficient privileges`, `501 Not Implemented / Authorization is not configured`) are INLINE literals in the switch — a second writer of the same bodies would duplicate them (§3.9).               |
-| `withHttpStatusHint` / `HttpStatusHint`          | `packages/common/src/errors/status-hint.ts`                                                                   | `HttpStatusHint extends ErrorResponseInit` with `status` (400–599) and REQUIRED `detail`; the hint is honoured by `errorHandler` only (`exceptions/src/middleware/error-handler.ts`); the kernel's fallback 500 does NOT read it (grep: no `httpStatusHintOf` under `packages/kernel/src`). |
-| `withSecurityMetadata` / `RouteSecurityMetadata` | `packages/common/src/http.ts:538,664,698,725`                                                                 | `Symbol.for('setu.security.metadata')`, `{ authenticated: boolean }`, defined `configurable: true, writable: false, enumerable: false`; read by `openapi-plugin`'s `deriveSecurity`.                                                                                                        |
-| The six guards                                   | `packages/auth-plugin/src/guards/index.ts`                                                                    | 401 when `ctx.request.user` absent; `resolveAuthorization` answers 501 via `services.has` (per request); 403 on a failed check; all branded `AUTHENTICATED`. Untouched here.                                                                                                                |
-| `AuthPlugin` provides / register                 | `packages/auth-plugin/src/plugin/auth-plugin.ts:126-141,440-519`                                              | `provides` is assembled conditionally; `optionalDependencies: [CAPABILITIES.SESSION]`; `priority: PLUGIN_PRIORITY.NORMAL`; services registered synchronously in `register()`; `onClose` already used.                                                                                       |
-| `AuthPluginOptions`                              | `packages/auth-plugin/src/interfaces/index.ts:270`                                                            | Has `jwt?`/`middleware?`/`apiKey?`/`local?`/`rbac?`/`authorizationDiagnostics?`/`session?`/`strategies?`/… — no `policies` member. Validation happens at `AuthPlugin(...)` construction (`AuthPluginConfigurationError`, `src/errors.ts`).                                                  |
-| `IRouterApi.listRoutes` / `RouteInfo`            | `packages/common/src/plugin.ts:58,162`                                                                        | `listRoutes(): readonly RouteInfo[]`, each carrying `definition.middleware`. Available on `IPluginContext.router`; the router has no seal, so a route may be added after `start()`.                                                                                                         |
-| Lifecycle order                                  | `packages/kernel/src/application/application.ts:770-798`                                                      | all `register()` → `runInit` → pipeline compile → `runBootstrap` → `registry.seal()` → `setHandler` → `listen`. Routes registered in any `register()` exist at bootstrap.                                                                                                                   |
-| `ILifecycleApi.onBootstrap`                      | `packages/common/src/plugin.ts:341`                                                                           | "Runs immediately before the server starts listening."                                                                                                                                                                                                                                      |
-| `DecoratorPlugin` chain order                    | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:943-984`                                            | guards → `appendAuthorizationMiddleware` (`@Roles`/`@Permissions`, when `enforceRoles`) → interceptors/middleware/filters → validation (when `enforceSchemas`) → idempotency. Optional deps resolved ONCE at `register()` (lines 1076-1095).                                                |
-| `DecoratorPlugin` optional deps / priority       | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:1044-1067`                                          | `priority: PLUGIN_PRIORITY.LOW`; `optionalDependencies` lists VALIDATION, AUTHORIZATION, VIEW, IDEMPOTENCY (+ ingress tokens). So AuthPlugin (NORMAL) registers before it.                                                                                                                  |
-| `@Render` / `@Idempotent` refusal precedent      | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:471,492`                                            | New-surface decorator with no provider THROWS at `register()` naming route + remedy (not warn). `@Can` follows this, not the `@Roles` warn arm (which preserves released behaviour).                                                                                                        |
-| `buildRouteSchema` public marker                 | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:585-600`                                            | `@Public`'s `security: []` is emitted only when no enforced restriction exists; `@Can` must join that condition (§3.10).                                                                                                                                                                    |
-| Decorator metadata model                         | `packages/decorator-plugin/src/metadata/metadata-store.ts:239-280`, `context-bridge.ts`                       | `RouteMetadata` is package-local (not in `common`); method decorators use `methodDecorator((store, target, handler) => store.mutateMethod(...))`; class decorators drain via `Symbol.metadata` (M76). Adding route/class slots needs no `IMetadataStore` widening (the M97a precedent).     |
-| `instantiate(target, ctx)`                       | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:281`                                                | DI-aware construction (container when present, else class-position `@Inject`); reused for class policies.                                                                                                                                                                                   |
-| `IngressContext`                                 | `packages/common/src/services/ingress.ts:55`                                                                  | `kind`/`name`/`payload`/`attempt?`/`headers?`/`consumer?` — NO principal; the JSDoc states "no `state`, no `services`".                                                                                                                                                                     |
-| `serializeError`                                 | `packages/common/src/errors/serialize-error.ts:165`                                                           | Bounded, total; used for the throwing-policy log.                                                                                                                                                                                                                                           |
-| Name collisions                                  | `grep -rn "export.*\b(Policy\|Ability\|Can\|definePolicy\|requirePolicy\|PolicyDefinition)\b" packages/*/src` | Empty — none of the new names exist.                                                                                                                                                                                                                                                        |
+| Reference                                        | Source (file:line)                                                                                                      | Verified surface / fact                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IAuthorizationService`                          | `packages/common/src/services/auth.ts:152`                                                                              | Four SYNCHRONOUS members (`hasRole`/`hasPermission`/`hasAnyRole`/`hasAllPermissions`), each `(principal: IPrincipal, string \| string[]) => boolean`. No target parameter, no `null` principal. Unchanged by this milestone.                                                                |
+| `IPrincipal`                                     | `packages/common/src/services/auth.ts:16`                                                                               | `{ id; roles?; permissions?; claims? }`, all readonly. The policy check receives it verbatim.                                                                                                                                                                                               |
+| `CAPABILITIES` / token grammar                   | `packages/common/src/tokens.ts:59,174,295,323,343`                                                                      | `AUTHORIZATION: 'authorization'`, `AUTHORIZATION_DIAGNOSTICS`, `IDEMPOTENCY`; `TOKEN_PATTERN` is kebab segments joined by `.` — `'authorization-policies'` matches (one segment, hyphenated).                                                                                               |
+| `respondWithAuthorizationFailure`                | `packages/common/src/errors/authorization-responder.ts:39`                                                              | Four arms; the strings (`401 Unauthorized / Authentication required`, `403 Forbidden / Insufficient privileges`, `501 Not Implemented / Authorization is not configured`) are INLINE literals in the switch — a second writer of the same bodies would duplicate them (§3.9).               |
+| `withHttpStatusHint` / `HttpStatusHint`          | `packages/common/src/errors/status-hint.ts`                                                                             | `HttpStatusHint extends ErrorResponseInit` with `status` (400–599) and REQUIRED `detail`; the hint is honoured by `errorHandler` only (`exceptions/src/middleware/error-handler.ts`); the kernel's fallback 500 does NOT read it (grep: no `httpStatusHintOf` under `packages/kernel/src`). |
+| `withSecurityMetadata` / `RouteSecurityMetadata` | `packages/common/src/http.ts:538,664,698,725`                                                                           | `Symbol.for('setu.security.metadata')`, `{ authenticated: boolean }`, defined `configurable: true, writable: false, enumerable: false`; read by `openapi-plugin`'s `deriveSecurity`.                                                                                                        |
+| The six guards                                   | `packages/auth-plugin/src/guards/index.ts`                                                                              | 401 when `ctx.request.user` absent; `resolveAuthorization` answers 501 via `services.has` (per request); 403 on a failed check; all branded `AUTHENTICATED`. Untouched here.                                                                                                                |
+| `AuthPlugin` provides / register                 | `packages/auth-plugin/src/plugin/auth-plugin.ts:126-141,440-519`                                                        | `provides` is assembled conditionally; `optionalDependencies: [CAPABILITIES.SESSION]`; `priority: PLUGIN_PRIORITY.NORMAL`; services registered synchronously in `register()`; `onClose` already used.                                                                                       |
+| `AuthPluginOptions`                              | `packages/auth-plugin/src/interfaces/index.ts:270`                                                                      | Has `jwt?`/`middleware?`/`apiKey?`/`local?`/`rbac?`/`authorizationDiagnostics?`/`session?`/`strategies?`/… — no `policies` member. Validation happens at `AuthPlugin(...)` construction (`AuthPluginConfigurationError`, `src/errors.ts`).                                                  |
+| `IRouterApi.listRoutes` / `RouteInfo`            | `packages/common/src/plugin.ts:58,162`                                                                                  | `listRoutes(): readonly RouteInfo[]`, each carrying `definition.middleware`. Available on `IPluginContext.router`; the router has no seal, so a route may be added after `start()`.                                                                                                         |
+| Lifecycle order                                  | `packages/kernel/src/application/application.ts:770-798`                                                                | all `register()` → `runInit` → pipeline compile → `runBootstrap` → `registry.seal()` → `setHandler` → `listen`. Routes registered in any `register()` exist at bootstrap.                                                                                                                   |
+| `ILifecycleApi.onBootstrap`                      | `packages/common/src/plugin.ts:341`                                                                                     | "Runs immediately before the server starts listening."                                                                                                                                                                                                                                      |
+| `DecoratorPlugin` chain order                    | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:943-984`                                                      | guards → `appendAuthorizationMiddleware` (`@Roles`/`@Permissions`, when `enforceRoles`) → interceptors/middleware/filters → validation (when `enforceSchemas`) → idempotency. Optional deps resolved ONCE at `register()` (lines 1076-1095).                                                |
+| `DecoratorPlugin` optional deps / priority       | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:1044-1067`                                                    | `priority: PLUGIN_PRIORITY.LOW`; `optionalDependencies` lists VALIDATION, AUTHORIZATION, VIEW, IDEMPOTENCY (+ ingress tokens). So AuthPlugin (NORMAL) registers before it.                                                                                                                  |
+| `@Render` / `@Idempotent` refusal precedent      | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:471,492`                                                      | New-surface decorator with no provider THROWS at `register()` naming route + remedy (not warn). `@RequirePolicy` follows this, not the `@Roles` warn arm (which preserves released behaviour).                                                                                              |
+| `buildRouteSchema` public marker                 | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:585-600`                                                      | `@Public`'s `security: []` is emitted only when no enforced restriction exists; `@RequirePolicy` must join that condition (§3.10).                                                                                                                                                          |
+| Decorator metadata model                         | `packages/decorator-plugin/src/metadata/metadata-store.ts:239-280`, `context-bridge.ts`                                 | `RouteMetadata` is package-local (not in `common`); method decorators use `methodDecorator((store, target, handler) => store.mutateMethod(...))`; class decorators drain via `Symbol.metadata` (M76). Adding route/class slots needs no `IMetadataStore` widening (the M97a precedent).     |
+| `instantiate(target, ctx)`                       | `packages/decorator-plugin/src/plugin/decorator-plugin.ts:281`                                                          | DI-aware construction (container when present, else class-position `@Inject`); reused for class policies.                                                                                                                                                                                   |
+| `IngressContext`                                 | `packages/common/src/services/ingress.ts:55`                                                                            | `kind`/`name`/`payload`/`attempt?`/`headers?`/`consumer?` — NO principal; the JSDoc states "no `state`, no `services`".                                                                                                                                                                     |
+| `serializeError`                                 | `packages/common/src/errors/serialize-error.ts:165`                                                                     | Bounded, total; used for the throwing-policy log.                                                                                                                                                                                                                                           |
+| Name collisions                                  | `grep -rn "export.*\b(Policy\|Ability\|RequirePolicy\|definePolicy\|requirePolicy\|PolicyDefinition)\b" packages/*/src` | Empty — none of the new names exist.                                                                                                                                                                                                                                                        |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -63,7 +63,7 @@ plugs in at.
 | C1 | ROADMAP names the route guard `can(policy, ability, target?)`; AI_GUIDELINES §10.4 names guards `requireXxx`.                                                                                                      | §10.4 wins: the guard is `requirePolicy`. `can` stays the name of the boolean member on the service, where it reads naturally.                                                                                                                                                                                                          | ROADMAP M110a scope bullet corrected to `requirePolicy`.             |
 | C2 | ROADMAP gives every ability the signature `(principal \| null, target?) → boolean`.                                                                                                                                | Refined, not inherited: an ability sees `null` ONLY when it opts in (`{ anonymous: true, check }`). Otherwise an anonymous principal is denied `401` before the check runs, so the default is fail-closed and a non-anonymous check is typed `IPrincipal` (no null handling to forget). Also what makes the M57 brand truthful (§3.10). | ROADMAP M110a "Policies" bullet amended; PUBLIC_API states the rule. |
 | C3 | ROADMAP's contract sketch is `authorize(...) → Promise<AuthorizationDecision>` beside `can(...) → Promise<boolean>`; the same section's survey says applications need "a throwing check plus a non-throwing twin". | The survey wins: `authorize` REJECTS on a deny (with an `errorHandler`-honoured `401`/`403` hint) and `can` resolves a boolean; both call one private evaluation. No public `AuthorizationDecision` type — it would be dead surface (the guard derives `401` vs `403` from principal presence, §3.6).                                   | ROADMAP M110a contract bullet corrected.                             |
-| C4 | ROADMAP: "an unknown policy or ability named by a guard … fails at `register()`". A functional guard is a value an application builds; no `register()` sees it.                                                    | Refused at STARTUP instead: AuthPlugin's `onBootstrap` hook scans `ctx.router.listRoutes()` for policy-guard brands and throws before `listen`. `@Can` is refused in DecoratorPlugin's own `register()`. Both precede serving; a route added after `start()` is the documented residual (§3.7).                                         | ROADMAP wording "fails at startup"; PUBLIC_API states the residual.  |
+| C4 | ROADMAP: "an unknown policy or ability named by a guard … fails at `register()`". A functional guard is a value an application builds; no `register()` sees it.                                                    | Refused at STARTUP instead: AuthPlugin's `onBootstrap` hook scans `ctx.router.listRoutes()` for policy-guard brands and throws before `listen`. `@RequirePolicy` is refused in DecoratorPlugin's own `register()`. Both precede serving; a route added after `start()` is the documented residual (§3.7).                               | ROADMAP wording "fails at startup"; PUBLIC_API states the residual.  |
 | C5 | ARCHITECTURE §14 "Authorization" lists the six guards as the whole authorization surface.                                                                                                                          | Extended, not contradicted.                                                                                                                                                                                                                                                                                                             | ARCHITECTURE §14 gains a "Policies" subsection.                      |
 
 ## 3. Design decisions
@@ -252,7 +252,7 @@ plugs in at.
   list) and `define`d in `register()`.
 - **Why:** construction-time refusal is the package's convention. No `RegistryFactory` arm: a policy
   needing a capability uses the class form (§3.11), which gets DI; an arm resolved at `onInit` would
-  land AFTER DecoratorPlugin's register-time `@Can` validation.
+  land AFTER DecoratorPlugin's register-time `@RequirePolicy` validation.
 - **Test home:** `policy-plugin.test.ts`.
 
 ### 3.9 One owner for the refusal bodies
@@ -270,14 +270,15 @@ plugs in at.
 
 ### 3.10 M57 brand and the OpenAPI `@Public` marker
 
-- **Decision:** `requirePolicy` and `@Can` middleware are branded with
+- **Decision:** `requirePolicy` and `@RequirePolicy` middleware are branded with
   `withSecurityMetadata(mw, { authenticated: !anonymous })` where `anonymous` comes from the
-  ability. `buildRouteSchema` omits `@Public`'s `security: []` when the route carries any `@Can`
-  whose ability is not anonymous (joining the `@Roles` condition). No `openapi-plugin` change.
+  ability. `buildRouteSchema` omits `@Public`'s `security: []` when the route carries any
+  `@RequirePolicy` whose ability is not anonymous (joining the `@Roles` condition). No
+  `openapi-plugin` change.
 - **Why:** an anonymous-allowed ability must not be documented as requiring authentication.
 - **Test home:** `auth-plugin/test/integration/policy-openapi.test.ts` (real `OpenApiPlugin` with
   `deriveSecurity`: authenticated route documented, anonymous route not);
-  `decorator-plugin/test/unit/can-schema.test.ts`.
+  `decorator-plugin/test/unit/require-policy-schema.test.ts`.
 
 ### 3.11 Class form in decorator-plugin
 
@@ -291,23 +292,24 @@ plugs in at.
   is converted to a `PolicyDefinition` whose checks call the bound methods, and `define`d on the
   resolved `AUTHORIZATION_POLICIES` service. Refusals at `register()`: a class without `@Policy`, a
   `@Policy` class with no `@Ability`, `policies` given with no provider.
-  `@Can(policy, ability, target?)` (method; repeatable — ALL must allow, evaluated top to bottom)
-  takes a `@Policy` class or a `PolicyDefinition`; ability typed as the definition's ability keys,
-  or for a class as `keyof InstanceType<C> & string` — the type cannot tell an `@Ability` method
-  from an ordinary one, so naming a non-ability method compiles and is refused at `register()`
-  through `describe`; target a value or `(ctx) => T`. Appended after `@Roles`/`@Permissions` and
-  before interceptors; validated at `register()` via `describe` (unknown → throw naming route,
-  policy, ability; no provider → throw naming `AuthPlugin`). `AUTHORIZATION_POLICIES` joins
-  `optionalDependencies`. The packages may not import each other (AI_GUIDELINES §2.2), so
-  decorator-plugin builds its own thin middleware over the same public contract — evaluation stays
-  in the one `PolicyService` — and the parity test (§3.12) proves the two entry points agree.
+  `@RequirePolicy(policy, ability, target?)` (method; repeatable — ALL must allow, evaluated top to
+  bottom) takes a `@Policy` class or a `PolicyDefinition`; ability typed as the definition's ability
+  keys, or for a class as `keyof InstanceType<C> & string` — the type cannot tell an `@Ability`
+  method from an ordinary one, so naming a non-ability method compiles and is refused at
+  `register()` through `describe`; target a value or `(ctx) => T`. Appended after
+  `@Roles`/`@Permissions` and before interceptors; validated at `register()` via `describe` (unknown
+  → throw naming route, policy, ability; no provider → throw naming `AuthPlugin`).
+  `AUTHORIZATION_POLICIES` joins `optionalDependencies`. The packages may not import each other
+  (AI_GUIDELINES §2.2), so decorator-plugin builds its own thin middleware over the same public
+  contract — evaluation stays in the one `PolicyService` — and the parity test (§3.12) proves the
+  two entry points agree.
 - **Why:** functional default / class opt-in (M65); DI for policies that need a repository.
 - **Test home:** `decorator-plugin/test/unit/policy-decorators.test.ts`,
-  `decorator-plugin/test/integration/can-e2e.test.ts`.
+  `decorator-plugin/test/integration/require-policy-e2e.test.ts`.
 
 ### 3.12 Parity across entry points
 
-- **Decision:** one integration test drives `requirePolicy`, `@Can`, `service.can` and
+- **Decision:** one integration test drives `requirePolicy`, `@RequirePolicy`, `service.can` and
   `service.authorize` (through `errorHandler`) for the SAME policy, principal and target, under a
   NON-default configuration (`format: 'rfc9457'`, a `before` hook, an anonymous ability), and
   asserts identical allow/deny and byte-identical refusal bodies (modulo `instance`).
@@ -328,19 +330,19 @@ plugs in at.
 **Breaking for implementors:** none — a new capability token, new types and new exports; no existing
 interface gains a member. `respondWithAuthorizationFailure` keeps its signature and output.
 
-| Exported symbol                                                                                                       | Kind      | Consumer / real code path that READS it                                                                 |
-| --------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES.AUTHORIZATION_POLICIES` (common)                                                                        | token     | AuthPlugin `provides`/`register`; `requirePolicy`; DecoratorPlugin `optionalDependencies` + `register`  |
-| `IAuthorizationPolicyService` (common)                                                                                | interface | `PolicyService implements`; `requirePolicy`; DecoratorPlugin's `@Can` middleware and class registration |
-| `PolicyDefinition`, `PolicyAbility`, `PolicyCheck`, `AnonymousPolicyCheck`, `PolicyRef`, `PolicyAbilityInfo` (common) | types     | `IAuthorizationPolicyService` signatures; `definePolicy`; DecoratorPlugin's class conversion            |
-| `authorizationFailureInit` (common)                                                                                   | function  | `respondWithAuthorizationFailure`; `AuthorizationDeniedError`                                           |
-| `definePolicy` (auth-plugin)                                                                                          | function  | applications; `AuthPluginOptions.policies`                                                              |
-| `requirePolicy` (auth-plugin)                                                                                         | function  | applications' route definitions; scanned at bootstrap                                                   |
-| `AuthorizationDeniedError` (auth-plugin)                                                                              | class     | `PolicyService.authorize` rejection; applications' `instanceof`                                         |
-| `UnknownPolicyError` (auth-plugin)                                                                                    | class     | `PolicyService` rejection; applications' `instanceof`                                                   |
-| re-export `IAuthorizationPolicyService` (auth-plugin)                                                                 | type      | the package's existing "re-export common contracts" block                                               |
-| `Policy`, `Ability`, `Can` (decorator-plugin)                                                                         | functions | DecoratorPlugin `policies` registration and route registration                                          |
-| `CanTarget` (decorator-plugin)                                                                                        | type      | `@Can`'s third parameter                                                                                |
+| Exported symbol                                                                                                       | Kind      | Consumer / real code path that READS it                                                                           |
+| --------------------------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES.AUTHORIZATION_POLICIES` (common)                                                                        | token     | AuthPlugin `provides`/`register`; `requirePolicy`; DecoratorPlugin `optionalDependencies` + `register`            |
+| `IAuthorizationPolicyService` (common)                                                                                | interface | `PolicyService implements`; `requirePolicy`; DecoratorPlugin's `@RequirePolicy` middleware and class registration |
+| `PolicyDefinition`, `PolicyAbility`, `PolicyCheck`, `AnonymousPolicyCheck`, `PolicyRef`, `PolicyAbilityInfo` (common) | types     | `IAuthorizationPolicyService` signatures; `definePolicy`; DecoratorPlugin's class conversion                      |
+| `authorizationFailureInit` (common)                                                                                   | function  | `respondWithAuthorizationFailure`; `AuthorizationDeniedError`                                                     |
+| `definePolicy` (auth-plugin)                                                                                          | function  | applications; `AuthPluginOptions.policies`                                                                        |
+| `requirePolicy` (auth-plugin)                                                                                         | function  | applications' route definitions; scanned at bootstrap                                                             |
+| `AuthorizationDeniedError` (auth-plugin)                                                                              | class     | `PolicyService.authorize` rejection; applications' `instanceof`                                                   |
+| `UnknownPolicyError` (auth-plugin)                                                                                    | class     | `PolicyService` rejection; applications' `instanceof`                                                             |
+| re-export `IAuthorizationPolicyService` (auth-plugin)                                                                 | type      | the package's existing "re-export common contracts" block                                                         |
+| `Policy`, `Ability`, `RequirePolicy` (decorator-plugin)                                                               | functions | DecoratorPlugin `policies` registration and route registration                                                    |
+| `RequirePolicyTarget` (decorator-plugin)                                                                              | type      | `@RequirePolicy`'s third parameter                                                                                |
 
 ### 4.1 Options — every option names its consumer
 
@@ -352,27 +354,27 @@ interface gains a member. `respondWithAuthorizationFailure` keeps its signature 
 
 ## 5. Implementation files
 
-| File                                                          | Purpose                                                                                   |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `packages/common/src/services/authorization-policies.ts`      | contract + definition types                                                               |
-| `packages/common/src/tokens.ts`                               | `AUTHORIZATION_POLICIES`                                                                  |
-| `packages/common/src/errors/authorization-responder.ts`       | `authorizationFailureInit`; responder rewritten over it                                   |
-| `packages/common/src/index.ts`                                | barrel                                                                                    |
-| `packages/auth-plugin/src/policies/policy-service.ts`         | `PolicyService` (evaluator, define, describe, seal)                                       |
-| `packages/auth-plugin/src/policies/define-policy.ts`          | `definePolicy` + shared `validatePolicyDefinition` (internal export)                      |
-| `packages/auth-plugin/src/policies/errors.ts`                 | `AuthorizationDeniedError`, `UnknownPolicyError`                                          |
-| `packages/auth-plugin/src/policies/policy-guard.ts`           | `requirePolicy`, the guard brand, `policyGuardOf` (internal)                              |
-| `packages/auth-plugin/src/policies/startup-scan.ts`           | `scanPolicyGuards(routes, service)` (internal)                                            |
-| `packages/auth-plugin/src/plugin/auth-plugin.ts`              | `provides`, `policies` option, register, `onBootstrap` scan + seal                        |
-| `packages/auth-plugin/src/interfaces/index.ts`                | `AuthPluginOptions.policies`                                                              |
-| `packages/auth-plugin/src/index.ts`                           | barrel                                                                                    |
-| `packages/decorator-plugin/src/decorators/policy.ts`          | `@Policy`, `@Ability`, `@Can`, `CanTarget`                                                |
-| `packages/decorator-plugin/src/plugin/policy-registration.ts` | class → `PolicyDefinition` conversion + `@Can` middleware builder + validation (internal) |
-| `packages/decorator-plugin/src/metadata/metadata-store.ts`    | route `policies` slot; class policy slots                                                 |
-| `packages/decorator-plugin/src/plugin/decorator-plugin.ts`    | option, optional dep, ordering, `buildRouteSchema` public-marker condition                |
-| `packages/decorator-plugin/src/index.ts`                      | barrel                                                                                    |
-| `docs/authorization.md`                                       | "where does ABAC go" guide (fence-gated)                                                  |
-| `docs/README.md`, `scripts/check-docs.ts` `REQUIRED_GUIDES`   | index the new guide (same precedent as `docs/localization.md`)                            |
+| File                                                          | Purpose                                                                                             |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `packages/common/src/services/authorization-policies.ts`      | contract + definition types                                                                         |
+| `packages/common/src/tokens.ts`                               | `AUTHORIZATION_POLICIES`                                                                            |
+| `packages/common/src/errors/authorization-responder.ts`       | `authorizationFailureInit`; responder rewritten over it                                             |
+| `packages/common/src/index.ts`                                | barrel                                                                                              |
+| `packages/auth-plugin/src/policies/policy-service.ts`         | `PolicyService` (evaluator, define, describe, seal)                                                 |
+| `packages/auth-plugin/src/policies/define-policy.ts`          | `definePolicy` + shared `validatePolicyDefinition` (internal export)                                |
+| `packages/auth-plugin/src/policies/errors.ts`                 | `AuthorizationDeniedError`, `UnknownPolicyError`                                                    |
+| `packages/auth-plugin/src/policies/policy-guard.ts`           | `requirePolicy`, the guard brand, `policyGuardOf` (internal)                                        |
+| `packages/auth-plugin/src/policies/startup-scan.ts`           | `scanPolicyGuards(routes, service)` (internal)                                                      |
+| `packages/auth-plugin/src/plugin/auth-plugin.ts`              | `provides`, `policies` option, register, `onBootstrap` scan + seal                                  |
+| `packages/auth-plugin/src/interfaces/index.ts`                | `AuthPluginOptions.policies`                                                                        |
+| `packages/auth-plugin/src/index.ts`                           | barrel                                                                                              |
+| `packages/decorator-plugin/src/decorators/policy.ts`          | `@Policy`, `@Ability`, `@RequirePolicy`, `RequirePolicyTarget`                                      |
+| `packages/decorator-plugin/src/plugin/policy-registration.ts` | class → `PolicyDefinition` conversion + `@RequirePolicy` middleware builder + validation (internal) |
+| `packages/decorator-plugin/src/metadata/metadata-store.ts`    | route `policies` slot; class policy slots                                                           |
+| `packages/decorator-plugin/src/plugin/decorator-plugin.ts`    | option, optional dep, ordering, `buildRouteSchema` public-marker condition                          |
+| `packages/decorator-plugin/src/index.ts`                      | barrel                                                                                              |
+| `docs/authorization.md`                                       | "where does ABAC go" guide (fence-gated)                                                            |
+| `docs/README.md`, `scripts/check-docs.ts` `REQUIRED_GUIDES`   | index the new guide (same precedent as `docs/localization.md`)                                      |
 
 Doc and process deliverables in the same PR: `PUBLIC_API.md` (common contract rows, auth-plugin and
 decorator-plugin sections), both package READMEs, `ARCHITECTURE.md` §14 "Policies" (C5), a
@@ -384,26 +386,26 @@ versions).
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                 | src covered                             | Key assertions                                                                                                                                                                 |
-| ------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `common/test/unit/authorization-responder.test.ts` (create — none exists) | authorization-responder.ts              | each arm's init literal; responder output unchanged across all four arms                                                                                                       |
-| `common/test/unit/authorization-policies-contract.test.ts`                | authorization-policies.ts, tokens.ts    | token grammar; type-level rows (`@ts-expect-error` on a misspelled ability through `PolicyRef<A,T>`)                                                                           |
-| `common/test/unit/barrel-exports.test.ts` (extend)                        | index.ts                                | new symbols pinned against the barrel                                                                                                                                          |
-| `auth-plugin/test/unit/policies/define-policy.test.ts`                    | define-policy.ts                        | every §3.3 refusal by name; frozen copy; inferred ability names                                                                                                                |
-| `auth-plugin/test/unit/policies/policy-service.test.ts`                   | policy-service.ts, errors.ts            | §3.4 table incl. literal-`true`, `null`/`1` deny, `before` arms, throwing policy denies + one log, throwing logger, prototype names, unknown names reject, no sync throw, seal |
-| `auth-plugin/test/unit/policies/require-policy.test.ts`                   | policy-guard.ts                         | 501/401/403/allow; extractor sync/async; extractor throw propagates; short-circuit; brand values                                                                               |
-| `auth-plugin/test/unit/policies/startup-scan.test.ts`                     | startup-scan.ts                         | unknown policy / ability named; non-guard middleware ignored                                                                                                                   |
-| `auth-plugin/test/integration/policy-plugin.test.ts`                      | auth-plugin.ts (new arms), interfaces   | token always provided; option validated at construction; real kernel app: allow/deny round trip                                                                                |
-| `auth-plugin/test/integration/policy-startup-scan.test.ts`                | auth-plugin.ts onBootstrap              | `start()` rejects naming route/policy/ability; post-start route residual; `define` after start throws                                                                          |
-| `auth-plugin/test/integration/policy-refusal-parity.test.ts`              | errors.ts + responder                   | thrown `authorize` deny through `errorHandler({format:'rfc9457'})` byte-identical to `requireRole` refusal (401 and 403)                                                       |
-| `auth-plugin/test/integration/policy-openapi.test.ts`                     | brand                                   | real `OpenApiPlugin` `deriveSecurity`: authenticated vs anonymous ability                                                                                                      |
-| `auth-plugin/test/unit/barrel-exports.test.ts` (extend — it exists)       | index.ts                                | new exports pinned                                                                                                                                                             |
-| `decorator-plugin/test/unit/policy-decorators.test.ts`                    | decorators/policy.ts, metadata-store.ts | metadata recorded; repeatable `@Can` order; `@Ability` anonymous; type rows                                                                                                    |
-| `decorator-plugin/test/unit/policy-registration.test.ts`                  | policy-registration.ts                  | conversion; `before` method wired; every register-time refusal; middleware 501/401/403/allow; extractor                                                                        |
-| `decorator-plugin/test/integration/can-e2e.test.ts`                       | decorator-plugin.ts arms                | real kernel app + AuthPlugin: class policy with injected dependency; `@Can` all-of; order after `@Roles`, before validation (401 → 403 → 400); `@Public` marker omitted        |
-| `decorator-plugin/test/unit/can-schema.test.ts`                           | decorator-plugin.ts `buildRouteSchema`  | `@Public` marker omitted beside a non-anonymous `@Can`, kept beside an anonymous one                                                                                           |
-| `decorator-plugin/test/integration/policy-parity.test.ts`                 | cross-entry                             | §3.12                                                                                                                                                                          |
-| `test/guide-fence-compiler.test.ts` (register `docs/authorization.md`)    | docs                                    | every fence compiles; the guide is added to `GUIDES` in `test/fixtures/snippets/fence-engine.ts` and to the test's `EXPECTED_INVENTORY`                                        |
+| Test file                                                                 | src covered                             | Key assertions                                                                                                                                                                    |
+| ------------------------------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common/test/unit/authorization-responder.test.ts` (create — none exists) | authorization-responder.ts              | each arm's init literal; responder output unchanged across all four arms                                                                                                          |
+| `common/test/unit/authorization-policies-contract.test.ts`                | authorization-policies.ts, tokens.ts    | token grammar; type-level rows (`@ts-expect-error` on a misspelled ability through `PolicyRef<A,T>`)                                                                              |
+| `common/test/unit/barrel-exports.test.ts` (extend)                        | index.ts                                | new symbols pinned against the barrel                                                                                                                                             |
+| `auth-plugin/test/unit/policies/define-policy.test.ts`                    | define-policy.ts                        | every §3.3 refusal by name; frozen copy; inferred ability names                                                                                                                   |
+| `auth-plugin/test/unit/policies/policy-service.test.ts`                   | policy-service.ts, errors.ts            | §3.4 table incl. literal-`true`, `null`/`1` deny, `before` arms, throwing policy denies + one log, throwing logger, prototype names, unknown names reject, no sync throw, seal    |
+| `auth-plugin/test/unit/policies/require-policy.test.ts`                   | policy-guard.ts                         | 501/401/403/allow; extractor sync/async; extractor throw propagates; short-circuit; brand values                                                                                  |
+| `auth-plugin/test/unit/policies/startup-scan.test.ts`                     | startup-scan.ts                         | unknown policy / ability named; non-guard middleware ignored                                                                                                                      |
+| `auth-plugin/test/integration/policy-plugin.test.ts`                      | auth-plugin.ts (new arms), interfaces   | token always provided; option validated at construction; real kernel app: allow/deny round trip                                                                                   |
+| `auth-plugin/test/integration/policy-startup-scan.test.ts`                | auth-plugin.ts onBootstrap              | `start()` rejects naming route/policy/ability; post-start route residual; `define` after start throws                                                                             |
+| `auth-plugin/test/integration/policy-refusal-parity.test.ts`              | errors.ts + responder                   | thrown `authorize` deny through `errorHandler({format:'rfc9457'})` byte-identical to `requireRole` refusal (401 and 403)                                                          |
+| `auth-plugin/test/integration/policy-openapi.test.ts`                     | brand                                   | real `OpenApiPlugin` `deriveSecurity`: authenticated vs anonymous ability                                                                                                         |
+| `auth-plugin/test/unit/barrel-exports.test.ts` (extend — it exists)       | index.ts                                | new exports pinned                                                                                                                                                                |
+| `decorator-plugin/test/unit/policy-decorators.test.ts`                    | decorators/policy.ts, metadata-store.ts | metadata recorded; repeatable `@RequirePolicy` order; `@Ability` anonymous; type rows                                                                                             |
+| `decorator-plugin/test/unit/policy-registration.test.ts`                  | policy-registration.ts                  | conversion; `before` method wired; every register-time refusal; middleware 501/401/403/allow; extractor                                                                           |
+| `decorator-plugin/test/integration/require-policy-e2e.test.ts`            | decorator-plugin.ts arms                | real kernel app + AuthPlugin: class policy with injected dependency; `@RequirePolicy` all-of; order after `@Roles`, before validation (401 → 403 → 400); `@Public` marker omitted |
+| `decorator-plugin/test/unit/require-policy-schema.test.ts`                | decorator-plugin.ts `buildRouteSchema`  | `@Public` marker omitted beside a non-anonymous `@RequirePolicy`, kept beside an anonymous one                                                                                    |
+| `decorator-plugin/test/integration/policy-parity.test.ts`                 | cross-entry                             | §3.12                                                                                                                                                                             |
+| `test/guide-fence-compiler.test.ts` (register `docs/authorization.md`)    | docs                                    | every fence compiles; the guide is added to `GUIDES` in `test/fixtures/snippets/fence-engine.ts` and to the test's `EXPECTED_INVENTORY`                                           |
 
 Negative controls (each observed failing, then reverted): truthiness instead of `=== true`; dropping
 the `hasOwn` guard; removing the startup scan; `before` skipped for authenticated principals;
@@ -454,7 +456,8 @@ non-owner 403, anonymous 401, anonymous-ability 200, throwing policy 403 with on
 - Policy decisions in M98h's authorization explanations — unowned; the M98h collector observes
   `RbacService` only, and widening its DTOs is a diagnostics-contract change.
 - A per-check deadline — unowned; would be an option with no honest default.
-- Deny-overrides / policy combination beyond all-of `@Can` — 110b names deny rules deferred.
+- Deny-overrides / policy combination beyond all-of `@RequirePolicy` — 110b names deny rules
+  deferred.
 
 ## 10. Design security review
 
@@ -464,13 +467,13 @@ non-owner 403, anonymous 401, anonymous-ability 200, throwing policy 403 with on
 > pair each threat with its resolution and the file that carries it, so the committed-tree audit can
 > check each claim against the code.
 
-**Reviewed flow.** A request reaches a `requirePolicy` guard or a `@Can` middleware → the middleware
-resolves `CAPABILITIES.AUTHORIZATION_POLICIES` (absent → `501`) → resolves the target (value, or an
-extractor over the request) → `service.can(principal | null, name, ability, target)` → the one
-`PolicyService` evaluator → allow (`next()`) or deny (`401`/`403` through the shared responder).
-Imperatively, a handler calls `can` (boolean) or `authorize` (rejects with a status-hinted
-`AuthorizationDeniedError`). At startup, AuthPlugin's `onBootstrap` scans route guards and seals the
-registry.
+**Reviewed flow.** A request reaches a `requirePolicy` guard or a `@RequirePolicy` middleware → the
+middleware resolves `CAPABILITIES.AUTHORIZATION_POLICIES` (absent → `501`) → resolves the target
+(value, or an extractor over the request) → `service.can(principal | null, name, ability, target)` →
+the one `PolicyService` evaluator → allow (`next()`) or deny (`401`/`403` through the shared
+responder). Imperatively, a handler calls `can` (boolean) or `authorize` (rejects with a
+status-hinted `AuthorizationDeniedError`). At startup, AuthPlugin's `onBootstrap` scans route guards
+and seals the registry.
 
 **Assets.** The decision itself (a wrong allow is the whole failure); the target and principal (may
 carry personal or business data); the policy and ability names (tell an attacker what to acquire).
@@ -494,16 +497,17 @@ evaluation per check; a check is application code and is NOT time-bounded (§8, 
 | T7  | (A4) a second policy shadows a registered one under the same name                       | `define` refuses a duplicate name; the startup scan refuses a guard whose policy object disagrees with the registered one on `anonymous`                                             | `policy-service.ts` `define`, `startup-scan.ts`                                       |
 | T8  | (A4) the policy set is mutated while serving                                            | `seal()` after the bootstrap scan; `define` then throws                                                                                                                              | `plugin/auth-plugin.ts` `onBootstrap`                                                 |
 | T9  | A definition object whose getters answer differently after validation (TOCTOU)          | Every member is read once into a frozen copy at `define`; the evaluator never consults the caller's object                                                                           | `policies/define-policy.ts`                                                           |
-| T10 | No policy service registered → a guarded route is served                                | Guard and `@Can` answer `501` per request; `@Can`/`policies` refuse `register()` without a provider                                                                                  | `policy-guard.ts`, `decorator-plugin/plugin/policy-registration.ts`                   |
+| T10 | No policy service registered → a guarded route is served                                | Guard and `@RequirePolicy` answer `501` per request; `@RequirePolicy`/`policies` refuse `register()` without a provider                                                              | `policy-guard.ts`, `decorator-plugin/plugin/policy-registration.ts`                   |
 | T11 | An extractor failure (database outage) turns into an allow                              | Extractor errors propagate; the handler never runs                                                                                                                                   | `policy-guard.ts`, `policy-registration.ts`                                           |
-| T12 | The OpenAPI document marks a secured route public, or an anonymous one secured          | Brand computed from the registered ability's `anonymous`; `@Public` marker omitted beside a principal-requiring `@Can`                                                               | `policy-guard.ts`, `policy-registration.ts`, `decorator-plugin.ts` `buildRouteSchema` |
+| T12 | The OpenAPI document marks a secured route public, or an anonymous one secured          | Brand computed from the registered ability's `anonymous`; `@Public` marker omitted beside a principal-requiring `@RequirePolicy`                                                     | `policy-guard.ts`, `policy-registration.ts`, `decorator-plugin.ts` `buildRouteSchema` |
 | T13 | (A3) a user-controlled policy/ability string reaches an error message                   | Quoted through `JSON.stringify` (escapes control characters); a non-string is labelled `[<typeof>]` without conversion; the unknown-policy rejection is unbranded, so a masked `500` | `policy-service.ts` `refName`, `policies/errors.ts`                                   |
 | T14 | A policy that never settles holds the request                                           | Accepted and documented: a check is application code with its own backend bounds (M101a); a deadline would be an option with no honest default                                       | §8, §9                                                                                |
 
 **Obligations on the committed-tree audit** (each a probe with a positive control, at a real kernel
 application):
 
-1. Drive T1 through `requirePolicy`, `@Can`, `can` and `describe` with each inherited name.
+1. Drive T1 through `requirePolicy`, `@RequirePolicy`, `can` and `describe` with each inherited
+   name.
 2. Plant canaries in the target, in the principal's claims and in a thrown policy error; prove the
    target and principal canaries are absent from every response body and every log record, and the
    error canary is absent from every response body.
@@ -522,13 +526,30 @@ Round 1 (fresh subagent, commit `cfd087ce`) held all seven obligations and faile
 the T-table had not covered or had overstated. Each fix shipped with a test written first and
 observed failing:
 
-| Finding                                                                                                                                     | Fix                                                                                                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1 (Medium) — the target extractor ran before an anonymous refusal: a lookup per unauthenticated request, and a 401-vs-404 existence oracle | `requirePolicy` and `@Can` refuse `401` for an anonymous request to a non-anonymous ability BEFORE extracting (the evaluator would deny it without calling the check anyway) |
-| F2 (Low) — an `undefined` principal counted as signed in                                                                                    | `can`/`authorize` normalise `principal ?? null`; an anonymous check receives `null`                                                                                          |
-| F3 (Low) — T9 overstated: the anonymous arm's `check` getter was read twice; `authorize` re-read `policy.name`                              | `anonymousCheckOf` reads each member once and returns what it read; `authorize` reads the name once and passes it through                                                    |
-| F4 (Low) — `@Can` skipped T7's same-name refusal                                                                                            | `appendPolicyMiddleware` refuses a referenced class or definition that does not declare the ability with the registered `anonymous` flag                                     |
-| F5 (Low) — T13 covered escaping but not length: an attacker-chosen name was copied unbounded into `UnknownPolicyError`                      | Names are truncated to 128 characters in the message and fields, with the removed length noted                                                                               |
+| Finding                                                                                                                                     | Fix                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 (Medium) — the target extractor ran before an anonymous refusal: a lookup per unauthenticated request, and a 401-vs-404 existence oracle | `requirePolicy` and `@RequirePolicy` refuse `401` for an anonymous request to a non-anonymous ability BEFORE extracting (the evaluator would deny it without calling the check anyway) |
+| F2 (Low) — an `undefined` principal counted as signed in                                                                                    | `can`/`authorize` normalise `principal ?? null`; an anonymous check receives `null`                                                                                                    |
+| F3 (Low) — T9 overstated: the anonymous arm's `check` getter was read twice; `authorize` re-read `policy.name`                              | `anonymousCheckOf` reads each member once and returns what it read; `authorize` reads the name once and passes it through                                                              |
+| F4 (Low) — `@RequirePolicy` skipped T7's same-name refusal                                                                                  | `appendPolicyMiddleware` refuses a referenced class or definition that does not declare the ability with the registered `anonymous` flag                                               |
+| F5 (Low) — T13 covered escaping but not length: an attacker-chosen name was copied unbounded into `UnknownPolicyError`                      | Names are truncated to 128 characters in the message and fields, with the removed length noted                                                                                         |
 
 One pre-existing unit fixture referenced an ability through a definition that did not declare it —
 the F4 case itself — and was corrected rather than left relying on the gap.
+
+### 10.2 Committed-tree audit, round 2 — one finding, fixed on this branch
+
+Round 2 (fresh subagent, commit `6ef94ff3`) closed F1–F5 and held all seven obligations, and failed
+on **G1 (Low)**: the F1 refusal read `anonymous` from the guard's OWN policy object, which only the
+startup scan proves agrees with the registered policy. A guard the scan never sees — a route added
+after `start()`, a guard used as global middleware — built from a same-named object marking the
+ability anonymous ran the extractor for anonymous callers (`[401, 404]`), and the docs stated the
+guarantee unconditionally. Access stayed fail-closed throughout. **Fix:** the guard reads
+`service.describe(name, ability)` on every request and refuses anonymous from the REGISTERED flag
+(the way `@RequirePolicy` already did at `register()`); an unregistered ability rejects through
+`can()` without running the extractor, and a replacement provider that describes nothing yet allows
+is still refused. Four tests, each observed failing on the round-2 guard; the three doc sites now
+state the per-request reading.
+
+**Rename.** At the maintainer's direction the decorator `@Can` became `@RequirePolicy`, matching the
+`requireXxx` guard names; nothing was published under the old name.

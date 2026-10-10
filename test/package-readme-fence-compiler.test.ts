@@ -94,7 +94,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M92: +1 for the @Render example.
   // M99d: +1 for the Non-HTTP ingress example (the `ingress` option the README
   // previously documented nowhere).
-  // M110a: +1 for the Authorization policies (@Policy/@Can) example.
+  // M110a: +1 for the Authorization policies (@Policy/@RequirePolicy) example.
   'packages/decorator-plugin/README.md': 7,
   // M92: the new package's README is born gated — usage, functional renderView,
   // the @Render decorator and the raw() opt-out.

@@ -277,12 +277,12 @@ export interface RouteMetadata {
   readonly responseHeaders?: readonly ResponseHeaderMetadata[];
   /** Idempotency options declared by `@Idempotent(options?)` (M109a). */
   readonly idempotent?: IdempotentRouteOptions;
-  /** Policy requirements declared by `@Can`, top to bottom (M110a). */
+  /** Policy requirements declared by `@RequirePolicy`, top to bottom (M110a). */
   readonly policies?: readonly PolicyRequirement[];
 }
 
 /**
- * One `@Can(policy, ability, target?)` requirement on a route (M110a).
+ * One `@RequirePolicy(policy, ability, target?)` requirement on a route (M110a).
  *
  * `policy` is a `@Policy` class or a `PolicyDefinition`; both are resolved to a
  * policy NAME at `register()`. `target` is a value, or an extractor called per
@@ -364,8 +364,8 @@ export interface MethodMeta {
   /** Idempotency options declared by `@Idempotent(options?)` (mutable twin, M109a). */
   idempotent?: IdempotentRouteOptions;
   /**
-   * Policy requirements declared by `@Can` (mutable twin, M110a). Decorators
-   * apply bottom-up, so each `@Can` PREPENDS — the list reads top to bottom,
+   * Policy requirements declared by `@RequirePolicy` (mutable twin, M110a). Decorators
+   * apply bottom-up, so each `@RequirePolicy` PREPENDS — the list reads top to bottom,
    * which is the order the requirements are evaluated in.
    */
   policies?: PolicyRequirement[];

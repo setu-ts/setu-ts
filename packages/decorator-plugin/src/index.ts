@@ -77,7 +77,7 @@ export { HttpCode, Redirect, ResponseHeader } from './decorators/response.ts';
 export { Idempotent } from './decorators/idempotency.ts';
 
 // --- Authorization policies (M110a) ---
-export { Ability, Can, Policy } from './decorators/policy.ts';
+export { Ability, Policy, RequirePolicy } from './decorators/policy.ts';
 export type { AbilityOptions, PolicyClassAbility, PolicyClassTarget } from './decorators/policy.ts';
 
 // --- View decorators ---

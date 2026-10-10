@@ -136,7 +136,7 @@ export type PolicyRef<A extends string, T> = string | PolicyDefinition<A, T>;
  * record that was not found — which the check receives as it receives an
  * omitted target, since every check's target is already `T | undefined`.
  *
- * Shared by AuthPlugin's `requirePolicy` and DecoratorPlugin's `@Can`, so the
+ * Shared by AuthPlugin's `requirePolicy` and DecoratorPlugin's `@RequirePolicy`, so the
  * two entry points accept the same targets.
  *
  * @typeParam T - The policy's target type

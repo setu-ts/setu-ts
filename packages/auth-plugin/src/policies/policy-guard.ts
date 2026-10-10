@@ -133,20 +133,34 @@ export function requirePolicy<A extends string, T>(
       return;
     }
     const user = ctx.request.user ?? null;
+    const service = ctx.services.get<IAuthorizationPolicyService>(
+      CAPABILITIES.AUTHORIZATION_POLICIES,
+    );
+    // Decide from the REGISTERED policy, never from this guard's own object
+    // (audit G1): the startup scan proves the two agree only for guards it
+    // sees, and a route added after `start()` or a guard used as global
+    // middleware is never scanned. An unregistered ability is evaluated with
+    // no target, so `can()` rejects per request before the extractor runs; a
+    // replacement provider that answers instead is still refused (fail closed).
+    const registered = service.describe(name, ability);
+    if (registered === undefined) {
+      await service.can(user, name, ability, undefined);
+      respondWithAuthorizationFailure(
+        ctx,
+        user === null ? 'authentication-required' : 'insufficient-privileges',
+      );
+      return;
+    }
     // Refuse an anonymous request to an ability that needs a principal BEFORE
     // the extractor runs (audit F1): otherwise every unauthenticated request
     // pays for the record lookup, and an extractor that throws not-found turns
     // the 401/404 difference into an existence oracle for anonymous callers.
     // The evaluator would deny the same request without calling the check, so
-    // this only moves the refusal earlier; the startup scan guarantees the
-    // registered ability agrees with this object on `anonymous`.
-    if (user === null && !anonymous) {
+    // this only moves the refusal earlier.
+    if (user === null && !registered.anonymous) {
       respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
-    const service = ctx.services.get<IAuthorizationPolicyService>(
-      CAPABILITIES.AUTHORIZATION_POLICIES,
-    );
     const resolved = typeof target === 'function'
       ? await (target as (ctx: IRequestContext) => T | undefined | Promise<T | undefined>)(ctx)
       : target;

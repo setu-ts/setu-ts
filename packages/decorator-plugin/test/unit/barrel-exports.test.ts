@@ -39,7 +39,7 @@ const EXPECTED_VALUES = [
   'MetadataStore',
   // M110a authorization policies
   'Ability',
-  'Can',
+  'RequirePolicy',
   'Policy',
   'metadataStore',
   'Controller',
@@ -179,10 +179,10 @@ describe('published barrel surface', () => {
 });
 
 describe('@setu-ts/decorator-plugin barrel — authorization policies (M110a)', () => {
-  it('exports @Policy, @Ability and @Can with their helper types', () => {
+  it('exports @Policy, @Ability and @RequirePolicy with their helper types', () => {
     expect(typeof barrel.Policy).toBe('function');
     expect(typeof barrel.Ability).toBe('function');
-    expect(typeof barrel.Can).toBe('function');
+    expect(typeof barrel.RequirePolicy).toBe('function');
     const options: barrel.AbilityOptions = { anonymous: true };
     class Sample {
       go(): boolean {
@@ -201,7 +201,7 @@ describe('@setu-ts/decorator-plugin barrel — authorization policies (M110a)', 
         'toPolicyDefinition',
         'registerPolicyClasses',
         'appendPolicyMiddleware',
-        'createCanMiddleware',
+        'createPolicyMiddleware',
       ]
     ) {
       expect(names).not.toContain(internal);

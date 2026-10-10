@@ -1,12 +1,12 @@
 /**
- * `@Can` and class-form policies through a REAL kernel application with the
+ * `@RequirePolicy` and class-form policies through a REAL kernel application with the
  * real AuthPlugin, ValidationPlugin and OpenApiPlugin (M110a §3.10–§3.11).
  *
- * Pinned here: a `@Policy` class receives an injected dependency; `@Can`
+ * Pinned here: a `@Policy` class receives an injected dependency; `@RequirePolicy`
  * runs after `@Roles` and BEFORE validation (anonymous 401 → missing role 403
  * → denied policy 403 even with a bad body → allowed policy with a bad body
- * 400); repeated `@Can` is all-of; the OpenAPI `@Public` marker yields to a
- * `@Can` that requires a principal; and every register-time refusal.
+ * 400); repeated `@RequirePolicy` is all-of; the OpenAPI `@Public` marker yields to a
+ * `@RequirePolicy` that requires a principal; and every register-time refusal.
  *
  * @module
  */
@@ -24,7 +24,6 @@ import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
 import {
   Ability,
-  Can,
   Controller,
   Get,
   Inject,
@@ -32,6 +31,7 @@ import {
   Patch,
   Policy,
   Public,
+  RequirePolicy,
   Roles,
   ValidateBody,
 } from '../../src/index.ts';
@@ -73,7 +73,7 @@ class DocPolicy {
   }
 }
 
-/** A functional policy registered through AuthPlugin, used by `@Can` too. */
+/** A functional policy registered through AuthPlugin, used by `@RequirePolicy` too. */
 const auditPolicy = definePolicy({
   name: 'audit',
   abilities: { touch: (principal) => principal.id !== 'carol' },
@@ -91,29 +91,29 @@ const editSchema = z?.object({ title: z.string() });
 class DocController {
   @Patch('/:id')
   @Roles('editor')
-  @Can(DocPolicy, 'edit', loadDoc)
+  @RequirePolicy(DocPolicy, 'edit', loadDoc)
   @ValidateBody(editSchema ?? {})
   edit(): { readonly edited: boolean } {
     return { edited: true };
   }
 
   @Get('/:id/audit')
-  @Can(DocPolicy, 'edit', loadDoc)
-  @Can(auditPolicy, 'touch')
+  @RequirePolicy(DocPolicy, 'edit', loadDoc)
+  @RequirePolicy(auditPolicy, 'touch')
   audit(): { readonly audited: boolean } {
     return { audited: true };
   }
 
   @Get('/:id')
   @Public()
-  @Can(DocPolicy, 'view', loadDoc)
+  @RequirePolicy(DocPolicy, 'view', loadDoc)
   view(): { readonly viewed: boolean } {
     return { viewed: true };
   }
 
   @Get('/:id/secret')
   @Public()
-  @Can(DocPolicy, 'edit', loadDoc)
+  @RequirePolicy(DocPolicy, 'edit', loadDoc)
   secret(): { readonly secret: boolean } {
     return { secret: true };
   }
@@ -195,7 +195,7 @@ async function send(
   return response.status;
 }
 
-describe('@Can through a real application', () => {
+describe('@RequirePolicy through a real application', () => {
   it('evaluates a class policy through its injected dependency', async () => {
     const { app: started, token } = await start();
     expect(await send(started, 'GET', '/docs/ann/audit', await token('ann'))).toBe(200);
@@ -203,7 +203,7 @@ describe('@Can through a real application', () => {
     expect(await send(started, 'GET', '/docs/ann/audit')).toBe(401);
   });
 
-  it('requires every @Can on a route (all-of)', async () => {
+  it('requires every @RequirePolicy on a route (all-of)', async () => {
     const { app: started, token } = await start();
     // carol OWNS /docs/carol, so the first requirement (DocPolicy.edit) allows
     // her; only the second (auditPolicy.touch, which refuses carol) can refuse.
@@ -237,7 +237,7 @@ describe('@Can through a real application', () => {
     );
   });
 
-  it('documents a @Can requiring a principal as secured, despite @Public', async () => {
+  it('documents a @RequirePolicy requiring a principal as secured, despite @Public', async () => {
     const { app: started } = await start();
     const response = await started.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
     const spec = response.json() as {
@@ -248,7 +248,7 @@ describe('@Can through a real application', () => {
   });
 });
 
-describe('@Can and policies — refused at register()', () => {
+describe('@RequirePolicy and policies — refused at register()', () => {
   async function refusal(
     decorator: Parameters<typeof DecoratorPlugin>[0],
     withAuth = true,
@@ -260,35 +260,35 @@ describe('@Can and policies — refused at register()', () => {
     return (error as Error).message;
   }
 
-  it('refuses a @Can route with no policy service', async () => {
+  it('refuses a @RequirePolicy route with no policy service', async () => {
     @Controller('/a')
     class A {
       @Get('/')
-      @Can(auditPolicy, 'touch')
+      @RequirePolicy(auditPolicy, 'touch')
       index(): string {
         return 'a';
       }
     }
     expect(await refusal({ controllers: [A] }, false)).toContain(
-      'Route GET /a (A.index) is decorated with @Can, but no CAPABILITIES.AUTHORIZATION_POLICIES',
+      'Route GET /a (A.index) is decorated with @RequirePolicy, but no CAPABILITIES.AUTHORIZATION_POLICIES',
     );
   });
 
-  it('refuses a @Can naming a class policy that was never listed', async () => {
+  it('refuses a @RequirePolicy naming a class policy that was never listed', async () => {
     @Controller('/b')
     class B {
       @Get('/')
-      @Can(DocPolicy, 'edit')
+      @RequirePolicy(DocPolicy, 'edit')
       index(): string {
         return 'b';
       }
     }
     expect(await refusal({ controllers: [B] })).toContain(
-      '@Can("doc", "edit"), but no such policy ability is registered',
+      '@RequirePolicy("doc", "edit"), but no such policy ability is registered',
     );
   });
 
-  it('refuses a @Can naming an ordinary method of a policy class', async () => {
+  it('refuses a @RequirePolicy naming an ordinary method of a policy class', async () => {
     @Policy('helpers')
     class Helpers {
       @Ability()
@@ -303,13 +303,13 @@ describe('@Can and policies — refused at register()', () => {
     @Controller('/c')
     class C {
       @Get('/')
-      @Can(Helpers, 'plain')
+      @RequirePolicy(Helpers, 'plain')
       index(): string {
         return 'c';
       }
     }
     expect(await refusal({ controllers: [C], policies: [Helpers] })).toContain(
-      '@Can("helpers", "plain")',
+      '@RequirePolicy("helpers", "plain")',
     );
   });
 

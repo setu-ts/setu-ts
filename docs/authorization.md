@@ -105,9 +105,12 @@ Two limits are worth knowing. The startup check reads routes registered before `
 added afterwards, or a guard added as global middleware, is not checked and fails closed per request
 instead. And a policy is identified by its **name**: a guard built from a policy object you forgot
 to register, while a different policy with the same name is registered, would evaluate that other
-policy — the startup check (and, for `@Can`, `register()`) refuses the case where the two disagree
-on which abilities are anonymous. An anonymous request to an ability that needs a principal is
-refused before your target extractor runs, so it costs no record lookup and learns nothing from it.
+policy — the startup check (and, for `@RequirePolicy`, `register()`) refuses the case where the two
+disagree on which abilities are anonymous. Whether an ability needs a principal is read from the
+**registered** policy on every request, never from the guard's own object, so an unchecked guard
+gets this right too. An anonymous request to an ability that needs a principal is refused before
+your target extractor runs, so it costs no record lookup and learns nothing from it; a guard naming
+an unregistered policy or ability rejects without running the extractor at all.
 
 ## Checks Inside a Handler
 
@@ -165,7 +168,6 @@ It is constructed like a controller, so its constructor can take injected depend
 import type { IPrincipal } from '@setu-ts/common';
 import {
   Ability,
-  Can,
   Controller,
   DecoratorPlugin,
   Get,
@@ -173,6 +175,7 @@ import {
   Injectable,
   Patch,
   Policy,
+  RequirePolicy,
 } from '@setu-ts/decorator-plugin';
 
 interface Doc {
@@ -207,13 +210,13 @@ class DocPolicy {
 @Controller('/docs')
 class DocController {
   @Patch('/:id')
-  @Can(DocPolicy, 'edit', (ctx) => ({ id: ctx.params.id ?? '', ownerId: '' }))
+  @RequirePolicy(DocPolicy, 'edit', (ctx) => ({ id: ctx.params.id ?? '', ownerId: '' }))
   edit(): { readonly saved: boolean } {
     return { saved: true };
   }
 
   @Get('/:id')
-  @Can(DocPolicy, 'view')
+  @RequirePolicy(DocPolicy, 'view')
   show(): { readonly shown: boolean } {
     return { shown: true };
   }
@@ -226,11 +229,12 @@ export const decorators = DecoratorPlugin({
 });
 ```
 
-A method named `before` is the policy's `before` hook. `@Can` also accepts a `definePolicy`
-definition, may be repeated (every `@Can` on a route must allow, top to bottom), and runs after
-guards and `@Roles`/`@Permissions` but **before** validation — so a target extractor reading the
-body sees the unvalidated body; prefer route parameters. Registering `DecoratorPlugin` with `@Can`
-routes or `policies` but no `AuthPlugin` fails at startup, naming the route.
+A method named `before` is the policy's `before` hook. `@RequirePolicy` also accepts a
+`definePolicy` definition, may be repeated (every `@RequirePolicy` on a route must allow, top to
+bottom), and runs after guards and `@Roles`/`@Permissions` but **before** validation — so a target
+extractor reading the body sees the unvalidated body; prefer route parameters. Registering
+`DecoratorPlugin` with `@RequirePolicy` routes or `policies` but no `AuthPlugin` fails at startup,
+naming the route.
 
 ## Queues, Messages, and Sockets
 
@@ -265,7 +269,7 @@ export async function handleExport(
 
 ## OpenAPI
 
-`requirePolicy` and `@Can` carry the same security brand the role guards do, so
+`requirePolicy` and `@RequirePolicy` carry the same security brand the role guards do, so
 [`OpenApiPlugin({ deriveSecurity })`](../packages/openapi-plugin/README.md) documents a route whose
 ability requires a signed-in principal as secured. A route whose ability opted in to anonymous
 principals is documented as public (`security: []`), because the guard lets an anonymous request

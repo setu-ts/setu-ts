@@ -2467,12 +2467,12 @@ plus a role or permission string, so a target cannot reach it — which is why p
 capability, `IAuthorizationPolicyService` under `CAPABILITIES.AUTHORIZATION_POLICIES`, beside RBAC
 rather than a widening of it. AuthPlugin always registers it.
 
-**Why one evaluator.** The route guard (`requirePolicy`), the decorator (`@Can`), and the imperative
-`can`/`authorize` all reach the same service, so the four entry points cannot disagree about an
-outcome; a parity test drives all four under one non-default configuration. `@Can` and
-`requirePolicy` are two thin middlewares rather than one because decorator-plugin may not import
-auth-plugin (§2.2); both call the public contract, so an application's replacement provider serves
-them too.
+**Why one evaluator.** The route guard (`requirePolicy`), the decorator (`@RequirePolicy`), and the
+imperative `can`/`authorize` all reach the same service, so the four entry points cannot disagree
+about an outcome; a parity test drives all four under one non-default configuration.
+`@RequirePolicy` and `requirePolicy` are two thin middlewares rather than one because
+decorator-plugin may not import auth-plugin (§2.2); both call the public contract, so an
+application's replacement provider serves them too.
 
 **Why the rules are fixed.** Only a literal `true` allows; a throw denies (and is logged without the
 target); an anonymous principal is refused `401` unless the ability opted in. Configurable
@@ -2480,9 +2480,9 @@ fail-open-ish semantics are exactly the knobs an authorization layer should not 
 
 **Why unknown names fail at startup.** A functional guard is a value the application builds, so no
 `register()` ever sees it. AuthPlugin's `onBootstrap` hook scans every registered route for the
-policy-guard brand and fails `start()` before the server listens, then seals the registry. `@Can` is
-validated in DecoratorPlugin's own `register()`. A route added after `start()` is not scanned and
-fails closed per request.
+policy-guard brand and fails `start()` before the server listens, then seals the registry.
+`@RequirePolicy` is validated in DecoratorPlugin's own `register()`. A route added after `start()`
+is not scanned and fails closed per request.
 
 **Where attribute rules go.** Into policies. The framework ships no attribute language — ASP.NET
 Core, NestJS and Spring make the same choice. An external engine (OpenFGA, Casbin) is wrapped as a

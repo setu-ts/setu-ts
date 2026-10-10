@@ -247,3 +247,67 @@ describe('requirePolicy — audit F1: anonymous refusal precedes the extractor',
     expect(extracted).toBe(1);
   });
 });
+
+describe('requirePolicy — audit G1: the registered policy decides, not the guard object', () => {
+  /** Same name as the registered `doc`, but declaring `edit` anonymous and `view` not. */
+  const impostor = definePolicy({
+    name: 'doc',
+    abilities: {
+      edit: { anonymous: true, check: () => true },
+      view: () => true,
+    },
+  });
+
+  it('refuses anonymous before extracting when the registered ability needs a principal', async () => {
+    const harness = context(registered());
+    let extracted = 0;
+    const guard = requirePolicy(impostor, 'edit', () => {
+      extracted += 1;
+      return Promise.reject(new Error('not found'));
+    });
+    expect(await run(guard, harness)).toBe(false);
+    expect(harness.recorded.status).toBe(401);
+    expect(extracted).toBe(0);
+  });
+
+  it('extracts for an ability the registry declares anonymous, whatever the guard object says', async () => {
+    const harness = context(registered());
+    let extracted = 0;
+    const guard = requirePolicy(impostor, 'view', () => {
+      extracted += 1;
+      return { owner: 'x' };
+    });
+    expect(await run(guard, harness)).toBe(true);
+    expect(extracted).toBe(1);
+  });
+
+  it('rejects an unregistered policy per request without running the extractor', async () => {
+    const harness = context(new PolicyService(() => undefined));
+    let extracted = 0;
+    const guard = requirePolicy(docPolicy, 'edit', () => {
+      extracted += 1;
+      return { owner: 'x' };
+    });
+    await expect(run(guard, harness)).rejects.toThrow(/no authorization policy named "doc"/);
+    expect(extracted).toBe(0);
+    expect(harness.recorded.status).toBe(0);
+  });
+
+  it('fails closed when a replacement provider describes nothing yet allows', async () => {
+    for (const user of [undefined, { id: 'ann' }] as const) {
+      const lenient = {
+        describe: () => undefined,
+        can: () => Promise.resolve(true),
+      } as unknown as PolicyService;
+      const harness = context(lenient, user);
+      let extracted = 0;
+      const guard = requirePolicy(docPolicy, 'edit', () => {
+        extracted += 1;
+        return { owner: 'ann' };
+      });
+      expect(await run(guard, harness)).toBe(false);
+      expect(harness.recorded.status).toBe(user === undefined ? 401 : 403);
+      expect(extracted).toBe(0);
+    }
+  });
+});
