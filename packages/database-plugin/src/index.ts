@@ -141,6 +141,19 @@ export {
   TenantStoreStrategyUnsupportedError,
 } from './tenancy/database-tenant-data-store.ts';
 
+// Scoped RBAC sources (M110b) — grants and per-scope custom roles read from the
+// application's database, for AuthPlugin's `scopedRbac` option.
+export {
+  createDatabaseGrantSource,
+  createDatabaseRoleSource,
+} from './authorization/database-grant-source.ts';
+export type {
+  DatabaseGrantSourceOptions,
+  DatabaseRoleSourceOptions,
+  GrantFields,
+  RoleFields,
+} from './authorization/database-grant-source.ts';
+
 // Transactional outbox store bridge (M107) — the shipped `IOutboxStore` over
 // `IDatabaseService`, for the messaging plugin's `outbox.store` option. The
 // store class stays internal: it reaches an application only as `IOutboxStore`.

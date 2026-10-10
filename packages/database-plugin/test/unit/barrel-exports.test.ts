@@ -586,3 +586,21 @@ describe('database-plugin barrel exports — M108 inbox store bridge', () => {
     }
   });
 });
+
+describe('scoped RBAC source exports (M110b)', () => {
+  it('exports both factories and their option types, implementing the common ports', () => {
+    const grants: database.DatabaseGrantSourceOptions = {
+      entity: 'grants',
+      fields: { subject: 'subject' } satisfies database.GrantFields,
+    };
+    const roles: database.DatabaseRoleSourceOptions = {
+      entity: 'roles',
+      fields: { permission: 'permission' } satisfies database.RoleFields,
+    };
+    const services = { get: () => ({}) } as unknown as common.IServiceRegistry;
+    const grantSource: common.IGrantSource = database.createDatabaseGrantSource(grants)(services);
+    const roleSource: common.IScopedRoleSource = database.createDatabaseRoleSource(roles)(services);
+    expect(typeof grantSource.grantsFor).toBe('function');
+    expect(typeof roleSource.rolesFor).toBe('function');
+  });
+});
