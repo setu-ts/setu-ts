@@ -344,6 +344,7 @@ describe('MessagingPlugin outbox wiring', () => {
   it('a publish rejected after the drain began records no attempt', async () => {
     const store = capturedStore();
     const broker = new RecordingBroker();
+    let afterDrain: readonly unknown[] = [];
     let fail!: () => void;
     broker.behaviour = () =>
       new Promise<void>((_, reject) => {
@@ -352,12 +353,25 @@ describe('MessagingPlugin outbox wiring', () => {
     const app = buildApp({
       outbox: { store: store.entry, relay: { intervalMs: 20 } },
       messaging: { broker: 'custom', instance: broker },
+      extra: [{
+        name: 'claim-after-drain',
+        version: '0.8.0',
+        dependencies: ['messaging-plugin'],
+        register(ctx) {
+          ctx.lifecycle.onShutdown(async () => {
+            afterDrain = await store.store().scanPending(undefined, 10);
+          });
+        },
+      }],
     });
     await app.start();
     await writeOrder(app, 1);
     await waitFor(() => broker.calls.length === 1, 'the scheduled publish');
     const stopping = app.stop();
     await settle(30);
+    const [held] = await rows(app);
+    expect(held).toMatchObject({ status: 'pending', claimVersion: 1, attempts: 0 });
+    expect(held!.leaseUntil).toBeGreaterThan(held!.createdAt as number);
     fail();
     await stopping;
     // The sweep settled inside the drain (the publish was observed failing)
@@ -365,6 +379,9 @@ describe('MessagingPlugin outbox wiring', () => {
     expect(broker.calls.length).toBe(1);
     expect(store.store().count('markFailure')).toBe(0);
     expect(store.store().count('markSent')).toBe(0);
+    expect(afterDrain).toMatchObject([
+      { status: 'pending', claimVersion: 1, leaseUntil: held!.leaseUntil, attempts: 0 },
+    ]);
   });
 
   it('a later plugin failing onInit runs the idempotent close path: jobs removed, no warning', async () => {

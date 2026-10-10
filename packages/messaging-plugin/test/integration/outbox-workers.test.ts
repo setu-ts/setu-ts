@@ -17,7 +17,12 @@ import { expect } from '@std/expect';
 import type { IMessageBroker } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createScheduledHandler, D1Adapter, WorkersCron } from '@setu-ts/cloudflare-plugin';
-import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import {
+  createDatabaseOutboxStore,
+  DatabasePlugin,
+  DatabaseService,
+} from '@setu-ts/database-plugin';
+import { MockServiceRegistry } from '@setu-ts/testing';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
@@ -26,7 +31,8 @@ import { SqliteD1 } from '../../../cloudflare-plugin/test/d1-fakes.ts';
 
 import { MessagingPlugin } from '../../src/index.ts';
 import type { IOutbox } from '../../src/index.ts';
-import { orderPlaced } from '../fixtures/outbox.ts';
+import { FaultStore, orderPlaced } from '../fixtures/outbox.ts';
+import { describeOutboxRelayProofs } from '../fixtures/outbox-relay-proofs.ts';
 
 /** The committed SQLite/D1 DDL — the text the README embeds verbatim. */
 const SQLITE_DDL = await Deno.readTextFile(
@@ -35,6 +41,21 @@ const SQLITE_DDL = await Deno.readTextFile(
 
 const EVERY_MINUTE = '* * * * *';
 const HOURLY = '0 * * * *';
+
+describeOutboxRelayProofs('D1 over real SQLite', async () => {
+  const adapter = new D1Adapter(new SqliteD1(SQLITE_DDL), {
+    tables: { Outbox: { table: 'setu_outbox' } },
+  });
+  await adapter.connect();
+  const db = new DatabaseService(adapter, (entity) => adapter.createDataSource(entity), 'custom');
+  const registry = new MockServiceRegistry();
+  registry.register(CAPABILITIES.DATABASE, db);
+  return {
+    db,
+    store: new FaultStore(createDatabaseOutboxStore()(registry)),
+    dispose: () => db.close(),
+  };
+});
 
 /** One Worker isolate's composition. */
 interface WorkerHarness {

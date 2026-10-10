@@ -147,6 +147,80 @@ describe('DatabaseOutboxStore — reads', () => {
   });
 });
 
+describe('DatabaseOutboxStore — claims and invalid rows', () => {
+  it('takes a version once, classifies lost, settled and missing claims, and preserves stale writes', async () => {
+    const service = await memoryService();
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    await append(service, store, [record(1), record(2, { status: 'sent' })]);
+    expect(await store.claim('row-1', { claimVersion: 0, leaseUntil: 9000 })).toEqual({
+      outcome: 'applied',
+    });
+    expect(await store.claim('row-1', { claimVersion: 0, leaseUntil: 10000 })).toEqual({
+      outcome: 'claim-lost',
+    });
+    expect(await store.claim('row-2', { claimVersion: 0, leaseUntil: 9000 })).toEqual({
+      outcome: 'not-pending',
+      status: 'sent',
+    });
+    expect(await store.claim('missing', { claimVersion: 0, leaseUntil: 9000 })).toEqual({
+      outcome: 'missing',
+    });
+    for (const deleteNow of [false, true]) {
+      expect(
+        await store.markSent('row-1', {
+          claimVersion: 0,
+          settledAt: 5,
+          sentBy: 'stale',
+          deleteNow,
+        }),
+      ).toEqual({ outcome: 'claim-lost' });
+    }
+    expect(
+      await store.markFailure('row-1', {
+        claimVersion: 0,
+        attempts: 4,
+        lastError: 'stale',
+        availableAt: 5,
+        status: 'failed',
+      }),
+    ).toEqual({ outcome: 'claim-lost' });
+    expect(await rowOf(service, 'row-1')).toMatchObject({
+      status: 'pending',
+      claimVersion: 1,
+      leaseUntil: 9000,
+      attempts: 0,
+    });
+  });
+
+  it('poisons malformed claim fields preserving attempts and clears the lease on retry', async () => {
+    const service = await memoryService();
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    await seed(service, [{ ...record(1), claimVersion: 'edited', attempts: 7, leaseUntil: 9000 }]);
+    expect(await store.markInvalid('row-1', 5)).toEqual({ outcome: 'applied' });
+    expect(await rowOf(service, 'row-1')).toMatchObject({
+      status: 'failed',
+      claimVersion: 'edited',
+      attempts: 7,
+      leaseUntil: 0,
+      availableAt: 5,
+      lastError: 'invalid-row',
+    });
+    expect(await store.markInvalid('row-1', 6)).toEqual({
+      outcome: 'not-pending',
+      status: 'failed',
+    });
+    expect(await store.markInvalid('missing', 6)).toEqual({ outcome: 'missing' });
+    await store.release('row-1', 'retry', 7);
+    expect(await rowOf(service, 'row-1')).toMatchObject({
+      status: 'pending',
+      claimVersion: 'edited',
+      attempts: 0,
+      leaseUntil: 0,
+      availableAt: 7,
+    });
+  });
+});
+
 describe('DatabaseOutboxStore — markSent', () => {
   let service: IDatabaseService;
   let store: DatabaseOutboxStore;

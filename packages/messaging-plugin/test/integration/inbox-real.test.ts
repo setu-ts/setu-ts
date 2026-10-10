@@ -366,7 +366,7 @@ for (const transport of transports) {
         // The §3.13 crash shape: the relay published, and its `markSent` never
         // landed, so the row is still pending and the next sweep sends it again.
         await pg.pool.query(
-          "UPDATE setu_outbox SET status = 'pending', settled_at = NULL, sent_by = NULL",
+          "UPDATE setu_outbox SET status = 'pending', settled_at = NULL, sent_by = NULL, lease_until = 0",
         );
         expect((await outbox.sweep()).published).toBe(1);
         await settle();

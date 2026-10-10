@@ -49,6 +49,41 @@ function second(h: OutboxHarness, observer = countingObserver()) {
 }
 
 describe('overlapping relays', () => {
+  for (const retainSentMs of [0, 604800000]) {
+    for (const failure of [false, true]) {
+      it(`a lost held claim reports overlap after ${failure ? 'failure' : 'success'} with retention ${retainSentMs}`, async () => {
+        const observer = countingObserver();
+        const h = await outboxHarness({ observer, options: { retainSentMs } });
+        const id = await h.write({ n: 1 });
+        h.broker.behaviour = async () => {
+          await edit(h.db, id, { claimVersion: 2 });
+          if (failure) throw new Error('broker down');
+        };
+        await h.sweep();
+        expect(observer.counts['overlap-claim-lost']).toBe(1);
+        expect(await row(h.db, id)).toMatchObject({
+          status: 'pending',
+          attempts: 0,
+          claimVersion: 2,
+        });
+        expect(h.service.instanceSignals().relayOverlap).toBe(true);
+      });
+    }
+    it(`fencing remains visible with retention ${retainSentMs}`, async () => {
+      const observer = countingObserver();
+      const h = await outboxHarness({ observer, options: { retainSentMs } });
+      await h.write({ n: 1 });
+      h.store.claim = async (id, update) => {
+        const result = await h.store.inner.claim(id, update);
+        h.clock.setWall(update.leaseUntil + 1);
+        return result;
+      };
+      await h.sweep();
+      expect(observer.counts['overlap-fenced']).toBe(1);
+      expect(h.service.instanceSignals().relayOverlap).toBe(true);
+      expect(h.broker.calls).toEqual([]);
+    });
+  }
   it('a late failure write after the other relay marked the row sent leaves it sent', async () => {
     const a = await outboxHarness({ options: { health: { overlapWindowMs: 1000 } } });
     const id = await a.write({ n: 1 });

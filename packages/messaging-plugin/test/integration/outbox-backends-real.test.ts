@@ -50,7 +50,8 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { MessagingPlugin } from '../../src/index.ts';
 import type { IOutbox, OutboxRelayOptions } from '../../src/index.ts';
-import { orderPlaced } from '../fixtures/outbox.ts';
+import { FaultStore, orderPlaced } from '../fixtures/outbox.ts';
+import { describeOutboxRelayProofs } from '../fixtures/outbox-relay-proofs.ts';
 
 const mongoRsUri = Deno.env.get('MONGODB_RS_URI');
 const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
@@ -60,6 +61,34 @@ const cosmosEndpoint = Deno.env.get('COSMOS_ENDPOINT');
 const cosmosKey = Deno.env.get('COSMOS_KEY') ??
   'C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==';
 const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+
+describeOutboxRelayProofs('Cosmos emulator', async () => {
+  const { CosmosClient } = await import('npm:@azure/cosmos@^4');
+  const client = new CosmosClient({ endpoint: cosmosEndpoint!, key: cosmosKey });
+  const { database } = await client.databases.createIfNotExists({ id: 'setu_m107b' });
+  const container = `proof_${crypto.randomUUID().replaceAll('-', '')}`;
+  await database.containers.createIfNotExists({
+    id: container,
+    partitionKey: { paths: ['/tenantId'] },
+  });
+  const app = appOver(
+    new CosmosAdapter({
+      endpoint: cosmosEndpoint!,
+      key: cosmosKey,
+      database: 'setu_m107b',
+      containers: { Outbox: { container, partitionKey: 'tenantId' } },
+    }),
+  );
+  await app.start();
+  return {
+    db: app.services.get<IDatabaseService>(CAPABILITIES.DATABASE),
+    store: new FaultStore(createDatabaseOutboxStore()(app.services)),
+    dispose: async () => {
+      await app.stop();
+      await database.container(container).delete();
+    },
+  };
+}, cosmosEndpoint === undefined);
 
 /** Builds an app over one adapter, relaying only when asked. */
 function appOver(adapter: IDatabaseAdapter, relay: OutboxRelayOptions = {}): IKernelApplication {
@@ -355,7 +384,14 @@ describe('outbox in a shared Cosmos container (local emulator only)', {
       await settle();
       expect(result.published).toBe(1);
       expect(seen).toEqual([[id, 1]]);
-      expect(await store.markSent('b-pending', { settledAt: 1, sentBy: 'x', deleteNow: false }))
+      expect(
+        await store.markSent('b-pending', {
+          claimVersion: 0,
+          settledAt: 1,
+          sentBy: 'x',
+          deleteNow: false,
+        }),
+      )
         .toEqual({ outcome: 'missing' });
       expect(await store.purge(Number.MAX_SAFE_INTEGER, 100)).toBe(1);
 
