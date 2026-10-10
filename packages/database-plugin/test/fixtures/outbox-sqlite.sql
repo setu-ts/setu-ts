@@ -12,6 +12,8 @@ CREATE TABLE setu_outbox (
   status      TEXT    NOT NULL,
   attempts    INTEGER NOT NULL,
   availableAt INTEGER NOT NULL,
+  claimVersion INTEGER NOT NULL,
+  leaseUntil  INTEGER NOT NULL,
   lastError   TEXT,
   settledAt   INTEGER,
   sentBy      TEXT

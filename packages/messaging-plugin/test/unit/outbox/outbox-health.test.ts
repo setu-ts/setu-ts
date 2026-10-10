@@ -51,7 +51,7 @@ function signalling(
 const QUIET: OutboxInstanceSignals = {
   blockedKeyCap: false,
   storeWriteFailing: false,
-  scheduledOverlap: false,
+  relayOverlap: false,
 };
 
 describe('outbox health indicator', () => {
@@ -132,7 +132,7 @@ describe('outbox health indicator', () => {
       signalling(h, {
         blockedKeyCap: true,
         storeWriteFailing: true,
-        scheduledOverlap: true,
+        relayOverlap: true,
         lastSweep,
       }),
     )();
@@ -140,7 +140,7 @@ describe('outbox health indicator', () => {
     expect(result.data?.reasons).toEqual([
       'blocked-key-cap',
       'store-write-failing',
-      'scheduled-overlap',
+      'relay-overlap',
     ]);
     expect(result.data?.lastSweep).toEqual(lastSweep);
   });

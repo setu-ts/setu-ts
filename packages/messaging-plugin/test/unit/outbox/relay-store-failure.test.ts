@@ -23,6 +23,20 @@ function rejectOnce(): () => void {
 }
 
 describe('relay store failures', () => {
+  it('a rejected claim blocks the key and ends the sweep before any publish', async () => {
+    const h = await outboxHarness();
+    const id = await h.write({ key: 'K', n: 1 });
+    await h.write({ key: 'K', n: 2 });
+    await h.write({ n: 3 });
+    h.store.faults.claim = rejectOnce();
+    expect((await h.sweep()).endedBy).toBe('store-failure');
+    expect(h.broker.calls).toEqual([]);
+    expect(await row(h.db, id)).toMatchObject({ attempts: 0, claimVersion: 0 });
+    await h.sweep();
+    expect(h.broker.sequence()).toEqual([3]);
+    await h.sweep();
+    expect(h.broker.sequence()).toEqual([3, 1, 2]);
+  });
   it('a markSent rejecting after publish blocks the key, ends the sweep, and republishes that row first', async () => {
     const h = await outboxHarness();
     const first = await h.write({ key: 'K', n: 1 });
@@ -37,7 +51,10 @@ describe('relay store failures', () => {
     // The lap resumes after row 1; K is blocked for the rest of it.
     await h.sweep();
     expect(h.broker.sequence()).toEqual([1, 3]);
-    await h.sweep(); // new lap: row 1 again (a duplicate), then row 2
+    await h.sweep(); // new lap: own claim is still held
+    expect(h.broker.sequence()).toEqual([1, 3]);
+    h.clock.advanceWall(35000);
+    await h.sweep(); // expired claim: row 1 again, then row 2
     expect(h.broker.sequence()).toEqual([1, 3, 1, 2]);
     expect(h.broker.published[0]!.message.id).toBe(h.broker.published[2]!.message.id);
     expect(h.service.instanceSignals().storeWriteFailing).toBe(false);
@@ -58,16 +75,19 @@ describe('relay store failures', () => {
     failPublish = false;
     await h.sweep(); // the rest of the lap: K is blocked
     expect(h.broker.sequence()).toEqual([]);
-    await h.sweep(); // next lap: retried once, then row 2
+    await h.sweep(); // next lap: the rejected write left its claim held
+    expect(h.broker.sequence()).toEqual([]);
+    h.clock.advanceWall(35000);
+    await h.sweep(); // expired claim: retried once, then row 2
     expect(h.broker.sequence()).toEqual([1, 2]);
   });
 
-  it('a rejected markFailure for an invalid row ends the sweep with the key blocked', async () => {
+  it('a rejected markInvalid for an invalid row ends the sweep with the key blocked', async () => {
     const h = await outboxHarness();
     const id = await h.write({ key: 'K', n: 1 });
     await h.write({ key: 'K', n: 2 });
     await h.db.getRepository<Record<string, unknown>>('Outbox').update(id, { topic: '' });
-    h.store.faults.markFailure = rejectOnce();
+    h.store.faults.markInvalid = rejectOnce();
     expect((await h.sweep()).endedBy).toBe('store-failure');
     await h.sweep();
     expect(h.broker.calls).toEqual([]);

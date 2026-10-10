@@ -37,6 +37,8 @@ export function record(seq: number, overrides: Partial<OutboxRecord> = {}): Outb
     status: 'pending',
     attempts: 0,
     availableAt: 1_000 + seq,
+    claimVersion: 0,
+    leaseUntil: 0,
     ...overrides,
   };
 }

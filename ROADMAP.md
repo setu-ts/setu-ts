@@ -13273,8 +13273,8 @@ if a claim or epoch member is needed) and `packages/database-plugin` (the
 
 **Depends on:** M105 (conditional writes) for the fencing arm.
 
-**Objective:** a relay that has lost its right to run cannot publish, and more than one relay can
-drain one outbox without double-sending.
+**Objective:** fence a relay before it starts publishing past its row lease, and allow several
+relays to drain one outbox, with the duplicate windows stated explicitly.
 
 **Why.** M107 runs one relay per database under the scheduler's lock, and that lock has a TTL with
 no renewal. The sweep deadline keeps a healthy relay inside it, but a relay paused past the TTL — a
@@ -13297,28 +13297,34 @@ promises more than at-least-once:
 - **NServiceBus** has no separate relay — the outbox is dispatched while handling the incoming
   message — and deduplicates by message id on the receiving side.
 
-**Scope — for the plan to decide.**
+**Scope — approved in `plans/archive/milestone-107b-outbox-relay-fencing.md`.**
 
-- **Arm 1, a database-held claim**, where the backend has interactive transactions and row locks
-  (PostgreSQL and MySQL through Drizzle or Prisma; MongoDB to be probed): a relay claims a batch of
-  pending rows inside a transaction (`SKIP LOCKED`), so a stale relay's claim ends with its
-  transaction and no fencing token is needed. This is also what makes several relays safe at once.
-- **Arm 2, an epoch fence**, everywhere else (D1, DynamoDB, Cosmos, Bigtable, which defer writes to
-  commit): each relay holds an epoch that increases with every lock hand-off, and every row write is
-  an M105 `updateWhere` conditional on that epoch, so a stale relay's writes are refused. Whether it
-  can also stop the stale relay's PUBLISH (check the epoch immediately before publishing, which
-  narrows but does not close the window) is a plan decision, stated as a bound rather than implied.
-- Whether multi-relay is offered at all on Arm 2, or Arm 2 stays single-relay with fencing only.
-- How the relay learns which arm its store supports (a store capability, refused by name otherwise —
-  never inferred from the adapter's class).
+One per-row versioned lease on every supported backend, using M105's native conditional writes
+outside a transaction: `claimVersion` increases once per claim, `leaseUntil` gates takeover, and
+each status write compares the held version. The two arms first proposed here were not built, for
+reasons established from source by the plan:
+
+- **No `SKIP LOCKED` arm.** `IUnitOfWork` exposes neither raw SQL nor a lock option, so it would
+  need a portable-query widening that Prisma's builder, MongoDB, DynamoDB, Cosmos and D1 cannot
+  honour. It would not fence any better: a paused relay's session is killed by the server, its lock
+  released, and it can still publish on waking. And it holds a pooled connection and an open
+  transaction across every broker call.
+- **No lock epoch.** The outbox cannot observe the scheduler's lock — `IScheduler` has no lock
+  accessor, and `IDistributedLock` lives in `scheduler-plugin` with no epoch — so the fence lives in
+  the row.
+- **No separate arm for the deferred-write backends.** D1, DynamoDB and Cosmos defer writes only
+  inside a transaction; every relay write runs outside one, where each has a native `updateWhere`.
+
+Bigtable stays refused. A pre-publish fence requires time for the publish, status write and clock
+skew; a pause after that check and a late broker acceptance remain duplicate windows, inside
+at-least-once delivery. Multiple relays keep per-key first-publish order under M107's commit-order
+and writer-clock conditions.
 
 **Deliverables**
 
-- [ ] The chosen arms, each proven against a real backend with a paused-relay negative control (a
-      relay frozen past its lock's TTL publishes nothing once fenced)
-- [ ] Multi-relay, if offered, proven with N relays draining one outbox with no row published twice
-      by the relays (broker redelivery excluded) and per-key order preserved
-- [ ] README and PUBLIC_API.md stating which arm each backend gets and the exact promise
+- [x] Versioned claims and a pre-publish fence, proven with a relay paused past its lease
+- [x] Four relays draining 200 rows once each, preserving per-key first-publish order
+- [x] README and PUBLIC_API.md stating the shared protocol and exact promise
 
 ---
 
@@ -13928,7 +13934,7 @@ patch by construction and gains nothing new here.
 | 105       | ✅     | database-plugin + cloudflare-plugin + common — conditional writes on `IRepository` (closes the M101c tenant-bridge, outbox-transition and inbox-count check-then-write races)                                                                 |
 | 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
 | 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
-| 107b      | ⬜     | messaging-plugin + common + database-plugin — outbox relay fencing and multi-relay sweeping (depends on M105)                                                                                                                                 |
+| 107b      | ✅     | messaging-plugin + common + database-plugin — outbox relay fencing and multi-relay sweeping (depends on M105) ([#441](https://github.com/setu-ts/setu-ts/pull/441))                                                                           |
 | 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, topic, envelope id), in the handler's transaction                                                                               |
 | 109       | ✅     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |

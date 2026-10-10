@@ -26,6 +26,42 @@ function track(promise: Promise<OutboxSweepResult>): { settled: () => boolean } 
 const hang = (): Promise<void> => new Promise<void>(() => {});
 
 describe('relay deadline', () => {
+  it('default options publish with a monotonic clock advancing on every store call', async () => {
+    const h = await outboxHarness();
+    for (let n = 1; n <= 3; n++) await h.write({ key: 'K', n });
+    // Startup and each bounded call consume time, as they do on a real runtime.
+    h.clock.step(1);
+    for (const method of ['failedKeys', 'scanPending', 'claim', 'markSent'] as const) {
+      h.store.faults[method] = () => h.clock.step(1);
+    }
+    expect((await h.sweep()).endedBy).toBe('complete');
+    expect(h.broker.sequence()).toEqual([1, 2, 3]);
+    expect(await h.store.stats()).toMatchObject({ pending: 0, failed: 0 });
+  });
+
+  it('a hung claim ends the sweep at its store bound without publishing', async () => {
+    const h = await outboxHarness({ options: { relay: RELAY } });
+    await h.write({ n: 1 });
+    h.store.faults.claim = hang;
+    const sweep = h.sweep();
+    const state = track(sweep);
+    await flush();
+    expect(h.store.count('claim')).toBe(1);
+    expect(state.settled()).toBe(false);
+    await h.clock.advance(100);
+    expect((await sweep).endedBy).toBe('store-failure');
+    expect(h.broker.calls).toEqual([]);
+    expect(h.clock.timerCount()).toBe(0);
+  });
+
+  it('starts no row with one millisecond less than the claim + publish + mark reserve', async () => {
+    const h = await outboxHarness({ options: { relay: RELAY } });
+    await h.write({ n: 1 });
+    h.store.faults.scanPending = () => h.clock.step(701);
+    expect((await h.sweep()).endedBy).toBe('deadline');
+    expect(h.store.count('claim')).toBe(0);
+    expect(h.broker.calls).toEqual([]);
+  });
   it('a hung failedKeys ends the sweep at its bound', async () => {
     const h = await outboxHarness({ options: { relay: RELAY } });
     await h.write({ n: 1 });
@@ -75,7 +111,7 @@ describe('relay deadline', () => {
     expect(h.broker.sequence()).toEqual([1]);
   });
 
-  it('starts no row once the deadline leaves less than publish + store', async () => {
+  it('starts no row once the deadline leaves less than claim + publish + mark', async () => {
     const h = await outboxHarness({ options: { relay: RELAY } });
     for (let n = 1; n <= 6; n++) await h.write({ n });
     h.broker.behaviour = () => {
@@ -83,7 +119,7 @@ describe('relay deadline', () => {
       return undefined;
     };
     const result = await h.sweep();
-    // Rows start at 1000, 700 and 400 ms remaining; at 100 the 200 reserve is gone.
+    // Rows start at 1000, 700 and 400 ms remaining; at 100 the 300 reserve is gone.
     expect(result.endedBy).toBe('deadline');
     expect(h.broker.sequence()).toEqual([1, 2, 3]);
     await h.sweep();

@@ -69,6 +69,9 @@ describe('the crash table', () => {
     delete h.store.faults.markSent;
     const next = await restart(h);
     await next.sweep();
+    expect(h.broker.sequence()).toEqual([1, 2]);
+    next.clock.advanceWall(35000);
+    await next.sweep();
     expect(h.broker.sequence()).toEqual([1, 2, 2, 3, 4]);
     expect((await rows(h.db)).every((r) => r.status === 'sent')).toBe(true);
   });
@@ -81,6 +84,9 @@ describe('the crash table', () => {
     await flush();
     delete h.store.faults.markSent;
     const next = await restart(h);
+    await next.sweep();
+    expect(h.broker.sequence()).toEqual([1]);
+    next.clock.advanceWall(35000);
     await next.sweep();
     expect(h.broker.published.map((p) => p.message.id)).toEqual([id, id]);
     expect(h.broker.published.map((p) => p.options?.deduplicationId)).toEqual([id, id]);

@@ -12,6 +12,7 @@ import { expect } from '@std/expect';
 import type { EntityKey, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES, OUTBOX_RECORD_KIND } from '@setu-ts/common';
 import { UnsupportedQueryFeatureError } from '../../../src/errors.ts';
+import { DatabaseService, MemoryAdapter } from '../../../src/index.ts';
 import type { FindOptions, IDatabaseService } from '../../../src/interfaces/index.ts';
 import {
   createDatabaseOutboxStore,
@@ -70,6 +71,70 @@ async function refusalOf(service: IDatabaseService): Promise<OutboxStoreUnavaila
 }
 
 describe('DatabaseOutboxStore.verify', () => {
+  it('refuses a source without conditional writes by name before any transition', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const source = adapter.createDataSource(ENTITY);
+    delete source.updateWhere;
+    delete source.deleteWhere;
+    const service = new DatabaseService(adapter, () => source, 'memory');
+    const error = await refusalOf(service);
+    expect(error.reason).toBe('conditional-writes-unsupported');
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    for (
+      const transition of [
+        store.claim('nope', { claimVersion: 0, leaseUntil: 1 }),
+        store.markSent('nope', { claimVersion: 0, settledAt: 1, sentBy: 'r', deleteNow: true }),
+      ]
+    ) {
+      await expect(transition).rejects.toMatchObject({ reason: 'conditional-writes-unsupported' });
+    }
+  });
+
+  for (const missing of ['updateWhere', 'deleteWhere'] as const) {
+    it(`refuses a source lacking only ${missing}, before any row is published`, async () => {
+      // The two members are independent optional capabilities. Without
+      // `deleteWhere`, a `retainSentMs: 0` relay would publish a row and then
+      // fail to delete it, leaving it pending to be published again.
+      const adapter = new MemoryAdapter();
+      await adapter.connect();
+      const source = adapter.createDataSource(ENTITY);
+      delete source[missing];
+      const service = new DatabaseService(adapter, () => source, 'memory');
+      const error = await refusalOf(service);
+      expect(error.reason).toBe('conditional-writes-unsupported');
+    });
+  }
+
+  it('leaves a pending OUTBOX row appended under the probe id untouched', async () => {
+    // `append` accepts any id, so a caller can store a real pending row under
+    // the probe id. A probe predicate of version 0 would claim it (0 → 1) and
+    // its delete would then miss; version -1 matches no row a store can hold.
+    const service = await memoryService();
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    await service.transaction((uow) =>
+      store.append(uow, record(1, { id: 'setu-outbox-claim-probe' }))
+    );
+    const before = await service.getRepository(ENTITY).findAll();
+    await store.verify();
+    expect(await service.getRepository(ENTITY).findAll()).toEqual(before);
+    expect(before[0]).toMatchObject({ id: 'setu-outbox-claim-probe', claimVersion: 0 });
+  });
+
+  it('the capability probe changes neither outbox rows nor a business row at the probe id', async () => {
+    const service = await memoryService();
+    const repo = service.getRepository(ENTITY);
+    await repo.create({ ...record(1) });
+    await repo.create({
+      id: 'setu-outbox-claim-probe',
+      kind: 'business',
+      status: 'pending',
+      claimVersion: 0,
+    });
+    const before = await repo.findAll();
+    await new DatabaseOutboxStore(service, ENTITY).verify();
+    expect(await repo.findAll()).toEqual(before);
+  });
   it('passes on the memory adapter, after the relay query and a transactional probe', async () => {
     const { service, calls } = recordingService(await memoryService());
 
@@ -88,6 +153,22 @@ describe('DatabaseOutboxStore.verify', () => {
       {
         method: 'findAll',
         args: [{ where: { kind: OUTBOX_RECORD_KIND, status: 'pending' }, limit: 1 }],
+      },
+      {
+        method: 'updateWhere',
+        args: ['setu-outbox-claim-probe', {
+          kind: OUTBOX_RECORD_KIND,
+          status: 'pending',
+          claimVersion: -1,
+        }, { claimVersion: 0 }],
+      },
+      {
+        method: 'deleteWhere',
+        args: ['setu-outbox-claim-probe', {
+          kind: OUTBOX_RECORD_KIND,
+          status: 'pending',
+          claimVersion: -1,
+        }],
       },
     ]);
   });

@@ -1006,7 +1006,7 @@ export type OutboxStoreEntry = IOutboxStore | RegistryFactory<IOutboxStore>;
  * The outbox relay's schedule, budgets and failure policy (M107 §3.6–§3.8).
  *
  * Every numeric option must be a finite integer in its range, and
- * `publishTimeoutMs + storeTimeoutMs` must not exceed `sweepDeadlineMs`;
+ * `publishTimeoutMs + 2 * storeTimeoutMs` must be less than `sweepDeadlineMs`;
  * a violation is refused at construction, naming the option.
  *
  * @since 0.9.0
@@ -1036,13 +1036,27 @@ export interface OutboxRelayOptions {
   readonly maxBackoffMs?: number;
   /**
    * One deadline over the whole sweep, measured on the monotonic clock.
-   * Default `15000`. Keep it at most `distributedLock.ttlMs - 10000`.
+   * Default `30000`. Must be greater than publishTimeoutMs + 2 * storeTimeoutMs.
+   * Rows start while the remaining budget covers that reserve: the first
+   * `15000` ms with default options.
    */
   readonly sweepDeadlineMs?: number;
   /** Bound on one publish. Default `5000`. */
   readonly publishTimeoutMs?: number;
   /** Bound on one store call. Default `5000`. */
   readonly storeTimeoutMs?: number;
+  /**
+   * Row lease in ms, integer 1–3600000. Default `30000`. Must cover
+   * publishTimeoutMs + 2 * storeTimeoutMs + maxClockSkewMs.
+   * @since 0.9.0
+   */
+  readonly claimLeaseMs?: number;
+  /**
+   * Assumed maximum wall-clock disagreement in ms, integer 0–60000. Default
+   * `5000`. Zero assumes perfectly agreeing clocks and is unsafe across hosts.
+   * @since 0.9.0
+   */
+  readonly maxClockSkewMs?: number;
 }
 
 /**
@@ -1053,7 +1067,7 @@ export interface OutboxRelayOptions {
 export interface OutboxHealthOptions {
   /** The oldest pending row's age that degrades health. Default `60000`. */
   readonly degradedAfterMs?: number;
-  /** How long an observed scheduled-sweep overlap degrades health. Default `600000`. */
+  /** How long any observed relay overlap degrades health. Default `600000`. */
   readonly overlapWindowMs?: number;
 }
 
@@ -1162,12 +1176,15 @@ export interface OutboxSweepResult {
  * The transactional outbox, registered under `CAPABILITIES.OUTBOX`
  * (`outbox.<name>` for a named messaging instance).
  *
- * **The promise.** At-least-once delivery of every committed row; per
- * ordering key, publish order among committed rows, provided rows of one key
- * commit in the order they were written and, across replicas, provided the
- * writers' clocks agree; delivery order as the broker gives it. Consumers
- * compare `aggregateVersion`. Never exactly once — a re-send carries the same
- * envelope id as its de-duplication id.
+ * **The promise.** At-least-once delivery of every committed row. At most one
+ * relay holds a row's claim, provided relays' wall clocks agree within
+ * `relay.maxClockSkewMs`. A relay starts publishing only while its claim has
+ * room for the publish, status write and skew. Per-key order among first
+ * publishes across any number of relays assumes rows commit in write order
+ * and writers' clocks agree. Delivery order is the broker's; consumers compare
+ * `aggregateVersion`. A pause after the fence check or a publish the broker
+ * accepts after abandonment can cause repeats, including out of order. Never
+ * exactly once: repeats carry the same envelope and de-duplication id.
  *
  * @since 0.9.0
  */

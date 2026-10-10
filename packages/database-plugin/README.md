@@ -177,58 +177,77 @@ by id treats a row of another `kind` as missing. An outbox sharing an entity wit
 Cosmos container is queried as a whole) never reads, counts, transitions or deletes a business
 document that happens to carry `status: 'pending'` or `'sent'`.
 
-**Transitions are conditional.** `markSent`, `markFailure` and `release` check the discriminator and
-expected status within `updateWhere`/`deleteWhere`, so a late failure cannot regress a `sent` row. A
-miss is re-read for classification; unexplained misses retry at most three rounds. When the source
-lacks conditional support, the two-call fallback retains the stale-overwrite race. Absent optional
-columns are written as `NULL` and read back as absent.
+**Transitions are conditional.** `claim` compares `kind`, `pending` and the read `claimVersion`,
+increments the version once and writes the lease. `markSent` and `markFailure` require the held
+version; `deleteNow` uses the same predicate through `deleteWhere`. A version miss on a pending row
+answers `claim-lost` and writes nothing. `markFailure` clears the lease; `markInvalid` requires only
+`kind` and `pending`, writes `failed`/`invalid-row`, clears the lease and preserves attempts.
+`release('retry')` requires `failed`, resets attempts, the lease and `lastError`, and keeps the
+version — so a row poisoned for an exhausted `claimVersion` (`MAX_SAFE_INTEGER`, stored by a normal
+claim of a row at `MAX_SAFE_INTEGER - 1`, which takes 2^53 − 1 claims of one row or an edit) is
+poisoned again by the next sweep; `release('discard')` or editing the row are the only ways out. A
+miss is re-read for classification; unexplained misses retry at most three rounds. Sources without
+native conditional support are refused; there is no fallback. Absent optional columns are written as
+`NULL` and read back as absent. `sentBy` is an operator diagnostic only.
 
 **Startup check.** `verify()`, run by the outbox before it schedules the relay or accepts a write,
-runs the relay's first query and a transactional read of the outbox entity, and rejects with
-`OutboxStoreUnavailableError` (`reason`, `entity`, the adapter error as `cause`) when either fails:
+runs the relay's first query, a transactional read, and two conditional capability probes on the
+fixed non-UUID id `setu-outbox-claim-probe` with `{ kind, status: 'pending', claimVersion: -1 }`: an
+`updateWhere` writing `{ claimVersion: 0 }` and a `deleteWhere` (needed because `retainSentMs: 0`
+deletes a sent row conditionally after publishing it). No row can carry version `-1`, so neither
+probe writes, even to a row appended under the probe id. `verify()` rejects with
+`OutboxStoreUnavailableError` (`reason`, `entity`, the adapter error as `cause`) when any step
+fails:
 
-| Backend  | Verdict                                                                                                                                              |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| memory   | supported (single process)                                                                                                                           |
-| Prisma   | supported; the table must exist                                                                                                                      |
-| Drizzle  | supported; `drizzleTables` must register the outbox table                                                                                            |
-| D1       | supported; the table must exist                                                                                                                      |
-| MongoDB  | supported on a replica set; a standalone server is refused (`reason: 'mongodb-replica-set'`)                                                         |
-| DynamoDB | supported with a GSI `{ partitionKey: 'status', sortKey: 'position' }`, projection `ALL`; refused without it (`'dynamodb-index'`)                    |
-| Cosmos   | supported when the outbox entity maps to the business container and its partition-key path is a column the row carries (`tenantId` or `orderingKey`) |
-| Bigtable | refused (`'bigtable'`): no secondary index, so the relay query cannot run — use a change-data-capture relay                                          |
+| Backend               | Verdict                                                                                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| memory                | supported (single process)                                                                                                                           |
+| Prisma                | supported; the table must exist                                                                                                                      |
+| Drizzle               | supported; `drizzleTables` must register the outbox table                                                                                            |
+| D1                    | supported; the table must exist                                                                                                                      |
+| MongoDB               | supported on a replica set; a standalone server is refused (`reason: 'mongodb-replica-set'`)                                                         |
+| DynamoDB              | supported with a GSI `{ partitionKey: 'status', sortKey: 'position' }`, projection `ALL`; refused without it (`'dynamodb-index'`)                    |
+| Cosmos                | supported when the outbox entity maps to the business container and its partition-key path is a column the row carries (`tenantId` or `orderingKey`) |
+| No conditional writes | refused (`'conditional-writes-unsupported'`): `updateWhere` or `deleteWhere` is absent, or either rejects `conditional-write`                        |
+| Bigtable              | refused (`'bigtable'`): no secondary index, so the relay query cannot run — use a change-data-capture relay                                          |
 
 Any other refusal — a missing or unreadable table — is `reason: 'entity-unavailable'`. On the memory
 adapter and MongoDB a missing entity cannot be detected (both create lazily), so that check passes
 there by construction. No portable migration exists (`migrate()` always rejects): create the table
-yourself. For PostgreSQL:
+yourself. The old M107 SQL schema lacks the claim fields and is refused at startup as
+`entity-unavailable`. A claim reads a version in `[0, Number.MAX_SAFE_INTEGER - 1]` and stores one
+more, so the stored value reaches `Number.MAX_SAFE_INTEGER`, which is exhausted; PostgreSQL uses
+`bigint`, SQLite/D1 use 64-bit `INTEGER`, and JSON backends store the number. For PostgreSQL:
 
 ```sql
 CREATE TABLE setu_outbox (
-  id           text    PRIMARY KEY,
-  kind         text    NOT NULL,
-  topic        text    NOT NULL,
-  envelope     text    NOT NULL,
-  options      text    NOT NULL,
-  ordering_key text,
-  tenant_id    text,
-  traceparent  text,
-  position     text    NOT NULL,
-  created_at   bigint  NOT NULL,
-  status       text    NOT NULL,
-  attempts     integer NOT NULL,
-  available_at bigint  NOT NULL,
-  last_error   text,
-  settled_at   bigint,
-  sent_by      text
+  id            text    PRIMARY KEY,
+  kind          text    NOT NULL,
+  topic         text    NOT NULL,
+  envelope      text    NOT NULL,
+  options       text    NOT NULL,
+  ordering_key  text,
+  tenant_id     text,
+  traceparent   text,
+  position      text    NOT NULL,
+  created_at    bigint  NOT NULL,
+  status        text    NOT NULL,
+  attempts      integer NOT NULL,
+  available_at  bigint  NOT NULL,
+  claim_version bigint  NOT NULL,
+  lease_until   bigint  NOT NULL,
+  last_error    text,
+  settled_at    bigint,
+  sent_by       text
 );
 CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
 CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settled_at);
 ```
 
 Map it with `drizzleTables: { Outbox: pgTable('setu_outbox', { … }) }` (JS keys `orderingKey`,
-`tenantId`, `createdAt`, `availableAt`, `lastError`, `settledAt`, `sentBy` over the snake_case
-columns; the `bigint` columns in `{ mode: 'number' }`).
+`tenantId`, `createdAt`, `availableAt`, `claimVersion`, `leaseUntil`, `lastError`, `settledAt`,
+`sentBy` over the snake_case columns; `claim_version` and `lease_until` must be 64-bit; the `bigint`
+columns in `{ mode: 'number' }`).
 
 ## Consumer inbox store
 

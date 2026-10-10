@@ -10,7 +10,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { INVALID_ROW_ERROR } from '../../../src/outbox/relay.ts';
 import {
   countingObserver,
   edit,
@@ -123,17 +122,17 @@ describe('relay blocking', () => {
       expect(h.broker.calls).toEqual([]);
       const stored = await row(h.db, id);
       expect(stored!.status).toBe('failed');
-      expect(stored!.lastError).toBe(INVALID_ROW_ERROR);
+      expect(stored!.lastError).toBe('invalid-row');
       expect(observer.counts).toEqual({ 'poisoned-invalid': 1 });
     });
   }
 
-  it('an invalid-row keeps a sane attempt count when the stored one is not a number', async () => {
+  it('markInvalid preserves the stored attempt count even when it is malformed', async () => {
     const h = await outboxHarness();
     const id = await h.write({ n: 1 });
     await edit(h.db, id, { topic: '', attempts: 'many' });
     await h.sweep();
-    expect((await row(h.db, id))!.attempts).toBe(0);
+    expect((await row(h.db, id))!.attempts).toBe('many');
   });
 });
 

@@ -64,6 +64,34 @@ describeOutboxStoreContract('database bridge over real PostgreSQL (Drizzle)', as
 }, skipPostgres);
 
 describe('DatabaseOutboxStore over real PostgreSQL', { ignore: skipPostgres }, () => {
+  it('claims versions across int32 and safe-integer boundaries without losing precision', async () => {
+    const { service, dispose } = await postgres(true);
+    try {
+      const store = new DatabaseOutboxStore(service, 'Outbox');
+      for (const [seq, version] of [2_147_483_647, Number.MAX_SAFE_INTEGER - 1].entries()) {
+        await service.transaction((uow) =>
+          store.append(uow, record(seq + 1, { claimVersion: version }))
+        );
+        expect(await store.claim(`row-${seq + 1}`, { claimVersion: version, leaseUntil: 9000 }))
+          .toEqual({ outcome: 'applied' });
+        expect(await service.getRepository('Outbox').findById(`row-${seq + 1}`))
+          .toMatchObject({ claimVersion: version + 1, leaseUntil: 9000 });
+      }
+    } finally {
+      await dispose();
+    }
+  });
+
+  it('refuses the M107 SQL table without claim columns at startup', async () => {
+    const { service, dispose } = await postgres(true);
+    try {
+      await service.query('ALTER TABLE setu_outbox DROP COLUMN claim_version');
+      await expect(new DatabaseOutboxStore(service, 'Outbox').verify()).rejects
+        .toMatchObject({ reason: 'entity-unavailable' });
+    } finally {
+      await dispose();
+    }
+  });
   it('writes kind and NULL optionals into the DDL columns', async () => {
     const { service, dispose } = await postgres(true);
     try {

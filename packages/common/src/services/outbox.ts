@@ -86,6 +86,10 @@ export interface OutboxRecord {
   readonly attempts: number;
   /** Epoch milliseconds before which the relay must not retry the row. */
   readonly availableAt: number;
+  /** Monotonic claim counter; claimable in [0, Number.MAX_SAFE_INTEGER - 1]. @since 0.9.0 */
+  readonly claimVersion: number;
+  /** Claim expiry in epoch milliseconds; zero when unclaimed. @since 0.9.0 */
+  readonly leaseUntil: number;
   /** The last publish failure, one bounded line. Absent when none. */
   readonly lastError?: string;
   /**
@@ -115,7 +119,7 @@ export interface OutboxKey {
 }
 
 /**
- * The answer to a conditional status transition
+ * The answer to a conditional claim or status transition
  * ({@linkcode IOutboxStore.markSent}, {@linkcode IOutboxStore.markFailure},
  * {@linkcode IOutboxStore.release}).
  *
@@ -138,8 +142,10 @@ export type OutboxTransition =
     readonly outcome: 'not-pending';
     /** The row's actual status. */
     readonly status: Exclude<OutboxStatus, 'pending'>;
-    /** The `sentBy` of the sweep that sent it, when the row is `sent`. */
-    readonly sentBy?: string;
+  }
+  | {
+    /** The pending row has another claim version; nothing written. @since 0.9.0 */
+    readonly outcome: 'claim-lost';
   }
   | {
     /** `release`: the row was not `failed`; nothing written. */
@@ -197,9 +203,10 @@ export interface IOutboxWriteScope {
  * The outbox store port.
  *
  * Every method returns a promise that REJECTS on failure and never throws
- * synchronously. Every transition reads the row and writes only from the
- * expected status, and every read requires `kind` to equal
- * {@linkcode OUTBOX_RECORD_KIND}; a custom store must honour both rules.
+ * synchronously. Every transition atomically requires the expected status and
+ * `kind` equal to {@linkcode OUTBOX_RECORD_KIND}. Claims compare and increment
+ * the read version; settlement compares the held version. Every read requires
+ * that discriminator. A custom store must honour these rules.
  *
  * @since 0.9.0
  */
@@ -235,27 +242,67 @@ export interface IOutboxStore {
   failedKeys(limit: number): Promise<readonly OutboxKey[]>;
 
   /**
+   * Claims a pending row at the read version, incrementing that version by one.
+   *
+   * @param id - The row id
+   * @param update - The read version and the new lease expiry
+   * @returns `applied`, `missing`, `not-pending`, or `claim-lost`
+   * @since 0.9.0
+   */
+  claim(
+    id: string,
+    update: {
+      /** Version read by the caller, in [0, Number.MAX_SAFE_INTEGER - 1]. @since 0.9.0 */
+      readonly claimVersion: number;
+      /** New claim expiry in epoch milliseconds. @since 0.9.0 */
+      readonly leaseUntil: number;
+    },
+  ): Promise<OutboxTransition>;
+
+  /**
+   * Poisons an invalid pending row without a claim, preserving its attempts.
+   * Writes `failed`, `invalid-row`, `availableAt: now`, and `leaseUntil: 0`.
+   *
+   * @param id - The row id
+   * @param now - Epoch milliseconds
+   * @returns `applied`, `missing`, or `not-pending`
+   * @since 0.9.0
+   */
+  markInvalid(id: string, now: number): Promise<OutboxTransition>;
+
+  /**
    * Marks a `pending` row as sent (or deletes it when `deleteNow` is set).
    *
    * @param id - The row id
-   * @param update - The settlement time, the sending sweep, and whether to delete instead
+   * @param update - The held version, settlement time, sending sweep and deletion policy
    * @returns `applied`, or why nothing was written
    */
   markSent(
     id: string,
-    update: { readonly settledAt: number; readonly sentBy: string; readonly deleteNow: boolean },
+    update: {
+      /** Version held by the sending relay. @since 0.9.0 */
+      readonly claimVersion: number;
+      /** Settlement time in epoch milliseconds. @since 0.9.0 */
+      readonly settledAt: number;
+      /** Sending instance and sweep origin, for operator diagnostics. @since 0.9.0 */
+      readonly sentBy: string;
+      /** Delete immediately instead of retaining the sent row. @since 0.9.0 */
+      readonly deleteNow: boolean;
+    },
   ): Promise<OutboxTransition>;
 
   /**
-   * Records a publish failure on a `pending` row.
+   * Records a publish failure on a `pending` row at the held version, clearing its lease.
    *
    * @param id - The row id
-   * @param update - The attempt count, error line, next retry time, and new status
+   * @param update - The held version, attempt count, error line, retry time and status
    * @returns `applied`, or why nothing was written
    */
   markFailure(
     id: string,
     update: {
+      /** Version held by the publishing relay. @since 0.9.0 */
+      readonly claimVersion: number;
       readonly attempts: number;
       readonly lastError: string;
       readonly availableAt: number;
@@ -265,7 +312,8 @@ export interface IOutboxStore {
 
   /**
    * Releases a `failed` row: `retry` returns it to `pending` with
-   * `attempts: 0` and `availableAt: now`; `discard` makes it `discarded` with
+   * `attempts: 0`, `availableAt: now`, `leaseUntil: 0` and no `lastError`, keeping its version;
+   * `discard` makes it `discarded` with
    * `settledAt: now`.
    *
    * @param id - The row id

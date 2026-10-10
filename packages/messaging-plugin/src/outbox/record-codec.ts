@@ -28,6 +28,39 @@ const MAX_TOPIC_BYTES = 255;
 
 const UTF8 = new TextEncoder();
 
+/** The largest `relay.claimLeaseMs` the options accept. */
+export const MAX_CLAIM_LEASE_MS = 3_600_000;
+
+/** The largest `relay.maxClockSkewMs` the options accept. */
+export const MAX_CLOCK_SKEW_MS = 60_000;
+
+/**
+ * Largest legal lease plus largest legal clock skew. Derived from the option
+ * ceilings, never from one relay's own options, so replicas running different
+ * lease settings never poison each other's live claims.
+ */
+export const MAX_CLAIM_HORIZON_MS = MAX_CLAIM_LEASE_MS + MAX_CLOCK_SKEW_MS;
+
+/**
+ * Reads usable claim fields without incrementing an exhausted version.
+ * @internal
+ * @param record - The stored row
+ * @param now - This relay's wall clock
+ * @returns Valid claim fields, or undefined for a malformed or exhausted claim
+ */
+export function claimStateOf(
+  record: OutboxRecord,
+  now: number,
+): { readonly claimVersion: number; readonly leaseUntil: number } | undefined {
+  const { claimVersion, leaseUntil } = record;
+  return Number.isSafeInteger(claimVersion) && claimVersion >= 0 &&
+      claimVersion < Number.MAX_SAFE_INTEGER &&
+      Number.isSafeInteger(leaseUntil) && leaseUntil >= 0 &&
+      leaseUntil <= now + MAX_CLAIM_HORIZON_MS
+    ? { claimVersion, leaseUntil }
+    : undefined;
+}
+
 /**
  * The longest `options` text (in UTF-16 code units, so the check is O(1)) a
  * row written by {@linkcode encodeOutboxRecord} can carry. Derived from the
@@ -99,6 +132,8 @@ export function encodeOutboxRecord(input: OutboxRecordInput): OutboxRecord {
     status: 'pending',
     attempts: 0,
     availableAt: input.createdAt,
+    claimVersion: 0,
+    leaseUntil: 0,
   };
 }
 

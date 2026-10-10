@@ -29,6 +29,21 @@ function gate(): { promise: Promise<void>; open: () => void } {
 }
 
 describe('IOutbox.dispatch', () => {
+  it('a dispatch and a scheduled sweep of separate instances publish each row once', async () => {
+    const handed: Promise<unknown>[] = [];
+    const a = await outboxHarness({ options: { background: (p) => handed.push(p) } });
+    const b = await outboxHarness({
+      shared: { db: a.db, store: a.store },
+      broker: a.broker,
+      clock: outboxClock(10000),
+    });
+    for (let n = 1; n <= 10; n++) await a.write({ key: 'K', n });
+    a.service.dispatch();
+    await b.sweep();
+    await Promise.all(handed);
+    expect(a.broker.sequence()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(new Set(a.broker.published.map((p) => p.message.id)).size).toBe(10);
+  });
   it('coalesces a request flood to one running sweep and one follow-up', async () => {
     const handed: Promise<unknown>[] = [];
     const h = await outboxHarness({ options: { background: (p) => handed.push(p) } });

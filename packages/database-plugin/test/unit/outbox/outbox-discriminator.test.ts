@@ -59,12 +59,31 @@ describe('DatabaseOutboxStore — the discriminator', () => {
     const before = await allRows(service);
 
     for (const id of ['biz-pending', 'biz-sent', 'biz-failed', 'biz-plain']) {
-      expect(await store.markSent(id, { settledAt: 9, sentBy: 'r/scheduled', deleteNow: false }))
+      expect(await store.claim(id, { claimVersion: 0, leaseUntil: 9 })).toEqual({
+        outcome: 'missing',
+      });
+      expect(await store.markInvalid(id, 9)).toEqual({ outcome: 'missing' });
+      expect(
+        await store.markSent(id, {
+          claimVersion: 0,
+          settledAt: 9,
+          sentBy: 'r/scheduled',
+          deleteNow: false,
+        }),
+      )
         .toEqual({ outcome: 'missing' });
-      expect(await store.markSent(id, { settledAt: 9, sentBy: 'r/scheduled', deleteNow: true }))
+      expect(
+        await store.markSent(id, {
+          claimVersion: 0,
+          settledAt: 9,
+          sentBy: 'r/scheduled',
+          deleteNow: true,
+        }),
+      )
         .toEqual({ outcome: 'missing' });
       expect(
         await store.markFailure(id, {
+          claimVersion: 0,
           attempts: 1,
           lastError: 'x',
           availableAt: 9,
@@ -79,7 +98,12 @@ describe('DatabaseOutboxStore — the discriminator', () => {
   });
 
   it('purge never deletes a business document, however old its settledAt', async () => {
-    await store.markSent('row-1', { settledAt: 5, sentBy: 'r/scheduled', deleteNow: false });
+    await store.markSent('row-1', {
+      claimVersion: 0,
+      settledAt: 5,
+      sentBy: 'r/scheduled',
+      deleteNow: false,
+    });
 
     expect(await store.purge(Number.MAX_SAFE_INTEGER, 100)).toBe(1);
 

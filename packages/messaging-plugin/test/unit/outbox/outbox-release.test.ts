@@ -17,7 +17,13 @@ describe('IOutbox.release', () => {
     const h = await outboxHarness();
     const failed = await h.write({ key: 'K', n: 1 });
     await h.write({ key: 'K', n: 2 });
-    await edit(h.db, failed, { status: 'failed', attempts: 10, lastError: 'x' });
+    await edit(h.db, failed, {
+      status: 'failed',
+      attempts: 10,
+      lastError: 'x',
+      claimVersion: 7,
+      leaseUntil: WALL_START + 30000,
+    });
     await h.sweep();
     expect(h.broker.sequence()).toEqual([]);
     h.clock.advanceWall(5);
@@ -26,8 +32,11 @@ describe('IOutbox.release', () => {
     expect(stored!.status).toBe('pending');
     expect(stored!.attempts).toBe(0);
     expect(stored!.availableAt).toBe(WALL_START + 5);
+    expect(stored!.leaseUntil).toBe(0);
+    expect(stored!.claimVersion).toBe(7);
     await h.sweep();
     expect(h.broker.sequence()).toEqual([1, 2]);
+    expect((await row(h.db, failed))!.claimVersion).toBe(8);
   });
 
   it('discard: the row settles without publishing and unblocks its key at the next lap', async () => {

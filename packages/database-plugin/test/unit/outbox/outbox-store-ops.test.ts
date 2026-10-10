@@ -147,6 +147,80 @@ describe('DatabaseOutboxStore — reads', () => {
   });
 });
 
+describe('DatabaseOutboxStore — claims and invalid rows', () => {
+  it('takes a version once, classifies lost, settled and missing claims, and preserves stale writes', async () => {
+    const service = await memoryService();
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    await append(service, store, [record(1), record(2, { status: 'sent' })]);
+    expect(await store.claim('row-1', { claimVersion: 0, leaseUntil: 9000 })).toEqual({
+      outcome: 'applied',
+    });
+    expect(await store.claim('row-1', { claimVersion: 0, leaseUntil: 10000 })).toEqual({
+      outcome: 'claim-lost',
+    });
+    expect(await store.claim('row-2', { claimVersion: 0, leaseUntil: 9000 })).toEqual({
+      outcome: 'not-pending',
+      status: 'sent',
+    });
+    expect(await store.claim('missing', { claimVersion: 0, leaseUntil: 9000 })).toEqual({
+      outcome: 'missing',
+    });
+    for (const deleteNow of [false, true]) {
+      expect(
+        await store.markSent('row-1', {
+          claimVersion: 0,
+          settledAt: 5,
+          sentBy: 'stale',
+          deleteNow,
+        }),
+      ).toEqual({ outcome: 'claim-lost' });
+    }
+    expect(
+      await store.markFailure('row-1', {
+        claimVersion: 0,
+        attempts: 4,
+        lastError: 'stale',
+        availableAt: 5,
+        status: 'failed',
+      }),
+    ).toEqual({ outcome: 'claim-lost' });
+    expect(await rowOf(service, 'row-1')).toMatchObject({
+      status: 'pending',
+      claimVersion: 1,
+      leaseUntil: 9000,
+      attempts: 0,
+    });
+  });
+
+  it('poisons malformed claim fields preserving attempts and clears the lease on retry', async () => {
+    const service = await memoryService();
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    await seed(service, [{ ...record(1), claimVersion: 'edited', attempts: 7, leaseUntil: 9000 }]);
+    expect(await store.markInvalid('row-1', 5)).toEqual({ outcome: 'applied' });
+    expect(await rowOf(service, 'row-1')).toMatchObject({
+      status: 'failed',
+      claimVersion: 'edited',
+      attempts: 7,
+      leaseUntil: 0,
+      availableAt: 5,
+      lastError: 'invalid-row',
+    });
+    expect(await store.markInvalid('row-1', 6)).toEqual({
+      outcome: 'not-pending',
+      status: 'failed',
+    });
+    expect(await store.markInvalid('missing', 6)).toEqual({ outcome: 'missing' });
+    await store.release('row-1', 'retry', 7);
+    expect(await rowOf(service, 'row-1')).toMatchObject({
+      status: 'pending',
+      claimVersion: 'edited',
+      attempts: 0,
+      leaseUntil: 0,
+      availableAt: 7,
+    });
+  });
+});
+
 describe('DatabaseOutboxStore — markSent', () => {
   let service: IDatabaseService;
   let store: DatabaseOutboxStore;
@@ -163,28 +237,56 @@ describe('DatabaseOutboxStore — markSent', () => {
   });
 
   it('marks a pending row sent', async () => {
-    expect(await store.markSent('row-1', { settledAt: 9, sentBy: 'r/scheduled', deleteNow: false }))
+    expect(
+      await store.markSent('row-1', {
+        claimVersion: 0,
+        settledAt: 9,
+        sentBy: 'r/scheduled',
+        deleteNow: false,
+      }),
+    )
       .toEqual({ outcome: 'applied' });
     const row = await rowOf(service, 'row-1');
     expect(row).toMatchObject({ status: 'sent', settledAt: 9, sentBy: 'r/scheduled' });
   });
 
   it('deletes a pending row when deleteNow is set', async () => {
-    expect(await store.markSent('row-1', { settledAt: 9, sentBy: 'r/scheduled', deleteNow: true }))
+    expect(
+      await store.markSent('row-1', {
+        claimVersion: 0,
+        settledAt: 9,
+        sentBy: 'r/scheduled',
+        deleteNow: true,
+      }),
+    )
       .toEqual({ outcome: 'applied' });
     expect((await allRows(service)).map((row) => row.id)).not.toContain('row-1');
   });
 
   it('answers missing for an absent row and writes nothing', async () => {
     const before = await allRows(service);
-    expect(await store.markSent('nope', { settledAt: 9, sentBy: 'r/scheduled', deleteNow: false }))
+    expect(
+      await store.markSent('nope', {
+        claimVersion: 0,
+        settledAt: 9,
+        sentBy: 'r/scheduled',
+        deleteNow: false,
+      }),
+    )
       .toEqual({ outcome: 'missing' });
     expect(await allRows(service)).toEqual(before);
   });
 
-  it('answers not-pending with sentBy for a sent row and leaves it sent', async () => {
-    expect(await store.markSent('row-2', { settledAt: 9, sentBy: 'r/scheduled', deleteNow: false }))
-      .toEqual({ outcome: 'not-pending', status: 'sent', sentBy: 'relay-a/dispatch' });
+  it('answers not-pending for a sent row and preserves its diagnostic and leaves it sent', async () => {
+    expect(
+      await store.markSent('row-2', {
+        claimVersion: 0,
+        settledAt: 9,
+        sentBy: 'r/scheduled',
+        deleteNow: false,
+      }),
+    )
+      .toEqual({ outcome: 'not-pending', status: 'sent' });
     expect(await rowOf(service, 'row-2')).toMatchObject({
       settledAt: 3,
       sentBy: 'relay-a/dispatch',
@@ -193,7 +295,12 @@ describe('DatabaseOutboxStore — markSent', () => {
 
   it('answers not-pending without sentBy for failed and discarded rows', async () => {
     for (const [id, status] of [['row-3', 'failed'], ['row-4', 'discarded']] as const) {
-      const outcome = await store.markSent(id, { settledAt: 9, sentBy: 'r', deleteNow: true });
+      const outcome = await store.markSent(id, {
+        claimVersion: 0,
+        settledAt: 9,
+        sentBy: 'r',
+        deleteNow: true,
+      });
       expect(outcome).toEqual({ outcome: 'not-pending', status });
       expect(Object.hasOwn(outcome, 'sentBy')).toBe(false);
       expect((await rowOf(service, id)).status).toBe(status);
@@ -208,12 +315,22 @@ describe('DatabaseOutboxStore — markSent', () => {
         return {
           ...repo,
           findById: repo.findById.bind(repo),
-          delete: () => Promise.resolve(false),
+          deleteWhere: async (id: Id) => {
+            await repo.delete(id);
+            return false;
+          },
         };
       },
     };
     const racing = new DatabaseOutboxStore(vanishing, ENTITY);
-    expect(await racing.markSent('row-1', { settledAt: 9, sentBy: 'r', deleteNow: true }))
+    expect(
+      await racing.markSent('row-1', {
+        claimVersion: 0,
+        settledAt: 9,
+        sentBy: 'r',
+        deleteNow: true,
+      }),
+    )
       .toEqual({ outcome: 'missing' });
   });
 });
@@ -235,6 +352,7 @@ describe('DatabaseOutboxStore — markFailure', () => {
     it(`records a failure on a pending row and sets status ${status}`, async () => {
       expect(
         await store.markFailure('row-1', {
+          claimVersion: 0,
           attempts: 2,
           lastError: 'broker down',
           availableAt: 77,
@@ -253,12 +371,13 @@ describe('DatabaseOutboxStore — markFailure', () => {
   it('never regresses a sent row: a late failure writes nothing', async () => {
     expect(
       await store.markFailure('row-2', {
+        claimVersion: 0,
         attempts: 1,
         lastError: 'late',
         availableAt: 77,
         status: 'pending',
       }),
-    ).toEqual({ outcome: 'not-pending', status: 'sent', sentBy: 'relay-a/scheduled' });
+    ).toEqual({ outcome: 'not-pending', status: 'sent' });
     const row = await rowOf(service, 'row-2');
     expect(row.status).toBe('sent');
     expect(row.lastError).toBeNull();
@@ -267,6 +386,7 @@ describe('DatabaseOutboxStore — markFailure', () => {
   it('answers missing for an absent row', async () => {
     expect(
       await store.markFailure('nope', {
+        claimVersion: 0,
         attempts: 1,
         lastError: 'x',
         availableAt: 1,
@@ -296,6 +416,7 @@ describe('DatabaseOutboxStore — release', () => {
       status: 'pending',
       attempts: 0,
       availableAt: 500,
+      lastError: null,
     });
   });
 
@@ -391,14 +512,25 @@ describe('DatabaseOutboxStore — a status outside the vocabulary', () => {
     const store = new DatabaseOutboxStore(service, ENTITY);
     await seed(service, [{ ...record(1), status: 'secret-status' }]);
 
-    const pending = store.markSent('row-1', { settledAt: 1, sentBy: 'r', deleteNow: false });
+    const pending = store.markSent('row-1', {
+      claimVersion: 0,
+      settledAt: 1,
+      sentBy: 'r',
+      deleteNow: false,
+    });
     expect(pending).toBeInstanceOf(Promise);
     const refusal = await pending.catch((e: unknown) => e);
     expect(refusal).toBeInstanceOf(TypeError);
     expect((refusal as Error).message).not.toContain('secret-status');
     await expect(store.release('row-1', 'retry', 1)).rejects.toThrow(TypeError);
     await expect(
-      store.markFailure('row-1', { attempts: 1, lastError: 'x', availableAt: 1, status: 'failed' }),
+      store.markFailure('row-1', {
+        claimVersion: 0,
+        attempts: 1,
+        lastError: 'x',
+        availableAt: 1,
+        status: 'failed',
+      }),
     ).rejects.toThrow(TypeError);
   });
 

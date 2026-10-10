@@ -175,6 +175,8 @@ const FAST_BUDGET: OutboxRelayOptions = {
   publishTimeoutMs: 3_000,
   storeTimeoutMs: 500,
   sweepDeadlineMs: 5_000,
+  claimLeaseMs: 4_000,
+  maxClockSkewMs: 0,
 };
 
 for (const transport of transports) {
@@ -281,7 +283,16 @@ for (const transport of transports) {
         const afterCrash = await storedRows(dying);
         expect(afterCrash.map((r) => r.status)).toEqual(['sent', 'pending', 'pending', 'pending']);
 
-        const restarted = await fresh.services.get<IOutbox>(CAPABILITIES.OUTBOX).sweep();
+        const freshOutbox = fresh.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+        expect((await freshOutbox.sweep()).published).toBe(0);
+        const runtime = fresh.services.get<import('@setu-ts/common').IRuntimeServices>(
+          CAPABILITIES.RUNTIME,
+        );
+        await waitFor(
+          () => runtime.now() >= Number(afterCrash[1]!.leaseUntil),
+          'the crashed relay claim expiry',
+        );
+        const restarted = await freshOutbox.sweep();
         expect(restarted.published).toBe(3);
         await waitFor(() => delivered.length === 5, 'the republished row and the rest');
 
