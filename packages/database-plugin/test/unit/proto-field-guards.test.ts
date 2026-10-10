@@ -128,6 +128,13 @@ describe('Cosmos DB and DynamoDB __proto__ payload fields (M105)', () => {
       const row = unmarshalDynamoItem(item as DynamoAttributeMap);
       expect(row).toEqual({ name: 'foreign' });
       expect(Object.getPrototypeOf(row)).toBe(Object.prototype);
+      // One that arrives WITH a value stays an own property, never a prototype.
+      const valued = unmarshalDynamoItem(
+        JSON.parse('{"__proto__":{"M":{"isAdmin":{"S":"canary"}}}}') as DynamoAttributeMap,
+      );
+      expect(Object.getPrototypeOf(valued)).toBe(Object.prototype);
+      expect((valued as { isAdmin?: unknown }).isAdmin).toBeUndefined();
+      expect(Object.keys(valued)).toEqual(['__proto__']);
     });
   });
 });

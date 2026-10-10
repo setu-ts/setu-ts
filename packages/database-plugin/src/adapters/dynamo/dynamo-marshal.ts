@@ -368,9 +368,11 @@ export function unmarshalDynamoValue(value: DynamoAttributeValue): unknown {
 export function unmarshalDynamoItem(item: DynamoAttributeMap): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(item)) {
-    // The SDK delivers a `__proto__` attribute (written by anything) with no
-    // value, so it is skipped rather than crashing every read of the row.
-    if (key === '__proto__') continue;
+    // The AWS SDK delivers a `__proto__` attribute (written by anything) with
+    // no value (measured on DynamoDB Local), so that one is skipped rather than
+    // crashing every read of the row. One that arrives WITH a value — an
+    // injected client may deliver it — is kept as an own property below.
+    if (key === '__proto__' && value === undefined) continue;
     defineAttribute(row, key, unmarshalDynamoValue(value));
   }
   return row;

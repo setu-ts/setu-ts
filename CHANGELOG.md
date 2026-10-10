@@ -678,7 +678,8 @@ All notable changes to this project are documented here. The format follows
   attribute with no value. Both adapters now refuse such a field on write without quoting it — at
   any depth on DynamoDB, whose SDK drops nested ones too — and their read paths no longer let a
   stored one (written by anything) inject a prototype or crash the read: Cosmos keeps it as an
-  ordinary field and DynamoDB skips the attribute the SDK cannot deliver.
+  ordinary field, and DynamoDB skips the valueless attribute the SDK delivers (one an injected
+  client delivers with a value stays an own property).
 - **Bigtable and DynamoDB field maps read own entries only (`@setu-ts/database-plugin`, M105).** A
   field named after an inherited member (`constructor`, `toString`) resolved the inherited function
   as a column address or date encoding; Bigtable then threw a `TypeError`. Both maps are now
