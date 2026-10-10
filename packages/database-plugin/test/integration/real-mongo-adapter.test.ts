@@ -14,6 +14,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import { expect } from '@std/expect';
 import { MongoClient } from 'mongodb';
 import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
@@ -72,6 +73,63 @@ describe('IMongoDatabase facade static type fixture (M95b §3.5)', () => {
 });
 
 describe('MongoAdapter against a real MongoDB server (guarded)', () => {
+  it('M105 conditional writes match, miss and conjoin mapped keys', {
+    ignore: skipReal,
+  }, async () => {
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m78',
+      collections: {
+        Widget: { collection: `m105_${crypto.randomUUID().replaceAll('-', '')}`, primaryKey: 'id' },
+      },
+    });
+    await adapter.connect();
+    try {
+      await conditionalContract(
+        adapter.createDataSource('Widget'),
+        'a',
+        'missing',
+        { id: 'a', role: 'owner', name: 'old' },
+        { role: 'owner' },
+        { name: 'new' },
+      );
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+  // A session needs a replica set; CI's `MONGODB_URI` is a standalone server,
+  // so this half reports as ignored there rather than failing or passing vacuously.
+  it('M105 conditional writes match, miss and conjoin mapped keys inside a session', {
+    ignore: skipTx,
+  }, async () => {
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m78',
+      collections: {
+        Widget: { collection: `m105_${crypto.randomUUID().replaceAll('-', '')}`, primaryKey: 'id' },
+      },
+    });
+    await adapter.connect();
+    try {
+      const tx = await adapter.beginTransaction();
+      try {
+        await conditionalContract(
+          tx.createDataSource('Widget'),
+          'tx',
+          'missing',
+          { id: 'tx', role: 'owner', name: 'old' },
+          { role: 'owner' },
+          { name: 'new' },
+        );
+        await tx.commit();
+      } catch (error) {
+        await tx.rollback();
+        throw error;
+      }
+    } finally {
+      await adapter.disconnect();
+    }
+  });
   it('lazily imports the driver and reads CRUD operations back through IDataSource', {
     ignore: skipReal,
   }, async () => {

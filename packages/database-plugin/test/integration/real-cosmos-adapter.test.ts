@@ -23,6 +23,7 @@
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import { expect } from '@std/expect';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { DuplicateKeyError } from '@setu-ts/common';
@@ -84,6 +85,46 @@ async function provision(containerId: string, partitionKeyPath: string): Promise
 }
 
 describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
+  it('M105 conditional writes match, miss, and guard delete-and-recreate with IfMatch', {
+    ignore: skipReal,
+  }, async () => {
+    const containerId = await provision(`conditional_${suffix}`, '/id');
+    const adapter = new CosmosAdapter({
+      endpoint: endpoint as string,
+      key,
+      database: databaseId,
+      containers: { Row: { container: containerId, partitionKey: 'id' } },
+    });
+    await adapter.connect();
+    try {
+      await conditionalContract(
+        adapter.createDataSource('Row'),
+        'a',
+        'missing',
+        { id: 'a', status: 'pending', name: 'old' },
+        { status: 'pending' },
+        { name: 'new' },
+      );
+      const { CosmosClient } = await import('npm:@azure/cosmos@^4');
+      const native = new CosmosClient({ endpoint: endpoint as string, key }).database(databaseId)
+        .container(containerId);
+      for (const operation of ['replace', 'delete'] as const) {
+        await native.items.create({ id: operation, status: 'pending' });
+        const item = native.item(operation, operation);
+        const { resource } = await item.read();
+        await item.delete();
+        await native.items.create({ id: operation, status: 'sent', name: 'secret' });
+        const options = { accessCondition: { type: 'IfMatch', condition: resource!._etag } };
+        const refusal = operation === 'replace'
+          ? item.replace({ id: operation, status: 'pending', name: 'bad' }, options)
+          : item.delete(options);
+        await expect(refusal).rejects.toMatchObject({ code: 412 });
+        expect((await item.read()).resource).toMatchObject({ status: 'sent', name: 'secret' });
+      }
+    } finally {
+      await adapter.disconnect();
+    }
+  });
   it('lazily imports the SDK and reads CRUD operations back through IDataSource', {
     ignore: skipReal,
   }, async () => {

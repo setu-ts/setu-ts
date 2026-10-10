@@ -444,21 +444,21 @@ describe('DynamoDB marshalling hardening (Qodo review)', () => {
     expect(() => marshalDynamoValue(new Date('2026-01-01T00:00:00.000Z'), 'iso')).not.toThrow();
   });
 
-  it('keeps a `__proto__` attribute as an own property on both read and write', () => {
-    // DynamoDB accepts and returns an attribute literally named `__proto__`
-    // (measured). A plain `obj[key] = value` for that key is runtime-dependent:
-    // on Node it invokes the prototype setter — dropping the attribute and
-    // replacing the object's prototype — while on Deno it creates an own key,
-    // so no test running here can observe the pollution directly. These
-    // assertions pin the property the fix guarantees on every runtime.
+  it('keeps a value-bearing `__proto__` attribute as an own property on read', () => {
+    // A plain `obj[key] = value` for that key is runtime-dependent: on Node it
+    // invokes the prototype setter — dropping the attribute and replacing the
+    // object's prototype — while on Deno it creates an own key. These
+    // assertions pin the property the read path guarantees on every runtime.
     const item = JSON.parse('{"pk":{"S":"p"},"__proto__":{"M":{"admin":{"BOOL":true}}}}');
     const row = unmarshalDynamoItem(item);
     expect(Object.prototype.hasOwnProperty.call(row, '__proto__')).toBe(true);
     expect(Object.getPrototypeOf(row)).toBe(Object.prototype);
+  });
 
+  it('refuses to write a `__proto__` attribute, which the AWS SDK cannot read back (M105)', () => {
+    // The server stores one, but the SDK returns it with no value (measured on
+    // DynamoDB Local), so a written row could never be read back intact.
     const source = JSON.parse('{"pk":"p","__proto__":{"admin":true}}');
-    const marshalled = marshalDynamoItem(source);
-    expect(Object.prototype.hasOwnProperty.call(marshalled, '__proto__')).toBe(true);
-    expect(Object.getPrototypeOf(marshalled)).toBe(Object.prototype);
+    expect(() => marshalDynamoItem(source)).toThrow(/__proto__/);
   });
 });

@@ -78,6 +78,27 @@ function isPlainRecord(value: object): boolean {
  * @param key - The attribute name, which is caller/remote data
  * @param value - The value to store
  */
+/**
+ * Refuses an attribute named `__proto__` on the write path, at any depth.
+ *
+ * The server stores one, but the AWS SDK's deserializer returns its value as
+ * `undefined` on every runtime (measured against DynamoDB Local), so the row
+ * could never be read back intact. The refusal names no caller value.
+ *
+ * @param key - The attribute or map-member name being written
+ * @throws {UnsupportedQueryFeatureError} When the name is `__proto__`
+ * @internal
+ */
+export function assertWritableAttributeName(key: string): void {
+  if (key === '__proto__') {
+    throw new UnsupportedQueryFeatureError(
+      'attribute-value',
+      ADAPTER,
+      'A DynamoDB attribute may not be named __proto__: the AWS SDK cannot read its value back.',
+    );
+  }
+}
+
 function defineAttribute(target: Record<string, unknown>, key: string, value: unknown): void {
   Object.defineProperty(target, key, {
     value,
@@ -219,6 +240,7 @@ function marshalObjectValue(
     // JSON semantics: an undefined member stores nothing, so the row read
     // back carries no key — never an `undefined` leaking through the wire.
     if (member === undefined) continue;
+    assertWritableAttributeName(key);
     defineAttribute(
       members as Record<string, unknown>,
       key,
@@ -279,6 +301,7 @@ export function marshalDynamoItem(
   const item: Record<string, DynamoAttributeValue> = {};
   for (const [key, value] of Object.entries(row)) {
     if (value === undefined) continue;
+    assertWritableAttributeName(key);
     defineAttribute(
       item as Record<string, unknown>,
       key,
@@ -345,6 +368,11 @@ export function unmarshalDynamoValue(value: DynamoAttributeValue): unknown {
 export function unmarshalDynamoItem(item: DynamoAttributeMap): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(item)) {
+    // The AWS SDK delivers a `__proto__` attribute (written by anything) with
+    // no value (measured on DynamoDB Local), so that one is skipped rather than
+    // crashing every read of the row. One that arrives WITH a value — an
+    // injected client may deliver it — is kept as an own property below.
+    if (key === '__proto__' && value === undefined) continue;
     defineAttribute(row, key, unmarshalDynamoValue(value));
   }
   return row;

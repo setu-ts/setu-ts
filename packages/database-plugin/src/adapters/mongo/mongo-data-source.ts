@@ -21,6 +21,7 @@ import type {
   OrderDirection,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   keysetPredicate,
   mintNextCursor,
@@ -128,7 +129,15 @@ export function createMongoDataSource(
     operation: 'findById' | 'update' | 'delete',
   ): Promise<Record<string, unknown>> => {
     const columns = target.primaryKey;
+    // A key value reaches the driver as a filter value, and an object there is
+    // read as a query OPERATOR (`{ $ne: 'x' }` matches every other document),
+    // so only a string or number is accepted. The refusal never quotes the value.
+    const keyValueRefusal = (): Promise<never> =>
+      Promise.reject(
+        new Error(`MongoAdapter: ${operation} key values must be strings or numbers.`),
+      );
     if (columns.length === 1) {
+      if (typeof id !== 'string' && typeof id !== 'number') return keyValueRefusal();
       // Scalar path — still honours `idType: 'objectId'` conversion.
       return Promise.resolve({ _id: toDriverId(id, target.idType, objectIdCtor) });
     }
@@ -137,9 +146,7 @@ export function createMongoDataSource(
       if (typeof id === 'string' || typeof id === 'number') {
         return Promise.reject(
           new Error(
-            `MongoAdapter: ${operation} needs a composite record for compound key, got scalar '${
-              String(id)
-            }'.`,
+            `MongoAdapter: ${operation} needs a composite record for compound key, got a scalar.`,
           ),
         );
       }
@@ -157,6 +164,7 @@ export function createMongoDataSource(
             ),
           );
         }
+        if (typeof value !== 'string' && typeof value !== 'number') return keyValueRefusal();
         subdoc[col] = value;
       }
       return Promise.resolve({ _id: subdoc });
@@ -168,7 +176,7 @@ export function createMongoDataSource(
         new Error(
           `MongoAdapter: ${operation} needs a composite record for multi-column key ${
             columns.join(', ')
-          }, got scalar '${String(id)}'.`,
+          }, got a scalar.`,
         ),
       );
     }
@@ -182,6 +190,7 @@ export function createMongoDataSource(
           ),
         );
       }
+      if (typeof value !== 'string' && typeof value !== 'number') return keyValueRefusal();
       filter[col] = toDriverId(value, target.idType, objectIdCtor);
     }
     return Promise.resolve(filter);
@@ -284,6 +293,47 @@ export function createMongoDataSource(
       return (result.deletedCount ?? 0) > 0;
     },
 
+    async updateWhere(id, where, data) {
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'mongodb', checked.problem);
+      }
+      where = checked.where;
+      data = checked.data;
+      const mapped = mapQueryToDriver(
+        { where, orderBy: {}, limit: -1, offset: 0, select: [] },
+        target,
+      );
+      const whereFilter = mapMongoIdValues(mapped.where, target, objectIdCtor);
+      const idFilter = await buildIdFilter(id, 'update');
+      const filter = { $and: [idFilter, whereFilter] };
+      const patch = { ...data };
+      for (const column of target.primaryKey) delete patch[column];
+      delete patch._id;
+      const result = Object.keys(patch).length === 0
+        ? await collection.findOne(filter, options())
+        : await collection.findOneAndUpdate(filter, { $set: patch }, {
+          returnDocument: 'after',
+          ...options(),
+        });
+      return result == null ? null : fromDriverDocument(result, target);
+    },
+    async deleteWhere(id, where) {
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'mongodb', checked.problem);
+      }
+      where = checked.where;
+      const mapped = mapQueryToDriver(
+        { where, orderBy: {}, limit: -1, offset: 0, select: [] },
+        target,
+      );
+      const whereFilter = mapMongoIdValues(mapped.where, target, objectIdCtor);
+      const idFilter = await buildIdFilter(id, 'delete');
+      const filter = { $and: [idFilter, whereFilter] };
+      const result = await collection.deleteOne(filter, options());
+      return (result.deletedCount ?? 0) > 0;
+    },
     count: async (
       where: Record<string, unknown>,
       filter?: FilterExpression,

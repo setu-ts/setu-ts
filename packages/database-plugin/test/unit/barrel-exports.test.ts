@@ -2,6 +2,13 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as common from '@setu-ts/common';
 import * as database from '../../src/index.ts';
+
+describe('conditional fallback helper', () => {
+  it('stays internal', () => {
+    expect('conditionalUpdate' in database).toBe(false);
+    expect('conditionalDelete' in database).toBe(false);
+  });
+});
 import type {
   BigtableAdapterOptions,
   BigtableAdapterOptionsBase,

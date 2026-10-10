@@ -18,6 +18,7 @@ import type {
   PageResult,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   keysetPredicate,
   mintNextCursor,
@@ -30,10 +31,12 @@ import type { D1Statement, D1Target } from './d1-sql.ts';
 import {
   buildCount,
   buildDelete,
+  buildDeleteWhere,
   buildInsert,
   buildSelect,
   buildSelectById,
   buildUpdate,
+  buildUpdateWhere,
   D1_COUNT_ALIAS,
 } from './d1-sql.ts';
 
@@ -238,6 +241,21 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
 
     async delete(id: EntityKey): Promise<boolean> {
       const result = await prepareStatement(db, buildDelete(target, id)).all();
+      return result.results.length > 0;
+    },
+
+    async updateWhere(id, where, data) {
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) throw new CloudflareUnsupportedError(checked.problem);
+      where = checked.where;
+      data = checked.data;
+      return await prepareStatement(db, buildUpdateWhere(target, id, where, data)).first();
+    },
+    async deleteWhere(id, where) {
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) throw new CloudflareUnsupportedError(checked.problem);
+      where = checked.where;
+      const result = await prepareStatement(db, buildDeleteWhere(target, id, where)).all();
       return result.results.length > 0;
     },
 

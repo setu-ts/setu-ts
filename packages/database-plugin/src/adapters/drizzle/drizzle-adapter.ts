@@ -27,6 +27,7 @@ import type {
   TransactionIsolationLevel,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   keysetPredicate,
   mintNextCursor,
@@ -773,6 +774,51 @@ function createDrizzleDataSourceInner(
       return rows.length > 0;
     },
 
+    async updateWhere(id, where, data) {
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', checked.problem);
+      }
+      where = checked.where;
+      data = checked.data;
+      assertPreconditionColumns(drizzleTable, where);
+      const values = keyValues(id, keyColumns, `updateWhere on '${entity}'`);
+      const keyPredicates = keyColumns.map((col, index) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+      );
+      const predicate = operators.and(
+        ...keyPredicates,
+        predicateFor(drizzleTable, entity, where, operators),
+      );
+      const rows = await returningRows(
+        instance.update(drizzleTable).set(data).where!(predicate),
+        entity,
+        'update',
+      );
+      return rows[0] ?? null;
+    },
+    async deleteWhere(id, where) {
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', checked.problem);
+      }
+      where = checked.where;
+      assertPreconditionColumns(drizzleTable, where);
+      const values = keyValues(id, keyColumns, `deleteWhere on '${entity}'`);
+      const keyPredicates = keyColumns.map((col, index) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+      );
+      const predicate = operators.and(
+        ...keyPredicates,
+        predicateFor(drizzleTable, entity, where, operators),
+      );
+      const rows = await returningRows(
+        instance.delete(drizzleTable).where(predicate),
+        entity,
+        'delete',
+      );
+      return rows.length > 0;
+    },
     async count(where, filter) {
       // `count(*)` is selected so the database returns one aggregate row. A
       // bare `select()` would stream every matching row back just to measure
@@ -946,6 +992,23 @@ function hasColumn(value: unknown, field: string): boolean {
   return value !== null && typeof value === 'object' &&
     Object.prototype.hasOwnProperty.call(value, field) &&
     (value as Record<string, unknown>)[field] !== undefined;
+}
+
+/**
+ * Refuses a write precondition naming a column the table lacks, before any
+ * statement is built. The refusal names neither the field nor its value, which
+ * {@linkcode columnFor}'s message would.
+ */
+function assertPreconditionColumns(table: DrizzleTable, where: Record<string, unknown>): void {
+  for (const field of Object.keys(where)) {
+    if (!hasColumn(table, field)) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'drizzle',
+        'The write precondition names a column the table does not have.',
+      );
+    }
+  }
 }
 
 function columnFor(table: DrizzleTable, entity: string, field: string): unknown {

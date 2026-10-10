@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Conditional repository writes (M105).** Optional `updateWhere` and `deleteWhere` on
+  `IRepository` and `IDataSource`, with shared `WritePrecondition` and `checkWritePrecondition`
+  validation (`WritePreconditionCheck`), native adapter conditions, bounded Cosmos version guards
+  and Bigtable newest-cell checks. `checkWritePrecondition` returns private copies of the predicate
+  and payload, and every implementation writes the copies, so the predicate the backend receives is
+  the one that was validated. Non-finite numbers and an own `__proto__` field (in the predicate or
+  the payload, which Node and Bun drop when MongoDB or Prisma rebuild the object) are refused.
+  `checkWritePrecondition`'s refusal reasons quote no caller field name or value, and Prisma's
+  validation message, which renders the whole query, is replaced with a fixed sentence; other
+  adapter and driver refusals may quote caller input, in server logs only, as for every repository
+  operation. Tenant, outbox and inbox bridges use conditional writes when supported and retain their
+  fallback for other sources.
+
 - **Idempotency tier C — the work and its record committed together (`@setu-ts/idempotency-plugin`,
   `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/sdk`, M109b).** A new
   `IIdempotencyService.within(options, fn)` opens ONE database transaction, creates a claim row in
@@ -651,6 +664,26 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **MongoDB refuses an operator-shaped key (`@setu-ts/database-plugin`, M105).** Since M78 a key
+  value that was an object — `findById({ $ne: 'x' })`, or such a value inside a composite key —
+  reached the driver filter and was read as a query operator, addressing other documents. Every
+  keyed operation now rejects a key value that is not a string or number, before any driver call,
+  without quoting it.
+- **Cosmos DB and DynamoDB refuse a `__proto__` payload field (`@setu-ts/database-plugin`, M105).**
+  A JSON payload carrying an own `"__proto__"` key reached `create`/`update` unchecked. On Cosmos
+  (since M81) every row read back then carried that object as its prototype on Node and Bun
+  (`row.isAdmin === true`), because the read mapping assigned keys; on DynamoDB (since M80) the row
+  became permanently unreadable on every runtime, because the AWS SDK returns a `__proto__`
+  attribute with no value. Both adapters now refuse such a field on write without quoting it — at
+  any depth on DynamoDB, whose SDK drops nested ones too — and their read paths no longer let a
+  stored one (written by anything) inject a prototype or crash the read: Cosmos keeps it as an
+  ordinary field, and DynamoDB skips the valueless attribute the SDK delivers (one an injected
+  client delivers with a value stays an own property).
+- **Bigtable and DynamoDB field maps read own entries only (`@setu-ts/database-plugin`, M105).** A
+  field named after an inherited member (`constructor`, `toString`) resolved the inherited function
+  as a column address or date encoding; Bigtable then threw a `TypeError`. Both maps are now
+  null-prototype records, so such a field is an ordinary unmapped field.
 
 - **Worker lifecycle and example hardening (M45c, #433).** Expired pending tasks reclaim excess
   starting slots; stale startup callbacks cannot reject unrelated work. Termination throws and

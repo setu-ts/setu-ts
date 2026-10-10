@@ -22,7 +22,13 @@ import type {
   NormalizedQuery,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, DuplicateKeyError, mintNextCursor, sortFingerprint } from '@setu-ts/common';
+import {
+  checkWritePrecondition,
+  decodeCursor,
+  DuplicateKeyError,
+  mintNextCursor,
+  sortFingerprint,
+} from '@setu-ts/common';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import { matchesFilter, matchesWhere, projectFields } from '../../query/query-builder.ts';
 import type {
@@ -33,7 +39,7 @@ import type {
 import type { BigtableTarget } from './bigtable-mapping.ts';
 import { columnAddress } from './bigtable-mapping.ts';
 import { composeRowKey, composeRowKeyFromFields, parseRowKey } from './bigtable-row-key.ts';
-import { planBigtableScan } from './bigtable-scan.ts';
+import { planBigtableScan, preconditionTest } from './bigtable-scan.ts';
 import { decodeCellValue, encodeCellValue } from './bigtable-value.ts';
 import type { BigtableCellBag, IBigtableWriteBuffer } from './bigtable-transaction.ts';
 
@@ -380,6 +386,37 @@ export function createBigtableDataSource(
         onMatch: [{ method: 'delete' }],
       });
     },
+
+    ...(buffer !== undefined ? {} : {
+      async updateWhere(id, where, data) {
+        const checked = checkWritePrecondition(where, data);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
+        }
+        where = checked.where;
+        data = checked.data;
+        const rowKey = composeRowKey(target, id, 'updateWhere');
+        const test = preconditionTest(target, where);
+        if (test === null) return null;
+        assertKeyUnchanged(target, id, data);
+        const cells = buildCells(target, index, data, 'update');
+        const matched = await table.row(rowKey).conditionalMutate(test, {
+          onMatch: [{ method: 'insert', data: cells }],
+        });
+        return matched ? await readOne(rowKey) : null;
+      },
+      async deleteWhere(id, where) {
+        const checked = checkWritePrecondition(where);
+        if (!checked.ok) {
+          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
+        }
+        where = checked.where;
+        const rowKey = composeRowKey(target, id, 'deleteWhere');
+        const test = preconditionTest(target, where);
+        if (test === null) return false;
+        return await table.row(rowKey).conditionalMutate(test, { onMatch: [{ method: 'delete' }] });
+      },
+    } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>),
 
     async count(
       where: Record<string, unknown>,

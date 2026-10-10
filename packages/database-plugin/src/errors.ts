@@ -100,6 +100,7 @@ const QUERY_SHAPE_FEATURES: ReadonlySet<string> = new Set([
   'attribute-value',
   'composite-key',
   'cursor-pagination',
+  'conditional-write',
   'key',
   'nested-path',
   'offset',

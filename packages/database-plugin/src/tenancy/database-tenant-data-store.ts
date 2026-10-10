@@ -23,20 +23,14 @@
  * column to its `where`, the tenant column is spread/stamped LAST so a caller's
  * filter or payload cannot override it, and every `update` payload has the
  * tenant column STRIPPED. `update` and `delete` look the row up under the
- * tenant first, so a foreign tenant's id is a no-op.
+ * tenant, so a foreign tenant's id is a no-op.
  *
- * **The ownership check and the write are two calls, not one.** `IRepository`
- * has no conditional write, so between them another request can delete the
- * checked row and a row from another tenant can take its id; the write then
- * addresses that row. That needs a primary key REUSED across tenants, which a
- * backend refuses while the original row exists (the memory adapter does too
- * since M101c) and which a generated key never produces — so let the backend
- * generate keys, or treat a caller-supplied key as tenant-scoped data. An
- * `update` whose returned row carries another tenant's column is refused
- * rather than returned, so the race can never read a foreign row back — but
- * the write has already happened. A `delete` has no such after-check: it can
- * remove the swapped-in row and still return `true`. Closing the window needs
- * a conditional write on `IRepository`, which ROADMAP Milestone 105 owns.
+ * **Conditional writes guard the tenant column at write time.** Every built-in
+ * non-transactional data source supports them. A source lacking the members
+ * keeps the ownership-read then key-write fallback: a delete-and-recreate under
+ * the same caller-supplied key can then retarget the write to another tenant.
+ * Generated keys avoid that reuse. Both update paths check the returned tenant
+ * column before returning it, including Bigtable's separate read-back.
  *
  * **`find` filters are equality only.** A filter key starting with `$` or a
  * non-scalar value is refused, because some backends (MongoDB) read those as
@@ -59,6 +53,7 @@ import type {
   RegistryFactory,
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
+import { conditionalDelete, conditionalUpdate } from '../repositories/conditional-write.ts';
 import type { IDatabaseService } from '../interfaces/index.ts';
 
 /**
@@ -252,19 +247,29 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   ): Promise<E | null> {
     const col = this.#column();
     const repo = this.#repo(entity);
-    // Look the row up under the tenant first: a foreign tenant's id is a no-op,
-    // not a mutation of another tenant's row.
-    const existing = await this.#ownedRow(tenantId, entity, id as EntityKey);
-    if (existing === null) return null;
     // Strip the tenant column from the payload so no update can move a row
     // between tenants.
     const stripped: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
       if (key !== col) stripped[key] = value;
     }
-    const updated = await repo.update(id as EntityKey, stripped);
-    // The check and the write are two calls (see the class JSDoc); never hand
-    // back a row the race retargeted to another tenant.
+    // Nothing left to write: answer the owned row unchanged, as the reference
+    // memory store does, rather than sending a write with an empty payload.
+    if (Object.keys(stripped).length === 0) {
+      return await this.#ownedRow(tenantId, entity, id as EntityKey) as unknown as (E | null);
+    }
+    const result = await conditionalUpdate(repo, id as EntityKey, { [col]: tenantId }, stripped);
+    if (result.outcome === 'not-matched') return null;
+    let updated: Record<string, unknown>;
+    if (result.outcome === 'unsupported') {
+      const existing = await this.#ownedRow(tenantId, entity, id as EntityKey);
+      if (existing === null) return null;
+      updated = await repo.update(id as EntityKey, stripped);
+    } else {
+      updated = result.row;
+    }
+    // Bigtable reads back separately; the fallback also has a race.
+    // Both paths must refuse a foreign row before returning it.
     if (updated[col] !== tenantId) {
       throw new Error(
         `DatabaseTenantDataStore: the '${entity}' row changed tenant between the ownership ` +
@@ -275,7 +280,9 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   }
 
   async delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean> {
-    // Look the row up under the tenant first: a foreign tenant's id is a no-op.
+    const repo = this.#repo(entity);
+    const result = await conditionalDelete(repo, id as EntityKey, { [this.#column()]: tenantId });
+    if (result.outcome !== 'unsupported') return result.outcome === 'applied';
     const existing = await this.#ownedRow(tenantId, entity, id as EntityKey);
     if (existing === null) return false;
     return this.#repo(entity).delete(id as EntityKey);
