@@ -12,7 +12,13 @@ import type {
   IRuntimeServices,
   PolicyDefinition,
 } from '@setu-ts/common';
-import { CAPABILITIES, createPathMatcher, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createPathMatcher,
+  PLUGIN_PRIORITY,
+  resolveProbeTiming,
+  SCOPED_RBAC_POLICY,
+} from '@setu-ts/common';
 import type { IAuthStrategy, IPrincipal, ISessionService } from '@setu-ts/common';
 import type { AuthPluginOptions } from '../interfaces/index.ts';
 import { JwtService } from '../services/jwt-service.ts';
@@ -49,6 +55,11 @@ import { validatePolicyDefinition } from '../policies/define-policy.ts';
 import { PolicyService } from '../policies/policy-service.ts';
 import { scanPolicyGuards } from '../policies/startup-scan.ts';
 import { registerSamlRoutes } from '../saml/routes.ts';
+import { compileScopedRbac } from '../scoped/options.ts';
+import type { CompiledScopedRbac } from '../scoped/options.ts';
+import { createScopedRbac } from '../scoped/scoped-policy.ts';
+import type { ScopedRbac } from '../scoped/scoped-policy.ts';
+import { GrantResolutionError } from '../scoped/errors.ts';
 import type { LoadedSamlProvider } from '../saml/routes.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -127,6 +138,11 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   // every other option, so a malformed policy or a duplicate name refuses
   // before any application exists.
   const policies = compilePolicies(options.policies);
+  // Scoped RBAC (M110b): validated here too. Needs `rbac` (its catalogue) and,
+  // for 'sign-in' timing, `signIn`.
+  const compiledScoped: CompiledScopedRbac | null = options.scopedRbac === undefined
+    ? null
+    : compileScopedRbac(options.scopedRbac, options.rbac, compiledSignIn !== null);
   if (options.http !== undefined && compiledIssuers.length === 0 && compiledSignIn === null) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: http is only read for issuers and signIn; configure one or drop http',
@@ -157,6 +173,11 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     register(ctx: IPluginContext): void | Promise<void> {
       // Resolve runtime
       const runtime = ctx.services.get<IRuntimeServices>('runtime');
+      // Scoped RBAC (M110b): built before the sign-in block, which reads it
+      // for 'sign-in' timing. The logger is read at call time.
+      const scoped: ScopedRbac | null = compiledScoped === null
+        ? null
+        : createScopedRbac(compiledScoped, resolveProbeTiming(runtime), () => ctx.logger);
 
       // The outbound seam is shared by the issuer key-set caches (M100b) and the
       // sign-in routes (M100c): one place to configure it, one place to fake it.
@@ -335,6 +356,20 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         const authSessionService = new AuthSessionService({
           sessionService,
           now: () => runtime.now(),
+          ...(scoped === null || compiledScoped?.timing.kind !== 'sign-in' ? {} : {
+            scopedGrants: {
+              resolveAll: async (principal) => {
+                const outcome = await scoped.resolver.resolveFromSources(principal, {
+                  kind: 'all',
+                });
+                if (!outcome.ok) {
+                  scoped.evaluator.report(outcome);
+                  throw new GrantResolutionError(outcome.reason, outcome.source);
+                }
+                return outcome.grants;
+              },
+            },
+          }),
           ...(mfa === null ? {} : {
             // The configured TTL passes through untouched; `AuthSessionService`
             // owns the default and is the only reader of the value, so the
@@ -346,6 +381,9 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           }),
         });
         ctx.services.register(CAPABILITIES.AUTH_SESSION, authSessionService);
+        scoped?.resolver.useStoredGrants((request, principal) =>
+          authSessionService.storedGrants(request, principal)
+        );
 
         strategies.push(
           new AuthSessionStrategy({
@@ -496,6 +534,14 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       for (const policy of policies) {
         policyService.define(policy);
       }
+      if (scoped !== null) {
+        policyService.define(scoped.policy);
+        // Factory sources resolve once every plugin has registered — the
+        // first phase at which the registry holds every capability (M101c).
+        ctx.lifecycle.onInit(() => {
+          scoped.resolver.bind(ctx.services);
+        });
+      }
       ctx.services.register(CAPABILITIES.AUTHORIZATION_POLICIES, policyService);
       // After every plugin has registered its routes and before the server
       // listens: a guard naming an unregistered policy fails start(), and the
@@ -567,6 +613,14 @@ function compilePolicies(
   const names = new Set<string>();
   return policies.map((policy) => {
     const validated = validatePolicyDefinition(policy);
+    // Reserved whether or not `scopedRbac` is set, so enabling it later can
+    // never silently shadow an application policy (M110b plan §3.2).
+    if (validated.name === SCOPED_RBAC_POLICY) {
+      throw new AuthPluginConfigurationError(
+        `auth-plugin: the policy name ${JSON.stringify(SCOPED_RBAC_POLICY)} is reserved for ` +
+          'scoped RBAC — configure AuthPlugin({ scopedRbac }) instead',
+      );
+    }
     if (names.has(validated.name)) {
       throw new AuthPluginConfigurationError(
         `auth-plugin: two authorization policies are named ${JSON.stringify(validated.name)}`,
