@@ -265,6 +265,7 @@ export type {
   PolicyCheck,
   PolicyDefinition,
   PolicyRef,
+  PolicyTarget,
 } from './services/authorization-policies.ts';
 export type {
   AuthMethod,

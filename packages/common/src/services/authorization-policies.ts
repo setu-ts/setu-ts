@@ -13,6 +13,7 @@
  * @module
  */
 
+import type { IRequestContext } from '../http.ts';
 import type { IPrincipal } from './auth.ts';
 
 /**
@@ -126,6 +127,24 @@ export interface PolicyDefinition<A extends string = string, T = never> {
  * @since 0.9.0
  */
 export type PolicyRef<A extends string, T> = string | PolicyDefinition<A, T>;
+
+/**
+ * The target a route-level policy check evaluates against: a fixed value, or
+ * an extractor called per request — reading a route parameter, or loading the
+ * record. A FUNCTION is always treated as an extractor; a policy whose target
+ * is itself a function wraps it. An extractor may answer `undefined` — a
+ * record that was not found — which the check receives as it receives an
+ * omitted target, since every check's target is already `T | undefined`.
+ *
+ * Shared by AuthPlugin's `requirePolicy` and DecoratorPlugin's `@Can`, so the
+ * two entry points accept the same targets.
+ *
+ * @typeParam T - The policy's target type
+ * @since 0.9.0
+ */
+export type PolicyTarget<T> =
+  | T
+  | ((ctx: IRequestContext) => T | undefined | Promise<T | undefined>);
 
 /**
  * What a registry reports about one registered ability.
