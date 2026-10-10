@@ -47,7 +47,7 @@ export type OutboxHealthReason =
   | 'failed-scan-cap'
   | 'blocked-key-cap'
   | 'store-write-failing'
-  | 'scheduled-overlap';
+  | 'relay-overlap';
 
 /**
  * What the indicator reads.
@@ -153,7 +153,7 @@ export function createOutboxHealthIndicator(deps: OutboxHealthDeps): HealthIndic
     if (stats.failedScanCap) reasons.push('failed-scan-cap');
     if (signals.blockedKeyCap) reasons.push('blocked-key-cap');
     if (signals.storeWriteFailing) reasons.push('store-write-failing');
-    if (signals.scheduledOverlap) reasons.push('scheduled-overlap');
+    if (signals.relayOverlap) reasons.push('relay-overlap');
     const last = signals.lastSweep;
     return {
       status: reasons.length > 0 ? 'degraded' : 'up',

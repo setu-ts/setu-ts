@@ -36,6 +36,8 @@ export interface ResolvedOutboxOptions {
   readonly sweepDeadlineMs: number;
   readonly publishTimeoutMs: number;
   readonly storeTimeoutMs: number;
+  readonly claimLeaseMs: number;
+  readonly maxClockSkewMs: number;
   readonly degradedAfterMs: number;
   readonly overlapWindowMs: number;
   readonly retainSentMs: number;
@@ -141,10 +143,18 @@ export function resolveOutboxOptions(options: OutboxOptions): ResolvedOutboxOpti
     1,
     MAX_TIMER_MS,
   );
-  if (publishTimeoutMs + storeTimeoutMs > sweepDeadlineMs) {
+  if (publishTimeoutMs + 2 * storeTimeoutMs > sweepDeadlineMs) {
     throw new RangeError(
-      'outbox: relay.publishTimeoutMs + relay.storeTimeoutMs must not exceed ' +
+      'outbox: relay.publishTimeoutMs + 2 * relay.storeTimeoutMs must not exceed ' +
         'relay.sweepDeadlineMs, or no row could ever start',
+    );
+  }
+  const claimLeaseMs = integer('relay.claimLeaseMs', relay.claimLeaseMs, 30_000, 1, 3_600_000);
+  const maxClockSkewMs = integer('relay.maxClockSkewMs', relay.maxClockSkewMs, 5000, 0, 60_000);
+  if (claimLeaseMs < publishTimeoutMs + 2 * storeTimeoutMs + maxClockSkewMs) {
+    throw new RangeError(
+      'outbox: relay.claimLeaseMs must cover relay.publishTimeoutMs + ' +
+        '2 * relay.storeTimeoutMs + relay.maxClockSkewMs',
     );
   }
   return {
@@ -168,6 +178,8 @@ export function resolveOutboxOptions(options: OutboxOptions): ResolvedOutboxOpti
     sweepDeadlineMs,
     publishTimeoutMs,
     storeTimeoutMs,
+    claimLeaseMs,
+    maxClockSkewMs,
     degradedAfterMs: integer(
       'health.degradedAfterMs',
       health.degradedAfterMs,

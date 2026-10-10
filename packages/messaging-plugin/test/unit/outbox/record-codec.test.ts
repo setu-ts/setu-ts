@@ -21,8 +21,10 @@ import {
 
 import { OutboxEnvelopeTooLargeError } from '../../../src/outbox/errors.ts';
 import {
+  claimStateOf,
   decodeOutboxRecord,
   encodeOutboxRecord,
+  MAX_CLAIM_HORIZON_MS,
   MAX_STORED_OPTIONS_LENGTH,
 } from '../../../src/outbox/record-codec.ts';
 
@@ -63,6 +65,8 @@ describe('encodeOutboxRecord', () => {
       status: 'pending',
       attempts: 0,
       availableAt: 42,
+      claimVersion: 0,
+      leaseUntil: 0,
     });
   });
 
@@ -87,6 +91,47 @@ describe('encodeOutboxRecord', () => {
     expect(error).toBeInstanceOf(OutboxEnvelopeTooLargeError);
     expect((error as OutboxEnvelopeTooLargeError).limit).toBe(1024);
     expect((error as OutboxEnvelopeTooLargeError).bytes).toBeGreaterThan(1200);
+  });
+});
+
+describe('claimStateOf', () => {
+  const valid = encode();
+  it('accepts the exact version and global horizon boundaries', () => {
+    expect(claimStateOf(valid, 42)).toEqual({ claimVersion: 0, leaseUntil: 0 });
+    expect(
+      claimStateOf({
+        ...valid,
+        claimVersion: Number.MAX_SAFE_INTEGER - 1,
+        leaseUntil: 42 + MAX_CLAIM_HORIZON_MS,
+      }, 42),
+    ).toEqual({
+      claimVersion: Number.MAX_SAFE_INTEGER - 1,
+      leaseUntil: 42 + MAX_CLAIM_HORIZON_MS,
+    });
+  });
+  for (const field of ['claimVersion', 'leaseUntil'] as const) {
+    for (
+      const value of [
+        undefined,
+        null,
+        'x',
+        -1,
+        1.5,
+        Number.NaN,
+        Infinity,
+        Number.MAX_SAFE_INTEGER + 1,
+      ]
+    ) {
+      it(`refuses ${field}=${String(value)}`, () => {
+        expect(claimStateOf({ ...valid, [field]: value } as unknown as OutboxRecord, 42))
+          .toBeUndefined();
+      });
+    }
+  }
+  it('refuses exhausted versions and leases beyond the horizon', () => {
+    expect(claimStateOf({ ...valid, claimVersion: Number.MAX_SAFE_INTEGER }, 42)).toBeUndefined();
+    expect(claimStateOf({ ...valid, leaseUntil: 42 + MAX_CLAIM_HORIZON_MS + 1 }, 42))
+      .toBeUndefined();
   });
 });
 

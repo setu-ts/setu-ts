@@ -39,6 +39,8 @@ describe('resolveOutboxOptions', () => {
       sweepDeadlineMs: 15_000,
       publishTimeoutMs: 5000,
       storeTimeoutMs: 5000,
+      claimLeaseMs: 30000,
+      maxClockSkewMs: 5000,
       degradedAfterMs: 60_000,
       overlapWindowMs: 600_000,
       retainSentMs: 604_800_000,
@@ -66,6 +68,8 @@ describe('resolveOutboxOptions', () => {
   });
 
   const numeric: [string, (v: number) => Partial<OutboxOptions>][] = [
+    ['relay.claimLeaseMs', (v) => ({ relay: { claimLeaseMs: v } })],
+    ['relay.maxClockSkewMs', (v) => ({ relay: { maxClockSkewMs: v } })],
     ['maxEnvelopeBytes', (v) => ({ maxEnvelopeBytes: v })],
     ['relay.intervalMs', (v) => ({ relay: { intervalMs: v } })],
     ['relay.pageSize', (v) => ({ relay: { pageSize: v } })],
@@ -102,19 +106,41 @@ describe('resolveOutboxOptions', () => {
       .toThrow('relay.maxBackoffMs');
   });
 
-  it('refuses publishTimeoutMs + storeTimeoutMs above sweepDeadlineMs, and accepts equality', () => {
+  it('refuses publishTimeoutMs + 2 * storeTimeoutMs above sweepDeadlineMs, and accepts equality', () => {
     expect(() =>
       resolveOutboxOptions({
         store,
-        relay: { sweepDeadlineMs: 9999, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
+        relay: { sweepDeadlineMs: 14999, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
       })
     ).toThrow('must not exceed relay.sweepDeadlineMs');
     expect(
       resolveOutboxOptions({
         store,
-        relay: { sweepDeadlineMs: 10_000, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
+        relay: { sweepDeadlineMs: 15_000, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
       }).sweepDeadlineMs,
-    ).toBe(10_000);
+    ).toBe(15_000);
+  });
+
+  it('pins lease and clock-skew ranges and the construction relation on both sides', () => {
+    for (const [claimLeaseMs, maxClockSkewMs] of [[3600001, 0], [30000, 60001], [0, 0]]) {
+      expect(() => resolveOutboxOptions({ store, relay: { claimLeaseMs, maxClockSkewMs } }))
+        .toThrow(RangeError);
+    }
+    expect(
+      resolveOutboxOptions({
+        store,
+        relay: { claimLeaseMs: 3, maxClockSkewMs: 0, publishTimeoutMs: 1, storeTimeoutMs: 1 },
+      }),
+    ).toBeDefined();
+    expect(() => resolveOutboxOptions({ store, relay: { claimLeaseMs: 19999 } }))
+      .toThrow('relay.publishTimeoutMs + 2 * relay.storeTimeoutMs + relay.maxClockSkewMs');
+    expect(resolveOutboxOptions({ store, relay: { claimLeaseMs: 20000 } }).claimLeaseMs).toBe(
+      20000,
+    );
+    expect(
+      resolveOutboxOptions({ store, relay: { claimLeaseMs: 3600000, maxClockSkewMs: 60000 } })
+        .maxClockSkewMs,
+    ).toBe(60000);
   });
 
   it('refuses a non-boolean schedule and a non-function background', () => {

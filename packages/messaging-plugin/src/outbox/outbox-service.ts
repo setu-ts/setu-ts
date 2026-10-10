@@ -67,8 +67,8 @@ export interface OutboxInstanceSignals {
   readonly blockedKeyCap: boolean;
   /** The most recent sweep ended on a rejected or expired store call. */
   readonly storeWriteFailing: boolean;
-  /** A scheduled-sweep overlap was observed inside `overlapWindowMs`. */
-  readonly scheduledOverlap: boolean;
+  /** A relay overlap was observed inside `overlapWindowMs`. */
+  readonly relayOverlap: boolean;
   /** The most recent finished sweep, when any. */
   readonly lastSweep?: OutboxSweepResult;
 }
@@ -109,7 +109,7 @@ export class OutboxService implements IOutbox {
   #inflight: Promise<OutboxSweepResult> | undefined;
   #followUp: Promise<OutboxSweepResult | undefined> | undefined;
   #lastSweep: OutboxSweepResult | undefined;
-  #lastScheduledOverlapAt: number | undefined;
+  #lastRelayOverlapAt: number | undefined;
 
   /**
    * @param deps - Runtime, broker, resolved options and optional hooks
@@ -123,7 +123,7 @@ export class OutboxService implements IOutbox {
       publishFailed: (topic) => forward?.publishFailed(topic),
       poisoned: (topic) => forward?.poisoned(topic),
       overlap: (kind) => {
-        if (kind === 'scheduled') this.#lastScheduledOverlapAt = deps.runtime.hrtime();
+        this.#lastRelayOverlapAt = deps.runtime.hrtime();
         forward?.overlap(kind);
       },
     };
@@ -165,7 +165,7 @@ export class OutboxService implements IOutbox {
    * @returns The signals
    */
   instanceSignals(): OutboxInstanceSignals {
-    const at = this.#lastScheduledOverlapAt;
+    const at = this.#lastRelayOverlapAt;
     let blockedKeyCap = false;
     for (const holder of this.#laps.values()) {
       if (holder.lap?.blockedOverflow === true || holder.lastLapOverflowed) blockedKeyCap = true;
@@ -173,7 +173,7 @@ export class OutboxService implements IOutbox {
     return {
       blockedKeyCap,
       storeWriteFailing: this.#lastSweep?.endedBy === 'store-failure',
-      scheduledOverlap: at !== undefined &&
+      relayOverlap: at !== undefined &&
         this.#deps.runtime.hrtime() - at <= this.#deps.options.overlapWindowMs,
       ...(this.#lastSweep !== undefined ? { lastSweep: this.#lastSweep } : {}),
     };

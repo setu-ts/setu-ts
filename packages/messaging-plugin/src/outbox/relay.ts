@@ -32,13 +32,10 @@ import { OutboxLap } from './lap.ts';
 import type { ResolvedOutboxOptions } from './options.ts';
 import { blockKey } from './position.ts';
 import type { DecodedOutboxRow } from './record-codec.ts';
-import { decodeOutboxRecord } from './record-codec.ts';
+import { claimStateOf, decodeOutboxRecord } from './record-codec.ts';
 
 /** The most characters of `lastError` a row stores. */
 const MAX_LAST_ERROR = 1024;
-
-/** The `lastError` an undecodable row is marked with. */
-export const INVALID_ROW_ERROR = 'invalid-row';
 
 /**
  * Why one store's part of a sweep ended.
@@ -68,11 +65,9 @@ export interface OutboxRelayObserver {
   /** A row became `failed`; `topic` is absent for an undecodable row. */
   poisoned(topic: string | undefined): void;
   /**
-   * A row this sweep published was already `sent`: by another instance's
-   * scheduled sweep while this one was scheduled (`scheduled`), with a
-   * dispatch sweep involved (`dispatch`), or by this instance (`stale`).
+   * A relay was fenced, lost its held claim, or found a published row already sent.
    */
-  overlap(kind: 'scheduled' | 'dispatch' | 'stale'): void;
+  overlap(kind: 'fenced' | 'claim-lost' | 'duplicate'): void;
 }
 
 /**
@@ -198,7 +193,7 @@ function bounded<T>(
 function stopReason(ctx: RelayContext): StoreSweepEnd | undefined {
   const { options, budget } = ctx;
   if (ctx.isClosing()) return 'closing';
-  if (budget.remaining() < options.publishTimeoutMs + options.storeTimeoutMs) return 'deadline';
+  if (budget.remaining() < options.publishTimeoutMs + 2 * options.storeTimeoutMs) return 'deadline';
   if (budget.scanned >= options.scanLimit) return 'scan-limit';
   if (budget.attempted >= options.publishLimit) return 'publish-limit';
   return undefined;
@@ -234,15 +229,6 @@ function publish(ctx: RelayContext, record: OutboxRecord, row: DecodedOutboxRow)
   return ctx.telemetry.withSpan(`outbox relay ${row.topic}`, send, spanOptionsFor(record));
 }
 
-/** Classifies a `markSent` that found the row already sent. */
-function overlapKind(ctx: RelayContext, sentBy: string): 'scheduled' | 'dispatch' | 'stale' {
-  const slash = sentBy.lastIndexOf('/');
-  if (sentBy.slice(0, slash) === ctx.instanceId) return 'stale';
-  return ctx.origin === 'scheduled' && sentBy.slice(slash + 1) === 'scheduled'
-    ? 'scheduled'
-    : 'dispatch';
-}
-
 /** Applies what a `markSent` answered after a successful publish. */
 function onMarkSent(
   ctx: RelayContext,
@@ -250,9 +236,14 @@ function onMarkSent(
   key: string | undefined,
   transition: OutboxTransition,
 ): void {
+  if (transition.outcome === 'claim-lost') {
+    ctx.observer.overlap('claim-lost');
+    if (key !== undefined) lap.block(key);
+    return;
+  }
   if (transition.outcome !== 'not-pending') return;
-  if (transition.status === 'sent' && transition.sentBy !== undefined) {
-    ctx.observer.overlap(overlapKind(ctx, transition.sentBy));
+  if (transition.status === 'sent') {
+    ctx.observer.overlap('duplicate');
   } else if (transition.status === 'failed' && key !== undefined) {
     // Another relay failed it meanwhile: it now blocks its key.
     lap.block(key);
@@ -287,23 +278,24 @@ async function examine(
     return undefined;
   }
 
-  budget.attempted += 1;
-  const decoded = decodeOutboxRecord(record, options.maxEnvelopeBytes);
-  if (!decoded.ok) {
+  const claim = claimStateOf(record, now);
+  if (claim !== undefined && now < claim.leaseUntil + options.maxClockSkewMs) {
+    if (key !== undefined) lap.block(key);
+    return undefined;
+  }
+  const decoded = claim === undefined
+    ? { ok: false as const }
+    : decodeOutboxRecord(record, options.maxEnvelopeBytes);
+  if (claim === undefined || !decoded.ok) {
+    budget.attempted += 1;
     if (key !== undefined) lap.block(key);
     let transition: OutboxTransition;
     try {
       transition = await bounded(
         ctx,
         options.storeTimeoutMs,
-        'markFailure',
-        () =>
-          store.markFailure(record.id, {
-            attempts: attemptsOf(record),
-            lastError: INVALID_ROW_ERROR,
-            availableAt: now,
-            status: 'failed',
-          }),
+        'markInvalid',
+        () => store.markInvalid(record.id, now),
       );
     } catch {
       return 'store-failure';
@@ -312,6 +304,37 @@ async function examine(
       budget.poisoned += 1;
       ctx.observer.poisoned(undefined);
     }
+    return undefined;
+  }
+
+  const leaseUntil = runtime.now() + options.claimLeaseMs;
+  let acquired: OutboxTransition;
+  try {
+    acquired = await bounded(
+      ctx,
+      options.storeTimeoutMs,
+      'claim',
+      () => store.claim(record.id, { claimVersion: claim.claimVersion, leaseUntil }),
+    );
+  } catch {
+    if (key !== undefined) lap.block(key);
+    return 'store-failure';
+  }
+  if (acquired.outcome !== 'applied') {
+    if (
+      key !== undefined && (acquired.outcome === 'claim-lost' ||
+        (acquired.outcome === 'not-pending' && acquired.status === 'failed'))
+    ) lap.block(key);
+    return undefined;
+  }
+  const claimVersion = claim.claimVersion + 1;
+  budget.attempted += 1;
+  if (
+    runtime.now() + options.publishTimeoutMs + options.storeTimeoutMs + options.maxClockSkewMs >
+      leaseUntil
+  ) {
+    if (key !== undefined) lap.block(key);
+    ctx.observer.overlap('fenced');
     return undefined;
   }
 
@@ -339,6 +362,7 @@ async function examine(
         'markSent',
         () =>
           store.markSent(record.id, {
+            claimVersion,
             settledAt: runtime.now(),
             sentBy: `${ctx.instanceId}/${ctx.origin}`,
             deleteNow: options.retainSentMs === 0,
@@ -370,6 +394,7 @@ async function examine(
       'markFailure',
       () =>
         store.markFailure(record.id, {
+          claimVersion,
           attempts,
           lastError: lastErrorOf(failure.error),
           availableAt: now + backoff,
@@ -379,6 +404,7 @@ async function examine(
   } catch {
     return 'store-failure';
   }
+  if (transition.outcome === 'claim-lost') ctx.observer.overlap('claim-lost');
   if (transition.outcome === 'applied' && status === 'failed') {
     budget.poisoned += 1;
     ctx.observer.poisoned(topic);

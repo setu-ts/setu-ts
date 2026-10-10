@@ -42,7 +42,7 @@ export const OUTBOX_METRICS = {
   PUBLISH_FAILURES: 'outbox_publish_failures_total',
   /** Counter: rows made `failed`. */
   POISONED: 'outbox_poisoned_total',
-  /** Counter: observed overlaps, by origin. */
+  /** Counter: observed overlaps, by kind. */
   OVERLAPS: 'outbox_overlaps_total',
   /** Gauge: pending rows, at the last store read. */
   PENDING: 'outbox_pending_rows',
@@ -55,7 +55,7 @@ const OUTBOX_LABEL = 'outbox';
 /** The row's topic. */
 const TOPIC_LABEL = 'topic';
 /** What an overlap involved. */
-const ORIGIN_LABEL = 'origin';
+const KIND_LABEL = 'kind';
 
 /** Counter names. */
 type CounterName =
@@ -82,8 +82,8 @@ const COUNTER_OPTIONS: Readonly<Record<CounterName, MetricOptions>> = {
     labels: [OUTBOX_LABEL, TOPIC_LABEL],
   },
   [OUTBOX_METRICS.OVERLAPS]: {
-    help: 'Rows another sweep had already sent, by what was involved',
-    labels: [OUTBOX_LABEL, ORIGIN_LABEL],
+    help: 'Relay overlaps, by kind',
+    labels: [OUTBOX_LABEL, KIND_LABEL],
   },
 };
 
@@ -169,9 +169,9 @@ export class OutboxCollector implements OutboxRelayObserver {
   }
 
   /** @inheritdoc */
-  overlap(kind: 'scheduled' | 'dispatch' | 'stale'): void {
+  overlap(kind: 'fenced' | 'claim-lost' | 'duplicate'): void {
     this.#guard(() =>
-      this.#overlaps.inc(1, { [OUTBOX_LABEL]: this.#instance, [ORIGIN_LABEL]: kind })
+      this.#overlaps.inc(1, { [OUTBOX_LABEL]: this.#instance, [KIND_LABEL]: kind })
     );
   }
 

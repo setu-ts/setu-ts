@@ -26,6 +26,29 @@ function track(promise: Promise<OutboxSweepResult>): { settled: () => boolean } 
 const hang = (): Promise<void> => new Promise<void>(() => {});
 
 describe('relay deadline', () => {
+  it('a hung claim ends the sweep at its store bound without publishing', async () => {
+    const h = await outboxHarness({ options: { relay: RELAY } });
+    await h.write({ n: 1 });
+    h.store.faults.claim = hang;
+    const sweep = h.sweep();
+    const state = track(sweep);
+    await flush();
+    expect(h.store.count('claim')).toBe(1);
+    expect(state.settled()).toBe(false);
+    await h.clock.advance(100);
+    expect((await sweep).endedBy).toBe('store-failure');
+    expect(h.broker.calls).toEqual([]);
+    expect(h.clock.timerCount()).toBe(0);
+  });
+
+  it('starts no row with one millisecond less than the claim + publish + mark reserve', async () => {
+    const h = await outboxHarness({ options: { relay: RELAY } });
+    await h.write({ n: 1 });
+    h.store.faults.scanPending = () => h.clock.step(701);
+    expect((await h.sweep()).endedBy).toBe('deadline');
+    expect(h.store.count('claim')).toBe(0);
+    expect(h.broker.calls).toEqual([]);
+  });
   it('a hung failedKeys ends the sweep at its bound', async () => {
     const h = await outboxHarness({ options: { relay: RELAY } });
     await h.write({ n: 1 });

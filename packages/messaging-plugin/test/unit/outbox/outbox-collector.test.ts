@@ -71,7 +71,7 @@ describe('outbox metrics collector', () => {
     collector.publishFailed('orders.v1');
     collector.poisoned('orders.v1');
     collector.poisoned(undefined);
-    collector.overlap('dispatch');
+    collector.overlap('claim-lost');
     collector.syncStats(7, 2_500);
     collector.syncStats(0, undefined);
     expect(metrics.writes).toEqual([
@@ -98,7 +98,7 @@ describe('outbox metrics collector', () => {
       {
         name: OUTBOX_METRICS.OVERLAPS,
         value: 1,
-        labels: { outbox: 'outbox.billing', origin: 'dispatch' },
+        labels: { outbox: 'outbox.billing', kind: 'claim-lost' },
       },
       { name: OUTBOX_METRICS.PENDING, value: 7, labels: { outbox: 'outbox.billing' } },
       { name: OUTBOX_METRICS.OLDEST_PENDING, value: 2.5, labels: { outbox: 'outbox.billing' } },
@@ -130,7 +130,7 @@ describe('outbox metrics collector', () => {
     const collector = new OutboxCollector(metrics, 'outbox', (e) => reported.push(e.message));
     metrics.fail = true;
     expect(() => collector.published('orders.v1')).not.toThrow();
-    expect(() => collector.overlap('stale')).not.toThrow();
+    expect(() => collector.overlap('duplicate')).not.toThrow();
     expect(() => collector.syncStats(1, 1)).not.toThrow();
     expect(reported).toEqual(Array(3).fill('metrics backend refused'));
     const silent = new OutboxCollector(metrics, 'outbox', () => {

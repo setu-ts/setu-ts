@@ -221,15 +221,30 @@ export class FaultStore implements IOutboxStore {
   failedKeys(limit: number): Promise<readonly OutboxKey[]> {
     return this.#run('failedKeys', [limit], () => this.inner.failedKeys(limit));
   }
+  claim(
+    id: string,
+    update: { readonly claimVersion: number; readonly leaseUntil: number },
+  ): Promise<OutboxTransition> {
+    return this.#run('claim', [id, update], () => this.inner.claim(id, update));
+  }
+  markInvalid(id: string, now: number): Promise<OutboxTransition> {
+    return this.#run('markInvalid', [id, now], () => this.inner.markInvalid(id, now));
+  }
   markSent(
     id: string,
-    update: { readonly settledAt: number; readonly sentBy: string; readonly deleteNow: boolean },
+    update: {
+      readonly claimVersion: number;
+      readonly settledAt: number;
+      readonly sentBy: string;
+      readonly deleteNow: boolean;
+    },
   ): Promise<OutboxTransition> {
     return this.#run('markSent', [id, update], () => this.inner.markSent(id, update));
   }
   markFailure(
     id: string,
     update: {
+      readonly claimVersion: number;
       readonly attempts: number;
       readonly lastError: string;
       readonly availableAt: number;
