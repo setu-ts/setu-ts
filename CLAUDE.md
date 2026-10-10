@@ -5990,7 +5990,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and Redis through existing outage suites. The extra write per row roughly doubled a 1 000-row
   PostgreSQL sweep (1.16 s → 2.33 s). Verified on real PostgreSQL, a MongoDB replica set, DynamoDB
   Local and D1's engine: a relay frozen past its lease published nothing while a second took over
-  once, and four relays drained every row once in per-key order — complete (PR pending).
+  once, and four relays drained every row once in per-key order. The committed-tree security audit
+  ran two fresh-context rounds: round 1 failed on a Medium — the documented Prisma mapping returns
+  `BigInt` columns as JS `bigint`, so the relay's safe-integer claim check poisoned every row (a
+  regression from M107) — fixed by converting integer columns in the store bridge; round 2 confirmed
+  it closed on real PostgreSQL with Drizzle `bigint` columns and found a Low (an unsafe `bigint`
+  `createdAt` left as a `bigint` made the health indicator throw), fixed afterwards by converting
+  every `bigint` and NOT re-audited, the maintainer proceeding to the PR — complete (PR pending).
 - **Next milestone** — M101h; M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see
   ROADMAP.md.
 
