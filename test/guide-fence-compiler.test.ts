@@ -197,10 +197,10 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 17,
   },
   'docs/authorization.md': {
-    // M110a: the policy guide — five fences, every one compiling.
-    total: 5,
-    ts: 5,
-    compile: 5,
+    // M110a: the policy guide — four fences, every one compiling.
+    total: 4,
+    ts: 4,
+    compile: 4,
     external: 0,
     pseudocode: 0,
     skipped: 0,
@@ -230,10 +230,10 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // commands and source links (-10 compiling, +14 skipped). 274 after the
   // custom-plugins cold read: a nested README fence stopped leaking out (-1).
   // 278 once docs/how-it-fits-together.md joins the corpus (+4, all compiling).
-  // 283 in M110a: docs/authorization.md joins the corpus (+5, all compiling).
-  total: 283,
-  ts: 221,
-  compile: 188,
+  // 282 in M110a: docs/authorization.md joins the corpus (+4, all compiling).
+  total: 282,
+  ts: 220,
+  compile: 187,
   external: 33,
   pseudocode: 0,
   skipped: 62,
