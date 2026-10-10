@@ -164,6 +164,8 @@ describe('conditional writes conjoin key and predicate at every public data sour
         { '': 1 },
         { n: Number.NaN },
         { n: Number.POSITIVE_INFINITY },
+        JSON.parse('{"__proto__":"x"}'),
+        JSON.parse('{"__proto__":"x","role":"owner"}'),
       ];
       for (const value of refused) {
         const where = value as WritePrecondition;
@@ -171,6 +173,9 @@ describe('conditional writes conjoin key and predicate at every public data sour
         await expect(ds.deleteWhere!('a', where)).rejects.toThrow();
       }
       await expect(ds.updateWhere!('a', { role: 'owner' }, {})).rejects.toThrow();
+      await expect(
+        ds.updateWhere!('a', { role: 'owner' }, JSON.parse('{"__proto__":{"isAdmin":true}}')),
+      ).rejects.toThrow(/__proto__/);
       expect(await ds.findById('a')).toBeNull();
     });
     // `constructor` and `toString` are inherited members of a plain object: a

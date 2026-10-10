@@ -92,15 +92,14 @@ describe('portable write preconditions', () => {
     expect(reads).toBe(1);
   });
 
-  it('keeps an own __proto__ field as an ordinary field of the copy', () => {
+  it('refuses an own __proto__ field in the predicate and in the payload', () => {
+    // Node and Bun drop `__proto__` from any object a backend rebuilds by
+    // assignment, so carrying it would silently remove a condition.
     const where = JSON.parse('{"__proto__":"x","n":1}') as Record<string, unknown>;
-    const checked = checkWritePrecondition(where);
-    if (!checked.ok) throw new Error(checked.problem);
-    expect(Object.keys(checked.where)).toEqual(['__proto__', 'n']);
-    expect(Object.getPrototypeOf(checked.where)).toBe(Object.prototype);
-    const payload = checkWritePrecondition({ n: 1 }, JSON.parse('{"__proto__":{"p":1}}'));
-    if (!payload.ok) throw new Error(payload.problem);
-    expect(Object.keys(payload.data)).toEqual(['__proto__']);
-    expect(Object.getPrototypeOf(payload.data)).toBe(Object.prototype);
+    expect(problemOf(where)).toMatch(/__proto__/);
+    expect(problemOf({ n: 1 }, JSON.parse('{"__proto__":{"isAdmin":true}}'))).toMatch(/__proto__/);
+    expect(problemOf({ n: 1 }, JSON.parse('{"__proto__":1,"name":"x"}'))).toMatch(/__proto__/);
+    // `constructor` is an ordinary own field name and stays accepted.
+    expect(problemOf({ constructor: 'x' }, { constructor: 'y' })).toBeUndefined();
   });
 });

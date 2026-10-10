@@ -1621,7 +1621,8 @@ or `{ ok: true, where, data }` carrying private copies of the inputs. It require
 equality object, non-empty field names without a `$` prefix or `.`, string or finite-number values,
 and, when supplied, a non-empty plain update payload. Each field is read once into the copy and the
 copy is what gets validated and written, so an input that changes between reads (a `Proxy`) cannot
-send something other than what passed. An own `__proto__` key stays an ordinary field. Every
+send something other than what passed. An own `__proto__` key is refused, in the predicate and in
+the payload, because Node and Bun drop it from any object a backend rebuilds by assignment. Every
 implementation validates direct calls as well as repository calls. No refusal from the conditional
 members quotes a caller value or field name, except D1's unknown-column refusal, which is SQLite's
 own diagnostic as for every D1 statement; Prisma's validation message is replaced with a fixed

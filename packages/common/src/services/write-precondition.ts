@@ -36,8 +36,9 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Copies a plain record's own enumerable string keys, reading each value once.
- * Keys are defined rather than assigned, so an own `__proto__` key stays an
- * ordinary field instead of replacing the copy's prototype.
+ * Keys are defined rather than assigned, so an own `__proto__` key lands as a
+ * field the validator can see and refuse, instead of replacing the copy's
+ * prototype before it is looked at.
  */
 function copyRecord(source: Record<string, unknown>): Record<string, unknown> {
   const copy: Record<string, unknown> = {};
@@ -58,7 +59,8 @@ function copyRecord(source: Record<string, unknown>): Record<string, unknown> {
  *
  * Validation runs on the copies, and a conditional write sends the copies, so
  * the predicate the backend receives is exactly the one that was validated —
- * even when the caller's object changes its keys or values between reads.
+ * even when the caller's object changes its keys or values between reads. An
+ * own `__proto__` key is refused in the predicate and in the payload.
  * Refusal reasons contain no caller-supplied field names or values.
  *
  * @param where - A non-empty plain equality map of string or finite-number values
@@ -102,11 +104,16 @@ export function checkWritePrecondition(
     return { ok: false, problem: 'The write precondition must contain at least one field.' };
   }
   for (const [field, value] of fields) {
-    if (field.length === 0 || field.startsWith('$') || field.includes('.')) {
+    // `__proto__` is refused rather than carried: Node and Bun drop it from any
+    // object a backend rebuilds by assignment (the MongoDB filter, Prisma's
+    // serialized query), so the predicate would silently lose a condition.
+    if (
+      field.length === 0 || field.startsWith('$') || field.includes('.') || field === '__proto__'
+    ) {
       return {
         ok: false,
-        problem:
-          'Write precondition field names must be non-empty, without operators or dotted paths.',
+        problem: 'Write precondition field names must be non-empty, without operators, dotted ' +
+          'paths or __proto__.',
       };
     }
     if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) {
@@ -120,6 +127,12 @@ export function checkWritePrecondition(
     return { ok: true, where: predicate as WritePrecondition, data: undefined };
   }
   const payload = isPlainRecord(data) ? copyRecord(data) : undefined;
+  if (payload !== undefined && Object.prototype.hasOwnProperty.call(payload, '__proto__')) {
+    return {
+      ok: false,
+      problem: 'The conditional update payload may not carry a __proto__ field.',
+    };
+  }
   if (payload === undefined || Object.keys(payload).length === 0) {
     return {
       ok: false,

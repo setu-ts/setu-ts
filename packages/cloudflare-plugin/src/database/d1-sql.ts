@@ -416,6 +416,14 @@ export function buildUpdateWhere(
   where: WritePrecondition,
   data: Partial<Record<string, unknown>>,
 ): D1Statement {
+  // Checked before `buildUpdate`, whose identifier refusal would quote the field.
+  for (const field of Object.keys(data)) {
+    if (!IDENTIFIER.test(field)) {
+      throw new CloudflareUnsupportedError(
+        'D1: a conditional update payload field is not a valid SQL identifier.',
+      );
+    }
+  }
   return withPrecondition(buildUpdate(target, id, data), where);
 }
 

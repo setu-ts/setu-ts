@@ -59,6 +59,7 @@ describe('D1 conditional-write refusals name no caller field (M105 audit O3)', (
       const attempt of [
         () => source.updateWhere!('a', { 'canary field': 'v' }, { name: 'x' }),
         () => source.deleteWhere!('a', { 'canary field': 'v' }),
+        () => source.updateWhere!('a', { role: 'owner' }, { 'canary field': 'v' }),
       ]
     ) {
       const error = await attempt().then(() => undefined, (caught: unknown) => caught);

@@ -862,3 +862,27 @@ describe('operator-shaped key values are refused before the driver (M105 audit O
     });
   }
 });
+
+describe('composite key refusals quote no caller value (M105 audit F2-r2)', () => {
+  for (const idType of [undefined, 'compound' as const]) {
+    it(`${idType ?? 'flat'}: a scalar key for a composite target is refused without an echo`, async () => {
+      const ds = createMongoDataSource(makeClient(), 'testdb', 'User', {
+        User: {
+          primaryKey: ['tenantId', 'userId'] as const,
+          ...(idType === undefined ? {} : { idType }),
+        },
+      });
+      for (
+        const attempt of [
+          () => ds.updateWhere!('canary-key', { name: 'a' }, { name: 'x' }),
+          () => ds.deleteWhere!('canary-key', { name: 'a' }),
+          () => ds.findById('canary-key'),
+        ]
+      ) {
+        const error = await attempt().then(() => undefined, (caught: unknown) => caught);
+        expect((error as Error).message).toMatch(/got a scalar/);
+        expect((error as Error).message).not.toContain('canary-key');
+      }
+    });
+  }
+});

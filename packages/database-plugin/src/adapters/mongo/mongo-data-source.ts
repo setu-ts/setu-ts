@@ -146,9 +146,7 @@ export function createMongoDataSource(
       if (typeof id === 'string' || typeof id === 'number') {
         return Promise.reject(
           new Error(
-            `MongoAdapter: ${operation} needs a composite record for compound key, got scalar '${
-              String(id)
-            }'.`,
+            `MongoAdapter: ${operation} needs a composite record for compound key, got a scalar.`,
           ),
         );
       }
@@ -178,7 +176,7 @@ export function createMongoDataSource(
         new Error(
           `MongoAdapter: ${operation} needs a composite record for multi-column key ${
             columns.join(', ')
-          }, got scalar '${String(id)}'.`,
+          }, got a scalar.`,
         ),
       );
     }
