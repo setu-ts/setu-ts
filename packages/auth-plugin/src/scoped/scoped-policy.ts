@@ -97,6 +97,11 @@ export class ScopedEvaluator {
   readonly #config: CompiledScopedRbac;
   readonly #deps: ScopedEvaluatorDeps;
   readonly #chainsInflight = new Map<string, Promise<ChainOutcome>>();
+  /**
+   * Failures already logged. A memoised failure is the SAME object for every
+   * check in one request, so an any-of guard reading it twice logs it once.
+   */
+  readonly #reported = new WeakSet<Failure>();
 
   /**
    * @param config - The compiled `scopedRbac` option
@@ -290,6 +295,10 @@ export class ScopedEvaluator {
    * @param failure - The failure to report
    */
   report(failure: Failure): void {
+    if (this.#reported.has(failure)) {
+      return;
+    }
+    this.#reported.add(failure);
     const fields: Record<string, unknown> = { policy: SCOPED_RBAC_POLICY, reason: failure.reason };
     if (failure.scopeType !== undefined) {
       fields.scopeType = failure.scopeType;
