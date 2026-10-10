@@ -183,18 +183,19 @@ version; `deleteNow` uses the same predicate through `deleteWhere`. A version mi
 answers `claim-lost` and writes nothing. `markFailure` clears the lease; `markInvalid` requires only
 `kind` and `pending`, writes `failed`/`invalid-row`, clears the lease and preserves attempts.
 `release('retry')` requires `failed`, resets attempts, the lease and `lastError`, and keeps the
-version — so a row poisoned for an exhausted `claimVersion` (`MAX_SAFE_INTEGER`, reachable only by
-editing the row) is poisoned again by the next sweep; `release('discard')` or editing the row are
-the only ways out. A miss is re-read for classification; unexplained misses retry at most three
-rounds. Sources without native conditional support are refused; there is no fallback. Absent
-optional columns are written as `NULL` and read back as absent. `sentBy` is an operator diagnostic
-only.
+version — so a row poisoned for an exhausted `claimVersion` (`MAX_SAFE_INTEGER`, stored by a normal
+claim of a row at `MAX_SAFE_INTEGER - 1`, which takes 2^53 − 1 claims of one row or an edit) is
+poisoned again by the next sweep; `release('discard')` or editing the row are the only ways out. A
+miss is re-read for classification; unexplained misses retry at most three rounds. Sources without
+native conditional support are refused; there is no fallback. Absent optional columns are written as
+`NULL` and read back as absent. `sentBy` is an operator diagnostic only.
 
 **Startup check.** `verify()`, run by the outbox before it schedules the relay or accepts a write,
 runs the relay's first query, a transactional read, and two conditional capability probes on the
-fixed non-UUID id `setu-outbox-claim-probe` with `{ kind, status: 'pending', claimVersion: 0 }`: an
-`updateWhere` writing `{ claimVersion: 1 }` and a `deleteWhere` (needed because `retainSentMs: 0`
-deletes a sent row conditionally after publishing it). They match no envelope row and rejects with
+fixed non-UUID id `setu-outbox-claim-probe` with `{ kind, status: 'pending', claimVersion: -1 }`: an
+`updateWhere` writing `{ claimVersion: 0 }` and a `deleteWhere` (needed because `retainSentMs: 0`
+deletes a sent row conditionally after publishing it). No row can carry version `-1`, so neither
+probe writes, even to a row appended under the probe id. `verify()` rejects with
 `OutboxStoreUnavailableError` (`reason`, `entity`, the adapter error as `cause`) when any step
 fails:
 
@@ -214,8 +215,9 @@ Any other refusal — a missing or unreadable table — is `reason: 'entity-unav
 adapter and MongoDB a missing entity cannot be detected (both create lazily), so that check passes
 there by construction. No portable migration exists (`migrate()` always rejects): create the table
 yourself. The old M107 SQL schema lacks the claim fields and is refused at startup as
-`entity-unavailable`. Claim versions are numbers in `[0, Number.MAX_SAFE_INTEGER - 1]`; PostgreSQL
-uses `bigint`, SQLite/D1 use 64-bit `INTEGER`, and JSON backends store the number. For PostgreSQL:
+`entity-unavailable`. A claim reads a version in `[0, Number.MAX_SAFE_INTEGER - 1]` and stores one
+more, so the stored value reaches `Number.MAX_SAFE_INTEGER`, which is exhausted; PostgreSQL uses
+`bigint`, SQLite/D1 use 64-bit `INTEGER`, and JSON backends store the number. For PostgreSQL:
 
 ```sql
 CREATE TABLE setu_outbox (

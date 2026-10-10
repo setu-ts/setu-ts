@@ -106,6 +106,21 @@ describe('DatabaseOutboxStore.verify', () => {
     });
   }
 
+  it('leaves a pending OUTBOX row appended under the probe id untouched', async () => {
+    // `append` accepts any id, so a caller can store a real pending row under
+    // the probe id. A probe predicate of version 0 would claim it (0 → 1) and
+    // its delete would then miss; version -1 matches no row a store can hold.
+    const service = await memoryService();
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    await service.transaction((uow) =>
+      store.append(uow, record(1, { id: 'setu-outbox-claim-probe' }))
+    );
+    const before = await service.getRepository(ENTITY).findAll();
+    await store.verify();
+    expect(await service.getRepository(ENTITY).findAll()).toEqual(before);
+    expect(before[0]).toMatchObject({ id: 'setu-outbox-claim-probe', claimVersion: 0 });
+  });
+
   it('the capability probe changes neither outbox rows nor a business row at the probe id', async () => {
     const service = await memoryService();
     const repo = service.getRepository(ENTITY);
@@ -144,15 +159,15 @@ describe('DatabaseOutboxStore.verify', () => {
         args: ['setu-outbox-claim-probe', {
           kind: OUTBOX_RECORD_KIND,
           status: 'pending',
-          claimVersion: 0,
-        }, { claimVersion: 1 }],
+          claimVersion: -1,
+        }, { claimVersion: 0 }],
       },
       {
         method: 'deleteWhere',
         args: ['setu-outbox-claim-probe', {
           kind: OUTBOX_RECORD_KIND,
           status: 'pending',
-          claimVersion: 0,
+          claimVersion: -1,
         }],
       },
     ]);

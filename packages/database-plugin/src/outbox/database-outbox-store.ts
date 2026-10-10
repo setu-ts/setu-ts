@@ -135,8 +135,16 @@ const STATUSES: ReadonlySet<string> = new Set<OutboxStatus>([
   'discarded',
 ]);
 
-/** Not a UUID: the conditional capability probe never matches an envelope id. */
+/** The id the conditional capability probes address. Not a UUID, so `write` never produces it. */
 const CLAIM_PROBE_ID = 'setu-outbox-claim-probe';
+
+/**
+ * The version the probes require: `-1`, which no row can carry — `append`
+ * writes `0` and a claim only increments. So the probes match no row even
+ * when a caller appended one under the probe id through the public
+ * `append`, which accepts any id; a version of `0` would have claimed it.
+ */
+const UNMATCHABLE_VERSION = -1;
 
 /** A row as the adapter hands it back. */
 type Row = Record<string, unknown>;
@@ -434,8 +442,12 @@ export class DatabaseOutboxStore implements IOutboxStore {
           'The bound repository lacks updateWhere or deleteWhere.',
         );
       }
-      const probe = { kind: OUTBOX_RECORD_KIND, status: 'pending', claimVersion: 0 };
-      await repo.updateWhere(CLAIM_PROBE_ID, probe, { claimVersion: 1 });
+      const probe = {
+        kind: OUTBOX_RECORD_KIND,
+        status: 'pending',
+        claimVersion: UNMATCHABLE_VERSION,
+      };
+      await repo.updateWhere(CLAIM_PROBE_ID, probe, { claimVersion: 0 });
       await repo.deleteWhere(CLAIM_PROBE_ID, probe);
     } catch (error) {
       throw new OutboxStoreUnavailableError(this.#entity, unavailableReason(error), {
