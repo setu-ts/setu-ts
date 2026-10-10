@@ -514,6 +514,9 @@ and this plan moved to `plans/archive/`. Every new symbol carries `@since 0.9.0`
   refused a public member typed by a private type, and only those three reasons reach sign-in.
 - A deny reason `evaluation-failed` was added for an unexpected throw inside the check, so the check
   still never throws (§3.14).
+- The `inheritsFrom` walk is depth-first, not breadth-first as §3.5 states: "a scope reached again
+  on its own path" is only decidable with the per-path set a depth-first walk carries. Diamonds are
+  still deduplicated through a separate seen set, and both bounds apply unchanged.
 - The database sources read `limit + 1` rows against their own `limit` option (default 10 001
   grants, 100 000 role rows) rather than `maxGrantsPerPrincipal + 1`, which a factory resolved
   before AuthPlugin compiles its options cannot see. More than `limit` matching rows reject the
