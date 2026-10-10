@@ -174,3 +174,15 @@ describe('resolveDynamoTarget — blank identifiers', () => {
     expect(target.table).toBe('Order');
   });
 });
+
+describe('dateAttributes lookups (M105 audit O4)', () => {
+  it('answer undefined for a field named after an inherited object member', () => {
+    const target = dynamoMapping.resolveDynamoTarget('Widget', {
+      Widget: { partitionKey: 'id', dateAttributes: { createdAt: 'iso' } },
+    });
+    expect(target.dateAttributes.createdAt).toBe('iso');
+    for (const field of ['constructor', 'toString', 'hasOwnProperty']) {
+      expect(target.dateAttributes[field]).toBeUndefined();
+    }
+  });
+});
