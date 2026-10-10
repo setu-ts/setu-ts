@@ -964,17 +964,17 @@ could never be sent. A `write` before `onInit` completes rejects `OutboxNotReady
 
 ### The promise
 
-At-least-once delivery of every committed row. Per ordering key, publish order among COMMITTED rows,
-provided rows of one key commit in the order they were written (serialize writes to one aggregate,
-as optimistic concurrency on `aggregateVersion` does) and, across replicas, provided the writers'
+At-least-once delivery of every committed row. At most one relay holds a row's claim at a time,
+provided the relays' wall clocks agree within `relay.maxClockSkewMs`. A relay starts publishing only
+while its claim leaves room for the publish, status write and clock skew. Any number of relays keep
+per-key order among FIRST publishes, provided rows of one key commit in write order and the writers'
 clocks agree. Delivery order is what the broker gives it (see
-[What `orderingKey` promises](#what-orderingkey-promises)). Consumers compare `aggregateVersion`.
-**Never exactly once**: a duplicate carries the same envelope id and deduplication id, which a
-consumer-side inbox absorbs. A duplicate can also arrive OUT OF ORDER. A publish abandoned at
-`publishTimeoutMs`, or in flight while the process is paused, can still reach the broker after a
-later row of the same key. The FIRST delivery of each row keeps write order, because a key's later
-row waits until the earlier one is marked sent, so the late arrival is always a repeat. The sweep
-deadline is a time bound against the lock's TTL, not fencing.
+[What `orderingKey` promises](#what-orderingkey-promises)); consumers compare `aggregateVersion`.
+
+Never exactly once: a repeat carries the same envelope and deduplication id, which a consumer inbox
+absorbs. Two windows remain: a relay can pause AFTER the fence check and resume after its lease; and
+a publish the broker accepts after it was abandoned can arrive late. Those repeats can arrive out of
+order. A relay paused past its claim BEFORE the fence check publishes nothing.
 
 The ordering limit is measured, not theoretical. On real PostgreSQL 16, transaction A wrote its row
 and stayed open while B wrote and committed; the relay published B; then A committed. The relay
@@ -985,17 +985,18 @@ rows it can see. Clock skew is the cross-replica version of the same limit: a ro
 taken from its writer's clock, clamped per process, so two writers whose clocks disagree interleave
 by clock rather than by real time.
 
-| Crash or fault                                      | Outcome                                                                                             |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| before commit                                       | nothing written, nothing published                                                                  |
-| after commit, before any sweep                      | the next sweep (any process) publishes it                                                           |
-| the process stops mid-batch                         | marked rows stay sent; the published-but-unmarked row is published AGAIN; the rest follow in order  |
-| after publish, before the status write              | published again by the next lap, with the same envelope id                                          |
-| the status write rejects after a successful publish | the key is blocked and the sweep ends; the next lap republishes that row before any later row of it |
-| the failure write rejects                           | no attempt recorded; the row is retried once at the next lap                                        |
-| a publish times out and the broker accepts it late  | recorded as a failure and retried after backoff — the broker holds two copies with one dedup id     |
-| the application stops mid-sweep                     | the shutdown drain awaits the sweep; a failure after shutdown began records no attempt              |
-| during purge                                        | rows deleted so far stay deleted; the rest are purged at the next interval                          |
+| Crash or fault                                       | Outcome                                                                                                    |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| before commit                                        | nothing written, nothing published                                                                         |
+| after commit, before any sweep                       | the next sweep publishes it                                                                                |
+| the process stops mid-batch                          | marked rows stay sent; an unmarked row is republished after its claim expires; the rest follow in order    |
+| after publish, before the status write               | republished after claim expiry, up to `claimLeaseMs + maxClockSkewMs`, with the same envelope id           |
+| the status write rejects after a successful publish  | key blocked and sweep ended; republished after claim expiry                                                |
+| the failure write rejects                            | no attempt recorded; retried after claim expiry                                                            |
+| a publish times out and the broker accepts it late   | failure recorded and retried after backoff; two copies with one deduplication id                           |
+| the application stops mid-sweep                      | drain awaits the sweep; a publish failure while closing writes no attempt and keeps the claim until expiry |
+| a relay pauses past its claim before the fence check | fenced; publishes nothing                                                                                  |
+| during purge                                         | deleted rows stay deleted; the rest are purged at the next interval                                        |
 
 The mid-batch and after-publish rows are driven against real PostgreSQL with real RabbitMQ 4 and
 real Redis Streams in `test/integration/outbox-real.test.ts`.
@@ -1049,6 +1050,8 @@ CREATE TABLE setu_outbox (
   status       text    NOT NULL,
   attempts     integer NOT NULL,
   available_at bigint  NOT NULL,
+  claim_version bigint NOT NULL,
+  lease_until  bigint  NOT NULL,
   last_error   text,
   settled_at   bigint,
   sent_by      text
@@ -1075,6 +1078,8 @@ CREATE TABLE setu_outbox (
   status      TEXT    NOT NULL,
   attempts    INTEGER NOT NULL,
   availableAt INTEGER NOT NULL,
+  claimVersion INTEGER NOT NULL,
+  leaseUntil  INTEGER NOT NULL,
   lastError   TEXT,
   settledAt   INTEGER,
   sentBy      TEXT
@@ -1109,6 +1114,8 @@ export const outbox = pgTable('setu_outbox', {
   status: text('status').notNull(),
   attempts: integer('attempts').notNull(),
   availableAt: bigint('available_at', { mode: 'number' }).notNull(),
+  claimVersion: bigint('claim_version', { mode: 'number' }).notNull(),
+  leaseUntil: bigint('lease_until', { mode: 'number' }).notNull(),
   lastError: text('last_error'),
   settledAt: bigint('settled_at', { mode: 'number' }),
   sentBy: text('sent_by'),
@@ -1162,41 +1169,59 @@ not detected by `verify()`. A Prisma model maps the PostgreSQL columns with `@ma
 ### The relay
 
 The relay walks the pending set in LAPS, keyset-paged on `position`, examining rows one at a time. A
-failed row, a row in retry backoff, or a row whose status write failed BLOCKS its ordering key for
-the rest of the lap, so a later row of the same key is never published first; an unkeyed row is
-never blocked. Two budgets per sweep keep a stuck key from starving others: `scanLimit` (rows
-examined, default 1000) and `publishLimit` (publishes, default 100); the lap carries across sweeps,
-so the scan moves past a blocked key's rows and reaches an unblocked key behind them.
+failed row, a row in retry backoff, a row held by another relay, or a row whose status write failed
+BLOCKS its ordering key for the rest of the lap, so a later row of the same key is never published
+first; an unkeyed row is never blocked. Two budgets per sweep keep a stuck key from starving others:
+`scanLimit` (rows examined, default 1000) and `publishLimit` (publishes, default 100); the lap
+carries across sweeps, so the scan moves past a blocked key's rows and reaches an unblocked key
+behind them.
 
 A publish failure is retried with backoff (`baseBackoffMs` doubled per attempt up to
 `maxBackoffMs`); after `maxAttempts` (default 10) the row becomes `failed`. A row that cannot be
 decoded — its envelope is not JSON, too large or carries another id; its options are longer than any
 the outbox writes, fail validation or disagree with its `orderingKey` column; or its topic is empty,
 over 255 bytes or carries a control character — is `failed` at once with `lastError: 'invalid-row'`.
-Either way it blocks its key until an operator calls `release`.
+Invalid claim fields also become `failed`: a stored version must be an integer in
+`[0, Number.MAX_SAFE_INTEGER - 1]`, and a lease must be a nonnegative safe integer no farther than
+`now + 3 660 000` ms. This global horizon accepts other replicas' longer leases during a rollout.
+`MAX_SAFE_INTEGER` is exhausted and never incremented; `MAX_SAFE_INTEGER - 1` is claimed normally.
+`markInvalid` preserves attempts, clears the lease and writes `invalid-row`. Either kind of failed
+row blocks its key until an operator calls `release`.
 
 **`release` carries no built-in authorization.** It is an operator capability: gate the route that
-calls it. `'retry'` returns the row to `pending` with zero attempts; `'discard'` settles it without
-publishing (and the purge deletes it later). A release takes effect at the relay's next lap.
+calls it. `'retry'` returns the row to `pending` with zero attempts and `leaseUntil: 0`, keeping
+`claimVersion`; `'discard'` settles it without publishing (and the purge deletes it later). A
+release takes effect at the relay's next lap.
 
-**One deadline per sweep.** `relay.sweepDeadlineMs` (default 15 000), on the monotonic clock, bounds
-everything a sweep does; each call inside it is bounded by `publishTimeoutMs` and `storeTimeoutMs`
-(default 5 000 each), and a row starts only while both still fit.
-`publishTimeoutMs + storeTimeoutMs > sweepDeadlineMs` is refused at construction. The scheduler's
-handler mutex has no renewal, so **keep `sweepDeadlineMs ≤ distributedLock.ttlMs − 10 000`**
-(defaults: 15 000 against 30 000). Raising `sweepDeadlineMs` requires raising
-`SchedulerPlugin({ distributedLock: { ttlMs } })` with it; the plugin cannot read the lock's TTL, so
-this rule is yours to keep.
+**One deadline per sweep.** `relay.sweepDeadlineMs` (default 30 000), on the monotonic clock, bounds
+the whole sweep and purge. Each publish and store call has its own bound (default 5 000 each). A row
+starts only while `publishTimeoutMs + 2 × storeTimeoutMs` fits: the claim, publish and status write
+reserve 15 000 ms by default, leaving the first 15 000 ms for row starts. Construction requires
+`publishTimeoutMs + 2 × storeTimeoutMs < sweepDeadlineMs`; equality is refused naming all three
+options.
 
-**One relay per cluster needs a SHARED scheduler lock.** The default `MemoryLock` is process-local,
-so with several replicas configure `SchedulerPlugin({ distributedLock: { … } })`. The plugin cannot
-tell which lock is in use; it DETECTS an overlap instead — a status write finding the row already
-`sent` by another instance — and reports `scheduled-overlap` in health. Two limits on that signal:
-with `retainSentMs: 0` a sent row is deleted at once and an overlap reads as a missing row, so
-detection is off; and on DynamoDB a GSI read is eventually consistent, so a replica can read a row
-another just sent as still pending, publish it again (a duplicate, inside the promise) and report a
-false overlap (documented from AWS's consistency model, not reproduced here). Overlaps involving a
-`dispatch()` sweep are expected and only counted.
+**Several relays may sweep one store.** Each row is claimed through an atomic compare-and-set on
+`claimVersion`, incrementing it once and recording `leaseUntil`. Another relay waits until
+`now ≥ leaseUntil + maxClockSkewMs`; every status write, including immediate deletion, requires the
+held version. `relay.claimLeaseMs` defaults to 30 000 (integer 1–3 600 000) and must cover
+`publishTimeoutMs + 2 × storeTimeoutMs + maxClockSkewMs`. `relay.maxClockSkewMs` defaults to 5 000
+(integer 0–60 000); zero assumes perfectly agreeing clocks and is unsafe across hosts.
+
+A shared scheduler lock saves redundant scans: without it each replica scans every interval.
+`dispatch()` runs outside the lock. The former `sweepDeadlineMs ≤ distributedLock.ttlMs − 10 000`
+rule no longer bears on correctness. Claims use the same protocol on every supported backend; the
+bridge refuses sources without native conditional writes.
+
+The overlap kinds are `fenced` (the pre-publish check refused an expired claim), `claim-lost` (a
+status write found another version) and `duplicate` (`markSent` found the row already sent). Any
+kind, including a dispatch sweep, degrades health with `relay-overlap` inside the configured window.
+Losing at CLAIM time is ordinary contention and has no shipped signal. `retainSentMs: 0` disables
+only `duplicate`; `fenced` and `claim-lost` still work. `sentBy` remains an operator diagnostic, and
+is absent from transition outcomes.
+
+On DynamoDB a stale GSI page cannot cause a publish: the claim's conditional write checks the latest
+base item. This follows AWS's documented model and is exercised against DynamoDB Local, not the
+service.
 
 On shutdown the relay drains in an `onShutdown` hook, before any `onClose` hook closes the broker or
 the database: the jobs are removed, `dispatch()` becomes a no-op, and the in-flight sweep finishes
@@ -1226,10 +1251,10 @@ payload.
 `sent` and `discarded` rows whose `settledAt` is older than `retainSentMs` (default 7 days), at most
 `purgeBatch` (default 100) per status per run. Settled rows hold event payloads, which may be
 personal data — set `retainSentMs` to what your retention policy allows. `retainSentMs: 0` deletes a
-row at mark-sent (and disables overlap detection). `failed` rows are never purged: they block their
-key until released. On DynamoDB the purge is a `status`-partition query with `settledAt` as a
-filter, which READS (and bills for) every settled item it passes over; `purgeIntervalMs` bounds how
-often.
+row at mark-sent (and disables only `duplicate` detection). `failed` rows are never purged: they
+block their key until released. On DynamoDB the purge is a `status`-partition query with `settledAt`
+as a filter, which READS (and bills for) every settled item it passes over; `purgeIntervalMs` bounds
+how often.
 
 ### Trust
 
@@ -1256,22 +1281,22 @@ bound): `down` when the store does not answer, otherwise `degraded` with `data.r
 vocabulary, else `up`. `data` carries counts, ages in ms and the last local sweep's counts — never a
 tenant id, ordering key, topic or error text.
 
-| Reason                | Source                                                                               | Scope                    |
-| --------------------- | ------------------------------------------------------------------------------------ | ------------------------ |
-| `oldest-pending-age`  | the oldest pending row is older than `health.degradedAfterMs` (default 60 s)         | cluster-wide (the store) |
-| `failed-rows`         | the failed count is above zero                                                       | cluster-wide             |
-| `failed-scan-cap`     | the failed count reaches `relay.maxFailedScan`, so a lap's blocked set is incomplete | cluster-wide             |
-| `blocked-key-cap`     | this instance's current or last completed lap overflowed its 10 000-key blocked set  | this instance            |
-| `store-write-failing` | this instance's last sweep ended on a rejected store call                            | this instance            |
-| `scheduled-overlap`   | this instance saw two scheduled sweeps overlap inside `health.overlapWindowMs`       | this instance            |
+| Reason                | Source                                                                                       | Scope                    |
+| --------------------- | -------------------------------------------------------------------------------------------- | ------------------------ |
+| `oldest-pending-age`  | the oldest pending row is older than `health.degradedAfterMs` (default 60 s)                 | cluster-wide (the store) |
+| `failed-rows`         | the failed count is above zero                                                               | cluster-wide             |
+| `failed-scan-cap`     | the failed count reaches `relay.maxFailedScan`, so a lap's blocked set is incomplete         | cluster-wide             |
+| `blocked-key-cap`     | this instance's current or last completed lap overflowed its 10 000-key blocked set          | this instance            |
+| `store-write-failing` | this instance's last sweep ended on a rejected store call                                    | this instance            |
+| `relay-overlap`       | this instance observed `fenced`, `claim-lost` or `duplicate` inside `health.overlapWindowMs` | this instance            |
 
 A replica that never wins the scheduler's slot never sweeps, so it reports none of the per-instance
 reasons. With `CAPABILITIES.METRICS` registered the outbox adds counters `outbox_published_total`,
 `outbox_publish_failures_total`, `outbox_poisoned_total` (labelled `topic`, capped at 100 distinct
-values then `other`) and `outbox_overlaps_total` (`origin`), and gauges `outbox_pending_rows` and
-`outbox_oldest_pending_seconds`, each labelled `outbox` with the instance's token. **The two gauges
-are written only when the health indicator reads the store** — they are as fresh as the last
-`/health` poll, and stale if nothing polls it.
+values then `other`) and `outbox_overlaps_total` (`kind`: `fenced`, `claim-lost`, `duplicate`), and
+gauges `outbox_pending_rows` and `outbox_oldest_pending_seconds`, each labelled `outbox` with the
+instance's token. **The two gauges are written only when the health indicator reads the store** —
+they are as fresh as the last `/health` poll, and stale if nothing polls it.
 
 ### Trace continuity
 
@@ -1354,10 +1379,11 @@ latency and keep the cron for reliability. This composition is driven at unit le
 Any `IOutboxStore` from `@setu-ts/common` can back the outbox — an instance or a `RegistryFactory`.
 It must keep the bridge's contract: `append` writes inside the caller's scope; `scanPending` returns
 `pending` rows of its own kind in `position` order, strictly after the cursor, without filtering on
-`availableAt`; every transition reads the row and writes ONLY from the expected status, answering
-`missing` or the status it found otherwise; `purge` deletes only settled rows older than the cutoff;
-`verify` rejects when the backend cannot serve the relay; and every method rejects rather than
-throwing synchronously.
+`availableAt`; every transition atomically requires the discriminator and expected status; `claim`
+also compares the read version and increments it, while `markSent`/`markFailure` require the held
+version and answer `claim-lost` on a version miss; `markInvalid` uses a status-only guard and
+preserves attempts; `purge` deletes only settled rows older than the cutoff; `verify` rejects when
+the backend cannot serve the relay; and every method rejects rather than throwing synchronously.
 
 ## Consumer inbox
 

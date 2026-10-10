@@ -1176,12 +1176,15 @@ export interface OutboxSweepResult {
  * The transactional outbox, registered under `CAPABILITIES.OUTBOX`
  * (`outbox.<name>` for a named messaging instance).
  *
- * **The promise.** At-least-once delivery of every committed row; per
- * ordering key, publish order among committed rows, provided rows of one key
- * commit in the order they were written and, across replicas, provided the
- * writers' clocks agree; delivery order as the broker gives it. Consumers
- * compare `aggregateVersion`. Never exactly once — a re-send carries the same
- * envelope id as its de-duplication id.
+ * **The promise.** At-least-once delivery of every committed row. At most one
+ * relay holds a row's claim, provided relays' wall clocks agree within
+ * `relay.maxClockSkewMs`. A relay starts publishing only while its claim has
+ * room for the publish, status write and skew. Per-key order among first
+ * publishes across any number of relays assumes rows commit in write order
+ * and writers' clocks agree. Delivery order is the broker's; consumers compare
+ * `aggregateVersion`. A pause after the fence check or a publish the broker
+ * accepts after abandonment can cause repeats, including out of order. Never
+ * exactly once: repeats carry the same envelope and de-duplication id.
  *
  * @since 0.9.0
  */

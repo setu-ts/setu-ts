@@ -119,7 +119,7 @@ export interface OutboxKey {
 }
 
 /**
- * The answer to a conditional status transition
+ * The answer to a conditional claim or status transition
  * ({@linkcode IOutboxStore.markSent}, {@linkcode IOutboxStore.markFailure},
  * {@linkcode IOutboxStore.release}).
  *
@@ -203,9 +203,10 @@ export interface IOutboxWriteScope {
  * The outbox store port.
  *
  * Every method returns a promise that REJECTS on failure and never throws
- * synchronously. Every transition reads the row and writes only from the
- * expected status, and every read requires `kind` to equal
- * {@linkcode OUTBOX_RECORD_KIND}; a custom store must honour both rules.
+ * synchronously. Every transition atomically requires the expected status and
+ * `kind` equal to {@linkcode OUTBOX_RECORD_KIND}. Claims compare and increment
+ * the read version; settlement compares the held version. Every read requires
+ * that discriminator. A custom store must honour these rules.
  *
  * @since 0.9.0
  */
@@ -273,7 +274,7 @@ export interface IOutboxStore {
    * Marks a `pending` row as sent (or deletes it when `deleteNow` is set).
    *
    * @param id - The row id
-   * @param update - The settlement time, the sending sweep, and whether to delete instead
+   * @param update - The held version, settlement time, sending sweep and deletion policy
    * @returns `applied`, or why nothing was written
    */
   markSent(
@@ -291,10 +292,10 @@ export interface IOutboxStore {
   ): Promise<OutboxTransition>;
 
   /**
-   * Records a publish failure on a `pending` row.
+   * Records a publish failure on a `pending` row at the held version, clearing its lease.
    *
    * @param id - The row id
-   * @param update - The attempt count, error line, next retry time, and new status
+   * @param update - The held version, attempt count, error line, retry time and status
    * @returns `applied`, or why nothing was written
    */
   markFailure(
@@ -311,7 +312,8 @@ export interface IOutboxStore {
 
   /**
    * Releases a `failed` row: `retry` returns it to `pending` with
-   * `attempts: 0` and `availableAt: now`; `discard` makes it `discarded` with
+   * `attempts: 0`, `availableAt: now` and `leaseUntil: 0`, keeping its version;
+   * `discard` makes it `discarded` with
    * `settledAt: now`.
    *
    * @param id - The row id

@@ -147,6 +147,20 @@ All notable changes to this project are documented here. The format follows
   the least recently used one with nothing in flight. The docs state the guarantee honestly:
   `orderingKey` decides placement, not the order handlers finish in.
 
+- **Outbox relay fencing (M107b).** Versioned per-row leases and native conditional claims on every
+  supported backend; held-version status writes, including immediate deletion, and a pre-publish
+  time fence. Several relays preserve per-key first-publish order under the existing commit-order
+  and writer-clock conditions; pauses after the fence and late broker acceptance remain duplicate
+  windows. New `relay.claimLeaseMs` (30 000) and `maxClockSkewMs` (5 000); `sweepDeadlineMs` is now
+  30 000 with strict headroom over the claim/publish/status reserve. Unsupported conditional sources
+  fail startup. The unreleased M107 schema requires 64-bit `claimVersion` and `leaseUntil`; old SQL
+  DDL is refused and old JSON rows without the fields are poisoned as `invalid-row`.
+  `MAX_SAFE_INTEGER` is exhausted; max-minus-one can be claimed exactly. `not-pending.sentBy` is
+  removed, while the stored diagnostic remains. Health uses `relay-overlap` for `fenced`,
+  `claim-lost`, `duplicate`, and `outbox_overlaps_total` uses `kind` instead of `origin`. A shared
+  scheduler lock now saves redundant scans; its TTL rule no longer bears on correctness. Retry
+  clears the lease and keeps the version; shutdown failures preserve the claim.
+
 - **Transactional outbox (M107, `@setu-ts/messaging-plugin`).** `MessagingPlugin({ outbox })` writes
   an integration event as a row in the SAME database transaction as the business change —
   `IOutbox.write(uow, definition, payload, input?)` through the caller's own unit of work, with the
@@ -173,13 +187,13 @@ All notable changes to this project are documented here. The format follows
   real OpenTelemetry SDK; the Workers composition is driven at unit level, not on real workerd.
 
 - **The outbox store port in `@setu-ts/common` (M107).** `IOutboxStore` — `append`, `scanPending`,
-  `failedKeys`, `markSent`, `markFailure`, `release`, `stats`, `purge` and `verify`, every method
-  rejecting rather than throwing — with `IOutboxWriteScope` (the one-method slice of a unit of work
-  the write needs, satisfied by `database-plugin`'s `IUnitOfWork`), the row shape `OutboxRecord` and
-  `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, the `'setu-outbox'`
-  discriminator `OUTBOX_RECORD_KIND`, and the token `CAPABILITIES.OUTBOX` (`'outbox'`,
-  `outbox.<name>` for a named messaging instance). It is in `common` so a database package can
-  implement it without importing the messaging plugin.
+  `failedKeys`, `claim`, `markInvalid`, `markSent`, `markFailure`, `release`, `stats`, `purge` and
+  `verify`, every method rejecting rather than throwing — with `IOutboxWriteScope` (the one-method
+  slice of a unit of work the write needs, satisfied by `database-plugin`'s `IUnitOfWork`), the row
+  shape `OutboxRecord` and `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, the
+  `'setu-outbox'` discriminator `OUTBOX_RECORD_KIND`, and the token `CAPABILITIES.OUTBOX`
+  (`'outbox'`, `outbox.<name>` for a named messaging instance). It is in `common` so a database
+  package can implement it without importing the messaging plugin.
 
 - **`createDatabaseOutboxStore` in `@setu-ts/database-plugin` (M107).** The shipped `IOutboxStore`
   over `IDatabaseService`, as a `RegistryFactory` (`DatabaseOutboxStoreOptions`: `entity`, default

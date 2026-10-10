@@ -353,10 +353,9 @@ describe('MessagingPlugin outbox wiring', () => {
     const app = buildApp({
       outbox: { store: store.entry, relay: { intervalMs: 20 } },
       messaging: { broker: 'custom', instance: broker },
-      extra: [{
+      before: [{
         name: 'claim-after-drain',
         version: '0.8.0',
-        dependencies: ['messaging-plugin'],
         register(ctx) {
           ctx.lifecycle.onShutdown(async () => {
             afterDrain = await store.store().scanPending(undefined, 10);

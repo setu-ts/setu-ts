@@ -13273,8 +13273,8 @@ if a claim or epoch member is needed) and `packages/database-plugin` (the
 
 **Depends on:** M105 (conditional writes) for the fencing arm.
 
-**Objective:** a relay that has lost its right to run cannot publish, and more than one relay can
-drain one outbox without double-sending.
+**Objective:** fence a relay before it starts publishing past its row lease, and allow several
+relays to drain one outbox, with the duplicate windows stated explicitly.
 
 **Why.** M107 runs one relay per database under the scheduler's lock, and that lock has a TTL with
 no renewal. The sweep deadline keeps a healthy relay inside it, but a relay paused past the TTL — a
@@ -13297,28 +13297,21 @@ promises more than at-least-once:
 - **NServiceBus** has no separate relay — the outbox is dispatched while handling the incoming
   message — and deduplicates by message id on the receiving side.
 
-**Scope — for the plan to decide.**
+**Scope — approved in `plans/milestone-107b-outbox-relay-fencing.md`.**
 
-- **Arm 1, a database-held claim**, where the backend has interactive transactions and row locks
-  (PostgreSQL and MySQL through Drizzle or Prisma; MongoDB to be probed): a relay claims a batch of
-  pending rows inside a transaction (`SKIP LOCKED`), so a stale relay's claim ends with its
-  transaction and no fencing token is needed. This is also what makes several relays safe at once.
-- **Arm 2, an epoch fence**, everywhere else (D1, DynamoDB, Cosmos, Bigtable, which defer writes to
-  commit): each relay holds an epoch that increases with every lock hand-off, and every row write is
-  an M105 `updateWhere` conditional on that epoch, so a stale relay's writes are refused. Whether it
-  can also stop the stale relay's PUBLISH (check the epoch immediately before publishing, which
-  narrows but does not close the window) is a plan decision, stated as a bound rather than implied.
-- Whether multi-relay is offered at all on Arm 2, or Arm 2 stays single-relay with fencing only.
-- How the relay learns which arm its store supports (a store capability, refused by name otherwise —
-  never inferred from the adapter's class).
+One per-row versioned lease on every supported backend, using M105's native conditional writes
+outside a transaction: `claimVersion` increases once per claim, `leaseUntil` gates takeover, and
+each status write compares the held version. No lock epoch or `SKIP LOCKED` arm is needed; deferred
+writes apply only inside transactions. Bigtable stays refused. A pre-publish fence requires time for
+the publish, status write and clock skew; a pause after that check and a late broker acceptance
+remain duplicate windows, inside at-least-once delivery. Multiple relays keep per-key first-publish
+order under M107's commit-order and writer-clock conditions.
 
 **Deliverables**
 
-- [ ] The chosen arms, each proven against a real backend with a paused-relay negative control (a
-      relay frozen past its lock's TTL publishes nothing once fenced)
-- [ ] Multi-relay, if offered, proven with N relays draining one outbox with no row published twice
-      by the relays (broker redelivery excluded) and per-key order preserved
-- [ ] README and PUBLIC_API.md stating which arm each backend gets and the exact promise
+- [ ] Versioned claims and a pre-publish fence, proven with a relay paused past its lease
+- [ ] Four relays draining 200 rows once each, preserving per-key first-publish order
+- [ ] README and PUBLIC_API.md stating the shared protocol and exact promise
 
 ---
 
