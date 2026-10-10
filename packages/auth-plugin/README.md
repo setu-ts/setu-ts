@@ -143,6 +143,62 @@ authz.hasAnyRole(principal, ['admin', 'manager']);
 authz.hasAllPermissions(principal, ['users:read', 'users:write']);
 ```
 
+## Authorization Policies
+
+Roles answer "does this principal hold this role, anywhere". A **policy** answers "may this
+principal do this, to this target" — asynchronously, with the target as an argument. Attribute rules
+("the author of this post", "an approver of this amount") are written as policies; there is no
+attribute engine. AuthPlugin always registers an `IAuthorizationPolicyService` under
+`CAPABILITIES.AUTHORIZATION_POLICIES`, independent of `rbac`.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { AuthPlugin, definePolicy, requirePolicy } from '@setu-ts/auth-plugin';
+
+interface Post {
+  readonly authorId: string;
+}
+
+const posts = new Map<string, Post>();
+
+const postPolicy = definePolicy({
+  name: 'post',
+  abilities: {
+    update: (principal, post: Post | undefined) => post?.authorId === principal.id,
+    read: { anonymous: true, check: () => true },
+  },
+  before: (principal) => (principal.roles?.includes('admin') === true ? true : undefined),
+});
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    AuthPlugin({ jwt: { secret: 'replace-with-a-secret-of-32-chars!' }, policies: [postPolicy] }),
+  ],
+});
+
+app.router.patch('/posts/:id', {
+  middleware: [requirePolicy(postPolicy, 'update', (ctx) => posts.get(ctx.params.id ?? ''))],
+  handler: (ctx) => ctx.response.json({ ok: true }),
+});
+```
+
+The rules are fixed: only a literal `true` allows; a throwing or rejecting check denies and is
+logged once (never the target); an anonymous request is refused `401` before a check runs unless the
+ability is declared `{ anonymous: true, check }`; for a signed-in principal `before` runs first —
+`true` allows, `undefined` falls through, anything else denies; a denied signed-in principal gets
+`403` with the same body `requireRole` writes; with no policy service the guard answers `501`. A
+guard naming a policy or ability that is not registered makes `app.start()` fail, naming the route —
+except on a route added after `start()` or a guard added as global middleware, where it fails closed
+per request.
+
+Inside a handler, `can(principal, policy, ability, target)` resolves a boolean and `authorize(...)`
+rejects a denial with `AuthorizationDeniedError`, which `errorHandler` answers with the guard's own
+`401`/`403` body. An unknown policy or ability rejects both with `UnknownPolicyError`. Class-form
+policies and the `@RequirePolicy` decorator live in `@setu-ts/decorator-plugin`. The full guide is
+[Authorization](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md).
+
 ## Guards
 
 Guards are free `MiddlewareFunction` factories (imported from the plugin, not methods on
@@ -223,28 +279,29 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 
 ## Options
 
-| Option                           | Type                                                  | Default             | Description                                                                                     |
-| -------------------------------- | ----------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------- |
-| `jwt`                            | `JwtOptions`                                          | -                   | Optional JWT service and passive bearer strategy.                                               |
-| `jwt.secret`                     | `string \| Uint8Array`                                | -                   | HS256 key. Required for HS256.                                                                  |
-| `jwt.privateKey`                 | `string` (PEM)                                        | -                   | RS256 private key. Required for RS256.                                                          |
-| `jwt.publicKey`                  | `string` (PEM)                                        | -                   | RS256 public key. Required for RS256.                                                           |
-| `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                  | inferred            | Inferred from which key material is provided.                                                   |
-| `jwt.audience`                   | `string`                                              | -                   | Expected `aud`; enforced on verify.                                                             |
-| `jwt.issuer`                     | `string`                                              | -                   | Expected `iss`; enforced on verify.                                                             |
-| `jwt.header`                     | `string`                                              | `'authorization'`   | Header name for bearer extraction.                                                              |
-| `jwt.scheme`                     | `string`                                              | `'bearer'`          | Token scheme prefix.                                                                            |
-| `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                         | -                   | Shared store that rejects revoked typed access tokens.                                          |
-| `apiKey.header`                  | `string`                                              | `'X-API-Key'`       | Header holding the API key.                                                                     |
-| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                | -                   | App-supplied API-key lookup.                                                                    |
-| `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                   | App-supplied credential check.                                                                  |
-| `rbac.roles`                     | `Record<string, RoleDefinition>`                      | -                   | Role → permissions + `inherits` hierarchy.                                                      |
-| `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                   | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
-| `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                 |
-| `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                      |
-| `issuers`                        | `readonly TrustedIssuer[]`                            | -                   | Outside identity providers whose access tokens are accepted.                                    |
-| `http`                           | `IAuthHttp`                                           | `fetch`-based       | Outbound HTTP for issuer key sets, discovery documents, and the sign-in token exchange.         |
-| `signIn`                         | `SignInConfig`                                        | -                   | Sign-in with outside providers; registers `IAuthSessionService`. Requires `SessionPlugin`.      |
+| Option                           | Type                                                  | Default             | Description                                                                                                                                                                                                                                     |
+| -------------------------------- | ----------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jwt`                            | `JwtOptions`                                          | -                   | Optional JWT service and passive bearer strategy.                                                                                                                                                                                               |
+| `jwt.secret`                     | `string \| Uint8Array`                                | -                   | HS256 key. Required for HS256.                                                                                                                                                                                                                  |
+| `jwt.privateKey`                 | `string` (PEM)                                        | -                   | RS256 private key. Required for RS256.                                                                                                                                                                                                          |
+| `jwt.publicKey`                  | `string` (PEM)                                        | -                   | RS256 public key. Required for RS256.                                                                                                                                                                                                           |
+| `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                  | inferred            | Inferred from which key material is provided.                                                                                                                                                                                                   |
+| `jwt.audience`                   | `string`                                              | -                   | Expected `aud`; enforced on verify.                                                                                                                                                                                                             |
+| `jwt.issuer`                     | `string`                                              | -                   | Expected `iss`; enforced on verify.                                                                                                                                                                                                             |
+| `jwt.header`                     | `string`                                              | `'authorization'`   | Header name for bearer extraction.                                                                                                                                                                                                              |
+| `jwt.scheme`                     | `string`                                              | `'bearer'`          | Token scheme prefix.                                                                                                                                                                                                                            |
+| `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                         | -                   | Shared store that rejects revoked typed access tokens.                                                                                                                                                                                          |
+| `apiKey.header`                  | `string`                                              | `'X-API-Key'`       | Header holding the API key.                                                                                                                                                                                                                     |
+| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                | -                   | App-supplied API-key lookup.                                                                                                                                                                                                                    |
+| `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                   | App-supplied credential check.                                                                                                                                                                                                                  |
+| `rbac.roles`                     | `Record<string, RoleDefinition>`                      | -                   | Role → permissions + `inherits` hierarchy.                                                                                                                                                                                                      |
+| `policies`                       | `readonly PolicyDefinition[]`                         | `[]`                | Authorization policies from `definePolicy`, checked when `AuthPlugin(...)` is called (malformed or duplicate names refuse). The policy service is registered whether or not this is set. See [Authorization Policies](#authorization-policies). |
+| `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                   | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`.                                                                                                                                                 |
+| `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                                                                                                                                                                 |
+| `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                                                                                                                                                                      |
+| `issuers`                        | `readonly TrustedIssuer[]`                            | -                   | Outside identity providers whose access tokens are accepted.                                                                                                                                                                                    |
+| `http`                           | `IAuthHttp`                                           | `fetch`-based       | Outbound HTTP for issuer key sets, discovery documents, and the sign-in token exchange.                                                                                                                                                         |
+| `signIn`                         | `SignInConfig`                                        | -                   | Sign-in with outside providers; registers `IAuthSessionService`. Requires `SessionPlugin`.                                                                                                                                                      |
 
 At least one passive strategy must be configured through `jwt`, `issuers`, `apiKey`, `session`, or
 `strategies`; `local` alone is a login verifier and cannot authenticate a later request. For
@@ -1115,6 +1172,7 @@ MIT
 | `authMiddleware`                    | function  |
 | `AuthPlugin`                        | function  |
 | `defaultRateLimitKey`               | function  |
+| `definePolicy`                      | function  |
 | `publicRoute`                       | function  |
 | `rateLimitMiddleware`               | function  |
 | `requireAllPermissions`             | function  |
@@ -1122,7 +1180,9 @@ MIT
 | `requireAuth`                       | function  |
 | `requireMfa`                        | function  |
 | `requirePermission`                 | function  |
+| `requirePolicy`                     | function  |
 | `requireRole`                       | function  |
+| `AuthorizationDeniedError`          | class     |
 | `AuthPluginConfigurationError`      | class     |
 | `MalformedPasswordHashError`        | class     |
 | `MemoryAccessTokenRevocationStore`  | class     |
@@ -1136,6 +1196,7 @@ MIT
 | `RefreshTokenService`               | class     |
 | `SamlRuntimeLoadError`              | class     |
 | `TotpService`                       | class     |
+| `UnknownPolicyError`                | class     |
 | `DEFAULT_MAX_PENDING_SAML_REQUESTS` | const     |
 | `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
 | `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
@@ -1146,6 +1207,7 @@ MIT
 | `IAccessTokenRevocationStore`       | interface |
 | `IAuthHttp`                         | interface |
 | `IAuthorizationDiagnosticsSource`   | interface |
+| `IAuthorizationPolicyService`       | interface |
 | `IAuthorizationService`             | interface |
 | `IAuthService`                      | interface |
 | `IAuthStrategy`                     | interface |
@@ -1192,6 +1254,7 @@ MIT
 | `IssuerAlgorithm`                   | type      |
 | `IssuerKeySource`                   | type      |
 | `PasskeySaveResult`                 | type      |
+| `PolicyDenial`                      | type      |
 | `RecoveryCodesResult`               | type      |
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |

@@ -686,6 +686,7 @@ const REQUIRED_GUIDES = [
   'docs/migration-fastify.md',
   'docs/examples.md',
   'docs/runtime-deployment.md',
+  'docs/authorization.md',
 ];
 
 /** The canonical absolute URL of the committed public-API ledger. */

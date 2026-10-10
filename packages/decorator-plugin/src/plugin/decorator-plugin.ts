@@ -17,6 +17,7 @@ import type {
   DecoratorHandler,
   FactoryProvider,
   HttpMethod,
+  IAuthorizationPolicyService,
   IAuthorizationService,
   IPlugin,
   IPluginContext,
@@ -35,6 +36,7 @@ import type { IIdempotencyService } from '@setu-ts/common';
 
 import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
 import { registerIngresses } from './ingress-registration.ts';
+import { appendPolicyMiddleware, registerPolicyClasses } from './policy-registration.ts';
 import { validateResponseShaping } from '../decorators/response-status.ts';
 import type { ResponseShaping } from '../decorators/response-status.ts';
 
@@ -101,6 +103,17 @@ export interface DecoratorPluginOptions {
    * silenced: the pre-M89a behaviour.
    */
   readonly enforceRoles?: boolean;
+  /**
+   * `@Policy` classes to register with the authorization policy service
+   * AuthPlugin provides (M110a). Each is constructed like a controller — with
+   * constructor injection — and registered before any controller, so a
+   * route's `@RequirePolicy` can name it. Listing a class with no policy service
+   * registered, a class without `@Policy`, or one without an `@Ability()`
+   * method refuses `register()`.
+   *
+   * @since 0.9.0
+   */
+  readonly policies?: readonly Constructor[];
 }
 
 /** Plugin name — matches the package name without the scope. */
@@ -586,6 +599,7 @@ function buildRouteSchema(
   ctrl: ControllerMetadata,
   route: RouteMetadata,
   enforceRoles: boolean,
+  requiresPolicyPrincipal: boolean,
 ): RouteSchema | undefined {
   const schema = route.schema;
   const tags = [...ctrl.tags, ...(route.openapi?.tags ?? [])];
@@ -594,7 +608,10 @@ function buildRouteSchema(
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
   const restrictions = effectiveRestrictions(ctrl, route);
-  const isPublic = route.isPublic === true && (
+  // A `@RequirePolicy` whose ability requires a signed-in principal is enforcement too,
+  // independent of `enforceRoles` (M110a §3.10): its branded middleware derives
+  // the requirement, so the public marker would contradict it.
+  const isPublic = route.isPublic === true && !requiresPolicyPrincipal && (
     !enforceRoles || (restrictions.roles === undefined && restrictions.permissions === undefined)
   );
   if (
@@ -949,6 +966,7 @@ function registerController(
   authorization: IAuthorizationService | undefined,
   viewEngine: IViewEngine | undefined,
   idempotency: IIdempotencyService | undefined,
+  policies: IAuthorizationPolicyService | undefined,
 ): void {
   const ctrlMeta = metadataStore.getController(target);
   if (ctrlMeta === undefined) {
@@ -968,6 +986,17 @@ function registerController(
     if (enforceRoles) {
       appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
     }
+    // `@RequirePolicy` (M110a): after `@Roles`/`@Permissions`, before the
+    // interceptor/middleware/filter band and validation. Always enforced —
+    // `enforceRoles` governs only the role/permission metadata that shipped
+    // inert before M89a; `@RequirePolicy` has no inert history to preserve.
+    const requiresPolicyPrincipal = appendPolicyMiddleware(
+      metadataStore,
+      routeLabel(target, route, fullPath),
+      route.policies ?? [],
+      middleware,
+      policies,
+    );
     middleware.push(...composeMiddleware(ctrlMeta, route));
     if (enforceSchemas) {
       appendValidationMiddleware(ctx, target, route, middleware, validation);
@@ -975,7 +1004,7 @@ function registerController(
     // Appended AFTER the validation band whether or not `enforceSchemas` is on,
     // so a `@ValidateBody` route always runs idempotency last (M109a §3.9).
     appendIdempotencyMiddleware(target, route, fullPath, middleware, idempotency);
-    const schema = buildRouteSchema(ctrlMeta, route, enforceRoles);
+    const schema = buildRouteSchema(ctrlMeta, route, enforceRoles, requiresPolicyPrincipal);
     const routeDef: RouteDefinition = {
       handler,
       ...(middleware.length > 0 ? { middleware } : {}),
@@ -1049,12 +1078,14 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       ? [
         CAPABILITIES.VALIDATION,
         CAPABILITIES.AUTHORIZATION,
+        CAPABILITIES.AUTHORIZATION_POLICIES,
         CAPABILITIES.VIEW,
         CAPABILITIES.IDEMPOTENCY,
       ]
       : [
         CAPABILITIES.VALIDATION,
         CAPABILITIES.AUTHORIZATION,
+        CAPABILITIES.AUTHORIZATION_POLICIES,
         CAPABILITIES.VIEW,
         CAPABILITIES.IDEMPOTENCY,
         CAPABILITIES.QUEUE,
@@ -1091,6 +1122,12 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // Resolved once, beside VALIDATION and AUTHORIZATION (M109a §3.9).
       const idempotency = ctx.services.has(CAPABILITIES.IDEMPOTENCY)
         ? ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY)
+        : undefined;
+      // Authorization policies (M110a): resolved once, to register class-form
+      // policies and to validate every `@RequirePolicy` at register(). The appended
+      // middleware re-resolves per request, like the role middleware.
+      const policyService = ctx.services.has(CAPABILITIES.AUTHORIZATION_POLICIES)
+        ? ctx.services.get<IAuthorizationPolicyService>(CAPABILITIES.AUTHORIZATION_POLICIES)
         : undefined;
       let discoveredControllers: Constructor[] = [];
       let discoveredServices: Constructor[] = [];
@@ -1142,6 +1179,12 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // they had deliberately replaced. In DI mode the provider lands in
       // `ctx.container` rather than the registry, so both are consulted.
       const viewEngine = resolveViewEngine(ctx);
+      // Policy classes AFTER the service loop (a policy may inject a service
+      // registered there) and BEFORE controllers (a route's `@RequirePolicy` names them).
+      registerPolicyClasses(metadataStore, dedup(opts.policies ?? []), policyService, (policy) => {
+        registerInContainer(ctx, policy, metadataStore.getService(policy));
+        return instantiate(policy, ctx);
+      });
       for (const ctrl of controllers) {
         registerController(
           ctx,
@@ -1152,6 +1195,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
           authorization,
           viewEngine,
           idempotency,
+          policyService,
         );
       }
       replayCustomDecorators(ctx);

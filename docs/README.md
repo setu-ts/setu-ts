@@ -35,6 +35,11 @@ building production-ready applications with our plugin-first, runtime-independen
   - Dependency injection
   - Custom decorators
 
+- [Authorization](./authorization.md)
+  - Roles versus policies, and where attribute rules go
+  - Route guards, `@RequirePolicy`, and checks inside a handler
+  - The fixed evaluation rules
+
 - [Localization](./localization.md)
   - Choosing how users pick a language
   - Catalogues and plural forms

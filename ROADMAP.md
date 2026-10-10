@@ -13517,11 +13517,11 @@ ABAC engine. Checked against current documentation (2026-10-09), every comparabl
 this layer and none ships an attribute engine — attribute logic lives in the policies they let you
 write:
 
-| Framework       | The layer                                                                                                | Async | Target                                         |
-| --------------- | -------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------- |
-| ASP.NET Core    | `IAuthorizationService.AuthorizeAsync(user, resource, policy)` + `AuthorizationHandler<TReq, TResource>` | yes   | loaded resource, imperative only               |
-| NestJS          | `@nestjs/authorization`: `@Policy()` classes, `@Can(Policy, 'ability', extractor)`, `authorize()`        | yes   | loaded resource or values extracted from route |
-| Spring Security | `@PreAuthorize("hasPermission(#id, 'Type', 'READ')")` → `PermissionEvaluator`                            | no    | object, or `(targetId, targetType)` unloaded   |
+| Framework       | The layer                                                                                                | Async | Target                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------- |
+| ASP.NET Core    | `IAuthorizationService.AuthorizeAsync(user, resource, policy)` + `AuthorizationHandler<TReq, TResource>` | yes   | loaded resource, imperative only             |
+| NestJS          | documented recipe: `@CheckPolicies(handler)` + a `PoliciesGuard` over a CASL `AbilityFactory`            | no    | subject type; record checks in the handler   |
+| Spring Security | `@PreAuthorize("hasPermission(#id, 'Type', 'READ')")` → `PermissionEvaluator`                            | no    | object, or `(targetId, targetType)` unloaded |
 
 Two surveyed production applications (multi-tenant B2B portals, one TypeScript and one .NET) confirm
 the shape from the other side: each hand-rolled a throwing check plus a non-throwing twin for UI
@@ -13555,40 +13555,49 @@ each one.
 
 - A new capability token and contract beside `CAPABILITIES.AUTHORIZATION`, which stays byte-for-byte
   unchanged (it is consumed by the six guards, by `decorator-plugin`'s `@Roles`/`@Permissions`
-  middleware, and by M98h's authorization explanations). Proposed shape, names settled by the plan:
-  `authorize(principal | null, ability, target?) → Promise<AuthorizationDecision>` and
-  `can(...) → Promise<boolean>`, both funnelling through ONE evaluator.
+  middleware, and by M98h's authorization explanations). Settled by the plan (C3):
+  `can(...) →
+  Promise<boolean>` and `authorize(...) → Promise<void>`, which REJECTS a denial with
+  a status-hinted error — the "throwing check plus a non-throwing twin" the surveyed applications
+  needed — both funnelling through ONE evaluator. No public decision type: nothing would read it.
 - Policies registered by name, each a set of abilities
-  `(principal | null, target?) → boolean | Promise<boolean>`, with an optional `before()` that may
-  allow or deny every ability of the policy (NestJS's admin bypass). Functional form in
-  `auth-plugin`; a class form (`@Policy`) in `decorator-plugin`, matching the framework's
-  functional-default / class-based-opt-in split (M65).
-- Entry points: a route guard `can(policy, ability, target?)` where `target` is a value or an
-  extractor `(ctx) => target | Promise<target>`; `@Can(...)` in `decorator-plugin`; imperative
-  `authorize()` for checks on records a handler loads (ASP.NET's lesson: a declarative check runs
-  before the record exists).
+  `(principal, target?) → boolean |
+  Promise<boolean>` — an ability sees a `null` principal only
+  when it opts in with `{ anonymous: true, check }`, so the default is fail-closed (plan C2) — with
+  an optional `before()` that may allow or deny every ability of the policy (NestJS's admin bypass).
+  Functional form in `auth-plugin`; a class form (`@Policy`) in `decorator-plugin`, matching the
+  framework's functional-default / class-based-opt-in split (M65).
+- Entry points: a route guard `requirePolicy(policy, ability, target?)` (named by AI_GUIDELINES
+  §10.4's `requireXxx` convention, plan C1) where `target` is a value or an extractor
+  `(ctx) => target | undefined | Promise<target | undefined>`; `@RequirePolicy(...)` in
+  `decorator-plugin`; imperative `authorize()` for checks on records a handler loads (ASP.NET's
+  lesson: a declarative check runs before the record exists).
 - **Fixed semantics, not configuration:** only a literal `true` allows; an anonymous principal that
   is denied gets `401`, a signed-in one `403`, through the existing responder so the body matches
   the guards; a policy that throws or rejects DENIES and is reported to the logger, never answers
-  `200`; an unknown policy or ability named by a guard or decorator fails at `register()`, an
+  `200`; an unknown policy or ability named by a decorator fails at `register()` and one named by a
+  functional guard fails `app.start()` (no `register()` sees a guard value — plan C4), and an
   unknown one passed imperatively rejects by name.
 - The six existing role/permission guards are NOT rerouted through the new evaluator in this
   milestone — their responses are pinned byte-identical and rewiring them buys nothing yet.
 - Non-HTTP ingress: `IngressContext` (`common/src/services/ingress.ts:55`) carries no principal, so
   an ingress behaviour form needs a principal source. The plan either defines one or names the gap
-  with an owner — it does not ship a behaviour that silently evaluates as anonymous.
+  with an owner — it does not ship a behaviour that silently evaluates as anonymous. **Named, owner
+  M110c** (below); the imperative calls already work in any ingress handler, since the principal is
+  an argument.
 - `docs/` gains the page that answers "where does ABAC go": attribute rules are policies.
 
 **Deliverables**
 
-- [ ] The contract, the token, and the evaluator, with the guard and the yes/no check proven to
+- [x] The contract, the token, and the evaluator, with the guard and the yes/no check proven to
       agree under a non-default configuration
-- [ ] Functional and class policy forms, the route guard, `@Can`, and `authorize()`
-- [ ] Fixed-semantics tests: literal-`true`, `401`/`403`, throwing policy denies, unknown names
+- [x] Functional and class policy forms, the route guard, `@RequirePolicy`, and `authorize()`
+- [x] Fixed-semantics tests: literal-`true`, `401`/`403`, throwing policy denies, unknown names
       refused — each with a negative control
-- [ ] M57 brand on `can(...)` routes so `deriveSecurity` documents them
-- [ ] PUBLIC_API.md, the auth-plugin and decorator-plugin READMEs, and the ABAC guidance page
-- [ ] A design security review in the plan, and a committed-tree audit
+- [x] M57 brand on `requirePolicy`/`@RequirePolicy` routes so `deriveSecurity` documents them
+- [x] PUBLIC_API.md, the auth-plugin and decorator-plugin READMEs, and the ABAC guidance page
+      (`docs/authorization.md`)
+- [x] A design security review in the plan (written — plan §10), and a committed-tree audit
 
 **Breaking for implementors:** none expected — a new token and new exports. The plan confirms it.
 
@@ -13668,6 +13677,19 @@ across principals; and revocation latency under each timing mode.
 - [ ] A design security review in the plan, and a committed-tree audit
 
 **Breaking for implementors:** none expected — the existing global `RbacConfig` path is unchanged.
+
+### Milestone 110c (proposed): An Ingress Principal Source
+
+**Package(s):** to be settled by its plan — `packages/common` at least.
+
+**Objective:** a policy check for non-HTTP ingress. `IngressContext`
+(`common/src/services/ingress.ts:55`) carries no principal, so M110a deliberately shipped no ingress
+behaviour form: one that evaluated every job, message or frame as anonymous would deny everything
+or, worse, pass every anonymous ability, silently. The imperative `can`/`authorize` already work in
+an ingress handler, because the application supplies the principal from a payload it trusts. This
+milestone would define where an ingress principal comes from — a verified token carried in message
+headers, a principal resolver over the payload, or the WebSocket upgrade's principal — and only then
+add a behaviour. Opened by M110a as the named owner of that gap; not scheduled.
 
 ---
 
@@ -13911,5 +13933,5 @@ patch by construction and gains nothing new here.
 | 109       | ✅     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
 | 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |
 | 109b      | ✅     | common + idempotency-plugin + database-plugin + sdk — idempotency tier C (`within`) and the SDK idempotency key ([#438](https://github.com/setu-ts/setu-ts/pull/438))                                                                         |
-| 110a      | ⬜     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
+| 110a      | ✅     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
 | 110b      | ⬜     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |

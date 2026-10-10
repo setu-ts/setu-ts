@@ -75,6 +75,12 @@ export { requireAllPermissions } from './guards/index.ts';
 export { requireMfa } from './guards/index.ts';
 export { publicRoute } from './guards/index.ts';
 
+// Authorization policies (M110a)
+export { definePolicy } from './policies/define-policy.ts';
+export { requirePolicy } from './policies/policy-guard.ts';
+export { AuthorizationDeniedError, UnknownPolicyError } from './policies/errors.ts';
+export type { PolicyDenial } from './policies/errors.ts';
+
 // Refresh token service
 export { RefreshTokenService } from './services/refresh-token-service.ts';
 export type { RefreshTokenOptions, TokenPair } from './services/refresh-token-service.ts';
@@ -139,6 +145,7 @@ export type { MfaOptions } from './interfaces/index.ts';
 // Re-export common contracts
 export type {
   IAuthorizationDiagnosticsSource,
+  IAuthorizationPolicyService,
   IAuthorizationService,
   IAuthService,
   IAuthStrategy,

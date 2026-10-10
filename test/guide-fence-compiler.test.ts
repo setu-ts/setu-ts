@@ -1,5 +1,5 @@
 /**
- * Actual-fence compiler for every copyable Setu-TS block across all ten guides.
+ * Actual-fence compiler for every copyable Setu-TS block across every curated guide.
  *
  * This test delegates classification and compilation to the shared fence engine
  * at test/fixtures/snippets/fence-engine.ts, which provides:
@@ -196,6 +196,15 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 17,
   },
+  'docs/authorization.md': {
+    // M110a: the policy guide — four fences, every one compiling.
+    total: 4,
+    ts: 4,
+    compile: 4,
+    external: 0,
+    pseudocode: 0,
+    skipped: 0,
+  },
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
@@ -221,15 +230,16 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // commands and source links (-10 compiling, +14 skipped). 274 after the
   // custom-plugins cold read: a nested README fence stopped leaking out (-1).
   // 278 once docs/how-it-fits-together.md joins the corpus (+4, all compiling).
-  total: 278,
-  ts: 216,
-  compile: 183,
+  // 282 in M110a: docs/authorization.md joins the corpus (+4, all compiling).
+  total: 282,
+  ts: 220,
+  compile: 187,
   external: 33,
   pseudocode: 0,
   skipped: 62,
 };
 
-describe('actual-fence compiler — all ten guides (shared engine)', () => {
+describe('actual-fence compiler — every curated guide (shared engine)', () => {
   it('compiles every compile fence against the workspace', async () => {
     const all = await allFences();
     const toCompile = all.filter(
