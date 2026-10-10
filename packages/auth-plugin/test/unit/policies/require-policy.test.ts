@@ -192,7 +192,7 @@ describe('requirePolicy — construction and brands', () => {
   it('brands a non-anonymous ability as authenticated for OpenAPI', () => {
     const guard = requirePolicy(docPolicy, 'edit');
     expect(securityMetadataOf(guard)).toEqual({ authenticated: true });
-    expect(policyGuardOf(guard)).toEqual({ policy: 'doc', ability: 'edit', anonymous: false });
+    expect(policyGuardOf(guard)).toEqual({ policy: 'doc', abilities: ['edit'], anonymous: false });
   });
 
   it('brands an anonymous ability as not requiring authentication', () => {
@@ -212,6 +212,21 @@ describe('requirePolicy — construction and brands', () => {
       [Symbol.for('setu.auth.policy-guard')]: null,
     });
     expect(policyGuardOf(nullBrand)).toBeUndefined();
+    // The pre-M110b single-ability shape, an empty list and a non-string entry
+    // are all malformed: the scan reads `abilities`, never `ability`.
+    for (
+      const value of [
+        { policy: 'doc', ability: 'edit', anonymous: false },
+        { policy: 'doc', abilities: [], anonymous: false },
+        { policy: 'doc', abilities: ['edit', 7], anonymous: false },
+        { policy: 'doc', abilities: 'edit', anonymous: false },
+      ]
+    ) {
+      const malformed = Object.assign(() => Promise.resolve(), {
+        [Symbol.for('setu.auth.policy-guard')]: value,
+      });
+      expect(policyGuardOf(malformed)).toBeUndefined();
+    }
   });
 
   it('keeps the brand non-enumerable and immutable', () => {

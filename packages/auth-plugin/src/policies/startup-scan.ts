@@ -9,6 +9,7 @@
  *
  * @module
  */
+import { SCOPED_RBAC_POLICY } from '@setu-ts/common';
 import type { IAuthorizationPolicyService, RouteInfo } from '@setu-ts/common';
 import { AuthPluginConfigurationError } from '../errors.ts';
 import { policyGuardOf } from './policy-guard.ts';
@@ -40,24 +41,54 @@ export function scanPolicyGuards(
       if (brand === undefined) {
         continue;
       }
-      const where = `route ${route.method} ${route.path} uses requirePolicy(${
-        JSON.stringify(brand.policy)
-      }, ${JSON.stringify(brand.ability)})`;
-      const registered = service.describe(brand.policy, brand.ability);
-      if (registered === undefined) {
-        problems.push(`${where}, but no such policy ability is registered`);
-      } else if (registered.anonymous !== brand.anonymous) {
-        problems.push(
-          `${where}, but the registered ${JSON.stringify(brand.policy)} policy declares that ` +
-            'ability differently — a different policy is registered under the same name',
-        );
+      for (const ability of brand.abilities) {
+        const problem = checkAbility(route, brand.policy, ability, brand.anonymous, service);
+        if (problem !== undefined) {
+          problems.push(problem);
+        }
       }
     }
   }
   if (problems.length > 0) {
     throw new AuthPluginConfigurationError(
-      `auth-plugin: ${problems.join('; ')}. Register the policy through ` +
-        'AuthPlugin({ policies }) or DecoratorPlugin({ policies }).',
+      `auth-plugin: ${problems.join('; ')}.`,
     );
   }
+}
+
+/**
+ * Checks one ability a guard names, answering the problem to report or
+ * `undefined` when the ability is registered as the guard declares it.
+ */
+function checkAbility(
+  route: RouteInfo,
+  policy: string,
+  ability: string,
+  anonymous: boolean,
+  service: IAuthorizationPolicyService,
+): string | undefined {
+  const registered = service.describe(policy, ability);
+  if (policy === SCOPED_RBAC_POLICY) {
+    // A scoped guard (M110b) names the built-in policy, never one the
+    // application registered, so the generic "register it through
+    // AuthPlugin({ policies })" advice would send the reader the wrong way.
+    return registered === undefined
+      ? `route ${route.method} ${route.path} uses a scoped guard naming ${
+        JSON.stringify(ability)
+      }, which is not in the scoped RBAC catalogue — configure AuthPlugin({ scopedRbac }) with ` +
+        'an rbac role granting it'
+      : undefined;
+  }
+  const where = `route ${route.method} ${route.path} uses requirePolicy(${
+    JSON.stringify(policy)
+  }, ${JSON.stringify(ability)})`;
+  if (registered === undefined) {
+    return `${where}, but no such policy ability is registered — register the policy through ` +
+      'AuthPlugin({ policies }) or DecoratorPlugin({ policies })';
+  }
+  if (registered.anonymous !== anonymous) {
+    return `${where}, but the registered ${JSON.stringify(policy)} policy declares that ` +
+      'ability differently — a different policy is registered under the same name';
+  }
+  return undefined;
 }

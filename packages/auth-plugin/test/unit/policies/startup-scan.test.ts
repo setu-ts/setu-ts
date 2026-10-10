@@ -7,10 +7,11 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { SCOPED_RBAC_POLICY } from '@setu-ts/common';
 import type { MiddlewareFunction, PolicyDefinition, RouteInfo } from '@setu-ts/common';
 
 import { definePolicy } from '../../../src/policies/define-policy.ts';
-import { requirePolicy } from '../../../src/policies/policy-guard.ts';
+import { brandPolicyGuard, requirePolicy } from '../../../src/policies/policy-guard.ts';
 import { PolicyService } from '../../../src/policies/policy-service.ts';
 import { scanPolicyGuards } from '../../../src/policies/startup-scan.ts';
 import { AuthPluginConfigurationError } from '../../../src/errors.ts';
@@ -84,5 +85,53 @@ describe('scanPolicyGuards', () => {
     expect(message).toContain('/one');
     expect(message).toContain('/two');
     expect(message).toContain('AuthPlugin({ policies })');
+  });
+});
+
+describe('scanPolicyGuards — multi-ability brands (M110b)', () => {
+  function branded(policy: string, abilities: readonly string[]): MiddlewareFunction {
+    const guard: MiddlewareFunction = (_ctx, next) => next();
+    brandPolicyGuard(guard, { policy, abilities, anonymous: false });
+    return guard;
+  }
+
+  it('checks every ability a brand lists, refusing the one that is unregistered', () => {
+    expect(() =>
+      scanPolicyGuards(
+        [route('/docs', [branded('doc', ['edit', 'delete'])])],
+        registry(docPolicy),
+      )
+    ).toThrow('uses requirePolicy("doc", "delete"), but no such policy ability is registered');
+  });
+
+  it('passes a brand whose every ability is registered', () => {
+    const both = definePolicy({ name: 'doc', abilities: { edit: () => true, delete: () => true } });
+    expect(() =>
+      scanPolicyGuards([route('/docs', [branded('doc', ['edit', 'delete'])])], registry(both))
+    )
+      .not.toThrow();
+  });
+
+  it('names scopedRbac, not AuthPlugin({ policies }), for an unknown scoped ability', () => {
+    let message = '';
+    try {
+      scanPolicyGuards(
+        [route('/inv', [branded(SCOPED_RBAC_POLICY, ['perm:invoices:aprove'])])],
+        registry(),
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('uses a scoped guard naming "perm:invoices:aprove"');
+    expect(message).toContain('AuthPlugin({ scopedRbac })');
+    expect(message).not.toContain('AuthPlugin({ policies })');
+  });
+
+  it('passes a scoped brand whose abilities the built-in policy declares', () => {
+    const scoped = definePolicy({ name: SCOPED_RBAC_POLICY, abilities: { 'perm:a': () => true } });
+    expect(() =>
+      scanPolicyGuards([route('/a', [branded(SCOPED_RBAC_POLICY, ['perm:a'])])], registry(scoped))
+    )
+      .not.toThrow();
   });
 });
