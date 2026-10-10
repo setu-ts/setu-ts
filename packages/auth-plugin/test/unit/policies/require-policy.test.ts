@@ -311,3 +311,21 @@ describe('requirePolicy — audit G1: the registered policy decides, not the gua
     }
   });
 });
+
+describe('requirePolicy — audit O1: only a literal true opts an ability out of the refusal', () => {
+  it('refuses anonymous before extracting when a provider reports a truthy non-boolean', async () => {
+    const odd = {
+      describe: () => ({ anonymous: 'yes' }),
+      can: () => Promise.resolve(true),
+    } as unknown as PolicyService;
+    const harness = context(odd);
+    let extracted = 0;
+    const guard = requirePolicy(docPolicy, 'edit', () => {
+      extracted += 1;
+      return { owner: 'x' };
+    });
+    expect(await run(guard, harness)).toBe(false);
+    expect(harness.recorded.status).toBe(401);
+    expect(extracted).toBe(0);
+  });
+});

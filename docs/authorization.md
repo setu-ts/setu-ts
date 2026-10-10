@@ -274,3 +274,8 @@ export async function handleExport(
 ability requires a signed-in principal as secured. A route whose ability opted in to anonymous
 principals is documented as public (`security: []`), because the guard lets an anonymous request
 through.
+
+The brand describes the guard's own policy object, because it is fixed when the guard is built. The
+startup check proves that object agrees with the registered policy for every route present at
+`start()`; a route added afterwards from a same-named object that disagrees on `anonymous` is
+documented from the object, while access is still decided by the registered policy.

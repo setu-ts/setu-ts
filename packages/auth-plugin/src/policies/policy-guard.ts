@@ -156,8 +156,9 @@ export function requirePolicy<A extends string, T>(
     // pays for the record lookup, and an extractor that throws not-found turns
     // the 401/404 difference into an existence oracle for anonymous callers.
     // The evaluator would deny the same request without calling the check, so
-    // this only moves the refusal earlier.
-    if (user === null && !registered.anonymous) {
+    // this only moves the refusal earlier. Only a literal `true` opts out, so a
+    // replacement provider reporting a truthy non-boolean cannot skip it.
+    if (user === null && registered.anonymous !== true) {
       respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }

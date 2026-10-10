@@ -2459,16 +2459,18 @@ scan never saw (a route added after `start()`, a global middleware) behaves the 
 an unregistered policy or ability rejects without running the extractor. An `undefined` principal
 passed to `can`/`authorize` is anonymous, exactly like `null`. A policy or ability name longer than
 128 characters is truncated in an `UnknownPolicyError`'s message and fields, with the removed length
-noted. It is branded for OpenAPI `deriveSecurity` as authenticated unless the ability is anonymous.
-The service's `can` resolves a boolean and `authorize` rejects a denial with
-`AuthorizationDeniedError`, which carries a `401`/`403` status hint whose title and detail are the
-guards' own, so under `errorHandler` a thrown denial answers the guard's exact body (without
-`errorHandler` the kernel answers `500`). AuthPlugin's `onBootstrap` hook scans every registered
-route and fails `start()` when a `requirePolicy` guard names a policy or ability that is not
-registered, or one whose registered ability disagrees with the guard's policy object on `anonymous`
-(a different policy registered under the same name); it then SEALS the registry, so `define` after
-`start()` throws. Not scanned: a route added after `start()` and a guard added as global middleware
-— an unknown name there rejects per request (fail closed). A policy is identified by its NAME. See
+noted. It is branded for OpenAPI `deriveSecurity` as authenticated unless the ability is anonymous;
+the brand is fixed from the guard's own policy object when the guard is built, which the startup
+scan proves agrees with the registered policy only for routes present at `start()`. The service's
+`can` resolves a boolean and `authorize` rejects a denial with `AuthorizationDeniedError`, which
+carries a `401`/`403` status hint whose title and detail are the guards' own, so under
+`errorHandler` a thrown denial answers the guard's exact body (without `errorHandler` the kernel
+answers `500`). AuthPlugin's `onBootstrap` hook scans every registered route and fails `start()`
+when a `requirePolicy` guard names a policy or ability that is not registered, or one whose
+registered ability disagrees with the guard's policy object on `anonymous` (a different policy
+registered under the same name); it then SEALS the registry, so `define` after `start()` throws. Not
+scanned: a route added after `start()` and a guard added as global middleware — an unknown name
+there rejects per request (fail closed). A policy is identified by its NAME. See
 [Authorization](docs/authorization.md).
 
 `jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `issuers`,
