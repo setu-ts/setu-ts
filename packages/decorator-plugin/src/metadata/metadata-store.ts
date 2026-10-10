@@ -23,6 +23,7 @@ import type {
   PolicyDefinition,
   ProcessOptions,
   ScheduleOptions,
+  ScopeSource,
   SubscribeOptions,
 } from '@setu-ts/common';
 
@@ -124,6 +125,10 @@ export interface ControllerMetadata {
   roles?: string[];
   /** Default permissions for all routes (overridden by method-level `@Permissions`). */
   permissions?: string[];
+  /** Default `@ScopedRoles` for all routes (overridden by the method's, M110b). */
+  scopedRoles?: ScopedRequirement;
+  /** Default `@ScopedPermissions` for all routes (overridden by the method's, M110b). */
+  scopedPermissions?: ScopedRequirement;
 }
 
 /**
@@ -279,6 +284,23 @@ export interface RouteMetadata {
   readonly idempotent?: IdempotentRouteOptions;
   /** Policy requirements declared by `@RequirePolicy`, top to bottom (M110a). */
   readonly policies?: readonly PolicyRequirement[];
+  /** Roles required in a scope, any of which suffices (`@ScopedRoles`, M110b). */
+  readonly scopedRoles?: ScopedRequirement;
+  /** Permissions required in a scope, all of them (`@ScopedPermissions`, M110b). */
+  readonly scopedPermissions?: ScopedRequirement;
+}
+
+/**
+ * One `@ScopedRoles` / `@ScopedPermissions` declaration (M110b): the catalogue
+ * names, and where the scope comes from (absent: the request tenant).
+ *
+ * Internal: not exported from the package barrel.
+ */
+export interface ScopedRequirement {
+  /** The role or permission names. */
+  readonly names: readonly string[];
+  /** The scope source; absent means `scopeFromTenant()`. */
+  readonly scope?: ScopeSource;
 }
 
 /**
@@ -369,6 +391,10 @@ export interface MethodMeta {
    * which is the order the requirements are evaluated in.
    */
   policies?: PolicyRequirement[];
+  /** `@ScopedRoles` (mutable twin, M110b). */
+  scopedRoles?: ScopedRequirement;
+  /** `@ScopedPermissions` (mutable twin, M110b). */
+  scopedPermissions?: ScopedRequirement;
 }
 
 /**
@@ -492,6 +518,16 @@ export class MetadataStore implements IMetadataStore {
         ? { permissions: partial.permissions }
         : existing.permissions !== undefined
         ? { permissions: existing.permissions }
+        : {}),
+      ...(partial.scopedRoles !== undefined
+        ? { scopedRoles: partial.scopedRoles }
+        : existing.scopedRoles !== undefined
+        ? { scopedRoles: existing.scopedRoles }
+        : {}),
+      ...(partial.scopedPermissions !== undefined
+        ? { scopedPermissions: partial.scopedPermissions }
+        : existing.scopedPermissions !== undefined
+        ? { scopedPermissions: existing.scopedPermissions }
         : {}),
     };
     this._controllers.set(target, merged);
@@ -893,6 +929,10 @@ export class MetadataStore implements IMetadataStore {
       ...(meta.redirect !== undefined ? { redirect: meta.redirect } : {}),
       ...(meta.responseHeaders !== undefined ? { responseHeaders: [...meta.responseHeaders] } : {}),
       ...(meta.policies !== undefined ? { policies: [...meta.policies] } : {}),
+      ...(meta.scopedRoles !== undefined ? { scopedRoles: meta.scopedRoles } : {}),
+      ...(meta.scopedPermissions !== undefined
+        ? { scopedPermissions: meta.scopedPermissions }
+        : {}),
     };
   }
 }

@@ -2486,10 +2486,49 @@ is not scanned and fails closed per request.
 
 **Where attribute rules go.** Into policies. The framework ships no attribute language — ASP.NET
 Core, NestJS and Spring make the same choice. An external engine (OpenFGA, Casbin) is wrapped as a
-policy. Scoped grants (a role held in one tenant) are the next layer, built on this one (Milestone
-110b). Non-HTTP ingress has no policy behaviour yet: `IngressContext` carries no principal, and a
-check that silently evaluated as anonymous would be worse than none; the imperative calls work there
+policy. Scoped grants (a role held in one tenant) are built on this layer — see Scoped Roles below.
+Non-HTTP ingress has no policy behaviour yet: `IngressContext` carries no principal, and a check
+that silently evaluated as anonymous would be worse than none; the imperative calls work there
 because the principal is an argument.
+
+### Scoped Roles (Milestone 110b)
+
+The RBAC layer below holds roles **globally**: "Ann is an approver". Scoped RBAC holds them **in a
+scope** — "Ann is an approver in the Acme tenant", or in one organisation, team or region. It
+extends the global model rather than contradicting it: the role catalogue is unchanged and still the
+only source of role and permission names; what a grant adds is where it applies.
+
+**Why a built-in policy, not a capability.** `scopedRbac` makes AuthPlugin define one reserved
+policy, `scoped-rbac`, on the M110a evaluator: each catalogue permission is an ability
+`perm:<name>`, each role `role:<name>`, and the target is the scope. So the guards
+(`requireScopedRole`/`requireScopedPermission`), the decorators
+(`@ScopedRoles`/`@ScopedPermissions`) and the imperative `can` reach the same evaluator and inherit
+its fixed rules, and the M110a startup scan refuses a typo in a scoped guard for free — a typo is a
+configuration error, not a `403`.
+
+**One mechanism for hierarchy and delegation.** `inheritsFrom(scope)` names the scopes whose grants
+also apply; a parent is one hop and a delegating tenant another. It is walked transitively,
+depth-first, with cycle refusal and depth/node bounds, so a malformed hierarchy denies rather than
+loops. Grants flow down only: a child request inherits a parent's grants, never the reverse.
+
+**Why the request tenant bounds the scope.** A scope taken from a route parameter is
+caller-controlled. A check whose own scope is a tenant other than the resolved request tenant
+denies, so a parameter cannot reach outside the caller's tenant; a parent reached through
+`inheritsFrom` still applies.
+
+**Why one failing source denies.** Grant sources are unioned. Answering from the sources that did
+reply would allow on a partial view — the one grant that says "no longer" may be the one that
+failed. Every source call has a deadline, every result is validated and bounded, and the deny is
+logged with the source name, the scope type and the error class — never an identifier.
+
+**Why custom roles bundle permissions.** A tenant may define its own roles at runtime, but only from
+catalogue permissions, resolved against the defining scope only, and checked through permissions.
+The permission catalogue stays static, so the startup check stays total.
+
+**Why timing is a choice.** Resolving per request makes a revocation immediate; a TTL cache or
+sign-in resolution trades revocation latency for fewer reads. Sign-in grants live under a private
+session key, never in principal claims, so a federated token carrying a same-named claim grants
+nothing.
 
 ### RBAC
 

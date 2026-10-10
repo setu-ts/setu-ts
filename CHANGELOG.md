@@ -21,6 +21,35 @@ All notable changes to this project are documented here. The format follows
   operation. Tenant, outbox and inbox bridges use conditional writes when supported and retain their
   fallback for other sources.
 
+- **Scoped RBAC — a role held in a tenant, organisation, team or region (`@setu-ts/auth-plugin`,
+  `@setu-ts/decorator-plugin`, `@setu-ts/database-plugin`, `@setu-ts/common`, M110b).** The new
+  `AuthPluginOptions.scopedRbac` (requires `rbac`) defines one built-in policy, `scoped-rbac`, on
+  the M110a evaluator — no new capability token. `requireScopedRole` (any-of) and
+  `requireScopedPermission` (all-of) guard a route in the request's scope, taken from
+  `scopeFromTenant()` (the default), `scopeFromParam(param, type)`, a fixed `ScopeRef` or a
+  function; `@ScopedRoles` / `@ScopedPermissions` are the class form, validated at `register()`.
+  Grants come from `static`, `claims` and `custom` sources, unioned, and one failing source denies
+  the check; `inheritsFrom` walks parent and delegating scopes with cycle refusal and bounds (child
+  requests inherit parent grants); a route scope naming another tenant than the resolved request
+  tenant denies; `grantableIn` limits where a role counts; `customRoles` lets a scope define roles
+  bundling catalogue permissions; `timing` is `'request'` (default), a TTL cache, or `'sign-in'`
+  (stored under a private session key, never in claims, and carried through a pending second
+  factor); a `custom` source receives only the principal's id and `iss` claim, and a `claims` source
+  is mapped from the credential on every check and never memoised, cached or shared, because two
+  tokens for one principal can carry different claims. A scoped guard or decorator naming a
+  permission or role outside the catalogue fails at startup. `common` adds `ScopeRef`,
+  `ScopedGrant`, `GrantQuery`, `IGrantSource`, `IScopedRoleSource`, `ScopedRoleDefinition`,
+  `ScopedRbacTarget`, `ScopeSource`, `SCOPED_RBAC_POLICY`, `scopedPermissionAbility`,
+  `scopedRoleAbility`, `isScopeType`, `MAX_SCOPE_ID_LENGTH`, `scopeFromTenant` and `scopeFromParam`;
+  `database-plugin` adds `createDatabaseGrantSource` and `createDatabaseRoleSource` with
+  `DatabaseGrantSourceOptions`, `DatabaseRoleSourceOptions`, `GrantFields` and `RoleFields`
+  (verified against real PostgreSQL and MongoDB). `auth-plugin` exports the option types
+  `ScopedRbacOptions`, `GrantSourceConfig`, `StaticGrant`, `ClaimsGrantMapper`, `ScopedRoleLimit`,
+  `ScopedRbacTiming` and `ScopedGuardOptions`, and `GrantResolutionError` (a `503` hint, with a
+  `GrantResolutionReason`), which a sign-in-timing source failure rejects with. The name
+  `scoped-rbac` is reserved: `AuthPlugin({ policies })` refuses a policy of that name. Nothing
+  existing changes, so there is no upgrade step.
+
 - **Authorization policies — an asynchronous, target-aware check (`@setu-ts/auth-plugin`,
   `@setu-ts/decorator-plugin`, `@setu-ts/common`, M110a).** Roles answer "does this principal hold
   this role, anywhere"; a policy answers "may this principal do this, to this target". `common` adds

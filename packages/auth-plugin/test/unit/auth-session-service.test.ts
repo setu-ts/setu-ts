@@ -25,6 +25,7 @@ import {
   ID_TOKEN_SESSION_KEY,
   PENDING_MFA_SESSION_KEY,
   RP_PROVIDER_SESSION_KEY,
+  SCOPED_GRANTS_SESSION_KEY,
 } from '../../src/sign-in/auth-session-service.ts';
 import { createFakeSession, createFakeSessionService } from '../fixtures/fake-session.ts';
 
@@ -397,6 +398,67 @@ async function logout(app: IKernelApplication, cookie: string): Promise<void> {
   );
   expect(response.status).toBe(200);
 }
+
+describe('AuthSessionService — scoped grants under sign-in timing (M110b)', () => {
+  const GRANT = { role: 'viewer', scope: { type: 'tenant', id: 'acme' } };
+
+  function build(session = createFakeSession(), mfa = false) {
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      scopedGrants: { resolveAll: () => Promise.resolve([GRANT]) },
+      ...(mfa ? { mfa: { required: () => true } } : {}),
+    });
+    return { impl, session };
+  }
+
+  it('reads back the grants stored for the signed-in principal', async () => {
+    const { impl, session } = build();
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(session.get(SCOPED_GRANTS_SESSION_KEY)).toEqual({ principalId: 'u1', grants: [GRANT] });
+    expect(impl.storedGrants(CTX, PRINCIPAL)).toEqual([GRANT]);
+  });
+
+  it('never returns grants stored for a different principal', async () => {
+    const { impl } = build();
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(impl.storedGrants(CTX, { id: 'someone-else' })).toBeNull();
+  });
+
+  it('answers null for a missing, malformed or unreadable stored value', () => {
+    const { impl, session } = build();
+    expect(impl.storedGrants(CTX, PRINCIPAL)).toBeNull();
+    session.set(SCOPED_GRANTS_SESSION_KEY, 'not-an-object');
+    expect(impl.storedGrants(CTX, PRINCIPAL)).toBeNull();
+    session.set(SCOPED_GRANTS_SESSION_KEY, { principalId: 'u1', grants: 'not-a-list' });
+    expect(impl.storedGrants(CTX, PRINCIPAL)).toBeNull();
+    // An invalid grant inside an otherwise valid list is dropped, not coerced.
+    session.set(SCOPED_GRANTS_SESSION_KEY, { principalId: 'u1', grants: [GRANT, { role: 7 }] });
+    expect(impl.storedGrants(CTX, PRINCIPAL)).toEqual([GRANT]);
+    const throwing = new AuthSessionService({
+      sessionService: {
+        from: () => {
+          throw new Error('no session middleware');
+        },
+      } as never,
+      now: () => NOW,
+      scopedGrants: { resolveAll: () => Promise.resolve([]) },
+    });
+    expect(throwing.storedGrants(CTX, PRINCIPAL)).toBeNull();
+  });
+
+  it('clears stale grants when the promoted pending record carries none', async () => {
+    const { impl, session } = build(createFakeSession(), true);
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    // A pending record written before sign-in timing was configured has no
+    // grants field; promotion must not leave an earlier principal's grants.
+    session.set(PENDING_MFA_SESSION_KEY, { principal: PRINCIPAL, methods: ['pwd'], at: NOW });
+    session.set(SCOPED_GRANTS_SESSION_KEY, { principalId: 'u1', grants: [GRANT] });
+    expect(asPendingPromotion(impl)?.promotePending(CTX, 'otp')).toBe('signed-in');
+    expect(session.get(SCOPED_GRANTS_SESSION_KEY)).toBeUndefined();
+    expect(impl.storedGrants(CTX, PRINCIPAL)).toBeNull();
+  });
+});
 
 describe('signOut revocation depends on the session strategy', () => {
   let storeApp: IKernelApplication;

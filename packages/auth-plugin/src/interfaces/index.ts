@@ -7,10 +7,15 @@
 import type {
   AuthMethod,
   IAuthStrategy,
+  IGrantSource,
   IPrincipal,
+  IScopedRoleSource,
   PathPattern,
   PolicyDefinition,
   RbacConfig,
+  RegistryFactory,
+  ScopedGrant,
+  ScopeRef,
   SessionView,
 } from '@setu-ts/common';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
@@ -297,6 +302,16 @@ export interface AuthPluginOptions {
    * @since 0.9.0
    */
   readonly policies?: readonly PolicyDefinition[];
+  /**
+   * Scoped RBAC (M110b): roles granted IN a scope — a tenant, an organisation,
+   * a team — evaluated as the built-in `scoped-rbac` policy and checked with
+   * `requireScopedRole`, `requireScopedPermission` and DecoratorPlugin's
+   * `@ScopedRoles`/`@ScopedPermissions`. Requires `rbac`, whose `roles` are
+   * the catalogue. Validated when `AuthPlugin(...)` is called.
+   *
+   * @since 0.9.0
+   */
+  readonly scopedRbac?: ScopedRbacOptions;
   /**
    * Authorization decision-explanation observation (M98h). When present, the
    * plugin attaches a collector to its own `RbacService` and registers an
@@ -736,4 +751,124 @@ export interface SignInConfig {
    * @since 0.8.0
    */
   readonly passkeys?: PasskeyOptions;
+}
+
+/**
+ * One grant written into configuration (`{ kind: 'static' }`).
+ *
+ * @since 0.9.0
+ */
+export interface StaticGrant {
+  /** The principal id the grant belongs to (`IPrincipal.id`). */
+  readonly subject: string;
+  /** The catalogue role granted. */
+  readonly role: string;
+  /** The scope it is granted in, or `null` for a global grant. */
+  readonly scope: ScopeRef | null;
+}
+
+/**
+ * Maps a principal's claims to grants (`{ kind: 'claims' }`) — the shape of an
+ * identity provider that puts organisation memberships in the token, with no
+ * store behind it.
+ *
+ * @since 0.9.0
+ */
+export type ClaimsGrantMapper = (
+  claims: Readonly<Record<string, unknown>>,
+  principal: IPrincipal,
+) => readonly ScopedGrant[];
+
+/**
+ * A source of scoped grants. Several are UNIONED; one failing source makes the
+ * whole check deny.
+ *
+ * - `static` — grants listed in configuration, indexed by subject.
+ * - `claims` — grants read from the principal's own claims by `map`.
+ * - `custom` — any {@linkcode IGrantSource}, or a factory resolved once every
+ *   plugin has registered (how `createDatabaseGrantSource()` plugs in).
+ *
+ * @since 0.9.0
+ */
+export type GrantSourceConfig =
+  | { readonly kind: 'static'; readonly grants: readonly StaticGrant[] }
+  | { readonly kind: 'claims'; readonly map: ClaimsGrantMapper }
+  | {
+    readonly kind: 'custom';
+    readonly source: IGrantSource | RegistryFactory<IGrantSource>;
+  };
+
+/**
+ * Where a catalogue role may be granted (`scopedRbac.grantableIn`).
+ *
+ * @since 0.9.0
+ */
+export interface ScopedRoleLimit {
+  /** The scope types a grant of the role counts in. */
+  readonly scopeTypes: readonly string[];
+  /** Whether a GLOBAL grant of the role counts (default `false`). */
+  readonly global?: boolean;
+}
+
+/**
+ * When grants are resolved, and so how quickly a revocation takes effect.
+ *
+ * - `'request'` (default) — per request, memoised for the rest of that
+ *   request. Revocation latency: the next request.
+ * - `{ kind: 'cache', ttlMs, maxEntries }` — a bounded cross-request cache on
+ *   the monotonic clock. Revocation latency: up to `ttlMs`.
+ * - `'sign-in'` — once, when the principal signs in through the auth session,
+ *   stored in the session. Revocation latency: until sign-out or the session
+ *   expires. Requires `signIn`.
+ *
+ * @since 0.9.0
+ */
+export type ScopedRbacTiming =
+  | 'request'
+  | 'sign-in'
+  | { readonly kind: 'cache'; readonly ttlMs: number; readonly maxEntries: number };
+
+/**
+ * Scoped RBAC configuration (`AuthPluginOptions.scopedRbac`).
+ *
+ * @since 0.9.0
+ */
+export interface ScopedRbacOptions {
+  /** The grant sources, unioned. At least one. */
+  readonly sources: readonly GrantSourceConfig[];
+  /** Catalogue permissions no `rbac` role names, made checkable. */
+  readonly permissions?: readonly string[];
+  /**
+   * The scopes whose grants ALSO apply in `scope` — its parent, a delegating
+   * tenant. Walked transitively; a cycle, or exceeding `maxScopeDepth` or
+   * `maxScopeNodes`, denies. Absent: scopes are flat.
+   */
+  readonly inheritsFrom?: (
+    scope: ScopeRef,
+    signal: AbortSignal,
+  ) => readonly ScopeRef[] | Promise<readonly ScopeRef[]>;
+  /**
+   * The scope type compared against the resolved request tenant (default
+   * `'tenant'`): a check whose own scope is of this type and names another
+   * tenant denies.
+   */
+  readonly tenantScopeType?: string;
+  /** Where each limited role may be granted. A role absent here is unlimited. */
+  readonly grantableIn?: Readonly<Record<string, ScopedRoleLimit>>;
+  /** Per-scope custom roles, bundling catalogue permissions only. */
+  readonly customRoles?: IScopedRoleSource | RegistryFactory<IScopedRoleSource>;
+  /** When grants are resolved (default `'request'`). */
+  readonly timing?: ScopedRbacTiming;
+  /** The deadline on every source and resolver call, 1–60 000 ms (default 2 000). */
+  readonly sourceTimeoutMs?: number;
+  /** The most grants one resolution may return, 1–10 000 (default 256); more denies. */
+  readonly maxGrantsPerPrincipal?: number;
+  /** The deepest `inheritsFrom` walk, 1–64 (default 8); deeper denies. */
+  readonly maxScopeDepth?: number;
+  /** The most scopes one walk may visit, 1–1 024 (default 32); more denies. */
+  readonly maxScopeNodes?: number;
+  /** The most custom roles one scope may define, 1–10 000 (default 128); more denies. */
+  readonly maxCustomRoles?: number;
+  /** The most permissions one custom role may bundle, 1–10 000 (default 256); more denies. */
+  readonly maxPermissionsPerRole?: number;
 }

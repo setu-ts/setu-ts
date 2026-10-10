@@ -36,10 +36,36 @@ const POLICY_GUARD: unique symbol = Symbol.for('setu.auth.policy-guard');
 export interface PolicyGuardBrand {
   /** The policy name the guard evaluates. */
   readonly policy: string;
-  /** The ability name the guard evaluates. */
-  readonly ability: string;
-  /** Whether the guard's policy object declared the ability anonymous. */
+  /**
+   * Every ability name the guard evaluates — one for `requirePolicy`, one or
+   * more for a scoped guard (M110b), so the startup scan checks each.
+   */
+  readonly abilities: readonly string[];
+  /** Whether the guard's policy object declared its abilities anonymous. */
   readonly anonymous: boolean;
+}
+
+/**
+ * Brands a guard for the startup scan: a frozen, non-enumerable,
+ * non-configurable property, so a later write cannot retarget a checked
+ * guard at an unchecked ability.
+ *
+ * Internal: not exported from the package barrel.
+ *
+ * @param guard - The middleware to brand
+ * @param brand - What the guard evaluates
+ */
+export function brandPolicyGuard(guard: MiddlewareFunction, brand: PolicyGuardBrand): void {
+  Object.defineProperty(guard, POLICY_GUARD, {
+    value: Object.freeze({
+      policy: brand.policy,
+      abilities: Object.freeze([...brand.abilities]),
+      anonymous: brand.anonymous,
+    }),
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
 }
 
 /** Labels a value for an error message without converting it (`String` can throw). */
@@ -64,13 +90,17 @@ export function policyGuardOf(middleware: MiddlewareFunction): PolicyGuardBrand 
   }
   const brand = value as {
     readonly policy?: unknown;
-    readonly ability?: unknown;
+    readonly abilities?: unknown;
     readonly anonymous?: unknown;
   };
-  return typeof brand.policy === 'string' && typeof brand.ability === 'string' &&
-      typeof brand.anonymous === 'boolean'
-    ? { policy: brand.policy, ability: brand.ability, anonymous: brand.anonymous }
-    : undefined;
+  const { policy, abilities, anonymous } = brand;
+  if (
+    typeof policy !== 'string' || typeof anonymous !== 'boolean' || !Array.isArray(abilities) ||
+    abilities.length === 0 || !abilities.every((ability) => typeof ability === 'string')
+  ) {
+    return undefined;
+  }
+  return { policy, abilities: [...abilities] as string[], anonymous };
 }
 
 /**
@@ -175,11 +205,6 @@ export function requirePolicy<A extends string, T>(
     await next();
   };
 
-  Object.defineProperty(guard, POLICY_GUARD, {
-    value: Object.freeze({ policy: name, ability, anonymous }),
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
+  brandPolicyGuard(guard, { policy: name, abilities: [ability], anonymous });
   return withSecurityMetadata(guard, { authenticated: !anonymous });
 }

@@ -41,6 +41,9 @@ const EXPECTED_VALUES = [
   'Ability',
   'RequirePolicy',
   'Policy',
+  // M110b scoped RBAC
+  'ScopedPermissions',
+  'ScopedRoles',
   'metadataStore',
   'Controller',
   'Version',

@@ -298,6 +298,34 @@ CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updated_at);
 Map it with `drizzleTables: { Inbox: pgTable('setu_inbox', { … }) }` (JS keys `envelopeId`,
 `updatedAt`, `lastError` over the snake_case columns; `updated_at` in `{ mode: 'number' }`).
 
+## Scoped RBAC sources
+
+`createDatabaseGrantSource({ entity })` and `createDatabaseRoleSource({ entity })` feed AuthPlugin's
+`scopedRbac` option from the application's own database — one row per grant, and one row per (scope,
+role, permission) for roles a tenant defines at runtime. Both return factories AuthPlugin resolves
+at `onInit`, read the default database through the repository surface with portable filters (so
+every adapter works), and refuse a non-identifier column name when called.
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+import { createDatabaseGrantSource, createDatabaseRoleSource } from '@setu-ts/database-plugin';
+
+export const auth = AuthPlugin({
+  rbac: { roles: { approver: { permissions: ['invoices:approve'] } } },
+  scopedRbac: {
+    // Columns default to subject / role / scopeType / scopeId; both scope
+    // columns null is a global grant.
+    sources: [{ kind: 'custom', source: createDatabaseGrantSource({ entity: 'role_grants' }) }],
+    // Columns default to scopeType / scopeId / role / permission.
+    customRoles: createDatabaseRoleSource({ entity: 'tenant_roles' }),
+  },
+});
+```
+
+A check's question is one query: the subject's rows that are global or in one of the asked scopes.
+More than `limit` matching rows (default 10 001 for grants, 100 000 for role rows) refuse the
+question, so the check denies, rather than answering with an arbitrary subset.
+
 ## Options
 
 | Option    | Type                                                                                                 | Default     | Description                              |
@@ -1049,11 +1077,11 @@ imperative begin/commit.
 
 | Export                                    | Kind      |
 | ----------------------------------------- | --------- |
-| `DatabaseIdempotencyStoreOptions`         | interface |
-| `TransactionalStoreUnavailableError`      | class     |
+| `createDatabaseGrantSource`               | function  |
 | `createDatabaseIdempotencyStore`          | function  |
 | `createDatabaseInboxStore`                | function  |
 | `createDatabaseOutboxStore`               | function  |
+| `createDatabaseRoleSource`                | function  |
 | `createDatabaseTenantDataStore`           | function  |
 | `createDrizzleDatabase`                   | function  |
 | `createDrizzleDataSource`                 | function  |
@@ -1090,6 +1118,7 @@ imperative begin/commit.
 | `PrismaRepository`                        | class     |
 | `SerializationConflictError`              | class     |
 | `TenantStoreStrategyUnsupportedError`     | class     |
+| `TransactionalStoreUnavailableError`      | class     |
 | `UnitOfWork`                              | class     |
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedIsolationLevelError`          | class     |
@@ -1129,9 +1158,12 @@ imperative begin/commit.
 | `CustomDatabaseOptions`                   | interface |
 | `DatabaseAdapterOptions`                  | interface |
 | `DatabaseConnectionOptions`               | interface |
+| `DatabaseGrantSourceOptions`              | interface |
+| `DatabaseIdempotencyStoreOptions`         | interface |
 | `DatabaseInboxStoreOptions`               | interface |
 | `DatabaseOutboxStoreOptions`              | interface |
 | `DatabasePoolCapacity`                    | interface |
+| `DatabaseRoleSourceOptions`               | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
 | `DrizzleDatabase`                         | interface |
@@ -1166,6 +1198,7 @@ imperative begin/commit.
 | `DynamoUpdateItemCommandInput`            | interface |
 | `DynamoUpdateItemCommandOutput`           | interface |
 | `FindOptions`                             | interface |
+| `GrantFields`                             | interface |
 | `IAdapterTransaction`                     | interface |
 | `IBigtableClient`                         | interface |
 | `IBigtableInstance`                       | interface |
@@ -1202,6 +1235,7 @@ imperative begin/commit.
 | `PrismaAdapterOptions`                    | interface |
 | `PrismaCompositeKeyOptions`               | interface |
 | `PrismaDatabaseOptions`                   | interface |
+| `RoleFields`                              | interface |
 | `TransactionOptions`                      | interface |
 | `BigtableAdapterOptions`                  | type      |
 | `BigtableFilter`                          | type      |

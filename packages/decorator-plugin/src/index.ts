@@ -78,6 +78,7 @@ export { Idempotent } from './decorators/idempotency.ts';
 
 // --- Authorization policies (M110a) ---
 export { Ability, Policy, RequirePolicy } from './decorators/policy.ts';
+export { ScopedPermissions, ScopedRoles } from './decorators/scoped.ts';
 export type { AbilityOptions, PolicyClassAbility, PolicyClassTarget } from './decorators/policy.ts';
 
 // --- View decorators ---

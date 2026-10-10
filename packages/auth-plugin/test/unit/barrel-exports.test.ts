@@ -408,3 +408,46 @@ describe('@setu-ts/auth-plugin barrel — authorization policies (M110a)', () =>
     }
   });
 });
+
+describe('scoped RBAC exports (M110b)', () => {
+  it('exports the guards, the error and the option types', () => {
+    expect(typeof auth.requireScopedRole).toBe('function');
+    expect(typeof auth.requireScopedPermission).toBe('function');
+    expect(new auth.GrantResolutionError('source-failed').name).toBe('GrantResolutionError');
+    const grant: auth.StaticGrant = { subject: 'u', role: 'viewer', scope: null };
+    const limit: auth.ScopedRoleLimit = { scopeTypes: ['tenant'] };
+    const mapper: auth.ClaimsGrantMapper = () => [];
+    const timing: auth.ScopedRbacTiming = { kind: 'cache', ttlMs: 1_000, maxEntries: 1 };
+    const source: auth.GrantSourceConfig = { kind: 'static', grants: [grant] };
+    const options: auth.ScopedRbacOptions = {
+      sources: [source, { kind: 'claims', map: mapper }],
+      grantableIn: { viewer: limit },
+      timing,
+    };
+    const guard: auth.ScopedGuardOptions = { scope: null };
+    const reason: auth.GrantResolutionReason = 'grant-limit';
+    // @ts-expect-error -- only the three source-resolution reasons reach sign-in
+    const wrong: auth.GrantResolutionReason = 'scope-cycle';
+    expect([options.sources.length, guard.scope, reason, wrong]).toEqual([
+      2,
+      null,
+      'grant-limit',
+      'scope-cycle',
+    ]);
+  });
+
+  it('keeps the scoped internals off the barrel', () => {
+    for (
+      const internal of [
+        'compileScopedRbac',
+        'createScopedRbac',
+        'ScopedEvaluator',
+        'GrantResolver',
+        'brandPolicyGuard',
+        'walkScopeChain',
+      ]
+    ) {
+      expect(Object.hasOwn(auth, internal)).toBe(false);
+    }
+  });
+});

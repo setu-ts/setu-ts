@@ -81,6 +81,20 @@ export { requirePolicy } from './policies/policy-guard.ts';
 export { AuthorizationDeniedError, UnknownPolicyError } from './policies/errors.ts';
 export type { PolicyDenial } from './policies/errors.ts';
 
+// Scoped RBAC (M110b)
+export { requireScopedPermission, requireScopedRole } from './scoped/scoped-guards.ts';
+export type { ScopedGuardOptions } from './scoped/scoped-guards.ts';
+export { GrantResolutionError } from './scoped/errors.ts';
+export type { GrantResolutionReason } from './scoped/errors.ts';
+export type {
+  ClaimsGrantMapper,
+  GrantSourceConfig,
+  ScopedRbacOptions,
+  ScopedRbacTiming,
+  ScopedRoleLimit,
+  StaticGrant,
+} from './interfaces/index.ts';
+
 // Refresh token service
 export { RefreshTokenService } from './services/refresh-token-service.ts';
 export type { RefreshTokenOptions, TokenPair } from './services/refresh-token-service.ts';

@@ -22,8 +22,8 @@ asynchronous check that receives the principal and the target. ASP.NET Core
 place to put code. If you prefer an external engine (OpenFGA, Casbin, Cerbos), wrap it in a policy:
 the check calls the engine, and every entry point below works unchanged.
 
-What policies do **not** give you yet is a role held in one tenant, organisation, or region rather
-than everywhere. That is scoped RBAC, built on this layer in a later milestone (M110b).
+A role held in one tenant, organisation, or region rather than everywhere is scoped RBAC, built on
+this layer — see [Scoped Roles](#scoped-roles).
 
 ## Defining a Policy
 
@@ -266,6 +266,196 @@ export async function handleExport(
   // …run the export
 }
 ```
+
+## Scoped Roles
+
+A global role says "Ann is an approver". A scoped role says "Ann is an approver **in the Acme
+tenant**" — or in one organisation, team, or region. Configure `scopedRbac` beside `rbac`, and
+AuthPlugin defines one built-in policy, `scoped-rbac`, on the same evaluator every policy uses: each
+catalogue permission and role is an ability of it, and the target is the scope. No new capability
+and no new evaluator — so the rules table above applies unchanged.
+
+```typescript
+import { scopeFromParam } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+import { AuthPlugin, requireScopedPermission, requireScopedRole } from '@setu-ts/auth-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    MultiTenancyPlugin({ resolver: 'header' }),
+    AuthPlugin({
+      jwt: { secret: 'replace-with-a-secret-of-32-chars!' },
+      // The catalogue: the only roles and permissions a guard may name.
+      rbac: {
+        roles: {
+          viewer: { permissions: ['invoices:read'] },
+          approver: { permissions: ['invoices:approve'], inherits: ['viewer'] },
+          'org-admin': { permissions: ['reports:read'] },
+        },
+      },
+      scopedRbac: {
+        sources: [
+          // Grants listed in configuration. A `null` scope is a global grant.
+          {
+            kind: 'static',
+            grants: [{ subject: 'ann', role: 'approver', scope: { type: 'tenant', id: 'acme' } }],
+          },
+          // Grants an identity provider put in the token.
+          {
+            kind: 'claims',
+            map: (claims) =>
+              Array.isArray(claims.orgAdminOf)
+                ? claims.orgAdminOf.map((id) => ({
+                  role: 'org-admin',
+                  scope: { type: 'organisation', id: String(id) },
+                }))
+                : [],
+          },
+        ],
+        // A child tenant inherits its parent's grants. Walked transitively;
+        // a cycle, or too deep or too wide a walk, denies.
+        inheritsFrom: (scope) =>
+          scope.type === 'tenant' && scope.id === 'acme-eu' ? [{ type: 'tenant', id: 'acme' }] : [],
+        // `org-admin` counts only when granted in an organisation.
+        grantableIn: { 'org-admin': { scopeTypes: ['organisation'] } },
+      },
+    }),
+  ],
+});
+
+// The default scope is the resolved request tenant.
+app.router.post('/invoices/:id/approve', {
+  middleware: [requireScopedPermission('invoices:approve')],
+  handler: (ctx) => ctx.response.json({ approved: ctx.params.id }),
+});
+
+// Or take it from the route. Several roles are any-of; several permissions all-of.
+app.router.get('/orgs/:orgId/reports', {
+  middleware: [
+    requireScopedRole(['org-admin'], { scope: scopeFromParam('orgId', 'organisation') }),
+  ],
+  handler: (ctx) => ctx.response.json({ org: ctx.params.orgId }),
+});
+
+await app.start();
+```
+
+### What a scoped check decides
+
+| Situation                                                                      | Outcome                                                              |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| A grant of a role carrying the permission, in the scope or a scope it inherits | Allowed                                                              |
+| A global grant (`scope: null`)                                                 | Counts in every scope, unless `grantableIn` restricts the role       |
+| A route scope naming a different tenant than the resolved request tenant       | Denied — a parameter cannot reach outside the caller's tenant        |
+| A parent tenant's grant, checked in a child that names it in `inheritsFrom`    | Allowed — child requests inherit parent grants, never the reverse    |
+| Any grant source rejects, throws, or exceeds `sourceTimeoutMs`                 | Denied, and logged with the source name and error class only         |
+| More grants, a deeper walk, or more scopes than the configured bounds          | Denied                                                               |
+| A guard naming a permission or role outside the catalogue                      | `app.start()` fails, naming the route — a typo is never a silent 403 |
+
+Grant sources are **unioned**, and one failing source denies the whole check: a check that silently
+skipped a source would allow on a partial answer. The wildcard `*` is never checkable by name.
+
+### Grants from the database, and roles a tenant defines
+
+`@setu-ts/database-plugin` ships both sources over any repository: one row per grant, and one row
+per (scope, role, permission) for roles a tenant defines at runtime. A custom role bundles
+**catalogue permissions** only — a guard names the permission, never the custom role — and resolves
+against the roles defined in the grant's **own** scope, so two tenants defining `regional-approver`
+never collide.
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+import { createDatabaseGrantSource, createDatabaseRoleSource } from '@setu-ts/database-plugin';
+
+export const auth = AuthPlugin({
+  rbac: { roles: { approver: { permissions: ['invoices:approve', 'invoices:read'] } } },
+  scopedRbac: {
+    sources: [{ kind: 'custom', source: createDatabaseGrantSource({ entity: 'role_grants' }) }],
+    customRoles: createDatabaseRoleSource({ entity: 'tenant_roles' }),
+    // Resolve grants once per 30 s instead of once per request.
+    timing: { kind: 'cache', ttlMs: 30_000, maxEntries: 10_000 },
+  },
+});
+```
+
+When grants are resolved decides how fast a revocation takes effect:
+
+| `timing`                        | Grants are read                                  | A revoked grant stops working           |
+| ------------------------------- | ------------------------------------------------ | --------------------------------------- |
+| `'request'` (default)           | Once per request, reused for the rest of it      | On the next request                     |
+| `{ kind: 'cache', ttlMs, … }`   | Once per principal per `ttlMs`, shared in-flight | Within `ttlMs`                          |
+| `'sign-in'` (requires `signIn`) | Once, at sign-in, stored in the auth session     | At sign-out or when the session expires |
+
+`'sign-in'` stores grants under a private session key, never in the principal's claims, so a
+federated token carrying a claim of the same name grants nothing.
+
+### The class form, and checks inside a handler
+
+```typescript
+import { scopeFromParam } from '@setu-ts/common';
+import { Controller, Get, Post, ScopedPermissions, ScopedRoles } from '@setu-ts/decorator-plugin';
+
+@Controller('/invoices')
+@ScopedRoles(['viewer'])
+export class InvoiceController {
+  @Get('/')
+  list(): string[] {
+    return [];
+  }
+
+  // Method decorators override the class default.
+  @Post('/:id/approve')
+  @ScopedPermissions(['invoices:approve'])
+  approve(): { approved: boolean } {
+    return { approved: true };
+  }
+
+  @Get('/orgs/:orgId')
+  @ScopedRoles(['org-admin'], scopeFromParam('orgId', 'organisation'))
+  forOrg(): string[] {
+    return [];
+  }
+}
+```
+
+The decorators answer exactly what the guards answer, and run after `@Roles`/`@Permissions`. A name
+outside the catalogue, or no `AuthPlugin({ rbac, scopedRbac })` registered, fails
+`DecoratorPlugin`'s `register()`, naming the route. Inside a handler, ask the policy service
+directly, and pass the request as `context`:
+
+```typescript
+import {
+  type IAuthorizationPolicyService,
+  type IRequestContext,
+  SCOPED_RBAC_POLICY,
+  scopedPermissionAbility,
+} from '@setu-ts/common';
+
+export async function canApprove(
+  policies: IAuthorizationPolicyService,
+  ctx: IRequestContext,
+  tenantId: string,
+): Promise<boolean> {
+  return await policies.can(
+    ctx.request.user ?? null,
+    SCOPED_RBAC_POLICY,
+    scopedPermissionAbility('invoices:approve'),
+    {
+      scope: { type: 'tenant', id: tenantId },
+      context: ctx,
+    },
+  );
+}
+```
+
+`context` is what makes the check compare the scope against the request's resolved tenant. Without
+it, a check for a tenant other than the one the request resolved to is answered from the grants
+alone, so a principal holding a role in tenant B passes a check for B made while serving tenant A. A
+queue job or a scheduled task has no request and so no tenant to compare; leave `context` out there,
+and pass the scope the job itself is about.
 
 ## OpenAPI
 
