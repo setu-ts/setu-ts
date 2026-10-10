@@ -26,7 +26,7 @@ plugs in at.
   policy guard so `deriveSecurity` documents it; `PUBLIC_API.md`, both READMEs, `ARCHITECTURE.md`
   §14, `CHANGELOG.md`, and a new `docs/authorization.md` ("where does ABAC go").
 - **NOT this milestone:** scoped grants (110b); an ingress-behaviour form of the check (named gap,
-  §3.12 — owner: proposed M110c); rerouting the six role/permission guards through the evaluator
+  §3.13 — owner: proposed M110c); rerouting the six role/permission guards through the evaluator
   (ROADMAP fixes this out); policy decision explanations through M98h's diagnostics connector
   (named, unowned — the M98h source observes `RbacService` only); a per-check deadline (§9).
 
@@ -120,14 +120,14 @@ plugs in at.
     readonly anonymous: true;
     readonly check: AnonymousPolicyCheck<T>;
   };
-  interface PolicyDefinition<A extends string = string, T = unknown> {
+  interface PolicyDefinition<A extends string = string, T = never> {
     readonly name: string;
     readonly abilities: Readonly<Record<A, PolicyAbility<T>>>;
-    readonly before?: (
+    before?(
       principal: IPrincipal,
       ability: A,
       target: T | undefined,
-    ) => boolean | undefined | Promise<boolean | undefined>;
+    ): boolean | undefined | Promise<boolean | undefined>;
   }
   ```
 
@@ -135,11 +135,31 @@ plugs in at.
   `definePolicy<A extends string, T>(definition: PolicyDefinition<A, T>):
   PolicyDefinition<A, T>`,
   which validates (§3.3) and returns a frozen copy. Ability names are inferred from the object
-  literal's keys, so `requirePolicy(postPolicy, 'updaet')` is a compile error.
+  literal's keys, so `requirePolicy(postPolicy, 'updaet')` is a compile error. The target type is
+  inferred from the check's annotated parameter (`update: (p, post: Post | undefined) => …`); an
+  unannotated check gets `T = unknown`.
+
+  **Two typing choices are load-bearing, both established by `deno check` probe in review, not by
+  reasoning.** The first draft declared `before` as a function-typed PROPERTY with default
+  `T = unknown`, and a typed policy was then NOT assignable to the bare `PolicyDefinition` the
+  registry accepts
+  (`TS2322: PolicyDefinition<"update" | "read", Post> is not assignable to
+  PolicyDefinition<string, unknown>`)
+  — under `strictFunctionTypes` a check is contravariant in its target and `before` in its ability,
+  so `AuthPluginOptions.policies: readonly PolicyDefinition[]` would have refused every typed
+  policy. (1) `before` is a METHOD signature, which TypeScript checks bivariantly, so
+  `ability: 'update' | 'read'` is accepted where `string` is declared; (2) the default target is
+  `never`, so `PolicyCheck<Post>` is assignable to `PolicyCheck<never>` (its parameter
+  `never | undefined` narrows to `undefined`, assignable to `Post | undefined`). The bare
+  `PolicyDefinition` is therefore the type-erased form the registry stores; evaluation passes the
+  caller's target through an internal cast. The probe also confirmed the misspelled-ability error
+  and `before`'s ability-union inference both survive the change.
 - **Why:** one target type per policy keeps generics tractable; the `anonymous` object arm makes
   opting in to `null` explicit and greppable.
-- **Test home:** `auth-plugin/test/unit/policies/define-policy.test.ts` (+ a `@ts-expect-error` row
-  for a misspelled ability).
+- **Test home:** `auth-plugin/test/unit/policies/define-policy.test.ts` — a `@ts-expect-error` row
+  for a misspelled ability AND a compile-time row assigning a typed policy to
+  `readonly PolicyDefinition[]` (the defect above; it fails `deno check` if one of the two typing
+  choices is reverted).
 
 ### 3.3 Validation at definition and at `define`
 
@@ -208,8 +228,8 @@ plugs in at.
   only, so its ability is type-checked; the string form is reached imperatively.
 - **Why:** consuming the public contract (not the concrete class) means a replacement provider
   serves the guard. Short-circuit on every refusal.
-- **Test home:** `auth-plugin/test/unit/guards/require-policy.test.ts` (short-circuit: handler and
-  later middleware do not run on each refusal); integration parity test (§3.11).
+- **Test home:** `auth-plugin/test/unit/policies/require-policy.test.ts` (short-circuit: handler and
+  later middleware do not run on each refusal); integration parity test (§3.12).
 
 ### 3.7 Startup refusal of an unknown name, and sealing
 
@@ -266,18 +286,21 @@ plugs in at.
   `before` hook (by method name, matching NestJS).
   `DecoratorPluginOptions.policies?: readonly
   Constructor[]` — at `register()`, BEFORE
-  controllers: each class is instantiated via `instantiate()` (DI-aware), converted to a
-  `PolicyDefinition` whose checks call the bound methods, and `define`d on the resolved
-  `AUTHORIZATION_POLICIES` service. Refusals at `register()`: a class without `@Policy`, a `@Policy`
-  class with no `@Ability`, `policies` given with no provider. `@Can(policy, ability, target?)`
-  (method; repeatable — ALL must allow, evaluated top to bottom) takes a `@Policy` class or a
-  `PolicyDefinition`; ability typed as the class's method names or the definition's ability keys;
-  target a value or `(ctx) => T`. Appended after `@Roles`/`@Permissions` and before interceptors;
-  validated at `register()` via `describe` (unknown → throw naming route, policy, ability; no
-  provider → throw naming `AuthPlugin`). `AUTHORIZATION_POLICIES` joins `optionalDependencies`. The
-  packages may not import each other (AI_GUIDELINES §2.2), so decorator-plugin builds its own thin
-  middleware over the same public contract — evaluation stays in the one `PolicyService` — and the
-  parity test (§3.12) proves the two entry points agree.
+  controllers: each class goes through `registerInContainer` then `instantiate()` — the same two
+  calls `registerController` makes, so constructor injection works with and without `DiPlugin` — and
+  is converted to a `PolicyDefinition` whose checks call the bound methods, and `define`d on the
+  resolved `AUTHORIZATION_POLICIES` service. Refusals at `register()`: a class without `@Policy`, a
+  `@Policy` class with no `@Ability`, `policies` given with no provider.
+  `@Can(policy, ability, target?)` (method; repeatable — ALL must allow, evaluated top to bottom)
+  takes a `@Policy` class or a `PolicyDefinition`; ability typed as the definition's ability keys,
+  or for a class as `keyof InstanceType<C> & string` — the type cannot tell an `@Ability` method
+  from an ordinary one, so naming a non-ability method compiles and is refused at `register()`
+  through `describe`; target a value or `(ctx) => T`. Appended after `@Roles`/`@Permissions` and
+  before interceptors; validated at `register()` via `describe` (unknown → throw naming route,
+  policy, ability; no provider → throw naming `AuthPlugin`). `AUTHORIZATION_POLICIES` joins
+  `optionalDependencies`. The packages may not import each other (AI_GUIDELINES §2.2), so
+  decorator-plugin builds its own thin middleware over the same public contract — evaluation stays
+  in the one `PolicyService` — and the parity test (§3.12) proves the two entry points agree.
 - **Why:** functional default / class opt-in (M65); DI for policies that need a repository.
 - **Test home:** `decorator-plugin/test/unit/policy-decorators.test.ts`,
   `decorator-plugin/test/integration/can-e2e.test.ts`.
@@ -349,28 +372,38 @@ interface gains a member. `respondWithAuthorizationFailure` keeps its signature 
 | `packages/decorator-plugin/src/plugin/decorator-plugin.ts`    | option, optional dep, ordering, `buildRouteSchema` public-marker condition                |
 | `packages/decorator-plugin/src/index.ts`                      | barrel                                                                                    |
 | `docs/authorization.md`                                       | "where does ABAC go" guide (fence-gated)                                                  |
+| `docs/README.md`, `scripts/check-docs.ts` `REQUIRED_GUIDES`   | index the new guide (same precedent as `docs/localization.md`)                            |
+
+Doc and process deliverables in the same PR: `PUBLIC_API.md` (common contract rows, auth-plugin and
+decorator-plugin sections), both package READMEs, `ARCHITECTURE.md` §14 "Policies" (C5), a
+`CHANGELOG.md` `Unreleased` → `Added` entry (no `docs/upgrading.md` entry — nothing breaks), the
+ROADMAP corrections C1–C4 plus the proposed M110c placeholder, the ROADMAP Progress row flipped to
+`✅`, the CLAUDE.md "Current status" entry, and this plan moved to `plans/archive/`. Every new
+symbol's JSDoc carries `@since 0.9.0` (the next release; `check:since-tags` skips ahead-of-registry
+versions).
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                              | src covered                             | Key assertions                                                                                                                                                                 |
-| ---------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `common/test/unit/authorization-responder.test.ts` (extend)            | authorization-responder.ts              | each arm's init literal; responder output unchanged across all four arms                                                                                                       |
-| `common/test/unit/authorization-policies-contract.test.ts`             | authorization-policies.ts, tokens.ts    | token grammar; type-level rows (`@ts-expect-error` on a misspelled ability through `PolicyRef<A,T>`)                                                                           |
-| `common/test/unit/barrel-exports.test.ts` (extend)                     | index.ts                                | new symbols pinned against the barrel                                                                                                                                          |
-| `auth-plugin/test/unit/policies/define-policy.test.ts`                 | define-policy.ts                        | every §3.3 refusal by name; frozen copy; inferred ability names                                                                                                                |
-| `auth-plugin/test/unit/policies/policy-service.test.ts`                | policy-service.ts, errors.ts            | §3.4 table incl. literal-`true`, `null`/`1` deny, `before` arms, throwing policy denies + one log, throwing logger, prototype names, unknown names reject, no sync throw, seal |
-| `auth-plugin/test/unit/policies/require-policy.test.ts`                | policy-guard.ts                         | 501/401/403/allow; extractor sync/async; extractor throw propagates; short-circuit; brand values                                                                               |
-| `auth-plugin/test/unit/policies/startup-scan.test.ts`                  | startup-scan.ts                         | unknown policy / ability named; non-guard middleware ignored                                                                                                                   |
-| `auth-plugin/test/integration/policy-plugin.test.ts`                   | auth-plugin.ts (new arms), interfaces   | token always provided; option validated at construction; real kernel app: allow/deny round trip                                                                                |
-| `auth-plugin/test/integration/policy-startup-scan.test.ts`             | auth-plugin.ts onBootstrap              | `start()` rejects naming route/policy/ability; post-start route residual; `define` after start throws                                                                          |
-| `auth-plugin/test/integration/policy-refusal-parity.test.ts`           | errors.ts + responder                   | thrown `authorize` deny through `errorHandler({format:'rfc9457'})` byte-identical to `requireRole` refusal (401 and 403)                                                       |
-| `auth-plugin/test/integration/policy-openapi.test.ts`                  | brand                                   | real `OpenApiPlugin` `deriveSecurity`: authenticated vs anonymous ability                                                                                                      |
-| `auth-plugin/test/unit/barrel-exports.test.ts` (extend/create)         | index.ts                                | new exports pinned                                                                                                                                                             |
-| `decorator-plugin/test/unit/policy-decorators.test.ts`                 | decorators/policy.ts, metadata-store.ts | metadata recorded; repeatable `@Can` order; `@Ability` anonymous; type rows                                                                                                    |
-| `decorator-plugin/test/unit/policy-registration.test.ts`               | policy-registration.ts                  | conversion; `before` method wired; every register-time refusal; middleware 501/401/403/allow; extractor                                                                        |
-| `decorator-plugin/test/integration/can-e2e.test.ts`                    | decorator-plugin.ts arms                | real kernel app + AuthPlugin: class policy with injected dependency; `@Can` all-of; order after `@Roles`, before validation (401 → 403 → 400); `@Public` marker omitted        |
-| `decorator-plugin/test/integration/policy-parity.test.ts`              | cross-entry                             | §3.12                                                                                                                                                                          |
-| `test/guide-fence-compiler.test.ts` (register `docs/authorization.md`) | docs                                    | every fence compiles                                                                                                                                                           |
+| Test file                                                                 | src covered                             | Key assertions                                                                                                                                                                 |
+| ------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `common/test/unit/authorization-responder.test.ts` (create — none exists) | authorization-responder.ts              | each arm's init literal; responder output unchanged across all four arms                                                                                                       |
+| `common/test/unit/authorization-policies-contract.test.ts`                | authorization-policies.ts, tokens.ts    | token grammar; type-level rows (`@ts-expect-error` on a misspelled ability through `PolicyRef<A,T>`)                                                                           |
+| `common/test/unit/barrel-exports.test.ts` (extend)                        | index.ts                                | new symbols pinned against the barrel                                                                                                                                          |
+| `auth-plugin/test/unit/policies/define-policy.test.ts`                    | define-policy.ts                        | every §3.3 refusal by name; frozen copy; inferred ability names                                                                                                                |
+| `auth-plugin/test/unit/policies/policy-service.test.ts`                   | policy-service.ts, errors.ts            | §3.4 table incl. literal-`true`, `null`/`1` deny, `before` arms, throwing policy denies + one log, throwing logger, prototype names, unknown names reject, no sync throw, seal |
+| `auth-plugin/test/unit/policies/require-policy.test.ts`                   | policy-guard.ts                         | 501/401/403/allow; extractor sync/async; extractor throw propagates; short-circuit; brand values                                                                               |
+| `auth-plugin/test/unit/policies/startup-scan.test.ts`                     | startup-scan.ts                         | unknown policy / ability named; non-guard middleware ignored                                                                                                                   |
+| `auth-plugin/test/integration/policy-plugin.test.ts`                      | auth-plugin.ts (new arms), interfaces   | token always provided; option validated at construction; real kernel app: allow/deny round trip                                                                                |
+| `auth-plugin/test/integration/policy-startup-scan.test.ts`                | auth-plugin.ts onBootstrap              | `start()` rejects naming route/policy/ability; post-start route residual; `define` after start throws                                                                          |
+| `auth-plugin/test/integration/policy-refusal-parity.test.ts`              | errors.ts + responder                   | thrown `authorize` deny through `errorHandler({format:'rfc9457'})` byte-identical to `requireRole` refusal (401 and 403)                                                       |
+| `auth-plugin/test/integration/policy-openapi.test.ts`                     | brand                                   | real `OpenApiPlugin` `deriveSecurity`: authenticated vs anonymous ability                                                                                                      |
+| `auth-plugin/test/unit/barrel-exports.test.ts` (extend — it exists)       | index.ts                                | new exports pinned                                                                                                                                                             |
+| `decorator-plugin/test/unit/policy-decorators.test.ts`                    | decorators/policy.ts, metadata-store.ts | metadata recorded; repeatable `@Can` order; `@Ability` anonymous; type rows                                                                                                    |
+| `decorator-plugin/test/unit/policy-registration.test.ts`                  | policy-registration.ts                  | conversion; `before` method wired; every register-time refusal; middleware 501/401/403/allow; extractor                                                                        |
+| `decorator-plugin/test/integration/can-e2e.test.ts`                       | decorator-plugin.ts arms                | real kernel app + AuthPlugin: class policy with injected dependency; `@Can` all-of; order after `@Roles`, before validation (401 → 403 → 400); `@Public` marker omitted        |
+| `decorator-plugin/test/unit/can-schema.test.ts`                           | decorator-plugin.ts `buildRouteSchema`  | `@Public` marker omitted beside a non-anonymous `@Can`, kept beside an anonymous one                                                                                           |
+| `decorator-plugin/test/integration/policy-parity.test.ts`                 | cross-entry                             | §3.12                                                                                                                                                                          |
+| `test/guide-fence-compiler.test.ts` (register `docs/authorization.md`)    | docs                                    | every fence compiles; the guide is added to `GUIDES` in `test/fixtures/snippets/fence-engine.ts` and to the test's `EXPECTED_INVENTORY`                                        |
 
 Negative controls (each observed failing, then reverted): truthiness instead of `=== true`; dropping
 the `hasOwn` guard; removing the startup scan; `before` skipped for authenticated principals;
@@ -403,9 +436,15 @@ non-owner 403, anonymous 401, anonymous-ability 200, throwing policy 403 with on
 - `before` returning `null` denies — surprising → stated in JSDoc, PUBLIC_API and the guide; tested.
 - A function-valued target is always treated as an extractor → stated; a policy wanting a function
   target wraps it.
-- Two copies of auth-plugin in one process: the guard brand uses `Symbol.for`, so a scan by one
-  copy sees both copies' guards.
+- Two copies of auth-plugin in one process: the guard brand uses `Symbol.for`, so a scan by one copy
+  sees both copies' guards.
 - `docs/authorization.md` fences drift → registered in the guide fence compiler.
+- Policy identity is the NAME: a `requirePolicy` guard built from a policy object that was never
+  registered, while a DIFFERENT policy with the same name is, evaluates the registered one and
+  passes the startup scan. `define` refuses duplicate names, so this needs two distinct objects
+  sharing a name with only one registered → documented in `requirePolicy`'s JSDoc; an identity
+  comparison was rejected because the class form produces its definition at `register()`, so no
+  application holds that object to compare against.
 
 ## 9. Out of scope
 
