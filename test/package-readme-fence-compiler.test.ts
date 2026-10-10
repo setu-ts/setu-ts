@@ -83,7 +83,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M100e: +1 for the passkeys configuration example; the browser-ceremony
   // snippet is a ```js fence (plain browser fetch, no Setu-TS import) the
   // engine deliberately skips.
-  'packages/auth-plugin/README.md': 16,
+  // M110a: +1 for the Authorization Policies example.
+  'packages/auth-plugin/README.md': 17,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
@@ -93,7 +94,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M92: +1 for the @Render example.
   // M99d: +1 for the Non-HTTP ingress example (the `ingress` option the README
   // previously documented nowhere).
-  'packages/decorator-plugin/README.md': 6,
+  // M110a: +1 for the Authorization policies (@Policy/@Can) example.
+  'packages/decorator-plugin/README.md': 7,
   // M92: the new package's README is born gated — usage, functional renderView,
   // the @Render decorator and the raw() opt-out.
   'packages/view-plugin/README.md': 6,

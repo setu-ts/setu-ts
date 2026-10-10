@@ -126,14 +126,9 @@ package fits the plugin architecture.
 
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
-| `IDEMPOTENCY_RECORD_KIND`             | const     |
-| `ITransactionalIdempotencyStore`      | interface |
-| `IdempotentWithinOptions`             | interface |
-| `IdempotentWithinResult`              | interface |
-| `TransactionalIdempotencyClaim`       | interface |
-| `TransactionalIdempotencyRecord`      | interface |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
+| `authorizationFailureInit`            | function  |
 | `brandErrorResponder`                 | function  |
 | `causeMessage`                        | function  |
 | `compileRealtimeDiagnosticsAlias`     | function  |
@@ -222,6 +217,7 @@ package fits the plugin architecture.
 | `ERROR_RESPONDER_BRAND`               | const     |
 | `ERROR_RESPONDER_STATE_KEY`           | const     |
 | `HTTP_STATUS_HINT`                    | const     |
+| `IDEMPOTENCY_RECORD_KIND`             | const     |
 | `INBOX_RECORD_KIND`                   | const     |
 | `MAX_PUBLISH_HEADER_NAME_BYTES`       | const     |
 | `MAX_PUBLISH_HEADER_VALUE_BYTES`      | const     |
@@ -299,6 +295,7 @@ package fits the plugin architecture.
 | `IApplication`                        | interface |
 | `IAuditLogger`                        | interface |
 | `IAuthorizationDiagnosticsSource`     | interface |
+| `IAuthorizationPolicyService`         | interface |
 | `IAuthorizationService`               | interface |
 | `IAuthService`                        | interface |
 | `IAuthSessionService`                 | interface |
@@ -320,6 +317,8 @@ package fits the plugin architecture.
 | `IdempotencyClaimRequest`             | interface |
 | `IdempotentIngressCommonOptions`      | interface |
 | `IdempotentRouteOptions`              | interface |
+| `IdempotentWithinOptions`             | interface |
+| `IdempotentWithinResult`              | interface |
 | `IDiagnosticsSource`                  | interface |
 | `IDnsResolver`                        | interface |
 | `IDomainEvent`                        | interface |
@@ -410,6 +409,7 @@ package fits the plugin architecture.
 | `ITenantResolver`                     | interface |
 | `ITraceDiagnosticsSource`             | interface |
 | `ITransaction`                        | interface |
+| `ITransactionalIdempotencyStore`      | interface |
 | `ITransactionIsolationSupport`        | interface |
 | `IValidationService`                  | interface |
 | `IViewEngine`                         | interface |
@@ -442,6 +442,8 @@ package fits the plugin architecture.
 | `PendingSignIn`                       | interface |
 | `PickOptions`                         | interface |
 | `PluralForms`                         | interface |
+| `PolicyAbilityInfo`                   | interface |
+| `PolicyDefinition`                    | interface |
 | `ProbeTiming`                         | interface |
 | `ProcessOptions`                      | interface |
 | `ProviderOptions`                     | interface |
@@ -507,6 +509,8 @@ package fits the plugin architecture.
 | `TraceObservation`                    | interface |
 | `TraceparentSource`                   | interface |
 | `TraceSamplerDescription`             | interface |
+| `TransactionalIdempotencyClaim`       | interface |
+| `TransactionalIdempotencyRecord`      | interface |
 | `TransactionOptions`                  | interface |
 | `ValidationIssue`                     | interface |
 | `ValueProvider`                       | interface |
@@ -523,6 +527,7 @@ package fits the plugin architecture.
 | `WorkerTaskReply`                     | interface |
 | `WorkerTaskRequest`                   | interface |
 | `WrapOptions`                         | interface |
+| `AnonymousPolicyCheck`                | type      |
 | `AuthMethod`                          | type      |
 | `AuthorizationCoverage`               | type      |
 | `AuthorizationDecisionOperation`      | type      |
@@ -598,6 +603,10 @@ package fits the plugin architecture.
 | `OutboxTransition`                    | type      |
 | `PathPattern`                         | type      |
 | `PluginPriority`                      | type      |
+| `PolicyAbility`                       | type      |
+| `PolicyCheck`                         | type      |
+| `PolicyRef`                           | type      |
+| `PolicyTarget`                        | type      |
 | `Provider`                            | type      |
 | `QueueDepthCoverage`                  | type      |
 | `QueueDepthCycleCoverage`             | type      |

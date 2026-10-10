@@ -455,3 +455,63 @@ non-owner 403, anonymous 401, anonymous-ability 200, throwing policy 403 with on
   `RbacService` only, and widening its DTOs is a diagnostics-contract change.
 - A per-check deadline — unowned; would be an option with no honest default.
 - Deny-overrides / policy combination beyond all-of `@Can` — 110b names deny rules deferred.
+
+## 10. Design security review
+
+> **Recorded after implementation**, on the M101a/M101b precedent: the security-relevant decisions
+> were made in §3 at plan time (literal `true`, `Object.hasOwn`, fixed semantics, fail-closed
+> `501`), but the review was not written down as its own section before the code. The rows below
+> pair each threat with its resolution and the file that carries it, so the committed-tree audit can
+> check each claim against the code.
+
+**Reviewed flow.** A request reaches a `requirePolicy` guard or a `@Can` middleware → the middleware
+resolves `CAPABILITIES.AUTHORIZATION_POLICIES` (absent → `501`) → resolves the target (value, or an
+extractor over the request) → `service.can(principal | null, name, ability, target)` → the one
+`PolicyService` evaluator → allow (`next()`) or deny (`401`/`403` through the shared responder).
+Imperatively, a handler calls `can` (boolean) or `authorize` (rejects with a status-hinted
+`AuthorizationDeniedError`). At startup, AuthPlugin's `onBootstrap` scans route guards and seals the
+registry.
+
+**Assets.** The decision itself (a wrong allow is the whole failure); the target and principal (may
+carry personal or business data); the policy and ability names (tell an attacker what to acquire).
+
+**Attackers.** (A1) an unauthenticated network client; (A2) a signed-in principal reaching for
+another principal's target; (A3) a client controlling a route parameter, header or body the
+application feeds into an extractor or an imperative call; (A4) code in the same process — another
+plugin — that can resolve the policy service.
+
+**Budgets.** No new outbound I/O, no new listener, no new secret. One registry lookup and one
+evaluation per check; a check is application code and is NOT time-bounded (§8, §9).
+
+| #   | Threat                                                                                  | Resolution                                                                                                                                                                           | Carried by                                                                            |
+| --- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| T1  | (A3) an ability named `constructor`/`toString`/`__proto__` resolves an inherited member | Ability lookup is `Object.hasOwn` on the frozen copy; unknown → `UnknownPolicyError`; `describe` answers `undefined`                                                                 | `policies/policy-service.ts` `#ability`                                               |
+| T2  | A check returning a truthy non-boolean (`1`, `'yes'`, `{}`) allows                      | Allow only on `=== true`; `before` allows only on `=== true`, falls through only on `=== undefined`                                                                                  | `policy-service.ts` `#evaluate`                                                       |
+| T3  | A throwing or rejecting policy answers `200`, a raw `500`, or leaks through the body    | Caught, denied, reported once at `error` with policy, ability, hook and `serializeError` — never the target or principal; a throwing logger cannot change the outcome                | `policy-service.ts` `#evaluate`, `#report`                                            |
+| T4  | (A1/A2) a refusal discloses which policy or ability failed                              | Bodies come from `authorizationFailureInit` (fixed title/detail); `AuthorizationDeniedError`'s message names them but is never served — the hint's detail is                         | `common/errors/authorization-responder.ts`, `policies/errors.ts`                      |
+| T5  | (A1) an anonymous request reaches a check written for a signed-in principal             | Denied `401` before the check runs unless the ability is declared anonymous; `before` is skipped for a `null` principal                                                              | `policy-service.ts` `#evaluate`                                                       |
+| T6  | A guard naming an unregistered policy fails open                                        | Startup scan fails `start()`; per request an unknown name REJECTS (the handler does not run) — never a deny that a caller could mistake for a configured policy                      | `policies/startup-scan.ts`, `policy-guard.ts`                                         |
+| T7  | (A4) a second policy shadows a registered one under the same name                       | `define` refuses a duplicate name; the startup scan refuses a guard whose policy object disagrees with the registered one on `anonymous`                                             | `policy-service.ts` `define`, `startup-scan.ts`                                       |
+| T8  | (A4) the policy set is mutated while serving                                            | `seal()` after the bootstrap scan; `define` then throws                                                                                                                              | `plugin/auth-plugin.ts` `onBootstrap`                                                 |
+| T9  | A definition object whose getters answer differently after validation (TOCTOU)          | Every member is read once into a frozen copy at `define`; the evaluator never consults the caller's object                                                                           | `policies/define-policy.ts`                                                           |
+| T10 | No policy service registered → a guarded route is served                                | Guard and `@Can` answer `501` per request; `@Can`/`policies` refuse `register()` without a provider                                                                                  | `policy-guard.ts`, `decorator-plugin/plugin/policy-registration.ts`                   |
+| T11 | An extractor failure (database outage) turns into an allow                              | Extractor errors propagate; the handler never runs                                                                                                                                   | `policy-guard.ts`, `policy-registration.ts`                                           |
+| T12 | The OpenAPI document marks a secured route public, or an anonymous one secured          | Brand computed from the registered ability's `anonymous`; `@Public` marker omitted beside a principal-requiring `@Can`                                                               | `policy-guard.ts`, `policy-registration.ts`, `decorator-plugin.ts` `buildRouteSchema` |
+| T13 | (A3) a user-controlled policy/ability string reaches an error message                   | Quoted through `JSON.stringify` (escapes control characters); a non-string is labelled `[<typeof>]` without conversion; the unknown-policy rejection is unbranded, so a masked `500` | `policy-service.ts` `refName`, `policies/errors.ts`                                   |
+| T14 | A policy that never settles holds the request                                           | Accepted and documented: a check is application code with its own backend bounds (M101a); a deadline would be an option with no honest default                                       | §8, §9                                                                                |
+
+**Obligations on the committed-tree audit** (each a probe with a positive control, at a real kernel
+application):
+
+1. Drive T1 through `requirePolicy`, `@Can`, `can` and `describe` with each inherited name.
+2. Plant canaries in the target, in the principal's claims and in a thrown policy error; prove the
+   target and principal canaries are absent from every response body and every log record, and the
+   error canary is absent from every response body.
+3. Prove the `401`/`403`/`501` bodies name no policy or ability under `'default'`, `'rfc9457'` and a
+   thrown `authorize` through `errorHandler`.
+4. Prove an anonymous request never invokes a non-anonymous check (call counter), and that `before`
+   is not invoked for it.
+5. Prove an unregistered guard fails `start()`; a route added after `start()` refuses (handler not
+   run); `define` after `start()` throws; a duplicate name is refused.
+6. Prove no provider → `501` for both entry points, with the handler not run.
+7. Confirm each §6 negative control exists and fails when its guard is removed.
