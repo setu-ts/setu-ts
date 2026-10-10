@@ -108,22 +108,22 @@ const INTEGER_FIELDS = [
 ] as const;
 
 /**
- * Converts a `bigint` the safe-integer range can hold exactly into a number.
- * Anything else — including an unsafe `bigint`, which a number cannot hold
- * without losing precision — is passed through unchanged for the relay to
- * refuse.
+ * Converts any `bigint` into a number; anything else is passed through.
+ *
+ * A safe-integer `bigint` converts exactly. An unsafe one converts to a number
+ * at or beyond `2^53`, which is not a safe integer either, so the relay still
+ * refuses it in `claimVersion` and `leaseUntil` — and every other integer
+ * field is an ordinary number the relay and the health indicator can compare,
+ * rather than a `bigint` that throws when mixed with a number.
  */
-function exactNumber(value: unknown): unknown {
-  return typeof value === 'bigint' && value >= BigInt(Number.MIN_SAFE_INTEGER) &&
-      value <= BigInt(Number.MAX_SAFE_INTEGER)
-    ? Number(value)
-    : value;
+function toNumber(value: unknown): unknown {
+  return typeof value === 'bigint' ? Number(value) : value;
 }
 
-/** A stored row with every integer field a safe `bigint` normalized to a number. */
+/** A stored row with every integer field read as a number, each field read once. */
 function normalizeIntegers(row: Row): Row {
   const normalized: Row = { ...row };
-  for (const field of INTEGER_FIELDS) normalized[field] = exactNumber(row[field]);
+  for (const field of INTEGER_FIELDS) normalized[field] = toNumber(normalized[field]);
   return normalized;
 }
 

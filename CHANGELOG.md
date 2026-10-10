@@ -155,10 +155,10 @@ All notable changes to this project are documented here. The format follows
   30 000 with strict headroom over the claim/publish/status reserve. Unsupported conditional sources
   fail startup. The unreleased M107 schema requires 64-bit `claimVersion` and `leaseUntil`; old SQL
   DDL is refused and old JSON rows without the fields are poisoned as `invalid-row`.
-  `MAX_SAFE_INTEGER` is exhausted; max-minus-one can be claimed exactly. The store bridge reads a
-  safe-integer `bigint` (Prisma Client's type for a `BigInt` column) as a number, so a Prisma-mapped
-  outbox is not poisoned row by row. `not-pending.sentBy` is removed, while the stored diagnostic
-  remains. Health uses `relay-overlap` for `fenced`, `claim-lost`, `duplicate`, and
+  `MAX_SAFE_INTEGER` is exhausted; max-minus-one can be claimed exactly. The store bridge reads
+  every integer `bigint` (Prisma Client's type for a `BigInt` column) as a number, so a
+  Prisma-mapped outbox is not poisoned row by row. `not-pending.sentBy` is removed, while the stored
+  diagnostic remains. Health uses `relay-overlap` for `fenced`, `claim-lost`, `duplicate`, and
   `outbox_overlaps_total` uses `kind` instead of `origin`. A shared scheduler lock now saves
   redundant scans; its TTL rule no longer bears on correctness. Retry clears the lease and
   `lastError` and keeps the version; shutdown failures preserve the claim.

@@ -78,7 +78,11 @@ describe('DatabaseOutboxStore — integer columns read back as bigint', () => {
     expect(row!.claimVersion).toBe(Number.MAX_SAFE_INTEGER - 1);
   });
 
-  it('passes an unsafe bigint through unchanged, so the relay refuses it', async () => {
+  it('converts an unsafe bigint to an unsafe number: claim fields stay refusable, the rest comparable', async () => {
+    // Audit F2: an unsafe `bigint` left as a `bigint` in `createdAt` made the
+    // health indicator throw (`Cannot mix BigInt and other types`). Converted,
+    // it is an ordinary number; in `claimVersion` it is still not a safe
+    // integer, so the relay still poisons the row.
     const adapter = new MemoryAdapter();
     const source = adapter.createDataSource(ENTITY);
     await source.create({ ...record(1) });
@@ -86,14 +90,26 @@ describe('DatabaseOutboxStore — integer columns read back as bigint', () => {
     const reading: IDataSource = {
       ...source,
       findAll: async (query) =>
-        (await source.findAll(query)).map((row) => ({ ...row, claimVersion: unsafe })),
+        (await source.findAll(query)).map((row) => ({
+          ...row,
+          claimVersion: unsafe,
+          createdAt: unsafe,
+          availableAt: unsafe,
+        })),
     };
     const store = new DatabaseOutboxStore(
       new DatabaseService(adapter, () => reading, 'memory'),
       ENTITY,
     );
     const [row] = await store.scanPending(undefined, 10);
-    expect((row as unknown as Record<string, unknown>).claimVersion).toBe(unsafe);
+    for (const field of ['claimVersion', 'createdAt', 'availableAt'] as const) {
+      expect(typeof row![field]).toBe('number');
+    }
+    expect(Number.isSafeInteger(row!.claimVersion)).toBe(false);
+    const stats = await store.stats();
+    expect(typeof stats.oldestPendingCreatedAt).toBe('number');
+    // The arithmetic the health indicator performs on it no longer throws.
+    expect(() => 1_700_000_000_000 - stats.oldestPendingCreatedAt!).not.toThrow();
   });
 
   it('a transient miss at the held version retries instead of reporting claim-lost', async () => {
