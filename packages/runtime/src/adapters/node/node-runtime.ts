@@ -47,6 +47,8 @@ export interface NodeFsOperations {
   readdir(path: string): Promise<string[]>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<string | void>;
   rm(path: string, options?: { recursive?: boolean }): Promise<void>;
+  /** Remove an empty directory when rm refuses it without recursive. */
+  rmdir?(path: string): Promise<void>;
   createReadStream?(
     path: string,
     options?: { start?: number; end?: number },
@@ -164,7 +166,15 @@ export function buildNodeHost(
     mkdir: (path: string, options?: { recursive?: boolean }): Promise<void> =>
       mods.fs.mkdir(path, options) as Promise<void>,
     rm: (path: string, options?: { recursive?: boolean }): Promise<void> =>
-      mods.fs.rm(path, options) as Promise<void>,
+      mods.fs.rm(path, options).catch((error: unknown) => {
+        // Node rm refuses even an empty directory without recursive. rmdir
+        // preserves the contract: remove empty directories, refuse nonempty ones.
+        if (
+          !options?.recursive && typeof error === 'object' && error !== null && 'code' in error &&
+          error.code === 'ERR_FS_EISDIR' && mods.fs.rmdir
+        ) return mods.fs.rmdir(path);
+        throw error;
+      }),
     createReadStream: (
       path: string,
       options?: { start?: number; end?: number },

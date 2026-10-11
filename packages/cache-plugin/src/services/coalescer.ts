@@ -99,10 +99,10 @@ export function createCoalescer(): Coalescer {
       );
       inFlight.set(key, running);
 
+      // This is the only removal, and until it runs every run() for `key`
+      // joins `running`, so the entry it deletes is always this one.
       const clear = (): void => {
-        if (inFlight.get(key) === running) {
-          inFlight.delete(key);
-        }
+        inFlight.delete(key);
       };
       void running.then(clear, clear);
 
