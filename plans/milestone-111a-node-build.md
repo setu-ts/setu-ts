@@ -381,3 +381,49 @@ deno task release:verify 0.8.0
 - Node `bin` for `setu`, Node-default generated projects, the emitted Deno Dockerfile (C1) — 111d.
 - Removing `deno.json`/`deno.lock`, ESLint/Prettier, porting scripts to Node — 111e.
 - Full AI_GUIDELINES §12.2 / CLAUDE.md / README rewrite — 111f (only C3/C4's sentences ship here).
+
+## 10. Corrections recorded during implementation
+
+Each deviation from the sections above, with the reason; the sections themselves are left as planned
+so the record shows what changed.
+
+1. **Script tests live in `test/unit/`**, not `scripts/test/` (§6): that is where every existing
+   script test sits (`npm-specifier-audit.test.ts`, `bump-version.test.ts`).
+2. **One `tsc -b` over the solution `tsconfig.json`** instead of `pnpm -r build` (§3.10): the test
+   edges are cyclic, so pnpm needs `ignoreWorkspaceCycles` and then orders nothing, and parallel
+   member builds race on shared references. One process orders every reference.
+3. **The gate is split** into `node-build-gate.ts` (pure, in `SCRIPT_TARGETS`) and
+   `check-node-build.ts` (spawns only, not a target) — the M39 `check-deploy.ts` precedent, so the
+   orchestration does not sit under the per-file bar.
+4. **The import scanner moved into `npm-specifier-audit.ts`** (§3.1, §3.8): the generator imported
+   the audit's masker, so the audit could not import the generator's scanner without a cycle. One
+   scanner now serves both, and §3.8's `npm:`/`jsr:` refusal is `findPrefixedSpecifiers` over it.
+   Its specifier character class gained the semver range characters: without them `npm:zod@^3.24.0`
+   read as a misread regex and the refusal missed exactly the caret-range form.
+5. **`allowBuilds` denies `protobufjs` and `sse4_crc32`** in the generated `pnpm-workspace.yaml`:
+   pnpm 12 fails `install --frozen-lockfile` while an install script is undecided.
+6. **The generator reconciles value-over-peer after the `src` scan**, and **skips a member's own
+   name in test edges**: the first let a package imported by type in one file and by value in
+   another land in both `dependencies` and `peerDependencies`, depending on file order; the second
+   made every member whose tests import itself dev-depend on itself.
+7. **No CLI template change.** Generated projects install the published packages and need no
+   mapping, so `project-files.ts` is unchanged (111d owns it).
+8. **The root `deno.json` excludes `packages/*/dist` and `packages/starters/*/dist`**: a bare
+   `"dist"` matches only a root directory, so `deno check` read the emitted declarations.
+9. **`release:verify` check 6 also reports `npm:`/`jsr:` specifiers**, and `release:bump` treats
+   `src/version.ts` as optional — the seven members without one were refused as untracked.
+10. **Members keep a GENERATED import map (maintainer decision, 2026-10-11)**, reversing §3.2's
+    "bare-keyed `deno.json` imports are removed". Deno honours a member's `package.json` only for a
+    program rooted inside the workspace; the 15 examples and the CLI e2e projects type-check
+    framework source from outside it, where only the member's import map applies, so `check:apps`
+    failed on bare `hono`. The generator now writes each member's `imports` from the same range
+    table as its `package.json` (`externalAliases` / `renderDenoJson`, splicing only that block and
+    keeping `npm:`-keyed pins), so there is still one source and `--check` refuses drift. This
+    replaced two per-consumer workarounds — a derived map in the CLI fixture and hand-written `hono`
+    entries in `test/fixtures/snippets/deno.json` — both reverted. `checkDenoAliases` was deleted
+    with the rule it enforced.
+11. **`hono` stays at `^4.12.30` and `@types/node` is `^24`**: the range table first raised `hono`
+    to `^4.13.13`, narrowing what consumers were promised and moving the locked version; the plan
+    probed `@types/node@24`. The `deno.lock` was rebuilt from `develop`'s, so no existing
+    third-party resolution moved (a full re-resolve had moved 30 packages, Prisma `7.10.0` → `7.8.0`
+    among them).

@@ -13788,7 +13788,9 @@ not a silent loss:
 the existing Deno gates still pass on the same sources.
 
 - `pnpm-workspace.yaml` + a `package.json` per member (`"type": "module"`, `exports` pointing at
-  `dist/*.js` + `dist/*.d.ts`, `files`, `sideEffects`, `engines`), with `workspace:^` internal deps.
+  `dist/*.js` + `dist/*.d.ts`, `files`, `engines`), with `workspace:^` internal deps. No
+  `sideEffects` yet: a wrong `false` lets a consumer's bundler drop module code, so it is decided in
+  111c behind an audit (plan C2).
 - One shared `tsconfig.base.json` carrying today's `compilerOptions` (`strict`,
   `exactOptionalPropertyTypes`, …) plus `module: nodenext`, `rewriteRelativeImportExtensions`,
   `isolatedDeclarations`, `declaration`; one project reference per member so `tsc -b` builds the
@@ -13798,8 +13800,9 @@ the existing Deno gates still pass on the same sources.
   stays: never a hard dependency. `scripts/npm-specifier-audit.ts` (M70e) is rewritten to require a
   LITERAL bare specifier — the property it exists for (bundlers and static analysis can see the
   import) is unchanged.
-- `sdk`'s inline `jsr:` specifiers and `@hono/hono` → `hono` from npm. `jsr:@std/jsonc` in `cli` is
-  replaced (`jsonc-parser` or an internal parser).
+- `sdk`'s inline `jsr:` specifiers and `@hono/hono` → `hono` from npm. (`cli` imports no
+  `@std/jsonc`: the string is a step in the Dockerfile it emits for generated Deno projects, which
+  111d owns — plan C1.)
 - **Exit:** `pnpm -r build` clean; a throwaway Node 24 project installing the packed tarballs
   (`pnpm pack`) boots `kernel` + `runtime` and serves a request; a decorated controller serves on
   Node from compiled output (proves TC39 decorator emit and the `Symbol.metadata` fallback M76
@@ -13838,6 +13841,10 @@ runner, before anything is published to npm.
 **Objective:** the framework is installable as `@setu-ts/*` from npm, published by CI.
 
 - **Blocked on the maintainer claiming the `@setu-ts` npm organization.**
+- Decide `sideEffects` per package behind an audit of top-level statements (111a ships none, which
+  npm reads as "every file has side effects" — correct, merely less tree-shakeable). The
+  `decorator-plugin` manifest may not omit `./dist/metadata/symbol-metadata.js`; the manifest
+  generator refuses it.
 - Trusted publishing (GitHub OIDC, `npm publish --provenance`) from `release.yml`; no long-lived
   token. The JSR lesson applies: the first real publish exercises paths a dry run skips.
 - `scripts/release-packages.ts`'s dependency-ordered allow-list is reused; pnpm rewrites
@@ -13866,6 +13873,7 @@ runner, before anything is published to npm.
 **Objective:** `npx @setu-ts/cli new` (or `npm create setu`) on Node is the documented first run.
 
 - `setu` ships as an npm `bin`; `src/main.ts` becomes a Node process boundary.
+- The emitted Deno Dockerfile's `jsr:@std/jsonc` step moves with the generated-Deno-target text.
 - The default `--runtime` becomes `node`; generated Node projects depend on `@setu-ts/*` from npm
   (no `.npmrc`, no `@jsr/` aliases) and run with `tsx`/compiled output as today. Deno, Bun and
   Workers targets stay, their projects also installing from npm.

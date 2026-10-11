@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A Node build for every package (M111a).** Every workspace member builds with TypeScript `6.0.3`
+  (`tsc -b`) to `dist/`, with a generated `package.json` (ESM only, `engines.node >=22`, `exports`
+  per subpath, `workspace:^` internal dependencies) and `tsconfig.json`, under a pnpm workspace.
+  `scripts/node-manifests.ts` generates them — and each member's `deno.json` `imports`, from the
+  same range table — from the member's sources, and refuses drift (`--check`); every lazily imported
+  driver is an OPTIONAL `peerDependency`, and `@hono/node-server` is a regular dependency of
+  `@setu-ts/runtime` so a bare install can serve on Node. `deno task check:node-build` packs every
+  member, refuses a tarball still naming `workspace:`, installs `kernel`, `runtime` and
+  `decorator-plugin` with plain npm into an empty project, and serves a request and a `tsc`-compiled
+  decorated controller on Node 24, Node 22 and Bun; a new CI job runs it with `--require-all`.
+  Nothing is published to npm yet (111c). The Deno toolchain and every Deno gate are unchanged.
+- **`@setu-ts/decorator-plugin` installs `Symbol.metadata` on Node and Bun (M111a).** Neither
+  runtime defines it, and TypeScript's TC39 decorator emit creates decorator metadata only when it
+  exists, so a `tsc`-compiled decorated class crashed at definition with a bare `TypeError`.
+  Importing the package now installs `Symbol.for('Symbol.metadata')` when the symbol is absent
+  (never overwriting one — a no-op on Deno), and a decorator that still finds no carrier throws
+  `DecoratorMetadataUnavailableError` naming both remedies. It is the one module-level exception to
+  AI_GUIDELINES §11.5.
+
 - **Per-field redaction in a policy (`@setu-ts/common`, M101h).** `RedactionPolicy.fields` accepts a
   `FieldRedaction` — `{ classification, redactor? }` — as well as a classification string, so one
   classification can carry two treatments (mask the email, erase the name, both `pii`) without an
@@ -515,6 +534,13 @@ All notable changes to this project are documented here. The format follows
   field is validated at construction, `factor` (kafkajs's jitter) included, held to [0, 1].
 
 ### Changed
+
+- **Lazy-import error messages and reported specifiers name the bare package (M111a).** Source
+  imports `ioredis`, not `npm:ioredis@5.x`, so `GrpcRuntimeLoadError.specifier`, the telemetry
+  instrumentation loaders' reported `specifier`, `SAML_SPECIFIER` and the React Router load failure
+  now read `@connectrpc/connect`, `@opentelemetry/instrumentation-http`, `@node-saml/node-saml` and
+  `Failed to import 'react-router'`. Code matching the old `npm:…` strings must match the bare name.
+  The install guidance in those messages is unchanged and still names `deno add npm:…` for Deno.
 
 - **Worker pool sizing (M45c, #433).** `WorkerPoolPluginOptions.maxWorkers` now bounds the sum of
   module pools, defaulting to the largest of available parallelism, defaultPoolSize and the sum of

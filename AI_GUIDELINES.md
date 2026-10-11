@@ -701,6 +701,15 @@ A public API is any export from a package's `src/index.ts` file.
 - Importing a module must not execute side effects.
 - No code at module top level that modifies global state.
 - Registration happens in `register()` functions, not at import time.
+- **The one named exception** (maintainer-approved 2026-10-11, M111a):
+  `packages/decorator-plugin/src/metadata/symbol-metadata.ts` installs `Symbol.metadata` at module
+  top level, write-if-absent (`Symbol.metadata ??= Symbol.for('Symbol.metadata')`). Node and Bun do
+  not define that spec-defined well-known symbol, and TypeScript's TC39 decorator emit creates
+  decorator metadata only when it exists, so without the install a `tsc`-compiled decorated class
+  crashes at definition. The module never overwrites an existing symbol (a no-op on Deno), every
+  `src/decorators/*.ts` imports it first, and a missing carrier fails with the named
+  `DecoratorMetadataUnavailableError`. No other module may use this exception; a new case needs its
+  own maintainer decision.
 
 ### 11.6 No `console.log` in Production Code
 
@@ -750,12 +759,13 @@ A public API is any export from a package's `src/index.ts` file.
 ### 12.2 Optional Heavy Dependencies
 
 - Heavy dependencies (Prisma, Pino, Redis, RabbitMQ clients) must never be hard dependencies of a
-  plugin. (JSR has no peer-dependency concept, so the npm "peer dependency" pattern does not apply.)
+  plugin. Each one is declared as an OPTIONAL `peerDependency` (`peerDependenciesMeta`) in the
+  package's generated `package.json` — never a regular dependency (M111a).
 - Instead, adapters either:
   - accept a **client instance injected via plugin options** (preferred — e.g.,
     `DatabasePlugin({ type: 'prisma', options: { prismaClient } })`), or
-  - **lazily load** the driver via dynamic `import()` of an `npm:` specifier, failing with a clear
-    error if it is not installed.
+  - **lazily load** the driver via a dynamic `import()` whose argument is the LITERAL bare package
+    name (`import('ioredis')`), failing with a clear error if it is not installed.
 - The framework never installs a database driver by default.
 - Users install the driver for the adapter they choose.
 - **Boundary-type compatibility.** When a public option accepts an application-created third-party

@@ -360,8 +360,8 @@ Two consequences follow from the list being positional:
 | `buildFullStackPlugins`           | function  |
 | `createFullStackApp`              | function  |
 | `createFullStackAppFromConfig`    | function  |
-| `FullStackConfigUnavailableError` | class     |
 | `fullStackConfigOf`               | function  |
+| `FullStackConfigUnavailableError` | class     |
 | `FromConfigOptions`               | interface |
 | `FullStackStarterOptions`         | interface |
 | `RealtimeArm`                     | interface |
