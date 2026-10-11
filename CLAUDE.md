@@ -6070,9 +6070,31 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   logger's default secret list — fixed by own-property reads, plus a Low review gap
   (`idempotency-plugin` unlisted). The fixes were NOT re-audited, at the maintainer's direction —
   complete (PR #445).
-- **Next milestone** — M111a, the first of the M111 toolchain letters (a Node build: pnpm
-  workspaces, `tsc` to `dist/`, `npm:` lazy imports as optional peers); M104 — the `v0.9.0`
-  client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
+- **Milestone 111a** (every member + `scripts/` + CI — a Node build for every package): each member
+  gains a generated `package.json` (ESM, `dist/` exports, `files`, `engines`, `workspace:^` internal
+  deps) and `tsconfig.json`, built by one `tsc -b` over a solution config from a shared
+  `tsconfig.base.json` (`module: nodenext`, `rewriteRelativeImportExtensions`,
+  `isolatedDeclarations`). `scripts/node-manifests.ts` generates all of it — plus each member's
+  `deno.json` import map, because Deno reads a member's `package.json` only for programs rooted
+  inside the workspace — from one committed range table, and `--check` refuses drift. Every lazy
+  `npm:` import became a bare specifier listed as an OPTIONAL peer, and the M70e audit now also
+  refuses any `npm:`/`jsr:` specifier in `src`. Each member that reads its own version ships a
+  `src/version.ts` constant, a third bump site `release:bump` and `release:verify` both cover.
+  Importing `decorator-plugin` installs `Symbol.metadata` write-if-absent (Node 24 and Bun 1.4 lack
+  it; a maintainer-approved §11.5 exception), and a missing carrier fails with a named
+  `DecoratorMetadataUnavailableError`. `check:node-build` packs every member, refuses a tarball
+  still naming `workspace:`, installs the kernel/runtime/decorator closure with a plain
+  `npm install`, and boots a decorated controller on Node 24, Node 22 and Bun; CI runs it with
+  `--require-all`. Zoo code's implementation pass looped and was taken over; measuring then rebuilt
+  the lockfile from `develop`'s with zero resolutions moved (a full re-resolve had moved 30, Prisma
+  backwards). Verified by driving the packed tarballs on Node 24 and Bun against real Redis — a
+  decorated write read back and the cache keys found in Redis — with the carrier removed as a
+  negative control. Verification found the drift gate refusing the committed boot fixture and four
+  gaps, all closed: an untested `release:verify` version-site check (extracted to
+  `scripts/version-sites.ts`), the undocumented `Symbol.metadata` install, a missing
+  `serverBuildPath` note, and the tracking flip — complete (PR pending)
+- **Next milestone** — M111b, the test suite on Node under Vitest (prep in the `m111b-node-tests`
+  worktree); M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
