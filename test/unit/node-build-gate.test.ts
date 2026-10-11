@@ -121,6 +121,12 @@ describe('the CI job runs the gate strictly (M111a §3.10)', () => {
     expect(job).toContain('uses: actions/setup-node@v4');
     expect(job).toContain('uses: oven-sh/setup-bun@v2');
     expect(job).toContain('run: corepack enable');
-    expect(job).toContain('run: deno run --allow-read scripts/node-manifests.ts --check');
+    // TypeScript reads its watch variables at load, so the drift check needs env access,
+    // scoped to those names rather than granted wholesale.
+    const drift = job.match(
+      /run: deno run --allow-read (--allow-env=\S+) scripts\/node-manifests\.ts --check/,
+    );
+    expect(drift).not.toBeNull();
+    expect(drift![1]).toContain('TSC_WATCHFILE');
   });
 });
