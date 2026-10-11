@@ -6092,7 +6092,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   negative control. Verification found the drift gate refusing the committed boot fixture and four
   gaps, all closed: an untested `release:verify` version-site check (extracted to
   `scripts/version-sites.ts`), the undocumented `Symbol.metadata` install, a missing
-  `serverBuildPath` note, and the tracking flip — complete (PR pending)
+  `serverBuildPath` note, and the tracking flip — complete (PR #446)
 - **Next milestone** — M111b, the test suite on Node under Vitest (prep in the `m111b-node-tests`
   worktree); M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
 
