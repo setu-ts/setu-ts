@@ -1,4 +1,4 @@
-import { run as runProcess } from '../../../../test/node-helpers.ts';
+import { NODE_SOURCE_ARGS, run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Transparency of `createObservedFetch` (M98n §3.3): the wrapped fetch sees
  * exactly the arguments and receiver it would see unwrapped, is called once,
@@ -389,7 +389,7 @@ describe('createObservedFetch — unhandled rejections', () => {
     async function run(mode: string, handling: string): Promise<string> {
       const output = await runProcess(process.execPath, {
         args: [
-          '--experimental-transform-types',
+          ...NODE_SOURCE_ARGS,
           '--input-type=module',
           '-e',
           script,

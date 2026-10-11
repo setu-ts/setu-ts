@@ -1,4 +1,4 @@
-import { run as runProcess } from '../../../../test/node-helpers.ts';
+import { NODE_SOURCE_ARGS, run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Unit tests for the M98i cache operation counters: option validation, the
  * collector's counting, saturation, retention and failure latch, the
@@ -356,7 +356,7 @@ describe('observeCacheCall — transparency', () => {
     const count = async (enabled: boolean): Promise<number> => {
       const output = await runProcess(process.execPath, {
         args: [
-          '--experimental-transform-types',
+          ...NODE_SOURCE_ARGS,
           '--input-type=module',
           '-e',
           `

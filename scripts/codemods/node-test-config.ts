@@ -4,24 +4,10 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DENO_ONLY_SOURCES, NODE_EXCLUDED_TESTS } from '../test-lanes.ts';
 import { isolationReason } from '../test-partition-rules.ts';
+import { sourceExport } from './workspace-sources.ts';
 
 const root = resolve(import.meta.dirname, '../..');
-const workspace: string[] = JSON.parse(readFileSync(resolve(root, 'deno.json'), 'utf8')).workspace;
-const members = new Map(workspace.map((member) => {
-  const dir = resolve(root, member);
-  const manifest = JSON.parse(readFileSync(resolve(dir, 'deno.json'), 'utf8'));
-  const exports = typeof manifest.exports === 'string' ? { '.': manifest.exports } : manifest.exports;
-  return [manifest.name, { dir, exports: exports as Record<string, string> }] as const;
-}));
-
-/** Resolve package tests to the same source export map used by the Node build. */
-export function sourceExport(specifier: string): string | null {
-  const match = /^(@setu-ts\/[^/]+)(\/.*)?$/.exec(specifier);
-  if (!match) return null;
-  const member = members.get(match[1]!);
-  const target = member?.exports[match[2] ? '.' + match[2] : '.'];
-  return member && target ? resolve(member.dir, target) : null;
-}
+export { sourceExport };
 
 function testFiles(directory: string): string[] {
   return readdirSync(resolve(root, directory), { withFileTypes: true }).flatMap((entry) => {
@@ -74,6 +60,12 @@ return defineConfig({
   }],
   test: {
     root, projects: projectsFor(member), pool: 'forks', maxWorkers: 4,
+    // Code a test hands to Node directly — a worker thread, a module loaded
+    // outside Vite — resolves `@setu-ts/*` through Node, which would reach a
+    // member's built `dist/` (absent on a fresh checkout, stale after an edit).
+    // The hook maps it to source exactly as `sourceExport` does here, and a
+    // Worker inherits these flags from the fork.
+    execArgv: ['--import', new URL('../../test/node-source-register.ts', import.meta.url).href],
     testTimeout: 30_000, hookTimeout: 30_000,
     reporters: ['default', 'json'],
     outputFile: { json: `coverage-node/${member.split('/').pop()}/tests.json` },

@@ -28,6 +28,16 @@ export async function tempDir(options: { prefix?: string; dir?: string } = {}): 
   return mkdtemp(resolve(base, options.prefix ?? 'test-'));
 }
 
+/**
+ * Node flags for a test subprocess that runs workspace TypeScript: strips types and resolves
+ * `@setu-ts/*` to source as Vitest does, so the child never depends on a built `dist/`.
+ */
+export const NODE_SOURCE_ARGS: readonly string[] = [
+  '--experimental-transform-types',
+  '--import',
+  new URL('./node-source-register.ts', import.meta.url).href,
+];
+
 /** The running Deno executable, or `undefined` under any other runtime. */
 function runningDeno(): string | undefined {
   return 'Deno' in globalThis ? process.execPath : undefined;

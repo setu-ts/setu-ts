@@ -1,4 +1,4 @@
-import { run as runProcess } from '../../../../test/node-helpers.ts';
+import { NODE_SOURCE_ARGS, run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * The one realtime observation collector (M98l): option validation, the
  * per-kind state and gauge rules, retention, latching, close, clamping and
@@ -412,7 +412,7 @@ describe('createRealtimeObservationCollector', () => {
     it('keeps an unobserved rejection unhandled (a derived promise, not a side branch)', async () => {
       const output = await runProcess(process.execPath, {
         args: [
-          '--experimental-transform-types',
+          ...NODE_SOURCE_ARGS,
           '--input-type=module',
           '-e',
           `

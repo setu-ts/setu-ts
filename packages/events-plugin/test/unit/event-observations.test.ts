@@ -1,4 +1,4 @@
-import { run as runProcess } from '../../../../test/node-helpers.ts';
+import { NODE_SOURCE_ARGS, run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Unit tests for event dispatch observations (M98j): the bounded collector
  * behind `IEventDiagnosticsSource`, the WeakMap attachment on the bus, and
@@ -665,7 +665,7 @@ describe('Observation never changes dispatch (M98j review fixes)', () => {
     const outcome = async (observed: boolean, waitIdle: boolean) => {
       const output = await runProcess(process.execPath, {
         args: [
-          '--experimental-transform-types',
+          ...NODE_SOURCE_ARGS,
           '--input-type=module',
           '-e',
           `
