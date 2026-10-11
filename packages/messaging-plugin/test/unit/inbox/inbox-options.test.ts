@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { InboxOptions } from '../../../src/index.ts';
 import { resolveInboxOptions } from '../../../src/inbox/options.ts';
 import { FakeInboxStore } from '../../fixtures/inbox.ts';

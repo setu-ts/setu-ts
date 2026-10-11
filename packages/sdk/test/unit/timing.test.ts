@@ -4,8 +4,7 @@
  * Covers monotonic `now()`, `sleep` resolution, and abort behavior.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createDefaultClientTiming } from '../../src/http/timing.ts';
 
 describe('createDefaultClientTiming', () => {

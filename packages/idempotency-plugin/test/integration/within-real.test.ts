@@ -1,7 +1,5 @@
 /** Tier C at real backend surfaces, including the §10 security obligations. @module */
-import { describe, it } from '@std/testing/bdd';
-import { afterAll, beforeAll } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ILogger, IPlugin } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { BigtableAdapter, TransactionalStoreUnavailableError } from '@setu-ts/database-plugin';
@@ -20,11 +18,11 @@ import {
 } from '../fixtures/within-backends.ts';
 import type { BackendHarness } from '../fixtures/within-backends.ts';
 
-const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
-const mongoRsUri = Deno.env.get('MONGODB_RS_URI');
-const mongoUri = Deno.env.get('MONGODB_URI');
-const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT_URL');
-const bigtableEndpoint = Deno.env.get('BIGTABLE_EMULATOR_ENDPOINT');
+const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
+const mongoRsUri = process.env['MONGODB_RS_URI'];
+const mongoUri = process.env['MONGODB_URI'];
+const dynamoEndpoint = process.env['DYNAMODB_ENDPOINT_URL'];
+const bigtableEndpoint = process.env['BIGTABLE_EMULATOR_ENDPOINT'];
 const backends = [
   { name: 'PostgreSQL', env: postgresUrl, setup: postgresHarness, deferred: false },
   { name: 'MongoDB replica set', env: mongoRsUri, setup: mongoHarness, deferred: false },
@@ -32,7 +30,7 @@ const backends = [
 ];
 
 for (const backend of backends) {
-  describe(`within-real: ${backend.name}`, { ignore: backend.env === undefined }, () => {
+  describe(`within-real: ${backend.name}`, { skip: backend.env === undefined }, () => {
     let harness: BackendHarness;
     let first: ReturnType<typeof withinApp>;
     let second: ReturnType<typeof withinApp>;
@@ -200,7 +198,7 @@ function diagnosticText(value: unknown): string {
   return JSON.stringify(value) ?? '';
 }
 
-describe('within-real: PostgreSQL interrupted purge', { ignore: postgresUrl === undefined }, () => {
+describe('within-real: PostgreSQL interrupted purge', { skip: postgresUrl === undefined }, () => {
   let pg: Awaited<ReturnType<typeof postgresHarness>>;
   beforeAll(async () => {
     pg = await postgresHarness(postgresUrl!);
@@ -237,7 +235,7 @@ describe('within-real: PostgreSQL interrupted purge', { ignore: postgresUrl === 
   });
 });
 
-describe('within-real: PostgreSQL obligation 3', { ignore: postgresUrl === undefined }, () => {
+describe('within-real: PostgreSQL obligation 3', { skip: postgresUrl === undefined }, () => {
   let pg: Awaited<ReturnType<typeof postgresHarness>>;
   beforeAll(async () => {
     pg = await postgresHarness(postgresUrl!);
@@ -350,7 +348,7 @@ describe('within-real: PostgreSQL obligation 3', { ignore: postgresUrl === undef
 
 describe('within-real: backend refusals', () => {
   it('refuses Bigtable at start with bigtable-unsupported', {
-    ignore: bigtableEndpoint === undefined,
+    skip: bigtableEndpoint === undefined,
   }, async () => {
     const app = withinApp(
       new BigtableAdapter({
@@ -365,7 +363,7 @@ describe('within-real: backend refusals', () => {
     expect((error as TransactionalStoreUnavailableError).reason).toBe('bigtable-unsupported');
   });
   it('refuses standalone MongoDB at start with mongodb-standalone', {
-    ignore: mongoUri === undefined,
+    skip: mongoUri === undefined,
   }, async () => {
     const harness = await mongoHarness(mongoUri!);
     const app = withinApp(harness.adapter());

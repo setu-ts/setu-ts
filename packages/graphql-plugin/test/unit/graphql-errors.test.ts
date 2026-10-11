@@ -2,8 +2,7 @@
  * Tests for graphql-errors.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { GraphqlRuntimeLoadError, GraphqlSchemaError } from '../../src/errors/graphql-errors.ts';
 
 describe('GraphqlSchemaError', () => {

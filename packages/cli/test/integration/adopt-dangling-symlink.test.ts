@@ -1,3 +1,5 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * `setu adopt` against a committed dangling symlink, on a REAL filesystem.
  *
@@ -10,31 +12,30 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { createRecorder } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runAdoptCommand } from '../../src/commands/adopt.ts';
 
-const fs = createDenoRuntimeServices().fs!;
+const fs = createNodeRuntimeServices().fs!;
 let root = '';
 
 beforeEach(async () => {
-  root = await Deno.makeTempDir({ prefix: 'setu-adopt-symlink-' });
-  await Deno.writeTextFile(
+  root = await tempDir({ prefix: 'setu-adopt-symlink-' });
+  await nodeFs.writeFile(
     `${root}/deno.json`,
     JSON.stringify({ tasks: { start: 'deno run -A main.ts' } }),
   );
-  await Deno.writeTextFile(`${root}/setu.config.ts`, 'export function createApp() {}\n');
-  await Deno.writeTextFile(`${root}/main.ts`, "import { createApp } from './setu.config.ts';\n");
-  await Deno.mkdir(`${root}/src`);
-  await Deno.writeTextFile(`${root}/src/ok.ts`, 'export const ok = 1;\n');
-  await Deno.symlink(`${root}/does-not-exist`, `${root}/src/evil\nsetu: FORGED`);
+  await nodeFs.writeFile(`${root}/setu.config.ts`, 'export function createApp() {}\n');
+  await nodeFs.writeFile(`${root}/main.ts`, "import { createApp } from './setu.config.ts';\n");
+  await nodeFs.mkdir(`${root}/src`);
+  await nodeFs.writeFile(`${root}/src/ok.ts`, 'export const ok = 1;\n');
+  await nodeFs.symlink(`${root}/does-not-exist`, `${root}/src/evil\nsetu: FORGED`);
 });
 
 afterEach(async () => {
-  await Deno.remove(root, { recursive: true }).catch(() => {});
+  await nodeFs.rm(root, { recursive: true }).catch(() => {});
 });
 
 describe('adopt with a dangling symlink under an adopted directory', () => {
@@ -52,8 +53,8 @@ describe('adopt with a dangling symlink under an adopted directory', () => {
         expect(line.split('\n').some((part) => part.startsWith('setu: FORGED'))).toBe(false);
       }
       // Refused before any move: the real file is still where it was.
-      expect(await Deno.readTextFile(`${root}/src/ok.ts`)).toBe('export const ok = 1;\n');
-      await expect(Deno.stat(`${root}/setu.workspace.json`)).rejects.toThrow();
+      expect(await nodeFs.readFile(`${root}/src/ok.ts`, 'utf8')).toBe('export const ok = 1;\n');
+      await expect(nodeFs.stat(`${root}/setu.workspace.json`)).rejects.toThrow();
     });
   }
 });

@@ -1,6 +1,5 @@
 // deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CacheService } from '../../src/services/cache-service.ts';
 import type { CacheStore } from '../../src/stores/cache-store.ts';

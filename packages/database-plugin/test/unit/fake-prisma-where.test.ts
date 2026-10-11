@@ -11,8 +11,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import type { PrismaAdapterOptions } from '../../src/interfaces/index.ts';

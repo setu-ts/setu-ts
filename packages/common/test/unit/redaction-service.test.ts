@@ -1,6 +1,5 @@
 /** Tests for the common clone-on-write redaction service. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createMaskRedactor, createRedactionService } from '../../src/index.ts';
 import type { RedactionContext, Redactor } from '../../src/index.ts';
 import { createFieldMatcher } from '../../src/redaction/field-matcher.ts';

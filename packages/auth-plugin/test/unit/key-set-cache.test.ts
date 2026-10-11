@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { IssuerKeySet, MAX_KEYS, MAX_RESPONSE_BYTES } from '../../src/issuers/key-set-cache.ts';
 import { compileIssuers } from '../../src/issuers/trusted-issuer.ts';
 import type { IAuthHttp, TrustedIssuer } from '../../src/interfaces/index.ts';

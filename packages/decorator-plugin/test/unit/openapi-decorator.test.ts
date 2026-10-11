@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { Controller } from '../../src/decorators/controller.ts';
 import { Get } from '../../src/decorators/http.ts';

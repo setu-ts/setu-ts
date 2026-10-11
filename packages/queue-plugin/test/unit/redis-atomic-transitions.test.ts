@@ -3,8 +3,7 @@
  * the client exposes `eval`, so a command timeout the server still applies can
  * leave the transition whole or absent, never half-applied.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 import {
   ACK_SCRIPT,

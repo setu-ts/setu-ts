@@ -9,5 +9,8 @@
       "env": true,
       "net": ["127.0.0.1"]
     }
+  },
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
   }
 }

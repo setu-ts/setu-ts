@@ -5,8 +5,7 @@
  * proving that kernel ordering resolves LoggerPlugin before QueuePlugin when both
  * are registered, and that QueuePlugin works without any logger.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IPlugin, IPluginContext, IQueue } from '@setu-ts/common';

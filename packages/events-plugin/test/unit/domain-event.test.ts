@@ -1,8 +1,7 @@
 /**
  * Unit tests for DomainEvent and defineDomainEvent.
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { defineDomainEvent, DomainEvent } from '../../src/events/domain-event.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 

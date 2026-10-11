@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IIdempotencyStore, IPluginContext, MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -16,7 +15,7 @@ import { resolveStore } from '../../src/stores/resolve-store.ts';
 import { createClockRuntime } from '../fixtures/clock-runtime.ts';
 import { IdempotencyPlugin, idempotent } from '../../src/index.ts';
 
-const REDIS_URL = Deno.env.get('REDIS_URL');
+const REDIS_URL = process.env['REDIS_URL'];
 const ignore = REDIS_URL === undefined;
 const runtime = createClockRuntime();
 
@@ -46,7 +45,7 @@ async function makeStore(
 /** Real sleep. */
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe('Redis store on real Redis (M109a §3.5)', { ignore }, () => {
+describe('Redis store on real Redis (M109a §3.5)', { skip: ignore }, () => {
   it('answers PING for isHealthy', async () => {
     const store = await makeStore();
     expect(await store.isHealthy!()).toBe(true);
@@ -214,7 +213,7 @@ const identity: MiddlewareFunction = async (ctx, next) => {
  * "on every store", and the memory store's unit case cannot prove the derived
  * key survives the Redis store. Real Redis, a real kernel, unique namespace.
  */
-describe('cross-principal isolation on real Redis (M109a §10 D1)', { ignore }, () => {
+describe('cross-principal isolation on real Redis (M109a §10 D1)', { skip: ignore }, () => {
   it('executes once for each principal and each tenant sharing one key', async () => {
     const counts = { pay: 0 };
     const app = createApplication({

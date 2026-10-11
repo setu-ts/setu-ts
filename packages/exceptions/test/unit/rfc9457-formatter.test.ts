@@ -11,8 +11,7 @@
  * `validationError()` — that one defines an `errors` extension member and is a
  * distinct problem type.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { rfc9457Formatter } from '../../src/formatters/rfc9457-formatter.ts';
 import { rfc7807Formatter } from '../../src/formatters/rfc7807-formatter.ts';

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { StaticPlugin } from '../../src/plugin/static-plugin.ts';
 import { createStaticHandler } from '../../src/handler/static-handler.ts';
 import type { IPluginContext } from '@setu-ts/common';

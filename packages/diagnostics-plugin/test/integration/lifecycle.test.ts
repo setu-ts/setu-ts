@@ -4,8 +4,7 @@
  * reopening after revocation, and the parent application continuing to
  * serve throughout.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createApplication } from '../../../kernel/src/index.ts';
 import { createRuntimeServices, RuntimePlugin } from '../../../runtime/src/index.ts';

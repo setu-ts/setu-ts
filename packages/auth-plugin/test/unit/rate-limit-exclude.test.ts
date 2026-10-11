@@ -7,8 +7,7 @@
  * restarts the container — whose only fault was being under load.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_RATE_LIMIT_EXCLUDED_PATHS,
   rateLimitMiddleware,

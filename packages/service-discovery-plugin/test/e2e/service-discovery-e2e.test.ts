@@ -1,3 +1,4 @@
+import { serveHttp } from '../../../../test/node-helpers.ts';
 /**
  * End-to-end tests over real loopback sockets and the real global `fetch`.
  *
@@ -10,8 +11,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -28,8 +28,10 @@ function consulEntry(host: string, port: number, id: string): unknown {
 }
 
 /** Serves a Consul-shaped health endpoint on an ephemeral loopback port. */
-function serveConsul(entries: unknown[]): { port: number; close: () => Promise<void> } {
-  const server = Deno.serve(
+async function serveConsul(
+  entries: unknown[],
+): Promise<{ port: number; close: () => Promise<void> }> {
+  const server = await serveHttp(
     { port: 0, hostname: '127.0.0.1', onListen: () => {} },
     (request) => {
       const url = new URL(request.url);
@@ -49,8 +51,8 @@ function serveConsul(entries: unknown[]): { port: number; close: () => Promise<v
 }
 
 /** Serves a trivial backend that reports which instance answered. */
-function serveBackend(name: string): { port: number; close: () => Promise<void> } {
-  const server = Deno.serve(
+async function serveBackend(name: string): Promise<{ port: number; close: () => Promise<void> }> {
+  const server = await serveHttp(
     { port: 0, hostname: '127.0.0.1', onListen: () => {} },
     () => new Response(name),
   );
@@ -59,8 +61,8 @@ function serveBackend(name: string): { port: number; close: () => Promise<void> 
 
 describe('service discovery e2e — real fetch against a Consul-shaped agent', () => {
   it('resolves a real advertised address through the default HTTP seam', async () => {
-    const backend = serveBackend('billing-1');
-    const consul = serveConsul([consulEntry('127.0.0.1', backend.port, 'billing-1')]);
+    const backend = await serveBackend('billing-1');
+    const consul = await serveConsul([consulEntry('127.0.0.1', backend.port, 'billing-1')]);
 
     const app = createApplication({
       plugins: [
@@ -90,8 +92,8 @@ describe('service discovery e2e — real fetch against a Consul-shaped agent', (
   });
 
   it('watches a real agent and receives the instance list', async () => {
-    const backend = serveBackend('billing-1');
-    const consul = serveConsul([consulEntry('127.0.0.1', backend.port, 'billing-1')]);
+    const backend = await serveBackend('billing-1');
+    const consul = await serveConsul([consulEntry('127.0.0.1', backend.port, 'billing-1')]);
 
     const app = createApplication({
       plugins: [
@@ -118,8 +120,8 @@ describe('service discovery e2e — real fetch against a Consul-shaped agent', (
 
 describe('service discovery e2e — the ejection loop over real sockets', () => {
   it('pick, fail, report, pick again lands on a different instance', async () => {
-    const good = serveBackend('good');
-    const bad = serveBackend('bad');
+    const good = await serveBackend('good');
+    const bad = await serveBackend('bad');
     // `bad` is closed below, so calling it really fails rather than being
     // faked into failing.
     await bad.close();

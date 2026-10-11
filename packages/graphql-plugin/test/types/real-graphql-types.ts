@@ -12,7 +12,7 @@
  *
  * Compiled by `deno task check`; not executed as a test.
  */
-import * as graphql from 'npm:graphql@^16';
+import * as graphql from 'graphql';
 import type { GraphqlModuleLike, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
 import { adaptGraphqlModule } from '../../src/runtime/graphql-loader.ts';
 

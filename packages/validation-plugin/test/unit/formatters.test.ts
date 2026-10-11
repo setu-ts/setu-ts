@@ -4,8 +4,7 @@
  * Covers resolveFormatter selector, each built-in formatter shape,
  * custom formatter passthrough, and the rfc7807 instance field.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ValidationIssue } from '@setu-ts/common';
 
 import { defaultFormatter, nestjsFormatter } from '../../src/formatters/default-formatter.ts';

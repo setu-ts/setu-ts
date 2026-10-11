@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRealtimeBackplane } from '@setu-ts/common';
 import { SseService } from '../../src/services/sse-service.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';

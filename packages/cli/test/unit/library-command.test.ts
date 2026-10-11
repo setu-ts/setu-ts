@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runLibraryCommand } from '../../src/commands/library.ts';
@@ -213,4 +212,48 @@ describe('runLibraryCommand', () => {
     expect(await deno.run(['library', 'shared'])).toBe(0);
     expect(deno.out.text()).not.toContain('install');
   });
+});
+
+it('rolls back a failed library write and reports scalar and Error failures', async () => {
+  for (const cause of ['disk refused', new Error('disk refused')]) {
+    const h = harness();
+    h.fs.writeFile = () => Promise.reject(cause);
+    expect(await h.run(['library', 'shared'])).toBe(1);
+    expect(h.err.text()).toContain('Failed to write: disk refused');
+  }
+});
+
+it('honors an already interrupted library command before the first write', async () => {
+  const h = harness();
+  const controller = new AbortController();
+  controller.abort();
+  expect(
+    await runLibraryCommand(parseArgs(['library', 'shared']), {
+      fs: h.fs,
+      dir: '/acme',
+      log: h.out.sink,
+      error: h.err.sink,
+      interrupt: controller.signal,
+    }),
+  ).toBe(130);
+  expect(h.fs.writes).toEqual([]);
+  expect(h.err.text()).toContain('Interrupted');
+});
+
+it('uses the workspace scope fallback for a root workspace directory', async () => {
+  const original = harness();
+  const seed = {
+    [`/${WORKSPACE_MANIFEST}`]: original.fs.read(`/acme/${WORKSPACE_MANIFEST}`),
+    '/deno.json': original.fs.read('/acme/deno.json'),
+  };
+  const fs = createFakeFs(seed);
+  expect(
+    await runLibraryCommand(parseArgs(['library', 'shared', '--dry-run']), {
+      fs,
+      dir: '/',
+      log: original.out.sink,
+      error: original.err.sink,
+    }),
+  ).toBe(0);
+  expect(original.out.text()).toContain('/libs/shared/');
 });

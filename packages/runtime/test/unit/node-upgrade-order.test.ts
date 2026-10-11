@@ -9,8 +9,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRequest, IResponse, WebSocketUpgradeRouter } from '@setu-ts/common';
 import { NodeHttpAdapter, type NodeServeHost } from '../../src/adapters/node/node-http-adapter.ts';
 

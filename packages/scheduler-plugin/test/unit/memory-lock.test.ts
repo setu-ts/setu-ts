@@ -1,8 +1,7 @@
 /**
  * Tests for MemoryLock.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryLock } from '../../src/lock/memory-lock.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
 import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -397,7 +396,7 @@ describe('MessagingPlugin', () => {
     expect(memoryResult.data).toEqual({ broker: 'memory', reachable: true });
   });
 
-  it.ignore('redis-streams uses custom URL', async () => {
+  it.skip('redis-streams uses custom URL', async () => {
     // Skip this test as it requires ioredis npm package which needs env access
   });
 

@@ -1,3 +1,11 @@
+import { connect } from '../../../../test/node-helpers.ts';
+import {
+  denoBinary,
+  run as runProcess,
+  spawnProcess,
+  tempDir,
+} from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The three-service gate: a workspace bigger than a pair, on a chosen transport,
  * with DI and decorators reached through the CLI alone.
@@ -11,16 +19,15 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { bootAndProbe, unusedPort, useWorkspacePackages } from '../fixtures/generated-project.ts';
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /** The three services every case in this file scaffolds. */
@@ -115,7 +122,7 @@ Deno.exit(0);
 async function redisReachable(url: string): Promise<boolean> {
   const { hostname, port } = new URL(url);
   try {
-    const conn = await Deno.connect({ hostname, port: Number(port) });
+    const conn = await connect({ hostname, port: Number(port) });
     conn.close();
     return true;
   } catch {
@@ -124,7 +131,7 @@ async function redisReachable(url: string): Promise<boolean> {
 }
 
 /** Where the broker proof looks for a Redis, matching the transport default. */
-const REDIS_URL = Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379';
+const REDIS_URL = process.env['REDIS_URL'] ?? 'redis://127.0.0.1:6379';
 
 /**
  * The probe for a broker workspace: publish from one service, receive in another.
@@ -179,13 +186,13 @@ describe('a three-service workspace — end to end', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-mesh-' });
-    base = unusedPort();
+    root = await tempDir({ prefix: 'setu-mesh-' });
+    base = await unusedPort();
     log.length = 0;
   });
 
   afterEach(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   /**
@@ -218,7 +225,7 @@ describe('a three-service workspace — end to end', () => {
   it('gives every member the address of every OTHER member', async () => {
     const ws = await mesh('http');
 
-    const manifest = JSON.parse(await Deno.readTextFile(`${ws}/${WORKSPACE_MANIFEST}`)) as {
+    const manifest = JSON.parse(await nodeFs.readFile(`${ws}/${WORKSPACE_MANIFEST}`, 'utf8')) as {
       members: { name: string; port: number }[];
     };
     // `healthProbes: true` — all three are generated with a template, so the
@@ -232,7 +239,7 @@ describe('a three-service workspace — end to end', () => {
     // The full mesh: 3 members × 2 peers. A map that was appended to rather than
     // regenerated would leave `orders` knowing only `billing`.
     for (const [index, member] of MEMBERS.entries()) {
-      const map = await Deno.readTextFile(`${ws}/apps/${member}/${DISCOVERY_MODULE}`);
+      const map = await nodeFs.readFile(`${ws}/apps/${member}/${DISCOVERY_MODULE}`, 'utf8');
       expect(map).toContain(`export const SERVICE_PORT = ${base + index};`);
       for (const [peerIndex, peer] of MEMBERS.entries()) {
         if (peer === member) {
@@ -254,12 +261,12 @@ describe('a three-service workspace — end to end', () => {
       `${ws}/apps/${m}/setu.config.ts`,
       `${ws}/apps/${m}/${DISCOVERY_MODULE}`,
     ]);
-    const { code, stderr } = await new Deno.Command(Deno.execPath(), {
+    const { code, stderr } = await runProcess(denoBinary(), {
       args: ['check', '--node-modules-dir=none', ...sources],
       cwd: ws,
       stdout: 'piped',
       stderr: 'piped',
-    }).output().then((r) => ({ code: r.code, stderr: new TextDecoder().decode(r.stderr) }));
+    }).then((r) => ({ code: r.code, stderr: new TextDecoder().decode(r.stderr) }));
 
     // The broker literal is an opaque string to the CLI's own type-checker;
     // this is the only place a wrong discriminant or field is caught.
@@ -272,12 +279,12 @@ describe('a three-service workspace — end to end', () => {
     await useWorkspace(ws);
 
     const servers = ['billing', 'shipping'].map((member) =>
-      new Deno.Command(Deno.execPath(), {
+      spawnProcess(denoBinary(), {
         args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
         cwd: `${ws}/apps/${member}`,
         stdout: 'piped',
         stderr: 'piped',
-      }).spawn()
+      })
     );
 
     try {
@@ -324,8 +331,8 @@ describe('a three-service workspace — end to end', () => {
           // Already gone; its status and streams still need draining below.
         }
         await server.status;
-        await server.stdout.cancel();
-        await server.stderr.cancel();
+        await server.stdout!.cancel();
+        await server.stderr!.cancel();
       }
     }
   });
@@ -335,12 +342,12 @@ describe('a three-service workspace — end to end', () => {
     await useWorkspace(ws);
 
     const servers = ['billing', 'shipping'].map((member) =>
-      new Deno.Command(Deno.execPath(), {
+      spawnProcess(denoBinary(), {
         args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
         cwd: `${ws}/apps/${member}`,
         stdout: 'piped',
         stderr: 'piped',
-      }).spawn()
+      })
     );
 
     try {
@@ -365,26 +372,25 @@ describe('a three-service workspace — end to end', () => {
           // Already gone.
         }
         await server.status;
-        await server.stdout.cancel();
-        await server.stderr.cancel();
+        await server.stdout!.cancel();
+        await server.stderr!.cancel();
       }
     }
   });
 
   // The transport that actually leaves the process. Guarded on a live Redis and
   // reported when absent, never silently skipped as a pass.
-  it('delivers a message from one service to another over the redis broker', async () => {
+  it('delivers a message from one service to another over the redis broker', async (context) => {
     if (!(await redisReachable(REDIS_URL))) {
-      console.log(`SKIPPED: no Redis at ${REDIS_URL}`);
-      return;
+      context.skip('Redis backend is unavailable');
     }
 
     const ws = await mesh('redis');
     await useWorkspace(ws);
 
     // The subscriber runs first and stays up while the publisher fires.
-    await Deno.writeTextFile(`${ws}/apps/billing/subscriber.ts`, BROKER_SUBSCRIBE_PROBE);
-    const subscriber = new Deno.Command(Deno.execPath(), {
+    await nodeFs.writeFile(`${ws}/apps/billing/subscriber.ts`, BROKER_SUBSCRIBE_PROBE);
+    const subscriber = spawnProcess(denoBinary(), {
       args: [
         'run',
         '-A',
@@ -396,7 +402,7 @@ describe('a three-service workspace — end to end', () => {
       cwd: `${ws}/apps/billing`,
       stdout: 'piped',
       stderr: 'piped',
-    }).spawn();
+    });
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -430,13 +436,13 @@ describe('a three-service workspace — end to end', () => {
     for (const member of MEMBERS) {
       const dir = `${ws}/apps/${member}`;
       for (const file of ['deno.json', 'main.ts', 'setu.config.ts', 'README.md', '.gitignore']) {
-        expect((await Deno.stat(`${dir}/${file}`)).isFile).toBe(true);
+        expect((await nodeFs.stat(`${dir}/${file}`)).isFile()).toBe(true);
       }
       // Functional members have only the seams their composition can consume.
       for (const seam of ['controllers', 'middleware', 'plugins']) {
-        expect((await Deno.stat(`${dir}/src/${seam}/index.ts`)).isFile).toBe(true);
+        expect((await nodeFs.stat(`${dir}/src/${seam}/index.ts`)).isFile()).toBe(true);
       }
-      expect((await Deno.stat(`${dir}/${DISCOVERY_MODULE}`)).isFile).toBe(true);
+      expect((await nodeFs.stat(`${dir}/${DISCOVERY_MODULE}`)).isFile()).toBe(true);
     }
   });
 
@@ -457,12 +463,12 @@ describe('a three-service workspace — end to end', () => {
 
     // The container is registered (since M70d with `autoRegister: true`, E3),
     // and the decorated artifacts are wired.
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     expect(config).toContain('DiPlugin({ autoRegister: true })');
     expect(config).toContain('DecoratorPlugin(');
 
     await useWorkspacePackages(project);
-    const { code, stderr } = await new Deno.Command(Deno.execPath(), {
+    const { code, stderr } = await runProcess(denoBinary(), {
       args: [
         'check',
         '--node-modules-dir=none',
@@ -476,7 +482,7 @@ describe('a three-service workspace — end to end', () => {
       ],
       stdout: 'piped',
       stderr: 'piped',
-    }).output().then((r) => ({ code: r.code, stderr: new TextDecoder().decode(r.stderr) }));
+    }).then((r) => ({ code: r.code, stderr: new TextDecoder().decode(r.stderr) }));
     expect(stderr).not.toContain('SyntaxError');
     expect(code).toBe(0);
 

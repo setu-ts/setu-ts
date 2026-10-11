@@ -2,8 +2,7 @@
  * M106 §3.4 — every refusal, every bound, the copy-once rule, the reserved
  * tables and the no-value-echo rule. Assertions fail if the validator is wrong.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RESERVED_HEADER_NAMES, RESERVED_HEADER_PREFIXES } from '@setu-ts/common';
 import {
   buildTransportHeaders,
@@ -351,5 +350,32 @@ describe('buildTransportHeaders', () => {
     const validated = await validatePublishOptions({ orderingKey: 'k' });
     buildTransportHeaders(validated, { traceparent: 'tp' });
     expect(Object.keys(validated.headers)).toHaveLength(0);
+  });
+});
+
+describe('framework transport-header own keys across runtimes', () => {
+  it('preserves hostile own data keys, excludes inherited keys, and retains framework precedence', () => {
+    const framework = Object.assign(
+      Object.create({ inherited: 'never-copy' }),
+      Object.fromEntries([
+        ['__proto__', 'safe'],
+        ['constructor', 'ctor'],
+        ['prototype', 'proto'],
+        ['traceparent', 'framework'],
+      ]),
+    ) as Record<string, string>;
+    // Object.assign itself has host-dependent __proto__ behavior; create the
+    // hostile own property explicitly in the input fixture.
+    Object.defineProperty(framework, '__proto__', { value: 'safe', enumerable: true });
+    const wire = buildTransportHeaders({ headers: { traceparent: 'caller' } }, framework);
+    expect(Object.getPrototypeOf(wire)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(wire, '__proto__')?.value).toBe('safe');
+    expect(Object.entries(wire)).toEqual(
+      expect.arrayContaining([['constructor', 'ctor'], ['prototype', 'proto'], [
+        'traceparent',
+        'framework',
+      ]]),
+    );
+    expect(Object.hasOwn(wire, 'inherited')).toBe(false);
   });
 });

@@ -1,15 +1,14 @@
 /** Real Redis recovery through a kernel app + MessagingPlugin, not an injected fake. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { Redis } from 'npm:ioredis@5.x';
+import { describe, expect, it } from 'vitest';
+import { Redis } from 'ioredis';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, MessageHandler } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { MessagingPlugin } from '../../src/index.ts';
 
-const redisUrl = Deno.env.get('REDIS_URL');
-const guard = { ignore: redisUrl === undefined };
+const redisUrl = process.env['REDIS_URL'];
+const guard = { skip: redisUrl === undefined };
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 async function until(check: () => boolean | Promise<boolean>): Promise<boolean> {
   const deadline = performance.now() + 2500;

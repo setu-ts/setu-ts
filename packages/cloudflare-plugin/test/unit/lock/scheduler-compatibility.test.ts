@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * Pins the structural-compatibility claim.
  *
@@ -12,8 +21,7 @@
  * itself — it does not type-check if the shapes diverge.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 import type { IRuntimeServices } from '@setu-ts/common';
 

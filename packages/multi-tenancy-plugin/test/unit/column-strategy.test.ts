@@ -1,8 +1,7 @@
 /**
  * ColumnPerTenant strategy tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { ColumnPerTenant } from '../../src/strategies/column-strategy.ts';
 
 describe('column strategy', () => {

@@ -1,3 +1,4 @@
+import { upgradeResponse } from '../../../../test/node-helpers.ts';
 /**
  * cf-upgrade-order — Framework handler invoked before the handshake;
  * a 401 returns with no handshake attempted.
@@ -9,8 +10,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   IRequest,
   IResponse,
@@ -59,7 +59,7 @@ function fakeWsHost(): CloudflareWebSocketHost {
       client: clientSocket,
       server: serverSocket,
     }),
-    createUpgradeResponse: (_client, _protocol) => new Response(null, { status: 101 }),
+    createUpgradeResponse: (_client, _protocol) => upgradeResponse(null, { status: 101 }),
   };
 }
 

@@ -1,10 +1,18 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The produce half: what reaches the platform, what the subscription table
  * records, and how the two RPC methods refuse when the `rpc` arm is absent.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { MessageMetadata } from '@setu-ts/common';
 import { MAX_PUBLISH_HEADERS } from '@setu-ts/common';
 

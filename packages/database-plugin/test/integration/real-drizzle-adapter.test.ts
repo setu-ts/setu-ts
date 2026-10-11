@@ -7,36 +7,17 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
+import { describe, expect, it } from 'vitest';
 import { conditionalContract } from '../fixtures/conditional-contract.ts';
-import { expect } from '@std/expect';
-import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
-import { integer, pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
-import { drizzle as nodePostgresDrizzle } from 'npm:drizzle-orm@0.45.2/node-postgres';
-import { Pool } from 'npm:pg@^8.0.0';
-import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
-import {
-  integer as sqliteInteger,
-  sqliteTable,
-  text as sqliteText,
-} from 'npm:drizzle-orm@0.45.2/sqlite-core';
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  gt,
-  gte,
-  inArray,
-  isNull,
-  lt,
-  lte,
-  or,
-  sql,
-} from 'npm:drizzle-orm@0.45.2';
-import { drizzle as mysqlDrizzle } from 'npm:drizzle-orm@0.45.2/mysql-proxy';
-import { mysqlTable, text as mysqlText } from 'npm:drizzle-orm@0.45.2/mysql-core';
+import { drizzle } from 'drizzle-orm/pg-proxy';
+import { integer, pgTable, text } from 'drizzle-orm/pg-core';
+import { drizzle as nodePostgresDrizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import { drizzle as sqliteDrizzle } from 'drizzle-orm/sqlite-proxy';
+import { integer as sqliteInteger, sqliteTable, text as sqliteText } from 'drizzle-orm/sqlite-core';
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { drizzle as mysqlDrizzle } from 'drizzle-orm/mysql-proxy';
+import { mysqlTable, text as mysqlText } from 'drizzle-orm/mysql-core';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
 import {
@@ -815,7 +796,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
 // unset variable is reported as IGNORED (the M70c trap).
 // ---------------------------------------------------------------------------
 
-const livePgUrl = Deno.env.get('POSTGRES_URL');
+const livePgUrl = process.env['POSTGRES_URL'];
 const skipLivePg = livePgUrl === undefined;
 
 /** The one-row table the two live cases drive. Dropped on teardown. */
@@ -838,7 +819,7 @@ const pgMembers = pgTable(pgMembersTable, {
 describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
   it(
     'M105 conditional writes persist matches and leave misses unchanged, including in transactions',
-    { ignore: skipLivePg },
+    { skip: skipLivePg },
     async () => {
       const tableName = `m105_${crypto.randomUUID().replaceAll('-', '')}`;
       const table = pgTable(tableName, {
@@ -888,7 +869,7 @@ describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
     },
   );
   it('a duplicate primary key or unique column reaches the caller as DuplicateKeyError', {
-    ignore: skipLivePg,
+    skip: skipLivePg,
   }, async () => {
     const pool = new Pool({ connectionString: livePgUrl!, max: 2 });
     const adapter = new DrizzleAdapter({
@@ -938,7 +919,7 @@ describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
 
 describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35-2)', () => {
   it('a real SERIALIZABLE conflict reaches the caller as SerializationConflictError', {
-    ignore: skipLivePg,
+    skip: skipLivePg,
   }, async () => {
     const pool = new Pool({ connectionString: livePgUrl!, max: 5 });
     const db = nodePostgresDrizzle(pool);
@@ -1010,7 +991,7 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
     }
   });
 
-  it('an exhausted pool answers DatabaseUnavailableError', { ignore: skipLivePg }, async () => {
+  it('an exhausted pool answers DatabaseUnavailableError', { skip: skipLivePg }, async () => {
     // X35-2: the application owns the pool, so the case is produced by a
     // bounded `connectionTimeoutMillis` exhausted by a held connection — the
     // exact shape a saturated deployment presents.
@@ -1104,7 +1085,7 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
   }
 
   it('a saturated real pool still completing queries keeps /ready at 200 (M101a V8-3)', {
-    ignore: skipLivePg,
+    skip: skipLivePg,
   }, async () => {
     // Every connection held and a caller queued behind them: the shape that
     // used to queue the probe too, time it out at the 2 s bound and fail
@@ -1122,7 +1103,7 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
   });
 
   it('a full real pool that has completed no query reads degraded (M101a V8-3)', {
-    ignore: skipLivePg,
+    skip: skipLivePg,
   }, async () => {
     // The same capacity snapshot a hung database presents: nothing finishes,
     // so the indicator must not call it saturation.

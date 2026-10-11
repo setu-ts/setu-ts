@@ -1,3 +1,5 @@
+import { denoBinary, spawnProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The gate for the generated workspace dev runner.
  *
@@ -16,8 +18,7 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { workspaceDevRunner } from '../../src/workspace/dev-runner.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
@@ -26,11 +27,11 @@ import { unusedPort } from '../fixtures/generated-project.ts';
 let root = '';
 
 beforeEach(async () => {
-  root = await Deno.makeTempDir({ prefix: 'setu-dev-runner-' });
+  root = await tempDir({ prefix: 'setu-dev-runner-' });
 });
 
 afterEach(async () => {
-  await Deno.remove(root, { recursive: true }).catch(() => {});
+  await nodeFs.rm(root, { recursive: true }).catch(() => {});
 });
 
 /** One workspace member, described the way the manifest describes it. */
@@ -51,32 +52,32 @@ interface Member {
  * @param ordersDelayMs - How long `orders` waits before it binds
  */
 async function writeWorkspace(members: readonly Member[], ordersDelayMs: number): Promise<void> {
-  await Deno.writeTextFile(
+  await nodeFs.writeFile(
     `${root}/setu.workspace.json`,
     JSON.stringify({ version: 1, basePort: members[0].port, runtime: 'deno', members }, null, 2),
   );
-  await Deno.mkdir(`${root}/scripts`, { recursive: true });
+  await nodeFs.mkdir(`${root}/scripts`, { recursive: true });
   const runner = workspaceDevRunner(workspaceProfile('deno'));
-  await Deno.writeTextFile(`${root}/${runner.path}`, runner.contents);
+  await nodeFs.writeFile(`${root}/${runner.path}`, runner.contents);
 
   const orders = members.find((member) => member.name === 'orders')!;
   const billing = members.find((member) => member.name === 'billing')!;
 
   for (const member of members) {
-    await Deno.mkdir(`${root}/apps/${member.name}`, { recursive: true });
-    await Deno.writeTextFile(
+    await nodeFs.mkdir(`${root}/apps/${member.name}`, { recursive: true });
+    await nodeFs.writeFile(
       `${root}/apps/${member.name}/deno.json`,
       JSON.stringify({ tasks: { start: 'deno run --allow-net --allow-write server.ts' } }),
     );
   }
 
-  await Deno.writeTextFile(
+  await nodeFs.writeFile(
     `${root}/apps/orders/server.ts`,
     `await new Promise((resolve) => setTimeout(resolve, ${ordersDelayMs}));\n` +
       `Deno.serve({ port: ${orders.port}, onListen: () => {} }, () => new Response('ok'));\n`,
   );
   // The observation: was the prerequisite already answering when this started?
-  await Deno.writeTextFile(
+  await nodeFs.writeFile(
     `${root}/apps/billing/server.ts`,
     `const ready = await fetch('http://127.0.0.1:${orders.port}/ready')\n` +
       `  .then((response) => response.ok)\n` +
@@ -97,7 +98,7 @@ async function writeWorkspace(members: readonly Member[], ordersDelayMs: number)
  * @returns Its combined output
  */
 async function runRunner(timeoutMs: number): Promise<string> {
-  const child = new Deno.Command(Deno.execPath(), {
+  const child = spawnProcess(denoBinary(), {
     // The root `dev` task's own grant, widened in M98c with the scoped
     // --allow-env the runner reads the launcher's variables through.
     args: [
@@ -112,7 +113,7 @@ async function runRunner(timeoutMs: number): Promise<string> {
     cwd: root,
     stdout: 'piped',
     stderr: 'piped',
-  }).spawn();
+  });
 
   const collected = child.output();
   const deadline = performance.now() + timeoutMs;
@@ -137,13 +138,13 @@ async function runRunner(timeoutMs: number): Promise<string> {
  * @returns The recorded observation, or undefined when it never started
  */
 async function observed(): Promise<string | undefined> {
-  return await Deno.readTextFile(`${root}/observed.txt`).catch(() => undefined);
+  return await nodeFs.readFile(`${root}/observed.txt`, 'utf8').catch(() => undefined);
 }
 
 describe('the generated dev runner, executed', () => {
   it('starts a dependent only after its prerequisite answers /ready', async () => {
-    const orders = unusedPort();
-    const billing = unusedPort();
+    const orders = await unusedPort();
+    const billing = await unusedPort();
     await writeWorkspace(
       [{ name: 'orders', port: orders }, { name: 'billing', port: billing, dependsOn: ['orders'] }],
       2000,
@@ -160,8 +161,8 @@ describe('the generated dev runner, executed', () => {
     // Same fixtures, same delay, `dependsOn` removed. If this also reported
     // `true`, the assertion above would be measuring the fixture rather than
     // the readiness gate.
-    const orders = unusedPort();
-    const billing = unusedPort();
+    const orders = await unusedPort();
+    const billing = await unusedPort();
     await writeWorkspace(
       [{ name: 'orders', port: orders }, { name: 'billing', port: billing }],
       2000,
@@ -173,8 +174,8 @@ describe('the generated dev runner, executed', () => {
   });
 
   it('names a dependency cycle instead of recursing forever', async () => {
-    const orders = unusedPort();
-    const billing = unusedPort();
+    const orders = await unusedPort();
+    const billing = await unusedPort();
     await writeWorkspace(
       [
         { name: 'orders', port: orders, dependsOn: ['billing'] },
@@ -196,8 +197,8 @@ describe('the generated dev runner, executed', () => {
     // The failure path the plan called for and never exercised: `orders` is
     // configured to bind long after the runner's 30s readiness deadline, so the
     // dependent must never start and the runner must say which service stalled.
-    const orders = unusedPort();
-    const billing = unusedPort();
+    const orders = await unusedPort();
+    const billing = await unusedPort();
     await writeWorkspace(
       [{ name: 'orders', port: orders }, { name: 'billing', port: billing, dependsOn: ['orders'] }],
       60_000,
@@ -222,10 +223,10 @@ describe('the generated dev runner, executed', () => {
  */
 async function writeDevtoolWorkspace(
   devtoolPort: number,
-): Promise<{ orders: number; billing: number }> {
-  const orders = unusedPort();
-  const billing = unusedPort();
-  await Deno.writeTextFile(
+): Promise<Promise<{ orders: number; billing: number }>> {
+  const orders = await unusedPort();
+  const billing = await unusedPort();
+  await nodeFs.writeFile(
     `${root}/setu.workspace.json`,
     JSON.stringify(
       {
@@ -241,9 +242,9 @@ async function writeDevtoolWorkspace(
       2,
     ),
   );
-  await Deno.mkdir(`${root}/scripts`, { recursive: true });
+  await nodeFs.mkdir(`${root}/scripts`, { recursive: true });
   const runner = workspaceDevRunner(workspaceProfile('deno'));
-  await Deno.writeTextFile(`${root}/${runner.path}`, runner.contents);
+  await nodeFs.writeFile(`${root}/${runner.path}`, runner.contents);
 
   // Records the environment AS RECEIVED and binds the member's own port.
   const recorder = (member: string, port: number, extraEnv = '') =>
@@ -257,10 +258,10 @@ await Deno.serve({ port: ${port}, onListen: () => {} }, () => new Response('ok')
 ${extraEnv}`;
 
   for (const member of ['orders', 'billing']) {
-    await Deno.mkdir(`${root}/apps/${member}`, { recursive: true });
+    await nodeFs.mkdir(`${root}/apps/${member}`, { recursive: true });
     // BOTH members carry both tasks: `dev` for the selected member, `start`
     // for everyone else — which is the observable under test.
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${root}/apps/${member}/deno.json`,
       JSON.stringify({
         tasks: {
@@ -269,11 +270,11 @@ ${extraEnv}`;
         },
       }),
     );
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${root}/apps/${member}/start-${member}.ts`,
       recorder(member, member === 'orders' ? orders : billing),
     );
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${root}/apps/${member}/dev-${member}.ts`,
       recorder(member, member === 'orders' ? orders : billing),
     );
@@ -283,7 +284,7 @@ ${extraEnv}`;
 
 /** Reads what one member recorded about the environment it was handed. */
 async function observedEnv(member: string): Promise<Record<string, string> | undefined> {
-  const text = await Deno.readTextFile(`${root}/${member}.env.json`).catch(() => undefined);
+  const text = await nodeFs.readFile(`${root}/${member}.env.json`, 'utf8').catch(() => undefined);
   return text === undefined ? undefined : JSON.parse(text) as Record<string, string>;
 }
 
@@ -293,7 +294,7 @@ async function runRunnerWithEnv(
   env: Record<string, string>,
   timeoutMs = 20_000,
 ): Promise<void> {
-  const child = new Deno.Command(Deno.execPath(), {
+  const child = spawnProcess(denoBinary(), {
     args: [
       'run',
       '--allow-read',
@@ -308,7 +309,7 @@ async function runRunnerWithEnv(
     stdin: 'null',
     stdout: 'piped',
     stderr: 'piped',
-  }).spawn();
+  });
   const deadline = performance.now() + timeoutMs;
   try {
     while (performance.now() < deadline) {
@@ -336,7 +337,7 @@ describe('the generated dev runner, forwarding the devtool environment', () => {
   const SESSION_KEY = 'c'.repeat(64);
 
   it('hands the pair to the named member alone and blanks it for every sibling', async () => {
-    const devtoolPort = unusedPort();
+    const devtoolPort = await unusedPort();
     const ports = await writeDevtoolWorkspace(devtoolPort);
     await runRunnerWithEnv([ports.orders, ports.billing], {
       SETU_DEVTOOL_MEMBER: 'orders',
@@ -359,7 +360,7 @@ describe('the generated dev runner, forwarding the devtool environment', () => {
   });
 
   it('runs every member on start with no devtool variables set — the no-launcher case', async () => {
-    const devtoolPort = unusedPort();
+    const devtoolPort = await unusedPort();
     const ports = await writeDevtoolWorkspace(devtoolPort);
     // `deno task dev` with no devtool variables: the pre-devtool behavior.
     await runRunnerWithEnv([ports.orders, ports.billing], {});
@@ -374,9 +375,9 @@ describe('the generated dev runner, forwarding the devtool environment', () => {
   });
 
   it('refuses a SETU_DEVTOOL_MEMBER the manifest does not carry, before spawning', async () => {
-    const devtoolPort = unusedPort();
+    const devtoolPort = await unusedPort();
     await writeDevtoolWorkspace(devtoolPort);
-    const child = new Deno.Command(Deno.execPath(), {
+    const child = spawnProcess(denoBinary(), {
       args: [
         'run',
         '--allow-read',
@@ -395,7 +396,7 @@ describe('the generated dev runner, forwarding the devtool environment', () => {
       stdin: 'null',
       stdout: 'piped',
       stderr: 'piped',
-    }).spawn();
+    });
     const { code, stderr } = await child.output();
     const decoder = new TextDecoder();
     expect(code).not.toBe(0);

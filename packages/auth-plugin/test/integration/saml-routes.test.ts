@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { afterEach, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   ACS_URL,

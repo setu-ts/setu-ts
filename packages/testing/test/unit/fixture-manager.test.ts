@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { FixtureManager } from '../../src/fixtures/fixture-manager.ts';
 import { createMockPlugin } from '../../src/mock-plugin.ts';
 

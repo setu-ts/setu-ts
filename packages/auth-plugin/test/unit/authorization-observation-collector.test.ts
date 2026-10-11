@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IPrincipal, IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
 import {
   AuthorizationObservationCollector,
@@ -637,4 +636,33 @@ describe('AuthorizationObservationCollector (M98h)', () => {
     attachAuthorizationObserver(rbac, collector);
     expect(rbac.hasRole(admin, 'admin')).toBe(true);
   });
+});
+
+it('drops unapproved observer rules and erases an unmapped intermediate role', () => {
+  const { collector } = makeCollector();
+  collector.onRole('unknown', false, 'not-held', null);
+  collector.onPermission('unknown', false, 'not-held', null);
+  collector.onAnyRole(['unknown'], [], 0, false);
+  collector.onAllPermissions(['unknown'], [], 0, false);
+  collector.onRole('admin', true, 'direct-role', 'unmapped');
+  collector.onPermission('posts.read', true, 'role-permission', 'unmapped');
+  const batch = collector.read('instance', 0);
+  expect(batch.decisions).toHaveLength(2);
+  expect(batch.decisions.every((decision) => decision.viaRoleAlias === undefined)).toBe(true);
+  expect(JSON.stringify(batch)).not.toContain('unknown');
+  expect(JSON.stringify(batch)).not.toContain('unmapped');
+});
+
+it('ignores every observer callback after close or a provider-replacement latch', () => {
+  for (const replaced of [false, true]) {
+    const { collector } = makeCollector(makeRegistry(replaced ? false : true));
+    if (!replaced) collector.close();
+    for (let i = 0; i < 2; i++) {
+      collector.onRole('admin', true, 'direct-role', null);
+      collector.onPermission('posts.read', true, 'role-permission', 'admin');
+      collector.onAnyRole(['admin'], [], 0, true);
+      collector.onAllPermissions(['posts.read'], [], 0, true);
+    }
+    expect(collector.read('instance', 0).decisions).toEqual([]);
+  }
 });

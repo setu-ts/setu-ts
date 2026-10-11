@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RESPONSE_METADATA, responseMetadataOf, withResponseMetadata } from '../../src/index.ts';
 import type { HandlerResult, IRequestContext, RouteHandler } from '../../src/index.ts';
 

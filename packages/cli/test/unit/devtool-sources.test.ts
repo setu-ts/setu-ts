@@ -1,6 +1,6 @@
+import * as nodeFs from 'node:fs/promises';
 /** Source policies and conservative upgrades consume the actual exported option types. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { DEVTOOL_SOURCES } from '../fixtures/devtool-source-shapes.ts';
 import {
@@ -43,8 +43,9 @@ const signature = `export function createApp(
 describe('development source policies', () => {
   it('emits every supported option against its exported type', async () => {
     const emitted = renderDevtoolSources(packages, { project: 'shop', authorization: true });
-    const fixture = await Deno.readTextFile(
+    const fixture = await nodeFs.readFile(
       new URL('../fixtures/devtool-source-shapes.ts', import.meta.url),
+      'utf8',
     );
     const normalized = (text: string) => text.replace(/,\s*}/g, '}').replace(/\s/g, '');
     expect(normalized(emitted.contents)).toBe(normalized(fixture));
@@ -380,7 +381,7 @@ describe('development source policies', () => {
   // outside that language and must be refused, not parsed.
   it('lists exactly the workspace packages as framework packages', async () => {
     const root = JSON.parse(
-      await Deno.readTextFile(new URL('../../../../deno.json', import.meta.url)),
+      await nodeFs.readFile(new URL('../../../../deno.json', import.meta.url), 'utf8'),
     ) as { workspace: string[] };
     const members = root.workspace.map((path) => path.split('/').at(-1)!).sort();
     expect([...FRAMEWORK_PACKAGES].sort()).toEqual(members);
@@ -606,8 +607,9 @@ describe('development source policies', () => {
   });
 
   it('keeps the committed absent-row fixture in step with the renderer', async () => {
-    const fixture = await Deno.readTextFile(
+    const fixture = await nodeFs.readFile(
       new URL('../fixtures/devtool-sources-absent.ts', import.meta.url),
+      'utf8',
     );
     expect(fixture).toBe(
       renderDevtoolSources(new Set(['cache-plugin']), { project: 'shop' }).contents,

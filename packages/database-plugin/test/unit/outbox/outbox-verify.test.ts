@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { EntityKey, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES, OUTBOX_RECORD_KIND } from '@setu-ts/common';
 import { UnsupportedQueryFeatureError } from '../../../src/errors.ts';

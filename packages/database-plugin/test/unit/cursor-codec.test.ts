@@ -15,8 +15,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { keysetPredicate } from '@setu-ts/common';
 import type { FilterExpression } from '@setu-ts/common';
 import { matchesFilter } from '../../src/query/query-builder.ts';

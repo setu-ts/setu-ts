@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { ConfigProvider } from '../../src/providers/config-provider.ts';
 import type { FlagDefinition } from '../../src/interfaces/index.ts';
 

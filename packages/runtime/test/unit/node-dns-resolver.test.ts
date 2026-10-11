@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createNodeDnsResolver } from '../../src/adapters/shared/node-dns-resolver.ts';
 import type { NodeDnsModule } from '../../src/adapters/shared/node-dns-resolver.ts';

@@ -10,8 +10,7 @@
  *
  * @module
  */
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
 import type { TracerHost } from '../../src/interfaces/index.ts';
 import {
@@ -21,9 +20,9 @@ import {
 import { buildTracerHost, setOtelApi } from '../../src/tracing/tracer.ts';
 import type { OtelResourcesModule, OtelSdkModule } from '../../src/tracing/tracer.ts';
 
-import * as api from 'npm:@opentelemetry/api@^1.9.0';
-import * as sdk from 'npm:@opentelemetry/sdk-trace-base@^2.9.0';
-import * as resources from 'npm:@opentelemetry/resources@^2.9.0';
+import * as api from '@opentelemetry/api';
+import * as sdk from '@opentelemetry/sdk-trace-base';
+import * as resources from '@opentelemetry/resources';
 
 /** A finished span as the in-memory exporter reports it (SDK 2.x shape). */
 interface FinishedSpan {

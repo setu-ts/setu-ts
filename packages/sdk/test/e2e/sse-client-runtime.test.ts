@@ -1,20 +1,17 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /** Real-server SSE client exercise. */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createSseClient } from '../../src/realtime/sse-client.ts';
 import { createRealtimeClientApp } from '../../../../apps/realtime-clients/src/app.ts';
 
-function freePort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr as Deno.NetAddr;
-  listener.close();
-  return address.port;
+function freePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 describe('createSseClient (e2e)', () => {
   it('sends bearer credentials, filters heartbeats, and resumes after a cut stream', async () => {
-    const port = freePort();
+    const port = await freePort();
     const app = createRealtimeClientApp();
     await app.start({ port });
     const events: Array<{ readonly id?: string }> = [];

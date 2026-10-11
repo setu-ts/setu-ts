@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { rootManifestSettings } from '../../src/templates/root-settings.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';

@@ -1,8 +1,8 @@
 /** Real process-boundary fixture: pause after the seventeenth real write. */
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { denoProcess, runMain } from '../../src/main.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs = runtime.fs!;
 let writes = 0;
 const slowed = {

@@ -20,8 +20,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import process from 'node:process';
 
 import { createDenoRuntimeServices } from '../../src/adapters/deno/deno-runtime.ts';
@@ -29,9 +28,9 @@ import { buildNodeHost } from '../../src/adapters/node/node-runtime.ts';
 import { buildBunHost } from '../../src/adapters/bun/bun-runtime.ts';
 import { createCloudflareRuntimeServices } from '../../src/adapters/workers/cf-runtime.ts';
 
-const onWindows = Deno.build.os === 'windows';
+const onWindows = process.platform === 'win32';
 
-describe('signal-real | Deno default host', () => {
+describe('signal-real | Deno default host', { skip: typeof Deno === 'undefined' }, () => {
   it('constructs without injection and exposes onSignal off-Windows', () => {
     // Constructing at all is half the assertion: the factory reads
     // `host.build.os`, so a default host missing `build` would throw a bare
@@ -42,7 +41,7 @@ describe('signal-real | Deno default host', () => {
     expect(services.onSignal === undefined).toBe(onWindows);
   });
 
-  it('registers a REAL listener through Deno.addSignalListener', { ignore: onWindows }, () => {
+  it('registers a REAL listener through Deno.addSignalListener', { skip: onWindows }, () => {
     const services = createDenoRuntimeServices();
     const handler = () => {};
 

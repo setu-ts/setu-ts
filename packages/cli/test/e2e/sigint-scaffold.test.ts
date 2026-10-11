@@ -1,19 +1,21 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { spawnProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from '../../src/cli.ts';
 
 describe(
-  { name: 'real SIGINT during scaffold writes', ignore: Deno.build.os === 'windows' },
+  'real SIGINT during scaffold writes',
+  { skip: process.platform === 'win32' },
   () => {
     for (const mode of ['handled', 'unhandled'] as const) {
       it(`${mode} signal ${mode === 'handled' ? 'rolls back' : 'leaves partial files'}`, async () => {
-        await Deno.mkdir('.tmp', { recursive: true });
-        const root = await Deno.makeTempDir({
-          dir: await Deno.realPath('.tmp'),
+        await nodeFs.mkdir('.tmp', { recursive: true });
+        const root = await tempDir({
+          dir: await nodeFs.realpath('.tmp'),
           prefix: 'sigint-',
         });
-        const child = new Deno.Command('deno', {
+        const child = spawnProcess('deno', {
           args: [
             'run',
             '-A',
@@ -23,12 +25,12 @@ describe(
           ],
           stdout: 'piped',
           stderr: 'piped',
-        }).spawn();
+        });
         const stderr = new Response(child.stderr).text();
         const stdout = (async () => {
           let text = '';
           const decoder = new TextDecoder();
-          for await (const chunk of child.stdout) {
+          for await (const chunk of child.stdout!) {
             text += decoder.decode(chunk, { stream: true });
             if (text.includes('WRITE17')) child.kill('SIGINT');
           }
@@ -46,26 +48,26 @@ describe(
             expect(status.code).toBe(130);
             expect(status.signal).toBeNull();
             expect(errors).toContain('Interrupted; the files this run wrote were removed.');
-            await expect(Deno.stat(`${root}/app`)).rejects.toThrow();
+            await expect(nodeFs.stat(`${root}/app`)).rejects.toThrow();
             expect(
               await runCli(['new', 'app', '--template', 'full-stack'], {
-                fs: createDenoRuntimeServices().fs!,
+                fs: createNodeRuntimeServices().fs!,
                 cwd: root,
                 now: () => 0,
                 log: () => {},
                 error: () => {},
               }),
             ).toBe(0);
-            expect((await Deno.stat(`${root}/app/main.ts`)).isFile).toBe(true);
+            expect((await nodeFs.stat(`${root}/app/main.ts`)).isFile()).toBe(true);
           } else {
             expect(status.signal).toBe('SIGINT');
             expect(status.success).toBe(false);
-            expect((await Deno.stat(`${root}/app`)).isDirectory).toBe(true);
+            expect((await nodeFs.stat(`${root}/app`)).isDirectory()).toBe(true);
             expect(errors).not.toContain('Interrupted;');
           }
         } finally {
           clearTimeout(watchdog);
-          await Deno.remove(root, { recursive: true });
+          await nodeFs.rm(root, { recursive: true });
         }
       });
     }

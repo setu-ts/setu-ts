@@ -1,5 +1,6 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import * as nodeFsSync from 'node:fs';
+import * as nodeFs from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runDevtoolCommand } from '../../src/commands/devtool.ts';
@@ -99,8 +100,9 @@ describe('M101f lifecycle refusals and allocation', () => {
         dir: '/ws',
       }),
     ).toBe(0);
-    const legacy = await Deno.readTextFile(
+    const legacy = await nodeFs.readFile(
       new URL('../fixtures/dev-entry-0.8.0-member.txt', import.meta.url),
+      'utf8',
     );
     await fs.writeFile('/ws/apps/orders/main.dev.ts', new TextEncoder().encode(legacy));
     const log = createRecorder();
@@ -326,7 +328,10 @@ describe('M101f lifecycle refusals and allocation', () => {
     // composition probe — is what every existing member carries. The fixtures
     // are that release's renderer output, captured byte for byte.
     const fixture = (name: string) =>
-      Deno.readTextFileSync(new URL(`../fixtures/dev-entry-0.8.0-${name}.txt`, import.meta.url));
+      nodeFsSync.readFileSync(
+        new URL(`../fixtures/dev-entry-0.8.0-${name}.txt`, import.meta.url),
+        'utf8',
+      );
     expect(devEntryVariants(5123)).toContain(fixture('member'));
     expect(devEntryVariants(4919, false)).toContain(fixture('standalone'));
 

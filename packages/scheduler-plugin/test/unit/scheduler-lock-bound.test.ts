@@ -6,8 +6,7 @@
  * `lock-failed`, the schedule re-armed), and an acquire abandoned at the bound
  * that later returns a token has that exact token released.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ILogger } from '@setu-ts/common';
 
 import { SchedulerService } from '../../src/services/scheduler-service.ts';

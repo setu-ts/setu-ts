@@ -1,14 +1,13 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { Pool } from 'npm:pg@^8.0.0';
-import { drizzle } from 'npm:drizzle-orm@0.45.2/node-postgres';
-import { pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
+import { describe, expect, it } from 'vitest';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { pgTable, text } from 'drizzle-orm/pg-core';
 import { createDrizzleDatabase, DatabaseService, DrizzleAdapter } from '../../src/index.ts';
 import { DatabaseTenantDataStore } from '../../src/tenancy/database-tenant-data-store.ts';
-const url = Deno.env.get('POSTGRES_URL');
+const url = process.env['POSTGRES_URL'];
 describe('tenant conditional writes on real PostgreSQL', () => {
   it('a row recreated by tenant B refuses tenant A update and delete', {
-    ignore: url === undefined,
+    skip: url === undefined,
   }, async () => {
     const tableName = `m105_tenant_${crypto.randomUUID().replaceAll('-', '')}`;
     const table = pgTable(tableName, {

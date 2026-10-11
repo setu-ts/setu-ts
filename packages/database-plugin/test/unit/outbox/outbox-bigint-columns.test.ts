@@ -12,8 +12,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IDataSource } from '@setu-ts/common';
 import { MemoryAdapter } from '../../../src/adapters/memory/memory-adapter.ts';
 import { DatabaseService } from '../../../src/services/database-service.ts';

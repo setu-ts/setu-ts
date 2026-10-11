@@ -16,8 +16,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker, IPluginContext, MessageMetadata } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
@@ -32,16 +31,16 @@ const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
 /** Tracks `unhandledrejection` — the only assertion that catches this failure mode. */
 class UnhandledRejectionProbe {
   readonly events: unknown[] = [];
-  #listener = (event: PromiseRejectionEvent): void => {
-    this.events.push(event.reason);
+  #listener = (reason: unknown): void => {
+    this.events.push(reason);
   };
 
   start(): void {
-    globalThis.addEventListener('unhandledrejection', this.#listener);
+    process.on('unhandledRejection', this.#listener);
   }
 
   stop(): void {
-    globalThis.removeEventListener('unhandledrejection', this.#listener);
+    process.off('unhandledRejection', this.#listener);
   }
 }
 

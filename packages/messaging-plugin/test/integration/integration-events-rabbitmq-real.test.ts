@@ -13,8 +13,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker, IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -28,7 +27,7 @@ import {
 } from '../../src/index.ts';
 import type { IntegrationEventEnvelope } from '../../src/index.ts';
 
-const rabbitUrl = Deno.env.get('RABBITMQ_URL');
+const rabbitUrl = process.env['RABBITMQ_URL'];
 
 /** Polls a predicate until true or the deadline, without a fixed sleep. */
 async function waitFor(predicate: () => boolean, label: string, timeoutMs = 20_000): Promise<void> {
@@ -42,7 +41,7 @@ async function waitFor(predicate: () => boolean, label: string, timeoutMs = 20_0
 
 describe('REAL RabbitMQ integration events (guarded on RABBITMQ_URL)', () => {
   it('delivers every envelope field through publishIntegrationEvent and onIntegrationEvent', {
-    ignore: rabbitUrl === undefined,
+    skip: rabbitUrl === undefined,
   }, async () => {
     // A unique topic per run AND the `.v1` suffix the definition guard
     // requires: `...<suffix>.v1` ends with the exact string `.v1`.

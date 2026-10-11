@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { asBrokerAdapter } from '../../src/brokers/custom-adapter.ts';
 import type { IMessageBroker } from '@setu-ts/common';
 

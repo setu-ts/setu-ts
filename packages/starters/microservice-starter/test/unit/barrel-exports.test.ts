@@ -1,8 +1,7 @@
 /**
  * @module microservice-starter barrel export tests
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as microserviceStarter from '../../src/index.ts';
 
 describe('microservice-starter / barrel exports', () => {

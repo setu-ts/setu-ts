@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFlagGuard } from '../../src/middleware/feature-flag-middleware.ts';
 import type { FlagContext, IFeatureFlags, IRequestContext, NextFunction } from '@setu-ts/common';
 

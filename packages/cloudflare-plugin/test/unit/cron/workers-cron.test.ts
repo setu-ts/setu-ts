@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The cron registry keys on the expression string, because that is the only
  * thing `ScheduledController` reports. A registration that does not match the
  * `wrangler.toml` trigger never fires, so the unmatched path must be loud.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { WorkersCron } from '../../../src/cron/workers-cron.ts';
 import type { IScheduledController } from '../../../src/bindings/facades.ts';

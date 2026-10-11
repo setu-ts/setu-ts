@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   BigtableFilter,
   IBigtableClient,
@@ -226,4 +225,20 @@ describe('adaptBigtableSdkModule', () => {
     await adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' }).close();
     expect(log.closes).toBe(1);
   });
+});
+
+it('loads and closes the installed Bigtable SDK without making a remote call', async () => {
+  const loader = createLazyBigtableLoader({ projectId: 'test-project' });
+  const client = await loader.load();
+  expect(client.instance('i').table('t')).toBeDefined();
+  await client.close();
+});
+
+it('preserves both interleaved filter arms on the SDK read wire', async () => {
+  const log = newLog();
+  const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
+  await client.instance('i').table('t').readRows({
+    filter: { interleave: [[{ all: true }], [{ family: 'cf' }]] },
+  });
+  expect(log.reads).toEqual([{ filter: { interleave: [[{ all: true }], [{ family: 'cf' }]] } }]);
 });

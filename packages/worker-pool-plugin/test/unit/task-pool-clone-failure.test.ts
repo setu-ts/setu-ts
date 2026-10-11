@@ -10,8 +10,7 @@
  * Both paths are driven here, and the drain path is the one that fails
  * without the guard in `TaskPool.dispatch`.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';

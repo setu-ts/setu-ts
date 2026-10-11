@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { deadlineRangeError, withDeadline } from '../../../src/health/deadline.ts';
 import type { DeadlineOptions } from '../../../src/health/deadline.ts';
 import type { TimerHandle } from '../../../src/runtime.ts';

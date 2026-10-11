@@ -2,8 +2,7 @@
  * Tests for JwtStrategy.
  */
 
-import { beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { JwtStrategy } from '../../src/strategies/jwt-strategy.ts';
 import { JwtService } from '../../src/services/jwt-service.ts';
 import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';

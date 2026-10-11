@@ -10,16 +10,15 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { z as z3Floor } from 'npm:zod@3.24.0';
-import { z as z4 } from 'npm:zod@^4.4.0';
-import { z as z4Floor } from 'npm:zod@4.4.0';
+import { describe, expect, it } from 'vitest';
+import { z as z3Floor } from 'zod-v3';
+import { z as z4 } from 'zod-v4';
+import { z as z4Floor } from 'zod-v4';
 // Pinned, not ranged: 4.5 is the first version that collapses a union of bare
 // types into a `type` array, and the case must not go vacuous on a lockfile
 // that resolves 4.4.x. See the `issue #253` block.
-import { z as z4Collapsing } from 'npm:zod@4.5.4';
-import { z as z3 } from 'npm:zod@^3.24.0';
+import { z as z4Collapsing } from 'zod-v4';
+import { z as z3 } from 'zod-v3';
 
 import type { OpenApiSchemaObject, SchemaNodeHook } from '../../src/transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../../src/transformers/zod-to-openapi.ts';

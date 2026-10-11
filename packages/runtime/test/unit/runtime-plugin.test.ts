@@ -14,8 +14,7 @@ import type {
   IRuntimeServices,
   RuntimePlatform,
 } from '@setu-ts/common';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Fake adapter that records calls to the new IHttpAdapter surface
@@ -184,7 +183,10 @@ describe('runtime-plugin | default factory mappings', () => {
   }
 
   it('maps deno to DenoHttpAdapter', () => {
-    const plugin = RuntimePlugin({ platform: 'deno' });
+    const plugin = RuntimePlugin({
+      platform: 'deno',
+      adapters: { deno: () => createFakeRuntimeServices('deno') },
+    });
     const ctx = createCtx();
     plugin.register(ctx as any);
     const adapter = ctx.services.get(CAPABILITIES.HTTP_ADAPTER) as IHttpAdapter;
@@ -253,6 +255,7 @@ describe('runtime-plugin | fake adapter records calls', () => {
     const fakeAdapter = new FakeHttpAdapter();
     const plugin = RuntimePlugin({
       platform: 'deno',
+      adapters: { deno: () => createFakeRuntimeServices('deno') },
       httpAdapters: {
         deno: () => fakeAdapter,
       },
@@ -349,6 +352,7 @@ describe('runtime-plugin | missing factory throws', () => {
   it('missing HTTP adapter factory throws', () => {
     const plugin = RuntimePlugin({
       platform: 'deno' as RuntimePlatform,
+      adapters: { deno: () => createFakeRuntimeServices('deno') },
       httpAdapters: {},
     });
 
@@ -424,6 +428,11 @@ describe('runtime-plugin | maxBodyBytes option domain', () => {
   }
 
   it('omitting the option is accepted and means unbounded', () => {
-    expect(() => RuntimePlugin({ platform: 'deno' })).not.toThrow();
+    expect(() =>
+      RuntimePlugin({
+        platform: 'deno',
+        adapters: { deno: () => createFakeRuntimeServices('deno') },
+      })
+    ).not.toThrow();
   });
 });

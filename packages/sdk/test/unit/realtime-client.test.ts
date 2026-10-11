@@ -1,7 +1,6 @@
 /** Behavior tests for the WebSocket realtime client. */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IClientTiming } from '../../src/http/contracts.ts';
 import { createRealtimeClient } from '../../src/realtime/realtime-client.ts';
 import type { IWebSocketTransport } from '../../src/realtime/websocket-contracts.ts';

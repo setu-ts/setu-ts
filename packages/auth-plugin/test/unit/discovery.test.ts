@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { IssuerKeySet } from '../../src/issuers/key-set-cache.ts';
 import { compileIssuers, discoveryUrlFor } from '../../src/issuers/trusted-issuer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

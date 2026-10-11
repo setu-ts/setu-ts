@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { generateSse } from '../../../src/schematics/sse.ts';
 import { APP_CONTROLLERS_EXPORT } from '../../../src/seams/http.ts';
 import { deriveNames } from '../../../src/utils/names.ts';

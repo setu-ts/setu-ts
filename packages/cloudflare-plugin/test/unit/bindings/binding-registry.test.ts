@@ -1,10 +1,18 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The binding registry is what turns a deployment mistake into a message that
  * names the mistake, so the error content is asserted, not only the throw.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { BindingRegistry } from '../../../src/bindings/binding-registry.ts';
 import { CloudflareBindingMissingError } from '../../../src/index.ts';

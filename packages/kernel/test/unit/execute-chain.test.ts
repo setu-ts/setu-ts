@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
 
 import { executeChain } from '../../src/pipeline/execute-chain.ts';

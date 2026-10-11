@@ -7,14 +7,12 @@
  *
  * The exporter is a recording stand-in handed to the REAL
  * `SimpleSpanProcessor`; the span-observation collector is the real one.
- * Guarded, not swallowed: without `npm:` import permission the suite skips
- * loudly in its title, and the plugin-level guarded test plus the e2e
- * cover the same path.
+ * Not swallowed: a failure inside fails the test; the plugin-level test and
+ * the e2e cover the same path.
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IRuntimeServices } from '@setu-ts/common';
 
@@ -29,26 +27,14 @@ import {
   SpanObservationCollector,
 } from '../../src/diagnostics/span-observation-collector.ts';
 
-/** Whether `npm:` imports are available in this environment. */
-function canImportNpm(): boolean {
-  try {
-    return Deno.permissions.querySync({ name: 'import' }).state === 'granted';
-  } catch {
-    return false;
-  }
-}
-
-describe('DiagnosticSpanProcessor — real locked OTel SDK (guarded)', () => {
-  it({
-    name: 'drives every lifecycle method; the exporter still receives the span',
-    ignore: !canImportNpm(),
-  }, async () => {
+describe('DiagnosticSpanProcessor — real locked OTel SDK', () => {
+  it('drives every lifecycle method; the exporter still receives the span', async () => {
     // Real locked modules, loaded the way loadOtelTracerProvider loads them.
     const sdkMod = await import(
-      'npm:@opentelemetry/sdk-trace-base@^2.9.0'
+      '@opentelemetry/sdk-trace-base'
     ) as unknown as OtelSdkModule;
     const resourcesMod = await import(
-      'npm:@opentelemetry/resources@^2.9.0'
+      '@opentelemetry/resources'
     ) as unknown as OtelResourcesModule;
 
     // A recording exporter: the stand-in proves the exporter processor still
@@ -105,20 +91,17 @@ describe('DiagnosticSpanProcessor — real locked OTel SDK (guarded)', () => {
     expect(collector.read('probe', 0).closed).toBe(true);
   });
 
-  it({
-    name: 'framework kinds and statuses reach the exporter AND the diagnostic record correctly',
-    ignore: !canImportNpm(),
-  }, async () => {
+  it('framework kinds and statuses reach the exporter AND the diagnostic record correctly', async () => {
     // Regression: TelemetryService once handed OTel the OTLP WIRE kind numbers
     // (server exported as CLIENT, consumer as an out-of-range 5) and passed
     // setStatus a bare string, which real OTel records as status `{}`. The
     // diagnostic processor then dropped every span that set a status — every
     // HTTP server span. Only the real SDK can show either.
     const sdkMod = await import(
-      'npm:@opentelemetry/sdk-trace-base@^2.9.0'
+      '@opentelemetry/sdk-trace-base'
     ) as unknown as OtelSdkModule;
     const resourcesMod = await import(
-      'npm:@opentelemetry/resources@^2.9.0'
+      '@opentelemetry/resources'
     ) as unknown as OtelResourcesModule;
     const exported: Array<{ name: string; kind: number; status: { code?: number } }> = [];
     class RecordingExporter {

@@ -1,4 +1,5 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
+import { connect } from '../../../../test/node-helpers.ts';
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * §3.7 real-outage bar: drives a **real** backend through a **real** stop and
  * restart for both queue adapters, asserting `up → (stop) down → (restart) up`.
@@ -19,8 +20,7 @@
  * `scripts/check-apps.ts` and governs `apps/`. `test/apps-gate.test.ts` pins the service, port
  * mapping, and env var.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 import { RabbitMqQueue } from '../../src/adapters/rabbitmq-queue.ts';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -33,7 +33,7 @@ import { QueuePlugin } from '../../src/index.ts';
 // ── Docker stop/start helpers ───────────────────────────────────────────────
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(
       `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
@@ -80,7 +80,7 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const conn = await Deno.connect({ hostname: '127.0.0.1', port });
+      const conn = await connect({ hostname: '127.0.0.1', port });
       conn.close();
       return;
     } catch {
@@ -133,128 +133,110 @@ function makeRuntime(): IRuntimeServices {
 // ── RedisQueue outage ───────────────────────────────────────────────────────
 
 describe('REAL RedisQueue outage (§3.7)', () => {
-  it('up → stop → down → restart → up', async () => {
-    const url = Deno.env.get('REDIS_URL');
-    if (url === undefined) {
-      console.log('SKIP: REDIS_URL not set');
-      return;
-    }
+  it(
+    'up → stop → down → restart → up',
+    { skip: process.env['REDIS_URL'] === undefined },
+    async () => {
+      const url = process.env['REDIS_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    let ioredisPresent = false;
-    try {
-      await import('npm:ioredis@5.x');
-      ioredisPresent = true;
-    } catch {
-      // npm:ioredis not available
-    }
-    if (!ioredisPresent) {
-      console.log('SKIP: npm:ioredis@5.x not available');
-      return;
-    }
+      await import('ioredis');
 
-    const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
-    const containerId = await containerIdForPort(port);
+      const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
+      const containerId = await containerIdForPort(port);
 
-    const queue = new RedisQueue({ url: toIpv4(url) });
+      const queue = new RedisQueue({ url: toIpv4(url) });
 
-    try {
-      await queue.connect();
-      const probe = queue.isHealthy;
-      expect(typeof probe).toBe('function');
-      if (typeof probe !== 'function') return;
+      try {
+        await queue.connect();
+        const probe = queue.isHealthy;
+        expect(typeof probe).toBe('function');
+        if (typeof probe !== 'function') return;
 
-      // (up) baseline: F3 regression — the bound ping must report reachable.
-      await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
-      expect(await probe()).toBe(true);
+        // (up) baseline: F3 regression — the bound ping must report reachable.
+        await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
+        expect(await probe()).toBe(true);
 
-      // (stop) real Redis stop → probe reports down
-      await docker(['stop', containerId]);
-      await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
-      expect(await probe()).toBe(false);
+        // (stop) real Redis stop → probe reports down
+        await docker(['stop', containerId]);
+        await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
+        expect(await probe()).toBe(false);
 
-      // (restart) real Redis start → probe reports up
-      await docker(['start', containerId]);
-      await waitTrue(async () => (await probe()) === true, 'up after restart', 30_000);
-      expect(await probe()).toBe(true);
-    } finally {
-      await queue.disconnect();
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
-    }
-  });
+        // (restart) real Redis start → probe reports up
+        await docker(['start', containerId]);
+        await waitTrue(async () => (await probe()) === true, 'up after restart', 30_000);
+        expect(await probe()).toBe(true);
+      } finally {
+        await queue.disconnect();
+        await runProcess('docker', { args: ['start', containerId] });
+      }
+    },
+  );
 });
 
 // ── RabbitMqQueue outage ────────────────────────────────────────────────────
 
 describe('REAL RabbitMqQueue outage (§3.7)', () => {
-  it('up → stop → down → restart → up', async () => {
-    const url = Deno.env.get('RABBITMQ_URL');
-    if (url === undefined) {
-      console.log('SKIP: RABBITMQ_URL not set');
-      return;
-    }
+  it(
+    'up → stop → down → restart → up',
+    { skip: process.env['RABBITMQ_URL'] === undefined },
+    async () => {
+      const url = process.env['RABBITMQ_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    let amqplibPresent = false;
-    try {
-      await import('npm:amqplib@0.10.x');
-      amqplibPresent = true;
-    } catch {
-      // npm:amqplib not available
-    }
-    if (!amqplibPresent) {
-      console.log('SKIP: npm:amqplib not available');
-      return;
-    }
+      await import('amqplib');
 
-    const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
-    const containerId = await containerIdForPort(port);
+      const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
+      const containerId = await containerIdForPort(port);
 
-    const queue = new RabbitMqQueue(makeRuntime(), { url: toIpv4(url) });
+      const queue = new RabbitMqQueue(makeRuntime(), { url: toIpv4(url) });
 
-    try {
-      await queue.connect();
-      const probe = queue.isHealthy;
-      expect(typeof probe).toBe('function');
-      if (typeof probe !== 'function') return;
+      try {
+        await queue.connect();
+        const probe = queue.isHealthy;
+        expect(typeof probe).toBe('function');
+        if (typeof probe !== 'function') return;
 
-      // (up) baseline
-      await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
-      expect(await probe()).toBe(true);
+        // (up) baseline
+        await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
+        expect(await probe()).toBe(true);
 
-      // (stop) real RabbitMQ stop → fault listener sets #faulted → down
-      await docker(['stop', containerId]);
-      await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
-      expect(await probe()).toBe(false);
+        // (stop) real RabbitMQ stop → fault listener sets #faulted → down
+        await docker(['stop', containerId]);
+        await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
+        expect(await probe()).toBe(false);
 
-      // (restart) real RabbitMQ start. The queue adapter is observation-only
-      // (§3.5 scopes the ReconnectSupervisor to messaging-plugin brokers), so
-      // it does not self-heal: recovery is an explicit lifecycle reconnection,
-      // which resets the fault flag and re-establishes the connection → up.
-      // `docker start` returns at container boot, not when RabbitMQ is
-      // listening, so wait for the port to accept connections first.
-      await docker(['start', containerId]);
-      await waitForPort(port, 30_000);
-      await reconnectWithRetry(queue);
-      const reprobe = queue.isHealthy;
-      expect(typeof reprobe).toBe('function');
-      if (typeof reprobe !== 'function') return;
-      await waitTrue(async () => (await reprobe()) === true, 'up after restart', 30_000);
-      expect(await reprobe()).toBe(true);
-    } finally {
-      await queue.disconnect();
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
-    }
-  });
+        // (restart) real RabbitMQ start. The queue adapter is observation-only
+        // (§3.5 scopes the ReconnectSupervisor to messaging-plugin brokers), so
+        // it does not self-heal: recovery is an explicit lifecycle reconnection,
+        // which resets the fault flag and re-establishes the connection → up.
+        // `docker start` returns at container boot, not when RabbitMQ is
+        // listening, so wait for the port to accept connections first.
+        await docker(['start', containerId]);
+        await waitForPort(port, 30_000);
+        await reconnectWithRetry(queue);
+        const reprobe = queue.isHealthy;
+        expect(typeof reprobe).toBe('function');
+        if (typeof reprobe !== 'function') return;
+        await waitTrue(async () => (await reprobe()) === true, 'up after restart', 30_000);
+        expect(await reprobe()).toBe(true);
+      } finally {
+        await queue.disconnect();
+        await runProcess('docker', { args: ['start', containerId] });
+      }
+    },
+  );
 });
 
 // ── RedisQueue paused-server bound (M101a V8-5) ─────────────────────────────
 
-const redisUrl = Deno.env.get('REDIS_URL');
+const redisUrl = process.env['REDIS_URL'];
 const BOUND_MS = 1000;
 const JOB_NAME = 'm101a.bounded';
 
 describe(
   'REAL paused Redis bounds queue.add (M101a V8-5)',
-  { ignore: redisUrl === undefined },
+  { skip: redisUrl === undefined },
   () => {
     it('paused → add rejects within the bound and /health down → unpaused → add succeeds', async () => {
       const url = toIpv4(redisUrl!);

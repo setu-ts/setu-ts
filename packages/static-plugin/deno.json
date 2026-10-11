@@ -20,5 +20,8 @@
   "tasks": {
     "test": "deno test --trace-leaks",
     "test:coverage": "deno test --coverage=coverage"
+  },
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
   }
 }

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { checkWritePrecondition } from '../../src/index.ts';
 import type { WritePrecondition } from '../../src/index.ts';
 

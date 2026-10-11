@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type {
   EventDiagnosticsRecord,
@@ -227,4 +226,51 @@ describe('source contract shape', () => {
     };
     expect(source.snapshot().state).toBe('ready');
   });
+});
+
+it('validates every required field in an event wire snapshot and record', () => {
+  const response = (snapshot: unknown) => ({
+    version: 1,
+    instanceId: 'instance',
+    state: 'ready',
+    sources: [{ sourceId: 's1', snapshot }],
+  });
+  expect(isEventResponseProjection(response(validSnapshot()))).toBe(true);
+  for (const key of Object.keys(validSnapshot())) {
+    const malformed: Record<string, unknown> = { ...validSnapshot(), [key]: null };
+    expect(isEventResponseProjection(response(malformed))).toBe(false);
+  }
+  const record = validSnapshot().records[0]!;
+  for (const key of Object.keys(record)) {
+    if (key === 'lastDurationMs') continue;
+    expect(
+      isEventResponseProjection(
+        response({ ...validSnapshot(), records: [{ ...record, [key]: null }] }),
+      ),
+    ).toBe(false);
+  }
+  expect(isEventResponseProjection(response({ ...validSnapshot(), records: [null] }))).toBe(false);
+  expect(
+    isEventResponseProjection(
+      response({ ...validSnapshot(), records: [{ ...record, lastDurationMs: -1 }] }),
+    ),
+  ).toBe(false);
+  expect(
+    isEventResponseProjection(
+      response({ ...validSnapshot(), state: 'disabled', alias: null, records: [] }),
+    ),
+  ).toBe(true);
+  expect(
+    isEventResponseProjection(
+      response({ ...validSnapshot(), state: 'collection-failed', records: [] }),
+    ),
+  ).toBe(true);
+  expect(
+    isEventResponseProjection(
+      response({ ...validSnapshot(), state: 'collection-failed', alias: null, records: [] }),
+    ),
+  ).toBe(true);
+  expect(
+    isEventResponseProjection(response({ ...validSnapshot(), state: 'disabled', alias: null })),
+  ).toBe(false);
 });

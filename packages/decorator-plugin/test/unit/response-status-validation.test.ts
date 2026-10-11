@@ -16,8 +16,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createTestApp } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { Constructor } from '@setu-ts/common';
@@ -35,6 +34,16 @@ function refusal(declared: Parameters<typeof validateResponseShaping>[0]): strin
   } catch (error) {
     return (error as Error).message;
   }
+}
+
+/** Compare the exact host error, whose wording differs across supported runtimes. */
+function headerError(name: string, value: string): string {
+  try {
+    new Headers().set(name, value);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  throw new Error('Expected a rejected header');
 }
 
 describe('@HttpCode status validation', () => {
@@ -110,7 +119,7 @@ describe('@Redirect status validation', () => {
     const url = `/ok${String.fromCharCode(10)}X-Injected: yes`;
     const message = refusal({ redirect: { url, status: 302 } });
 
-    expect(message).toContain('Invalid header value');
+    expect(message).toContain(headerError('Location', url));
     expect(message).toContain('would answer 500');
     expect(message).toContain(WHERE);
   });
@@ -176,7 +185,7 @@ describe('@Redirect status validation', () => {
           DecoratorPlugin({ controllers: [InjectedRedirectController as Constructor] }),
         ],
       }),
-    ).rejects.toThrow('Invalid header value');
+    ).rejects.toThrow(headerError('Location', `/ok${String.fromCharCode(10)}X-Injected: yes`));
   });
 });
 
@@ -195,19 +204,19 @@ describe('@ResponseHeader validation', () => {
     const message = refusal({ responseHeaders: [{ name: 'x custom', value: 'v' }] });
 
     expect(message).toContain("@ResponseHeader('x custom', 'v')");
-    expect(message).toContain('Invalid header name');
+    expect(message).toContain(headerError('x custom', 'v'));
   });
 
   it('refuses a header value the runtime rejects', () => {
     const value = `bad${String.fromCharCode(10)}value`;
     const message = refusal({ responseHeaders: [{ name: 'X-Custom', value }] });
 
-    expect(message).toContain('Invalid header value');
+    expect(message).toContain(headerError('X-Custom', value));
   });
 
   it('refuses an empty header name', () => {
     expect(refusal({ responseHeaders: [{ name: '', value: 'v' }] }))
-      .toContain('Invalid header name');
+      .toContain(headerError('', 'v'));
   });
 
   it('accepts what the runtime accepts, including an empty value', () => {

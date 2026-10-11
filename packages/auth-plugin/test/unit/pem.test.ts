@@ -2,8 +2,7 @@
  * Tests for PEM to DER conversion utility.
  */
 
-import { beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { pemToDer } from '../../src/utils/pem.ts';
 
 describe('pemToDer', () => {

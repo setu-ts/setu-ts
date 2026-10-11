@@ -1,36 +1,19 @@
 /**
- * Guarded real-import integration test for the OTLP exporter path.
- *
- * When the OTel npm packages are installed, this test exercises the real
- * import and verifies a full round-trip span. When absent, it skips.
+ * Real-import integration test for the OTLP exporter path: exercises the real
+ * import of the installed OTel packages and verifies a full round-trip span.
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-
-// Probe whether npm: imports are available
-function canImportNpm(): boolean {
-  try {
-    const state = Deno.permissions.querySync({ name: 'import' }).state;
-    return state === 'granted';
-  } catch {
-    return false;
-  }
-}
+import { describe, expect, it } from 'vitest';
 
 describe('OTel real-import integration', () => {
   it(
-    {
-      name: 'should load OTLP exporter and build a real span',
-      ignore: !canImportNpm(),
-    },
+    'should load OTLP exporter and build a real span',
     async () => {
-      // Guarded by `ignore: !canImportNpm()`; not swallowed — a real failure
-      // inside must fail the test, not pass silently.
+      // Not swallowed: a real failure inside must fail the test.
       // Lazy-load the OTel packages
-      const sdkMod = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
-      const resourcesMod = await import('npm:@opentelemetry/resources@^2.9.0');
+      const sdkMod = await import('@opentelemetry/sdk-trace-base');
+      const resourcesMod = await import('@opentelemetry/resources');
 
       const { BasicTracerProvider, SimpleSpanProcessor, InMemorySpanExporter } = sdkMod;
       const { resourceFromAttributes } = resourcesMod;
@@ -70,14 +53,10 @@ describe('OTel real-import integration', () => {
   );
 
   it(
-    {
-      name: 'should load OTLP trace exporter constructor',
-      ignore: !canImportNpm(),
-    },
+    'should load OTLP trace exporter constructor',
     async () => {
-      // Guarded by `ignore: !canImportNpm()`; not swallowed.
       const mod = await import(
-        'npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0'
+        '@opentelemetry/exporter-trace-otlp-http'
       );
       expect(mod.OTLPTraceExporter).toBeDefined();
       expect(typeof mod.OTLPTraceExporter).toBe('function');
@@ -93,14 +72,11 @@ describe('OTel real-import integration', () => {
   // The parent span ID lives on `parentSpanContext?.spanId` of the
   // ReadableSpan, not on spanContext().
   it(
-    {
-      name: 'should parent real OTel span to incoming traceparent context',
-      ignore: !canImportNpm(),
-    },
+    'should parent real OTel span to incoming traceparent context',
     async () => {
-      const sdkMod = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
-      const resourcesMod = await import('npm:@opentelemetry/resources@^2.9.0');
-      const apiMod = await import('npm:@opentelemetry/api@^1.9.0');
+      const sdkMod = await import('@opentelemetry/sdk-trace-base');
+      const resourcesMod = await import('@opentelemetry/resources');
+      const apiMod = await import('@opentelemetry/api');
 
       const { BasicTracerProvider, SimpleSpanProcessor, InMemorySpanExporter } = sdkMod;
       const { resourceFromAttributes } = resourcesMod;

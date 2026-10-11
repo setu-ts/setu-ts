@@ -13,8 +13,7 @@
  * timers: a hung indicator must not stop a healthy one from refreshing. This proves the minimization seam does not
  * leak `data` or error text, not merely that a field is missing by luck.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin } from '@setu-ts/common';

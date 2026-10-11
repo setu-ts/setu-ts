@@ -16,8 +16,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { TEMPLATES } from '../../../src/constants.ts';
 import { getTemplate, type TemplateHost } from '../../../src/templates/registry.ts';

@@ -1,8 +1,7 @@
 /**
  * Integration tests for MessagingPlugin via kernel app.inject().
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { MessagingPlugin } from '../../src/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';

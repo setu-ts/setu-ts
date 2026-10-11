@@ -3,8 +3,7 @@
  * runtime exports are checked by identity; the `IDiagnosticsClient.health()`
  * addition (M98d) is checked at the type level against a real client instance.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import * as diagnosticsPlugin from '../src/index.ts';
 import type { DiagnosticsSessionLifetime, IDiagnosticsClient } from '../src/interfaces/index.ts';

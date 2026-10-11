@@ -1,8 +1,7 @@
 /**
  * Tests for AuditPlugin factory + createStorage.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { AuditPlugin, createStorage } from '../../src/plugin/audit-plugin.ts';
 import { MemoryAuditStorage } from '../../src/storage/memory-audit.ts';
 import { LogAuditStorage } from '../../src/storage/log-audit.ts';

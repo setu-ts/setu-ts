@@ -87,3 +87,7 @@ website/.lighthouseci/
 # VSCode workspace settings. Kept local: the MCP-discovery entry an IDE writes
 # here is a per-developer editor preference, not a project setting.
 .vscode/
+
+# Per-member Vitest reports (M111b)
+coverage-node/
+coverage-deno-lane/

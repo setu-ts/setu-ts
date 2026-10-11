@@ -6,8 +6,7 @@
  * along with the refusal.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { compileSignIn, DEFAULT_SIGN_IN_BASE_PATH } from '../../src/sign-in/config.ts';
 import { MemoryPasskeyStore } from '../../src/stores/passkey-store.ts';
 import type { OAuth2Provider, OidcProvider, SignInConfig } from '../../src/interfaces/index.ts';

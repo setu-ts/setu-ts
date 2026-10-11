@@ -5,8 +5,7 @@
  * commit/rollback, rawQuery, createDataSourceForEntity, and connect-time
  * branches (operator loading, table validation, injected-driver errors).
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   createDrizzleDataSource,
   DrizzleAdapter,

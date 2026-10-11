@@ -3,7 +3,7 @@ import {
   DeleteTableCommand,
   DynamoDBClient,
   waitUntilTableExists,
-} from 'npm:@aws-sdk/client-dynamodb@^3';
+} from '@aws-sdk/client-dynamodb';
 import { CAPABILITIES } from '@setu-ts/common';
 import {
   createDatabaseOutboxStore,
@@ -17,9 +17,9 @@ import { FaultStore } from '../fixtures/outbox.ts';
 import { describeOutboxRelayProofs } from '../fixtures/outbox-relay-proofs.ts';
 import type { RelayProofBackend } from '../fixtures/outbox-relay-proofs.ts';
 
-const postgres = Deno.env.get('OUTBOX_POSTGRES_URL');
-const mongo = Deno.env.get('MONGODB_RS_URI');
-const dynamo = Deno.env.get('DYNAMODB_ENDPOINT');
+const postgres = process.env['OUTBOX_POSTGRES_URL'];
+const mongo = process.env['MONGODB_RS_URI'];
+const dynamo = process.env['DYNAMODB_ENDPOINT'];
 
 function storeOver(db: DatabaseService): FaultStore {
   const registry = new MockServiceRegistry();

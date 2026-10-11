@@ -2,8 +2,7 @@
  * Contract tests for the gRPC types added in Milestone 49.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, createCapabilityToken } from '../../src/tokens.ts';
 import type {
   GrpcServiceDefinition,

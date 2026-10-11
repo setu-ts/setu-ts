@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { TotpService } from '../../src/mfa/totp-service.ts';
 import { MemoryTotpStore } from '../../src/stores/totp-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

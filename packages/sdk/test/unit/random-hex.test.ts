@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { drawHexBytes } from '../../src/http/random-hex.ts';
 
 describe('drawHexBytes (M109b §3.8)', () => {

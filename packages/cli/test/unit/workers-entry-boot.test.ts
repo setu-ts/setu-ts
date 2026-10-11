@@ -1,3 +1,5 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * X9-8: only a successful boot is memoised, and no stack reaches the client.
  * Also: one app per binding environment, retired only when nothing holds it.
@@ -13,8 +15,7 @@
  *
  * @module
  */
-import { afterAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import type { TargetRuntime } from '../../src/constants.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
@@ -114,11 +115,11 @@ const tempDirs: string[] = [];
  * module-level cache starts empty.
  */
 async function loadEntry(): Promise<{ worker: WorkerModule['default']; log: BootLog }> {
-  const dir = await Deno.makeTempDir({ prefix: 'workers-entry-' });
+  const dir = await tempDir({ prefix: 'workers-entry-' });
   tempDirs.push(dir);
-  await Deno.mkdir(`${dir}/src`);
-  await Deno.writeTextFile(`${dir}/src/index.ts`, workersEntry());
-  await Deno.writeTextFile(
+  await nodeFs.mkdir(`${dir}/src`);
+  await nodeFs.writeFile(`${dir}/src/index.ts`, workersEntry());
+  await nodeFs.writeFile(
     `${dir}/setu.config.ts`,
     `export const log = {
   built: [] as string[],
@@ -169,7 +170,7 @@ async function body(
 
 describe('generated Workers entry keeps one app per binding environment', () => {
   afterAll(async () => {
-    for (const dir of tempDirs) await Deno.remove(dir, { recursive: true });
+    for (const dir of tempDirs) await nodeFs.rm(dir, { recursive: true });
   });
 
   it('reuses one application while every request carries the same env', async () => {

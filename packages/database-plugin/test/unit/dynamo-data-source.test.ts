@@ -1,6 +1,5 @@
 // deno-lint-ignore-file require-await -- async facade fakes model IDynamoClient promises.
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { IDynamoClient } from '../../src/adapters/dynamo/dynamo-client-types.ts';
 import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';

@@ -10,6 +10,7 @@
     }
   },
   "imports": {
-    "react-router": "npm:react-router@^8"
+    "react-router": "npm:react-router@^8",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

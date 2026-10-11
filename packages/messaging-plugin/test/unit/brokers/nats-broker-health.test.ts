@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { INatsConnection } from '../../../src/interfaces/index.ts';
 import { NatsBroker } from '../../../src/brokers/nats-broker.ts';
 import { JsonSerializer } from '../../../src/serializers/json-serializer.ts';

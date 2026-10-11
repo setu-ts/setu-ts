@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The `WebSocketPair` seam.
  *
@@ -6,8 +15,7 @@
  * real deployment takes — instead of leaving it behind a skipped test.
  */
 
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createDefaultDurableObjectWebSocketHost,

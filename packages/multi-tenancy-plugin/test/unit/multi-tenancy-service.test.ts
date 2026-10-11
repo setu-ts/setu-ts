@@ -1,8 +1,7 @@
 /**
  * MultiTenancyService tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
 import { TenantDataStoreNotReadyError, TenantNotResolvedError } from '../../src/errors.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';

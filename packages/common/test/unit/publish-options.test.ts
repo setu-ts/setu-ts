@@ -3,8 +3,7 @@
  * every existing caller and every two-parameter implementor stays assignable.
  * This file also pins the two header constants and the `PublishOptions` shape.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker, PublishOptions } from '../../src/index.ts';
 import {
   DEDUPLICATION_ID_HEADER,
@@ -217,5 +216,94 @@ describe('parsePublishOptions — the one parse both publish entries share', () 
       expect({ label, isRange: caught instanceof RangeError }).toEqual({ label, isRange: true });
       expect((caught as Error).message).toBe(message);
     }
+  });
+});
+
+describe('publish options at the common parser boundary', () => {
+  it('copies valid identifiers and own headers into an immutable record', () => {
+    expect(parsePublishOptions(undefined)).toEqual({ headers: {} });
+    expect(parsePublishOptions({})).toEqual({ headers: {} });
+    const headers = Object.assign(Object.create(null), { 'x-tenant': 'acme' }) as Record<
+      string,
+      string
+    >;
+    const parsed = parsePublishOptions({
+      orderingKey: 'order-7',
+      deduplicationId: 'id-1',
+      headers,
+    });
+    headers['x-tenant'] = 'mutated';
+    expect(parsed).toEqual({
+      orderingKey: 'order-7',
+      deduplicationId: 'id-1',
+      headers: { 'x-tenant': 'acme' },
+    });
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(Object.isFrozen(parsed.headers)).toBe(true);
+  });
+  it('refuses malformed options and contains hostile property traps', () => {
+    for (const options of [null, 'value', 1, [], new Date()]) {
+      expect(() => parsePublishOptions(options)).toThrow(RangeError);
+    }
+    expect(() =>
+      parsePublishOptions(
+        new Proxy({}, {
+          getPrototypeOf() {
+            throw Error('trap');
+          },
+        }),
+      )
+    ).toThrow('publish options could not be read');
+    expect(() =>
+      parsePublishOptions(
+        new Proxy({}, {
+          get() {
+            throw Error('trap');
+          },
+        }),
+      )
+    ).toThrow('publish options could not be read');
+    for (const field of ['orderingKey', 'deduplicationId']) {
+      expect(() => parsePublishOptions({ [field]: ' bad ' })).toThrow(`publish options ${field}`);
+    }
+  });
+  it('validates every header rule before handing a record to a transport', () => {
+    for (const headers of [null, [], 'value']) {
+      expect(() => parsePublishOptions({ headers })).toThrow('headers must be a plain object');
+    }
+    expect(() => parsePublishOptions({ headers: { [Symbol('hidden')]: 'secret' } })).toThrow(
+      'symbol keys',
+    );
+    expect(() =>
+      parsePublishOptions({
+        headers: Object.fromEntries(Array.from({ length: 33 }, (_, i) => ['x-' + i, 'v'])),
+      })
+    ).toThrow('at most 32 entries');
+    expect(() => parsePublishOptions({ headers: { 'x-setu-ordering-key': 'spoof' } })).toThrow(
+      'reserved',
+    );
+    expect(() => parsePublishOptions({ headers: { 'bad:name': 'v' } })).toThrow('invalid name');
+    expect(() => parsePublishOptions({ headers: { 'x-value': 1 } })).toThrow(
+      'value must be a string',
+    );
+    expect(() =>
+      parsePublishOptions({
+        headers: new Proxy({}, {
+          ownKeys() {
+            throw Error('trap');
+          },
+        }),
+      })
+    ).toThrow('headers could not be read');
+    expect(() =>
+      parsePublishOptions({
+        headers: Object.defineProperty({}, 'x-value', {
+          enumerable: true,
+          get() {
+            throw Error('trap');
+          },
+        }),
+      })
+    ).toThrow('headers could not be read');
   });
 });

@@ -1,8 +1,7 @@
 /**
  * Unit tests for the worker-pool error classes.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   WorkerPoolUnavailableError,

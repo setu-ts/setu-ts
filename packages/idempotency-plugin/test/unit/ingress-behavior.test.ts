@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   IdempotencyClaimResult,
   IdempotencySettleResult,
@@ -258,4 +257,35 @@ describe('createIngressBehavior (M109a §3.7)', () => {
     await scoped.handle(message('t'), () => Promise.resolve());
     expect((withScope.calls.claim[0] as { key: string }).key).not.toBe(keyA);
   });
+});
+
+it('refuses missing queue ids and missing custom and header keys', async () => {
+  const { store, calls } = recordingStore({ outcome: 'claimed', takeover: false });
+  for (const payload of [null, 1, {}, { id: 3 }]) {
+    for (const key of ['auto', 'job-id'] as const) {
+      await expect(
+        behavior(store, { jobNames: ['jobs'], key }).handle({
+          kind: 'queue',
+          name: 'jobs',
+          consumer: 'worker',
+          payload,
+        }, () => Promise.resolve()),
+      ).rejects.toMatchObject({ reason: 'key-missing' });
+    }
+  }
+  await expect(
+    behavior(store, { topics: ['t'], key: () => undefined }).handle(
+      message('t'),
+      () => Promise.resolve(),
+    ),
+  ).rejects.toMatchObject({ reason: 'key-missing' });
+  await expect(
+    behavior(store, { topics: ['t'], key: 'deduplication-header' }).handle({
+      kind: 'messaging',
+      name: 't',
+      payload: {},
+      consumer: 'c1',
+    }, () => Promise.resolve()),
+  ).rejects.toMatchObject({ reason: 'key-missing' });
+  expect(calls.claim).toHaveLength(0);
 });

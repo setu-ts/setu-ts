@@ -6,8 +6,7 @@
  * response-interceptor skip on failure.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { HttpClient } from '../../src/http/http-client.ts';
 import { createClient } from '../../src/sdk.ts';
 import { ClientCircuitOpenError, HttpClientError } from '../../src/errors.ts';

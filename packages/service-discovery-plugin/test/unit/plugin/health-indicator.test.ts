@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { HealthCheckResult, ServiceInstance } from '@setu-ts/common';
 import { ServiceDiscoveryPlugin } from '../../../src/index.ts';
 import type { DiscoveryProvider } from '../../../src/index.ts';

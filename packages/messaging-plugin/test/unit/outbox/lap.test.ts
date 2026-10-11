@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { MAX_BLOCKED_KEYS, OutboxLap } from '../../../src/outbox/lap.ts';
 import { blockKey } from '../../../src/outbox/position.ts';

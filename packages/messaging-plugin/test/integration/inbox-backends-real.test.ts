@@ -18,8 +18,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IDatabaseAdapter, IInboxStore, InboxRecord } from '@setu-ts/common';
 import { CAPABILITIES, INBOX_RECORD_KIND } from '@setu-ts/common';
 import {
@@ -41,10 +40,10 @@ import {
 
 import { MessagingPlugin } from '../../src/index.ts';
 
-const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
-const mongoRsUri = Deno.env.get('MONGODB_RS_URI');
-const mongoStandaloneUri = Deno.env.get('MONGODB_URI');
-const bigtableEndpoint = Deno.env.get('BIGTABLE_EMULATOR_ENDPOINT');
+const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
+const mongoRsUri = process.env['MONGODB_RS_URI'];
+const mongoStandaloneUri = process.env['MONGODB_URI'];
+const bigtableEndpoint = process.env['BIGTABLE_EMULATOR_ENDPOINT'];
 const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
 
 /** A database-only app over one adapter. */
@@ -93,7 +92,7 @@ async function race(a: IInboxStore, b: IInboxStore): Promise<PromiseSettledResul
   return await settled;
 }
 
-describe('inbox over real PostgreSQL', { ignore: postgresUrl === undefined }, () => {
+describe('inbox over real PostgreSQL', { skip: postgresUrl === undefined }, () => {
   it('two concurrent runs for one marker: one commits, the loser rejects, the marker is there', async () => {
     const pg = await postgresInboxSchema(postgresUrl!);
     const first = databaseApp(drizzleInboxAdapter(pg.pool));
@@ -121,7 +120,7 @@ describe('inbox over real PostgreSQL', { ignore: postgresUrl === undefined }, ()
   });
 });
 
-describe('inbox over a real MongoDB replica set', { ignore: mongoRsUri === undefined }, () => {
+describe('inbox over a real MongoDB replica set', { skip: mongoRsUri === undefined }, () => {
   it('the concurrent loser rejects (a write conflict), and the marker commits', async () => {
     const adapter = () =>
       new MongoAdapter({
@@ -157,7 +156,7 @@ describe('inbox over a real MongoDB replica set', { ignore: mongoRsUri === undef
       await first.stop();
       await second.stop();
       // The run's collections are unique to it; leave nothing behind.
-      const { MongoClient } = await import('npm:mongodb@^6.21.0');
+      const { MongoClient } = await import('mongodb');
       const client = new MongoClient(mongoRsUri!);
       try {
         const db = client.db('setu_m108_inbox');
@@ -189,7 +188,7 @@ function inboxApp(adapter: IDatabaseAdapter): IKernelApplication {
 }
 
 describe('inbox refusals on real backends', () => {
-  it('refuses Bigtable at start()', { ignore: bigtableEndpoint === undefined }, async () => {
+  it('refuses Bigtable at start()', { skip: bigtableEndpoint === undefined }, async () => {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -214,7 +213,7 @@ describe('inbox refusals on real backends', () => {
 
   it(
     'refuses a standalone MongoDB at start()',
-    { ignore: mongoStandaloneUri === undefined },
+    { skip: mongoStandaloneUri === undefined },
     async () => {
       const app = inboxApp(
         new MongoAdapter({

@@ -14,8 +14,7 @@
  *   6. confirm `requireRole` short-circuits 403 (downstream handler NOT run).
  */
 
-import { beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
 import { requireAuth, requireRole } from '../../src/guards/index.ts';

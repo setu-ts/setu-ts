@@ -1,3 +1,4 @@
+import { NODE_SOURCE_ARGS, run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Transparency of `createObservedFetch` (M98n §3.3): the wrapped fetch sees
  * exactly the arguments and receiver it would see unwrapped, is called once,
@@ -6,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IOutboundHttpDiagnosticsSource, IPluginContext } from '@setu-ts/common';
 
 import { createObservedFetch } from '../../src/http/observed-fetch.ts';
@@ -368,17 +368,17 @@ describe('createObservedFetch — unhandled rejections', () => {
       import { createObservedFetch } from ${
       JSON.stringify(new URL('../../src/http/observed-fetch.ts', import.meta.url).href)
     };
-      const mode = Deno.args[0];
+      const mode = process.argv[1];
       let reports = 0;
-      globalThis.addEventListener('unhandledrejection', (event) => {
+      process.on('unhandledRejection', (reason) => {
         reports++;
-        event.preventDefault();
+        if (reason.message !== 'dropped') process.exitCode = 1;
       });
       const inner = () => Promise.reject(new Error('dropped'));
       const call = mode === 'wrapped'
         ? createObservedFetch({ alias: 'a', fetch: inner }).fetch
         : inner;
-      if (Deno.args[1] === 'handled') {
+      if (process.argv[2] === 'handled') {
         call('https://example.test/').catch(() => {});
       } else {
         call('https://example.test/');
@@ -387,11 +387,19 @@ describe('createObservedFetch — unhandled rejections', () => {
       console.log(reports);
     `;
     async function run(mode: string, handling: string): Promise<string> {
-      const output = await new Deno.Command(Deno.execPath(), {
-        args: ['eval', '--ext=ts', script, mode, handling],
+      const output = await runProcess(process.execPath, {
+        args: [
+          ...NODE_SOURCE_ARGS,
+          '--input-type=module',
+          '-e',
+          script,
+          mode,
+          handling,
+        ],
         stdout: 'piped',
         stderr: 'piped',
-      }).output();
+      });
+      expect(output.code).toBe(0);
       return new TextDecoder().decode(output.stdout).trim();
     }
     expect(await run('raw', 'dropped')).toBe('1');

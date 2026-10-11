@@ -46,8 +46,11 @@
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/session-plugin": "workspace:^",
     "@setu-ts/sse-plugin": "workspace:^",
+    "@simplewebauthn/server": "14.0.3",
     "@types/node": "^24",
     "ioredis": "5.x",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "5.0.3",
+    "xml-crypto": "^6"
   }
 }

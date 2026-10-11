@@ -7,5 +7,8 @@
     "permissions": {
       "net": true
     }
+  },
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
   }
 }

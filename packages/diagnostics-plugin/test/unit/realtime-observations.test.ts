@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Unit tests for the M98l realtime operation: the copy-once source reader and
  * its refusals — getters, prototypes, extra keys, proxies, oversized lists,
@@ -7,8 +8,7 @@
  * `GET /v1/realtime` dispatch (no source or gauge read before
  * authentication), and the connector's refusal of more than 16 sources.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type {
   IPlugin,
@@ -681,20 +681,17 @@ describe('DiagnosticsPlugin — realtime source bound', () => {
     };
   }
 
-  function port(): number {
-    const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-    const value = (probe.addr as Deno.NetAddr).port;
-    probe.close();
-    return value;
+  function port(): Promise<number> {
+    return nodeUnusedPort();
   }
 
-  function boot(count: number) {
+  async function boot(count: number) {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
         DiagnosticsPlugin({
           enabled: true,
-          port: port(),
+          port: await port(),
           sessionId: TEST_SESSION_ID,
           sessionKey: TEST_KEY_BYTES,
         }),
@@ -705,14 +702,14 @@ describe('DiagnosticsPlugin — realtime source bound', () => {
     return { app, started: app.start() };
   }
 
-  it('starts with exactly 16 sources', async () => {
-    const { app, started } = boot(MAX_REALTIME_SOURCES);
+  it.skipIf(!('Deno' in globalThis))('starts with exactly 16 sources', async () => {
+    const { app, started } = await boot(MAX_REALTIME_SOURCES);
     await started;
     await app.stop();
   });
 
   it('refuses a 17th source with a fixed, value-free configuration error', async () => {
-    const { app, started } = boot(MAX_REALTIME_SOURCES + 1);
+    const { app, started } = await boot(MAX_REALTIME_SOURCES + 1);
     await expect(started).rejects.toThrow(PLUGIN_ERRORS.tooManyRealtimeSources);
     await app.stop().catch(() => {});
   });

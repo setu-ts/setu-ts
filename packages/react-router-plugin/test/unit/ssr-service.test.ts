@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { HandlerResult, ISsrService } from '@setu-ts/common';
 import type { PopulateLoadContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';

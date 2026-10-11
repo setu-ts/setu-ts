@@ -13,8 +13,7 @@
  * over the reply-topic inbox — the RPC case below is the first exercise that
  * path has ever had against a real broker.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import type { IKafkaFactory } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -23,7 +22,7 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { KafkaTopicUnavailableError, MessagingPlugin } from '../../src/index.ts';
 
-const kafkaBrokers = Deno.env.get('KAFKA_BROKERS');
+const kafkaBrokers = process.env['KAFKA_BROKERS'];
 
 /** Polls a predicate until true or the deadline, without a fixed sleep. */
 async function waitFor(predicate: () => boolean, label: string, timeoutMs = 20_000): Promise<void> {
@@ -47,14 +46,14 @@ function brokerProbe(capture: (broker: IMessageBroker) => void): IPlugin {
   };
 }
 
-describe({
-  name: 'REAL Kafka broker (guarded on KAFKA_BROKERS)',
-  ignore: kafkaBrokers === undefined,
-  fn() {
+describe(
+  'REAL Kafka broker (guarded on KAFKA_BROKERS)',
+  { skip: kafkaBrokers === undefined },
+  () => {
     const brokers = (kafkaBrokers ?? '').split(',').map((b) => b.trim()).filter(Boolean);
 
     it('boots an application, round-trips a publish/subscribe, and completes one request/reply', async () => {
-      const kafkajs = await import('npm:kafkajs@2.x');
+      const kafkajs = await import('kafkajs');
       const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
       const topic = `m90d.orders.${suffix}`;
       const rpcTopic = `m90d.rpc.${suffix}`;
@@ -259,7 +258,7 @@ describe({
       // `allowAutoTopicCreation: false` makes the metadata answer an honest
       // UNKNOWN_TOPIC_OR_PARTITION every time — no fabricated error. The
       // subscribe retry applies to an injected client too.
-      const kafkajs = await import('npm:kafkajs@2.x');
+      const kafkajs = await import('kafkajs');
       const kafka = new kafkajs.Kafka({
         clientId: 'm101b-no-autocreate',
         brokers,
@@ -310,7 +309,7 @@ describe({
     }
 
     it('places one orderingKey on exactly one partition (M106 §3.3, §10 obligation 9)', async () => {
-      const kafkajs = await import('npm:kafkajs@2.x');
+      const kafkajs = await import('kafkajs');
       const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
       const topic = `m106.part.${suffix}`;
 
@@ -368,7 +367,7 @@ describe({
     });
 
     it('does not handle a later message for one key until the first succeeds (M106 §3.8)', async () => {
-      const kafkajs = await import('npm:kafkajs@2.x');
+      const kafkajs = await import('kafkajs');
       const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
       const topic = `m106.block.${suffix}`;
       const groupId = `m106-block-${suffix}`;
@@ -432,4 +431,4 @@ describe({
       }
     });
   },
-});
+);

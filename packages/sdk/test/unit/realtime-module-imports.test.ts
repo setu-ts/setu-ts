@@ -1,7 +1,7 @@
+import * as nodeFs from 'node:fs/promises';
 /** Guards Node/Bun source loading from accidental common value imports. */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 const MODULES = [
   'sse-contracts.ts',
@@ -36,8 +36,9 @@ export function valueImportsOfCommon(source: string): readonly string[] {
 describe('SDK realtime module imports', () => {
   it('keeps every common import type-only for direct Node and Bun source loading', async () => {
     for (const module of MODULES) {
-      const source = await Deno.readTextFile(
+      const source = await nodeFs.readFile(
         new URL(`../../src/realtime/${module}`, import.meta.url),
+        'utf8',
       );
       expect(valueImportsOfCommon(source)).toEqual([]);
     }

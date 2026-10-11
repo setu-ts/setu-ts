@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { httpStatusHintOf } from '@setu-ts/common';
 import { HashiCorpVaultProvider } from '../../src/providers/vault.ts';
@@ -588,4 +587,29 @@ describe('HashiCorpVaultProvider secret path and body size (M101a security audit
       'Vault write failed for a\\u007f: HTTP 500',
     );
   });
+});
+
+it('contains rejected body cancellation on oversized reads and bodyless writes', async () => {
+  let cancellations = 0;
+  const response = () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(1_048_577));
+        },
+        cancel() {
+          cancellations++;
+          return Promise.reject(new Error('already closed'));
+        },
+      }),
+    );
+  const provider = new HashiCorpVaultProvider({
+    address: 'https://vault.test',
+    token: 'token',
+    http: () => Promise.resolve(response()),
+  });
+  await provider.connect();
+  await expect(provider.get('password')).rejects.toThrow('exceeded');
+  await provider.set('password', 'new-value');
+  expect(cancellations).toBe(2);
 });

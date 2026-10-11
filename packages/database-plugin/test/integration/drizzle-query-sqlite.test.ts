@@ -1,13 +1,11 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { assertType } from '@std/testing/types';
-import type { IsExact } from '@std/testing/types';
+import { describe, expect, it } from 'vitest';
+import { expectTypeOf } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
-import { eq } from 'npm:drizzle-orm@0.45.2';
-import { drizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
-import { sqliteTable, text } from 'npm:drizzle-orm@0.45.2/sqlite-core';
-import type { BetterSQLite3Database } from 'npm:drizzle-orm@0.45.2/better-sqlite3';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/sqlite-proxy';
+import { sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import {
   createDrizzleDatabase,
   DrizzleAdapter,
@@ -57,10 +55,10 @@ function assertDrizzleScopeTypes(
 ): void {
   const outer = getDrizzleDatabase(service, database);
   outer.batch;
-  assertType<IsExact<typeof outer, typeof drizzleDb>>(true);
+  expectTypeOf<typeof outer>().toEqualTypeOf<typeof drizzleDb>();
 
   const transaction = getDrizzleTransaction(uow, database);
-  assertType<IsExact<typeof transaction, DrizzleTransaction<typeof drizzleDb>>>(true);
+  expectTypeOf<typeof transaction>().toEqualTypeOf<DrizzleTransaction<typeof drizzleDb>>();
   // @ts-expect-error SQLite Proxy transactions exclude the outer database's batch operation.
   transaction.batch;
 
@@ -145,7 +143,7 @@ describe('typed Drizzle query seam on real SQLite', () => {
           })
           .from(users)
           .innerJoin(teams, eq(users.teamId, teams.id));
-        assertType<IsExact<typeof joined, JoinedUserTeam[]>>(true);
+        expectTypeOf<typeof joined>().toEqualTypeOf<JoinedUserTeam[]>();
         expect(joined).toEqual([{ userId: 'u1', userName: 'Ada', teamName: 'Research' }]);
         throw sentinel;
       }),

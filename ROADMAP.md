@@ -13826,12 +13826,14 @@ runner, before anything is published to npm.
   `thresholds: { perFile: true, branches: 90, functions: 90, lines: 90 }` — the gate CLAUDE.md has
   asked a human to enforce by reading a table becomes a failing exit code. The per-file tables
   before and after are compared so the swap itself cannot drop a file below the bar unnoticed.
-- The guarded real-backend suites keep their `ignore`/skip guards and their CI-reachability pins in
+- The guarded real-backend suites keep their `skip` guards and their CI-reachability pins in
   `test/apps-gate.test.ts`; the env block that un-skips them is unchanged.
 - Permission-scoped proofs (see above) are each given a Node-side replacement or are listed, by
   test, as retired with the reason.
-- **To probe first:** that Vitest's transformer handles TC39 decorators (esbuild does; confirm the
-  version Vitest ships), and that the suite's subprocess-heavy CLI e2e runs within CI time.
+- Vitest 5 uses OXC, which leaves standard decorators unlowered. An `enforce: 'pre'` Vite plugin
+  uses esbuild 0.28.2 to lower TC39 decorators before OXC.
+- Package tests move in 111b; root tests and repository scripts stay on Deno until 111e. Deno-only
+  runtime proofs retain their named lane over the same converted files.
 - **Exit:** `pnpm test` and `pnpm test:coverage` green on Node 24; the test COUNT matches the Deno
   run (a converted suite that silently collects fewer tests is the failure this guards against); one
   run under Bun as a smoke, not a gate.
@@ -13891,7 +13893,8 @@ own tests and the Deno-target CLI gate.
   today: `no-explicit-any`, `consistent-type-imports` (in place of `verbatim-module-syntax`),
   `no-console` outside `cli`/`scripts`, unused-variable errors with no underscore escape, and a
   restricted-syntax rule for `new Function` (which `deno lint` never caught — a gain).
-- The 33 Deno scripts ported to Node (`tsx` or compiled); the doc gates (`check:docs`, `check:plan`,
+- Root `test/` moves to Vitest alongside the scripts it tests.
+- The Deno scripts ported to Node (`tsx` or compiled); the doc gates (`check:docs`, `check:plan`,
   fence compilers, `@since`, doc-lint ratchet) re-pointed. The JSDoc ratchet's baseline is
   re-measured on the new linter, not carried over as a number.
 - `ci.yml`, `release.yml`, `drift.yml`, `website.yml` rewritten on `actions/setup-node` + pnpm; the
@@ -14168,7 +14171,7 @@ patch by construction and gains nothing new here.
 | 110a      | ✅     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
 | 110b      | ✅     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |
 | 111a      | ✅     | every member — a Node build: pnpm workspaces, `tsc` to `dist/`, `npm:` lazy imports as optional peers ([#446](https://github.com/setu-ts/setu-ts/pull/446))                                                                                   |
-| 111b      | ⬜     | every member — the test suite on Node under Vitest, per-file 90% enforced by the runner                                                                                                                                                       |
+| 111b      | ✅     | every member — the test suite on Node under Vitest, per-file 90% enforced by the runner ([#447](https://github.com/setu-ts/setu-ts/pull/447))                                                                                                 |
 | 111c      | ⬜     | every member + release tooling — first npm publish (`@setu-ts`, trusted publishing, provenance)                                                                                                                                               |
 | 111d      | ⬜     | cli — Node-first: npm `bin`, Node as the default generated target                                                                                                                                                                             |
 | 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |

@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   ClassProvider,
@@ -34,29 +33,6 @@ import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeFileSystem, createFakeRuntime } from '../fixtures/fake-runtime.ts';
-
-// Whether the runner can perform a real `import()` of a `file://` URL. The
-// real-`import()` discovery path is an external I/O line; under
-// non-interactive `deno test -P` (no read/import grant) it is skipped
-// (CLAUDE.md: an external I/O line may stay behind a guarded test, but the
-// branching logic around it is still exercised by the injectable-importer
-// unit tests). Probed synchronously via the permission API to avoid a
-// circular top-level `await import(import.meta.url)`.
-function probeImportPermission(): boolean {
-  const g = globalThis as {
-    Deno?: { permissions?: { querySync?: (p: unknown) => { state: string } } };
-  };
-  const deno = g.Deno;
-  if (deno?.permissions?.querySync === undefined) {
-    return false;
-  }
-  try {
-    return deno.permissions.querySync({ name: 'import' }).state === 'granted';
-  } catch {
-    return false;
-  }
-}
-const realImportAvailable = probeImportPermission();
 
 const guardFn: MiddlewareFunction = () => {};
 const otherGuardFn: MiddlewareFunction = () => {};
@@ -408,20 +384,22 @@ describe('DecoratorPlugin registration (integration)', () => {
     expect(decoratorDef.schema?.body).toBe(programmaticDef.schema?.body);
   });
 
-  it({
-    name: 'consumes autoDiscover + controllersPath (real import path)',
-    ignore: !realImportAvailable,
-  }, async () => {
-    const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
-      /\/$/,
-      '',
-    );
-    const fs = createFakeFileSystem({ [`${sampleDir}/user-controller.ts`]: '' });
-    const runtime = createFakeRuntime({ fs });
-    const { ctx, routes } = createFakeContext({ runtime });
-    await DecoratorPlugin({ autoDiscover: true, controllersPath: sampleDir }).register(ctx);
-    expect(routes.some((r) => r.method === 'GET' && r.path === '/discovered')).toBe(true);
-  });
+  // Node always grants a real `import()` of a `file://` URL, so the default
+  // discovery importer runs here unguarded (M111b; it was Deno-permission gated).
+  it(
+    'consumes autoDiscover + controllersPath (real import path)',
+    async () => {
+      const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
+        /\/$/,
+        '',
+      );
+      const fs = createFakeFileSystem({ [`${sampleDir}/user-controller.ts`]: '' });
+      const runtime = createFakeRuntime({ fs });
+      const { ctx, routes } = createFakeContext({ runtime });
+      await DecoratorPlugin({ autoDiscover: true, controllersPath: sampleDir }).register(ctx);
+      expect(routes.some((r) => r.method === 'GET' && r.path === '/discovered')).toBe(true);
+    },
+  );
 
   it('skips a non-controller class passed in the controllers list', async () => {
     class NotAController {

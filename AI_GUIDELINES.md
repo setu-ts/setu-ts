@@ -250,13 +250,14 @@ All runtime-specific operations must be abstracted:
 
 ### 4.5 Cross-Runtime Testing
 
-- CI must run the full test suite under Deno, against the working tree.
-- Node and Bun are verified by the separate compat suite in `compat/` (§6.4), which consumes the
-  PUBLISHED packages through JSR's npm compatibility layer. It cannot run the full suite: Node and
-  Bun resolve neither `jsr:@setu-ts/*` nor `npm:*` specifiers from source, so the compat suite
-  covers what only a live Node or Bun process can settle — module loading, runtime detection, and
-  the per-runtime HTTP adapters.
-- Runtime-specific tests must be guarded with `runtime.platform()` checks.
+- CI runs every package test suite on Node 24 with Vitest and per-file V8 coverage thresholds.
+- Deno-only runtime and diagnostics-listener proofs run through the named Deno lane over the same
+  converted test files. Deno remains a supported runtime.
+- The root `test/` suite and Deno repository scripts keep their Deno runner until M111e.
+- Node and Bun published-artifact compatibility remains separately verified by `compat/` and the
+  Node build boot. Bun package-suite execution is a recorded smoke.
+- Runtime-specific tests retain explicit platform or environment guards; a skipped backend is
+  unexercised.
 
 ---
 
@@ -367,8 +368,12 @@ Every package must include:
 
 ### 6.4 Test Framework
 
-- Use `deno test` as the test runner, with `@std/testing/bdd` (`describe`/`it`) and `@std/expect`
-  for assertions.
+- Package tests import `describe`, `it`, hooks, and `expect` from `vitest` and run through
+  `pnpm test` on Node 24.
+- Root tests import `@std/testing/bdd` and `@std/expect` and run through `deno task test` until
+  M111e.
+- Deno-only package tests keep Vitest-shaped imports; `deno task test:deno-lane` maps those imports
+  to the small Deno BDD shim.
 - Use `@setu-ts/testing` for test utilities.
 - Use `app.inject()` for HTTP testing without a server.
 - Use `createMockPlugin()` to PROVIDE a capability an application does not register, and
@@ -377,8 +382,8 @@ Every package must include:
 - Prefer `createTestApp({ app: createApp() })` over a hand-assembled `plugins` list wherever the
   behaviour under test depends on how the application is composed — the composition root is the one
   place the plugin list lives, and a second list drifts from it silently.
-- Node/Bun compatibility is verified by a separate compat suite in CI that consumes the packages
-  through JSR's npm compatibility layer.
+- Published-artifact Node/Bun compatibility is verified by the separate compat suite in CI and the
+  Node build boot; it supplements the source-based package suites.
 
 ### 6.5 Test Naming
 
@@ -410,18 +415,19 @@ Every package must include:
 
 ### 6.9 Suite Partitioning — What Runs Alone
 
-`deno task test` runs in two phases: suites that touch something shared run alone, then everything
-else runs with `--parallel`. [`scripts/test-partition.ts`](scripts/test-partition.ts) is the runner;
-the classification lives in [`scripts/test-partition-rules.ts`](scripts/test-partition-rules.ts) and
-is DERIVED on every run — there is no list to maintain, and a new suite is classified the moment it
-is written.
+`pnpm test` runs each member in two ordered Vitest projects: shared-resource suites with file
+parallelism disabled, followed by the remaining suites in parallel. `deno task test` applies the
+same partition to root tests. [`scripts/test-partition.ts`](scripts/test-partition.ts) is the root
+runner; the classification lives in
+[`scripts/test-partition-rules.ts`](scripts/test-partition-rules.ts) and is DERIVED on every run —
+there is no list to maintain, and a new suite is classified the moment it is written.
 
 A suite is isolated when any of these is true:
 
 - it lives under `test/e2e/` or its name ends `-e2e.test.ts`;
 - its source names a backend environment variable (`REDIS_URL`, `RABBITMQ_URL`, `S3_ENDPOINT_URL`,
   `MONGODB_URI`, …), which is how every guarded real-backend suite is gated;
-- it spawns a subprocess (`Deno.Command`), which covers everything driving `docker` or `deno`;
+- it spawns a subprocess (`Deno.Command`, `node:child_process`, `spawnProcess`, or `runProcess`);
 - it binds a real socket (`unusedPort`, `Deno.listen`, `Deno.serve`, `.listen(`, `.start({ port`).
 
 Two consequences to keep in mind when writing a test:
@@ -1167,7 +1173,7 @@ Any violation of these rules blocks the PR from merging. No exceptions.
 | No `eval`                                      | `deno lint` rule `no-eval`                                                                  |
 | No unused variables                            | `deno lint` rule `no-unused-vars` + `noUnusedLocals` in `compilerOptions`                   |
 | Strict TypeScript                              | Root `deno.json` `compilerOptions` with `strict: true`                                      |
-| Test coverage 90%+                             | `deno test --coverage` threshold check in CI                                                |
+| Test coverage 90%+                             | Vitest per-file V8 thresholds, Deno-lane and root-script coverage checks in CI              |
 | No circular dependencies                       | `deno info --json` graph check (custom script) or `dependency-cruiser` via `npm:` specifier |
 | No security vulnerabilities                    | `deno audit --level=high` in CI                                                             |
 | Code formatting                                | `deno fmt`                                                                                  |

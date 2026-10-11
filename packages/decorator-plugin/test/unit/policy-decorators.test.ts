@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IPrincipal, IRequestContext } from '@setu-ts/common';
 
 import { Ability, Controller, Get, Policy, RequirePolicy } from '../../src/index.ts';

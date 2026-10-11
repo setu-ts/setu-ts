@@ -1,3 +1,5 @@
+import { denoBinary, run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The `/format` subpath is browser-safe by construction, not by assumption.
  *
@@ -17,8 +19,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { format } from '../../src/format/index.ts';
 
@@ -36,12 +37,12 @@ interface InfoModule {
 
 /** The modules reachable from `entry` through VALUE imports only. */
 async function runtimeGraph(entry: URL): Promise<readonly string[]> {
-  const output = await new Deno.Command(Deno.execPath(), {
+  const output = await runProcess(denoBinary(), {
     args: ['info', '--json', entry.href],
     cwd: PACKAGE_DIR,
     stdout: 'piped',
     stderr: 'piped',
-  }).output();
+  });
   if (!output.success) {
     throw new Error(new TextDecoder().decode(output.stderr));
   }
@@ -77,24 +78,24 @@ describe('the /format subpath runtime graph', () => {
   });
 
   it('negative control: a planted value import of @setu-ts/common is detected', async () => {
-    const scratch = await Deno.makeTempDir({
+    const scratch = await tempDir({
       dir: new URL('.', PACKAGE_DIR).pathname,
       prefix: '.format-probe-',
     });
     try {
       for (const file of ['format.ts', 'index.ts', 'negotiate.ts', 'types.ts']) {
-        await Deno.copyFile(new URL(file, FORMAT_DIR), `${scratch}/${file}`);
+        await nodeFs.copyFile(new URL(file, FORMAT_DIR), `${scratch}/${file}`);
       }
       const formatFile = `${scratch}/format.ts`;
       const planted = "import { CAPABILITIES } from '@setu-ts/common';\nvoid CAPABILITIES;\n" +
-        await Deno.readTextFile(formatFile);
-      await Deno.writeTextFile(formatFile, planted);
+        await nodeFs.readFile(formatFile, 'utf8');
+      await nodeFs.writeFile(formatFile, planted);
       const graph = await runtimeGraph(new URL(`file://${scratch}/index.ts`));
       const outside = graph.filter((specifier) => !specifier.startsWith(`file://${scratch}/`));
       expect(outside.length).toBeGreaterThan(0);
       expect(outside.some((specifier) => specifier.includes('/common/'))).toBe(true);
     } finally {
-      await Deno.remove(scratch, { recursive: true });
+      await nodeFs.rm(scratch, { recursive: true });
     }
   });
 });
@@ -119,12 +120,12 @@ describe('the /format subpath without the Deno namespace', () => {
       '};',
       'D.stdout.writeSync(new TextEncoder().encode(JSON.stringify(out)));',
     ].join('\n');
-    const output = await new Deno.Command(Deno.execPath(), {
+    const output = await runProcess(denoBinary(), {
       args: ['eval', probe],
       cwd: PACKAGE_DIR,
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
     expect(new TextDecoder().decode(output.stderr)).toBe('');
     const result = JSON.parse(new TextDecoder().decode(output.stdout));
     expect(result).toEqual({

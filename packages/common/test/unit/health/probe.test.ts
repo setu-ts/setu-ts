@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createCachedProbe, resolveProbeTiming } from '../../../src/health/probe.ts';
 import type { IRuntimeServices } from '../../../src/runtime.ts';
 import type { CachedProbeOptions } from '../../../src/health/probe.ts';

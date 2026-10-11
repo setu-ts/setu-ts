@@ -1,5 +1,7 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { tempDir } from '../../../../../test/node-helpers.ts';
+import { rm, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
   detectProjectRuntime,
@@ -303,7 +305,11 @@ describe('a connection fallback is rendered as a literal, never as code', () => 
     const source = 'const Deno = { env: { get: (_: string) => undefined } };\n' +
       'const process = { env: {} as Record<string, string | undefined> };\n' +
       `export const value = ${expression};\n`;
-    const module = await import(`data:application/typescript,${encodeURIComponent(source)}`);
+    const directory = await tempDir();
+    const path = `${directory}/profile.ts`;
+    await writeFile(path, source);
+    const module = await import(/* @vite-ignore */ pathToFileURL(path).href);
+    await rm(directory, { recursive: true });
     return module.value;
   }
 

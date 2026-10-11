@@ -12,8 +12,7 @@
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { GraphqlPlugin } from '../../src/index.ts';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 describe('GraphQL HTTP E2E', () => {
   const typeDefs = `

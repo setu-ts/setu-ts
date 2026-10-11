@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * §3.7 real-outage bar: drives a **real** broker through a **real** stop and
  * restart, asserting the sequence `up → (stop) down → (restart) up`, and for
@@ -15,8 +15,7 @@
  * container by its published port, so the same suite works against the CI
  * service containers (localhost-mapped) and local `smoke-*` containers alike.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RabbitMqBroker } from '../../src/brokers/rabbitmq-broker.ts';
 import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';
 import { PipelinedBroker } from '../../src/pipeline/pipelined-broker.ts';
@@ -26,7 +25,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 // ── Docker stop/start helpers (inlined; no cross-package dep) ──────────────
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(
       `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
@@ -89,24 +88,13 @@ function makeRuntime(): IRuntimeServices {
 // ── RabbitMQ outage ─────────────────────────────────────────────────────────
 
 describe('REAL RabbitMQ outage (§3.7)', () => {
-  it('up → stop → down → restart → up, and pre-outage subscription receives post-outage publish', async () => {
-    const url = Deno.env.get('RABBITMQ_URL');
-    if (url === undefined) {
-      console.log('SKIP: RABBITMQ_URL not set');
-      return;
-    }
+  it('up → stop → down → restart → up, and pre-outage subscription receives post-outage publish', {
+    skip: process.env['RABBITMQ_URL'] === undefined,
+  }, async () => {
+    const url = process.env['RABBITMQ_URL'];
+    if (url === undefined) throw new Error('Backend guard failed');
 
-    let amqplibPresent = false;
-    try {
-      await import('npm:amqplib@0.10.x');
-      amqplibPresent = true;
-    } catch {
-      // npm:amqplib not available
-    }
-    if (!amqplibPresent) {
-      console.log('SKIP: npm:amqplib not available');
-      return;
-    }
+    await import('amqplib');
 
     const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
     const containerId = await containerIdForPort(port);
@@ -145,7 +133,7 @@ describe('REAL RabbitMQ outage (§3.7)', () => {
     } finally {
       await broker.disconnect();
       // Leave the container running for the environment.
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
+      await runProcess('docker', { args: ['start', containerId] });
     }
   });
 });
@@ -153,67 +141,58 @@ describe('REAL RabbitMQ outage (§3.7)', () => {
 // ── Redis Streams outage ────────────────────────────────────────────────────
 
 describe('REAL Redis Streams outage (§3.7)', () => {
-  it('up → stop → down → restart → up', async () => {
-    const url = Deno.env.get('REDIS_URL');
-    if (url === undefined) {
-      console.log('SKIP: REDIS_URL not set');
-      return;
-    }
+  it(
+    'up → stop → down → restart → up',
+    { skip: process.env['REDIS_URL'] === undefined },
+    async () => {
+      const url = process.env['REDIS_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    let ioredisPresent = false;
-    try {
-      await import('npm:ioredis@5.x');
-      ioredisPresent = true;
-    } catch {
-      // npm:ioredis not available
-    }
-    if (!ioredisPresent) {
-      console.log('SKIP: npm:ioredis@5.x not available');
-      return;
-    }
+      await import('ioredis');
 
-    const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
-    const containerId = await containerIdForPort(port);
+      const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
+      const containerId = await containerIdForPort(port);
 
-    const broker = new RedisStreamsBroker(makeRuntime(), new JsonSerializer(), {
-      url: toIpv4(url),
-    });
+      const broker = new RedisStreamsBroker(makeRuntime(), new JsonSerializer(), {
+        url: toIpv4(url),
+      });
 
-    try {
-      await broker.connect();
+      try {
+        await broker.connect();
 
-      // (up) baseline: poll until the ioredis connection settles to ready
-      await waitTrue(async () => (await broker.isHealthy()) === true, 'up baseline', 15_000);
-      expect(await broker.isHealthy()).toBe(true);
+        // (up) baseline: poll until the ioredis connection settles to ready
+        await waitTrue(async () => (await broker.isHealthy()) === true, 'up baseline', 15_000);
+        expect(await broker.isHealthy()).toBe(true);
 
-      // (stop) real Redis stop → probe reports down
-      await docker(['stop', containerId]);
-      await waitTrue(async () => (await broker.isHealthy()) === false, 'down after stop', 30_000);
-      expect(await broker.isHealthy()).toBe(false);
+        // (stop) real Redis stop → probe reports down
+        await docker(['stop', containerId]);
+        await waitTrue(async () => (await broker.isHealthy()) === false, 'down after stop', 30_000);
+        expect(await broker.isHealthy()).toBe(false);
 
-      // (restart) real Redis start → probe reports up
-      await docker(['start', containerId]);
-      await waitTrue(async () => (await broker.isHealthy()) === true, 'up after restart', 30_000);
-      expect(await broker.isHealthy()).toBe(true);
-    } finally {
-      await broker.disconnect();
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
-    }
-  });
+        // (restart) real Redis start → probe reports up
+        await docker(['start', containerId]);
+        await waitTrue(async () => (await broker.isHealthy()) === true, 'up after restart', 30_000);
+        expect(await broker.isHealthy()).toBe(true);
+      } finally {
+        await broker.disconnect();
+        await runProcess('docker', { args: ['start', containerId] });
+      }
+    },
+  );
 });
 
 // ── M89c: register-time publish on a REAL broker ────────────────────────────
 
 describe('REAL RabbitMQ register-time publish (M89c §6)', () => {
-  it('a register-time publish still boots and still delivers through the COMPLETE chain', async () => {
-    const url = Deno.env.get('RABBITMQ_URL');
-    if (url === undefined) {
-      return;
-    }
+  it('a register-time publish still boots and still delivers through the COMPLETE chain', {
+    skip: process.env['RABBITMQ_URL'] === undefined,
+  }, async () => {
+    const url = process.env['RABBITMQ_URL'];
+    if (url === undefined) throw new Error('Backend guard failed');
 
     let amqplibPresent = false;
     try {
-      await import('npm:amqplib@0.10.x');
+      await import('amqplib');
       amqplibPresent = true;
     } catch {
       // npm:amqplib not available
@@ -303,152 +282,134 @@ async function startHealthApp(rabbitUrl: string) {
 }
 
 describe('REAL RabbitMQ hung backend (M95b §3.6 / X51-2)', () => {
-  it('a paused broker: /health SETTLES inside the bound, never claims reachable true, and recovers', async () => {
-    const url = Deno.env.get('RABBITMQ_URL');
-    if (url === undefined) {
-      console.log('SKIP: RABBITMQ_URL not set');
-      return;
-    }
-    let amqplibPresent = false;
-    try {
-      await import('npm:amqplib@0.10.x');
-      amqplibPresent = true;
-    } catch {
-      // npm:amqplib not available
-    }
-    if (!amqplibPresent) {
-      console.log('SKIP: npm:amqplib not available');
-      return;
-    }
+  it(
+    'a paused broker: /health SETTLES inside the bound, never claims reachable true, and recovers',
+    { skip: process.env['RABBITMQ_URL'] === undefined },
+    async () => {
+      const url = process.env['RABBITMQ_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
+      await import('amqplib');
 
-    const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
-    const containerId = await containerIdForPort(port);
-    const app = await startHealthApp(url);
-    let paused = false;
+      const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
+      const containerId = await containerIdForPort(port);
+      const app = await startHealthApp(url);
+      let paused = false;
 
-    try {
-      const healthBody = async (): Promise<
-        { status: string; checks?: Record<string, { status: string; data?: unknown }> }
-      > => (await app.inject({ method: 'GET', url: 'http://localhost/health' })).json();
+      try {
+        const healthBody = async (): Promise<
+          { status: string; checks?: Record<string, { status: string; data?: unknown }> }
+        > => (await app.inject({ method: 'GET', url: 'http://localhost/health' })).json();
 
-      // (up) baseline: the probe's real round trip answers true.
-      await waitTrue(
-        async () => {
+        // (up) baseline: the probe's real round trip answers true.
+        await waitTrue(
+          async () => {
+            const body = await healthBody();
+            const data = body.checks?.messaging?.data as { reachable?: unknown } | undefined;
+            return body.status === 'up' && data?.reachable === true;
+          },
+          'baseline up with reachable true',
+          30_000,
+        );
+
+        // (pause) the condition a stopped container never produces: the
+        // socket stays open and nothing answers. X51-2 measured this as
+        // `reachable: true` in 0.576 ms — a flag read. Now the /health
+        // request must SETTLE (finding 2: the 0.6.0 hang never returned —
+        // 'it settled' is asserted by MEASURING the elapsed time), and the
+        // unanswerable probe must report 'unknown' (the R4 mapping §3.6
+        // preserves), never a claimed true.
+        await docker(['pause', containerId]);
+        paused = true;
+
+        let elapsed = -1;
+        let sawUnknown = false;
+        let unknownIndicatorStatus = '';
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline) {
+          const started = performance.now();
           const body = await healthBody();
+          elapsed = performance.now() - started;
           const data = body.checks?.messaging?.data as { reachable?: unknown } | undefined;
-          return body.status === 'up' && data?.reachable === true;
-        },
-        'baseline up with reachable true',
-        30_000,
-      );
-
-      // (pause) the condition a stopped container never produces: the
-      // socket stays open and nothing answers. X51-2 measured this as
-      // `reachable: true` in 0.576 ms — a flag read. Now the /health
-      // request must SETTLE (finding 2: the 0.6.0 hang never returned —
-      // 'it settled' is asserted by MEASURING the elapsed time), and the
-      // unanswerable probe must report 'unknown' (the R4 mapping §3.6
-      // preserves), never a claimed true.
-      await docker(['pause', containerId]);
-      paused = true;
-
-      let elapsed = -1;
-      let sawUnknown = false;
-      let unknownIndicatorStatus = '';
-      const deadline = Date.now() + 30_000;
-      while (Date.now() < deadline) {
-        const started = performance.now();
-        const body = await healthBody();
-        elapsed = performance.now() - started;
-        const data = body.checks?.messaging?.data as { reachable?: unknown } | undefined;
-        if (data?.reachable === 'unknown') {
-          sawUnknown = true;
-          unknownIndicatorStatus = body.checks?.messaging?.status ?? '';
-          break;
+          if (data?.reachable === 'unknown') {
+            sawUnknown = true;
+            unknownIndicatorStatus = body.checks?.messaging?.status ?? '';
+            break;
+          }
+          // A cached outcome inside the 5 s TTL answers instantly; keep
+          // polling until a FRESH probe has run against the paused broker.
+          await wait(500);
         }
-        // A cached outcome inside the 5 s TTL answers instantly; keep
-        // polling until a FRESH probe has run against the paused broker.
-        await wait(500);
+        expect(sawUnknown).toBe(true);
+        // The bound is 2 s; the request that answered 'unknown' must have
+        // settled well inside the suite's own timeout — a request that never
+        // returns fails here by measurement, not by luck.
+        expect(elapsed).toBeGreaterThan(0);
+        expect(elapsed).toBeLessThan(10_000);
+        // The indicator reports unknown as `up` (the documented R4 rule §3.6
+        // leaves unchanged) — the honest "we asked, nothing answered", not a
+        // claimed reachable.
+        expect(unknownIndicatorStatus).toBe('up');
+
+        // (unpause) the broker answers again and the probe recovers to a
+        // real `reachable: true`.
+        await docker(['unpause', containerId]);
+        paused = false;
+        await waitTrue(
+          async () => {
+            const body = await healthBody();
+            const data = body.checks?.messaging?.data as { reachable?: unknown } | undefined;
+            return data?.reachable === true;
+          },
+          'recovered reachable true',
+          30_000,
+        );
+      } finally {
+        if (paused) {
+          await runProcess('docker', { args: ['unpause', containerId] });
+        }
+        await app.stop().catch(() => {});
       }
-      expect(sawUnknown).toBe(true);
-      // The bound is 2 s; the request that answered 'unknown' must have
-      // settled well inside the suite's own timeout — a request that never
-      // returns fails here by measurement, not by luck.
-      expect(elapsed).toBeGreaterThan(0);
-      expect(elapsed).toBeLessThan(10_000);
-      // The indicator reports unknown as `up` (the documented R4 rule §3.6
-      // leaves unchanged) — the honest "we asked, nothing answered", not a
-      // claimed reachable.
-      expect(unknownIndicatorStatus).toBe('up');
+    },
+  );
 
-      // (unpause) the broker answers again and the probe recovers to a
-      // real `reachable: true`.
-      await docker(['unpause', containerId]);
-      paused = false;
-      await waitTrue(
-        async () => {
-          const body = await healthBody();
-          const data = body.checks?.messaging?.data as { reachable?: unknown } | undefined;
-          return data?.reachable === true;
-        },
-        'recovered reachable true',
-        30_000,
-      );
-    } finally {
-      if (paused) {
-        await new Deno.Command('docker', { args: ['unpause', containerId] }).output();
+  it(
+    '§3.6 shared-channel guard: after N health polls a publish and a subscription still round-trip',
+    { skip: process.env['RABBITMQ_URL'] === undefined },
+    async () => {
+      const url = process.env['RABBITMQ_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
+      await import('amqplib');
+
+      const app = await startHealthApp(url);
+      try {
+        // N health polls against the RUNNING broker. If any poll ever touched
+        // the shared channel (or leaked a fault into it), the traffic below
+        // fails — the e2e form of the guard the unit suite pins.
+        for (let i = 0; i < 5; i++) {
+          await app.inject({ method: 'GET', url: 'http://localhost/health' });
+        }
+
+        const { CAPABILITIES } = await import('@setu-ts/common');
+        const broker = app.services.get<{
+          subscribe(
+            topic: string,
+            handler: (msg: unknown) => void | Promise<void>,
+          ): Promise<{ unsubscribe(): Promise<void> }>;
+          publish(topic: string, message: unknown): Promise<void>;
+        }>(CAPABILITIES.MESSAGING);
+
+        const topic = `m95b.channel-guard.${crypto.randomUUID()}`;
+        const received: unknown[] = [];
+        const sub = await broker.subscribe(topic, (msg: unknown) => {
+          received.push(msg);
+        });
+        await broker.publish(topic, { after: 'polls' });
+        await waitTrue(() => received.length >= 1, 'post-poll delivery', 20_000);
+        await sub.unsubscribe();
+        expect(received.length).toBe(1);
+      } finally {
+        await app.stop().catch(() => {});
       }
-      await app.stop().catch(() => {});
-    }
-  });
-
-  it('§3.6 shared-channel guard: after N health polls a publish and a subscription still round-trip', async () => {
-    const url = Deno.env.get('RABBITMQ_URL');
-    if (url === undefined) {
-      console.log('SKIP: RABBITMQ_URL not set');
-      return;
-    }
-    let amqplibPresent = false;
-    try {
-      await import('npm:amqplib@0.10.x');
-      amqplibPresent = true;
-    } catch {
-      // npm:amqplib not available
-    }
-    if (!amqplibPresent) {
-      console.log('SKIP: npm:amqplib not available');
-      return;
-    }
-
-    const app = await startHealthApp(url);
-    try {
-      // N health polls against the RUNNING broker. If any poll ever touched
-      // the shared channel (or leaked a fault into it), the traffic below
-      // fails — the e2e form of the guard the unit suite pins.
-      for (let i = 0; i < 5; i++) {
-        await app.inject({ method: 'GET', url: 'http://localhost/health' });
-      }
-
-      const { CAPABILITIES } = await import('@setu-ts/common');
-      const broker = app.services.get<{
-        subscribe(
-          topic: string,
-          handler: (msg: unknown) => void | Promise<void>,
-        ): Promise<{ unsubscribe(): Promise<void> }>;
-        publish(topic: string, message: unknown): Promise<void>;
-      }>(CAPABILITIES.MESSAGING);
-
-      const topic = `m95b.channel-guard.${crypto.randomUUID()}`;
-      const received: unknown[] = [];
-      const sub = await broker.subscribe(topic, (msg: unknown) => {
-        received.push(msg);
-      });
-      await broker.publish(topic, { after: 'polls' });
-      await waitTrue(() => received.length >= 1, 'post-poll delivery', 20_000);
-      await sub.unsubscribe();
-      expect(received.length).toBe(1);
-    } finally {
-      await app.stop().catch(() => {});
-    }
-  });
+    },
+  );
 });

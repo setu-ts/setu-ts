@@ -1,8 +1,7 @@
 /**
  * CQRS plugin tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CqrsPlugin } from '../../src/plugin/cqrs-plugin.ts';
 import {
   CAPABILITIES,

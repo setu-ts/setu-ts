@@ -72,7 +72,10 @@ export function isolationReason(path: string, source: string): string | null {
   // A subprocess competes for CPU with the test workers rather than for a named
   // resource, which surfaces as a timeout in whichever suite is least patient.
   // `Deno.Command` also covers every suite that drives `docker`.
-  if (source.includes('Deno.Command')) {
+  if (
+    /Deno\.Command|node:child_process|\bspawnProcess\(|\brunProcess\(|\brun\(process\.execPath/
+      .test(source)
+  ) {
     return 'spawns a subprocess';
   }
   if (PORT_SIGNAL.test(source)) {

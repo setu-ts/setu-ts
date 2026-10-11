@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RabbitMqBroker } from '../../src/brokers/rabbitmq-broker.ts';
 import { IntegrationEventRejectedError, MessagingPlugin } from '../../src/index.ts';
 import type { RabbitMqOptions } from '../../src/index.ts';

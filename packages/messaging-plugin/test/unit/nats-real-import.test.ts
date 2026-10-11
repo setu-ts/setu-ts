@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /**
  * Real-import test: the NATS header factory (§12.2).
  *
@@ -14,18 +13,11 @@
  *
  * Needs no server: `headers()` is a pure constructor.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 describe('REAL nats header factory (guarded)', () => {
   it('builds MsgHdrs the broker can write to and read back', async () => {
-    let nats: typeof import('npm:nats@2.x');
-    try {
-      nats = await import('npm:nats@2.x');
-    } catch {
-      console.warn('SKIP: npm:nats is not resolvable');
-      return;
-    }
+    const nats = await import('nats');
 
     expect(typeof nats.headers).toBe('function');
 

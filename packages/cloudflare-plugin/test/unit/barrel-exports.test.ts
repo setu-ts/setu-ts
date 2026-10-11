@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The barrel must expose exactly the documented public surface — and must NOT
  * expose the concrete registry, which would commit the package to a class shape
  * when the contract is the interface (AI_GUIDELINES §1.6).
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as barrel from '../../src/index.ts';
 
 describe('cloudflare-plugin barrel', () => {

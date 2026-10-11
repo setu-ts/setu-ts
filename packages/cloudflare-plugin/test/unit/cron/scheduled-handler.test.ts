@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The `scheduled` export is a thin adapter, and the one property that matters
  * is that it AWAITS: Cloudflare ends the invocation when the returned promise
  * settles, so returning early truncates the work.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createScheduledHandler } from '../../../src/cron/scheduled-handler.ts';
 import { WorkersCron } from '../../../src/cron/workers-cron.ts';

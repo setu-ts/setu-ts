@@ -1,3 +1,5 @@
+import { run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * Tests for the `full-stack` template definition and the files it emits.
  *
@@ -11,8 +13,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { TargetRuntime } from '../../src/constants.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
@@ -417,23 +418,23 @@ describe('full-stack vite.config.ts | executed', () => {
   // of a declared package, must both stay external to the SSR build. Executes the
   // emitted file against stub `vite` modules so the predicate is run, not read.
   it('externalizes deno.jsonc libraries and exported subpaths, and nothing else', async () => {
-    const root = await Deno.makeTempDir({ prefix: 'setu-vite-config-' });
+    const root = await tempDir({ prefix: 'setu-vite-config-' });
     try {
       const app = `${root}/apps/web`;
-      await Deno.mkdir(app, { recursive: true });
-      await Deno.writeTextFile(`${app}/vite.config.ts`, contentsOf('vite.config.ts'));
-      await Deno.writeTextFile(
+      await nodeFs.mkdir(app, { recursive: true });
+      await nodeFs.writeFile(`${app}/vite.config.ts`, contentsOf('vite.config.ts'));
+      await nodeFs.writeFile(
         `${app}/vite.ts`,
         'export const defineConfig = (c: unknown) => c;\n',
       );
-      await Deno.writeTextFile(`${app}/rr.ts`, 'export const reactRouter = () => ({});\n');
-      await Deno.writeTextFile(
+      await nodeFs.writeFile(`${app}/rr.ts`, 'export const reactRouter = () => ({});\n');
+      await nodeFs.writeFile(
         `${app}/deno.json`,
         JSON.stringify({ imports: { 'vite': './vite.ts', '@react-router/dev/vite': './rr.ts' } }),
       );
       const library = async (name: string, file: string, text: string) => {
-        await Deno.mkdir(`${root}/libs/${name}`, { recursive: true });
-        await Deno.writeTextFile(`${root}/libs/${name}/${file}`, text);
+        await nodeFs.mkdir(`${root}/libs/${name}`, { recursive: true });
+        await nodeFs.writeFile(`${root}/libs/${name}/${file}`, text);
       };
       await library('plain', 'deno.json', '{ "name": "@custom/plain" }');
       await library(
@@ -458,7 +459,7 @@ describe('full-stack vite.config.ts | executed', () => {
         '@custom/plainer',
         'react',
       ];
-      await Deno.writeTextFile(
+      await nodeFs.writeFile(
         `${app}/run.ts`,
         "import config from './vite.config.ts';\n" +
           'const external = (config as { environments: { ssr: { build: { rollupOptions: ' +
@@ -466,11 +467,11 @@ describe('full-stack vite.config.ts | executed', () => {
           '.external;\n' +
           `console.log(JSON.stringify(${JSON.stringify(ids)}.filter((id) => external(id))));\n`,
       );
-      const result = await new Deno.Command('deno', {
+      const result = await runProcess('deno', {
         args: ['run', '--no-lock', '--allow-read', '--config', `${app}/deno.json`, `${app}/run.ts`],
         stdout: 'piped',
         stderr: 'piped',
-      }).output();
+      });
       const stderr = new TextDecoder().decode(result.stderr);
       expect(result.code, stderr).toBe(0);
       expect(JSON.parse(new TextDecoder().decode(result.stdout))).toEqual([
@@ -483,7 +484,7 @@ describe('full-stack vite.config.ts | executed', () => {
         '@custom/json-wins',
       ]);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await nodeFs.rm(root, { recursive: true });
     }
   });
 });

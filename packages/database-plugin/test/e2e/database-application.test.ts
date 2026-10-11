@@ -5,8 +5,7 @@
  * DatabasePlugin({ type: 'memory' }), registers routes exercising
  * CRUD and transaction-rollback isolation, then verifies via app.inject().
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HandlerResult,

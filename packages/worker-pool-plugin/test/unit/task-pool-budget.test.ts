@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IWorkerHost } from '@setu-ts/common';
 import { TaskPool } from '../../src/pool/task-pool.ts';
 import { WorkerBudget } from '../../src/pool/worker-budget.ts';

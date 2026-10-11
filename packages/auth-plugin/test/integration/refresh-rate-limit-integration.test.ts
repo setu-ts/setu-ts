@@ -9,8 +9,7 @@
  * max+1-th request 429s without reaching the handler.
  */
 
-import { beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
 import { rateLimitMiddleware } from '../../src/middleware/rate-limit-middleware.ts';

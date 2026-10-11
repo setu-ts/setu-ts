@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type {
   Constructor,
   IdempotentWithinResult,
@@ -31,7 +30,7 @@ import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 // Real Zod, guarded the same way the validation suites are: the ordering test
 // needs a schema that actually rejects, so it is skipped where npm:zod cannot
 // load rather than passing vacuously.
-const zodModule = await import('npm:zod@^3.24.0').catch(() => undefined);
+const zodModule = await import('zod-v3').catch(() => undefined);
 const z = zodModule?.z;
 const itZod = z === undefined ? it.skip : it;
 

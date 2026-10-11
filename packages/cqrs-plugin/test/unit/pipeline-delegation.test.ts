@@ -1,8 +1,7 @@
 /**
  * Request-bus delegation tests for the shared behavior composer.
  */
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { describe, expect, it } from 'vitest';
 import { RequestBus } from '../../src/bus/request-bus.ts';
 
 describe('RequestBus behavior-chain delegation', () => {

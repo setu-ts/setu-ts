@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /**
  * X10-1's real-backend gate: the queue declaration against an actual
  * RabbitMQ **4** server.
@@ -17,20 +16,18 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { MessageMetadata } from '@setu-ts/common';
 import { RabbitMqBroker } from '../../src/brokers/rabbitmq-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('RabbitMqBroker against RabbitMQ 4 (X10-1)', () => {
-  it('a group subscriber and a private subscriber both receive a published message', async () => {
-    const url = Deno.env.get('RABBITMQ_URL');
-    if (url === undefined) {
-      console.log('SKIP: RABBITMQ_URL not set');
-      return;
-    }
+  it('a group subscriber and a private subscriber both receive a published message', {
+    skip: process.env['RABBITMQ_URL'] === undefined,
+  }, async () => {
+    const url = process.env['RABBITMQ_URL'];
+    if (url === undefined) throw new Error('Backend guard failed');
 
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
       url,
@@ -66,31 +63,32 @@ describe('RabbitMqBroker against RabbitMQ 4 (X10-1)', () => {
     await broker.disconnect();
   });
 
-  it('completes an RPC round trip', async () => {
-    const url = Deno.env.get('RABBITMQ_URL');
-    if (url === undefined) {
-      console.log('SKIP: RABBITMQ_URL not set');
-      return;
-    }
+  it(
+    'completes an RPC round trip',
+    { skip: process.env['RABBITMQ_URL'] === undefined },
+    async () => {
+      const url = process.env['RABBITMQ_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
-      url,
-      exchangeName: `m70l-rpc-${crypto.randomUUID()}`,
-    });
-    await broker.connect();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+        url,
+        exchangeName: `m70l-rpc-${crypto.randomUUID()}`,
+      });
+      await broker.connect();
 
-    await broker.respond<{ ping: number }, { pong: number }>(
-      'm70l.rpc',
-      (request) => Promise.resolve({ pong: request.ping + 1 }),
-    );
-    await new Promise((r) => setTimeout(r, 200));
+      await broker.respond<{ ping: number }, { pong: number }>(
+        'm70l.rpc',
+        (request) => Promise.resolve({ pong: request.ping + 1 }),
+      );
+      await new Promise((r) => setTimeout(r, 200));
 
-    const reply = await broker.request<{ ping: number }, { pong: number }>(
-      'm70l.rpc',
-      { ping: 41 },
-    );
-    expect(reply).toEqual({ pong: 42 });
+      const reply = await broker.request<{ ping: number }, { pong: number }>(
+        'm70l.rpc',
+        { ping: 41 },
+      );
+      expect(reply).toEqual({ pong: 42 });
 
-    await broker.disconnect();
-  });
+      await broker.disconnect();
+    },
+  );
 });

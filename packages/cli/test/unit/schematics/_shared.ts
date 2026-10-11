@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { expect } from '@std/expect';
+import { expect } from 'vitest';
 
 import type { GeneratedFile, SchematicOptions } from '../../../src/schematics/registry.ts';
 import { getSchematic } from '../../../src/schematics/registry.ts';

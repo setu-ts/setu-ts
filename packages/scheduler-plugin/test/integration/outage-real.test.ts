@@ -1,3 +1,4 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Real Redis outage for the scheduler's distributed lock (M101a V8-24),
  * through a real kernel app.
@@ -17,8 +18,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ISchedulerDiagnosticsSource, SchedulerDiagnosticsRecord } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -27,11 +27,11 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { SchedulerPlugin } from '../../src/index.ts';
 import { RedisLock } from '../../src/lock/redis-lock.ts';
 
-const redisUrl = Deno.env.get('REDIS_URL');
+const redisUrl = process.env['REDIS_URL'];
 const BOUND_MS = 500;
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
@@ -63,7 +63,7 @@ async function waitFor<T>(read: () => T, done: (value: T) => boolean): Promise<T
 
 describe(
   'REAL Redis scheduler lock outage (M101a V8-24)',
-  { ignore: redisUrl === undefined },
+  { skip: redisUrl === undefined },
   () => {
     it('paused Redis → fires settle lock-failed within the bound → unpaused → dispatches resume', async () => {
       const { url, port } = target();

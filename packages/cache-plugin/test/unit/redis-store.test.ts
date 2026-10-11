@@ -1,6 +1,5 @@
 // deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { RedisStore, validateClient } from '../../src/stores/redis-store.ts';
 import type { IRedisClient } from '../../src/interfaces/index.ts';
@@ -206,7 +205,7 @@ describe('RedisStore', () => {
     it('can lazy-import ioredis when available', async () => {
       let RedisCtor: unknown;
       try {
-        const mod = await import('npm:ioredis@5.x');
+        const mod = await import('ioredis');
         RedisCtor = mod.Redis;
       } catch {
         // ioredis not available — skip this test

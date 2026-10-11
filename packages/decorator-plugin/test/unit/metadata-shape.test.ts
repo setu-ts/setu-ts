@@ -1,5 +1,5 @@
-import { beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import * as nodeFs from 'node:fs/promises';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { Controller, Version } from '../../src/decorators/controller.ts';
 import { Delete, Get, Post } from '../../src/decorators/http.ts';
@@ -45,7 +45,10 @@ import type { Constructor } from '@setu-ts/common';
  *   `params.test.ts` and across package copies in `context-marker-copies.test.ts`.
  */
 const baseline = JSON.parse(
-  await Deno.readTextFile(new URL('../fixtures/legacy-metadata-baseline.json', import.meta.url)),
+  await nodeFs.readFile(
+    new URL('../fixtures/legacy-metadata-baseline.json', import.meta.url),
+    'utf8',
+  ),
 ) as Record<string, [string, unknown][]>;
 
 /** Replays the serialization the capture script used, so the two are comparable. */

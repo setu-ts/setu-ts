@@ -73,7 +73,12 @@ export function buildTransportHeaders(
     headers[DEDUPLICATION_ID_HEADER] = validated.deduplicationId;
   }
   for (const [key, value] of Object.entries(frameworkHeaders)) {
-    headers[key] = value;
+    Object.defineProperty(headers, key, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
   return headers;
 }

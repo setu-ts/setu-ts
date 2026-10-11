@@ -11,8 +11,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { HttpCollector, MIDDLEWARE_PRIORITY } from '../../src/collectors/http-collector.ts';
 import { MetricsService } from '../../src/services/metrics-service.ts';
 import type { Counter } from '../../src/metrics/counter.ts';

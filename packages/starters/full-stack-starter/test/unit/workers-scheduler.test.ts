@@ -6,8 +6,7 @@
  * drive the internal composition with an explicit platform, because the
  * starter's own `detectRuntime()` always answers `'deno'` under this suite.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';

@@ -7,8 +7,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as barrel from '../../src/index.ts';
 import type { ProviderType } from '../../src/index.ts';
 

@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { blockKey, PositionClock } from '../../../src/outbox/position.ts';
 import { outboxHarness, rows } from '../../fixtures/outbox.ts';

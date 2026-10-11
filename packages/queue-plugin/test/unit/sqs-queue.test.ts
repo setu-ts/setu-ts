@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 import type { ISqsTransport } from '../../src/adapters/sqs-queue.ts';
@@ -1858,4 +1857,53 @@ describe('SqsQueue — B4 envelope validation', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0].id).toBe('j1');
   });
+});
+
+it('skips malformed envelopes and stale settlements safely without a logger', async () => {
+  const messages: Awaited<ReturnType<ISqsTransport['receive']>> = [
+    { body: '{', receiptHandle: 'bad-json', approximateReceiveCount: undefined },
+    { body: 'null', receiptHandle: 'null', approximateReceiveCount: undefined },
+    { body: '[]', receiptHandle: 'array', approximateReceiveCount: undefined },
+    {
+      body: JSON.stringify({ v: 1, id: '', name: 'jobs', data: {} }),
+      receiptHandle: 'empty',
+      approximateReceiveCount: undefined,
+    },
+    {
+      body: JSON.stringify({ v: 1, id: 'valid', name: 'jobs', data: {}, maxAttempts: 3 }),
+      receiptHandle: 'live',
+      approximateReceiveCount: undefined,
+    },
+    {
+      body: JSON.stringify({ v: 1, id: 'bad-count', name: 'jobs', data: {}, maxAttempts: 3 }),
+      receiptHandle: 'bad-count',
+      approximateReceiveCount: '1.5',
+    },
+  ];
+  let deletions = 0;
+  const transport: ISqsTransport = {
+    send: () => Promise.resolve(),
+    receive: () => Promise.resolve(messages),
+    delete: () => {
+      deletions++;
+      return Promise.resolve();
+    },
+    changeVisibility: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+  };
+  const queue = new SqsQueue(createRuntime(), { queues: { jobs: 'url' }, client: transport });
+  await queue.connect();
+  await queue.connect();
+  const jobs = await queue.reserve('jobs', 10, 1_000_000);
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0]!.id).toBe('valid');
+  expect(jobs[0]!.maxAttempts).toBe(3);
+  for (const id of ['missing', 'valid']) {
+    await queue.ack('jobs', id, 'stale');
+    await queue.requeue('jobs', id, 1_000_000, 1, 'stale');
+    await queue.deadLetter('jobs', id, 1_000_000, 'stale');
+  }
+  expect(deletions).toBe(0);
+  await queue.disconnect();
+  await queue.disconnect();
 });

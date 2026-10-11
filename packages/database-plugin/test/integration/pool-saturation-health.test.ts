@@ -20,10 +20,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
-import { pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
+import { describe, expect, it } from 'vitest';
+import { drizzle } from 'drizzle-orm/pg-proxy';
+import { pgTable, text } from 'drizzle-orm/pg-core';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IDatabaseService } from '../../src/index.ts';
 import { createApplication } from '@setu-ts/kernel';

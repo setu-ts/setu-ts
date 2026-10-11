@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IGrantSource, IServiceRegistry, ScopeRef } from '@setu-ts/common';
 import { compileScopedRbac } from '../../../src/scoped/options.ts';
 import { GrantResolver, principalKey } from '../../../src/scoped/grant-resolver.ts';

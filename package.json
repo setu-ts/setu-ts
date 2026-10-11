@@ -58,8 +58,17 @@
     "packages/diagnostics-plugin",
     "packages/idempotency-plugin"
   ],
+  "type": "module",
+  "scripts": {
+    "test": "deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts",
+    "test:coverage": "deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts --coverage"
+  },
   "devDependencies": {
     "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "vitest": "5.0.3",
+    "@vitest/coverage-v8": "5.0.3",
+    "esbuild": "0.28.2",
+    "@hono/node-server": "^2.0.0"
   }
 }

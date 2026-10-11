@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { Room, RoomRegistry } from '../../src/rooms/room-registry.ts';
 import { WebSocketConnection } from '../../src/connection/websocket-connection.ts';
 import { createFakeTransport, type FakeTransport } from '../fixtures/fake-runtime.ts';

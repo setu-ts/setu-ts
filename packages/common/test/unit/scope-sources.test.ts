@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRequestContext } from '../../src/http.ts';
 import { scopeFromParam, scopeFromTenant } from '../../src/services/scope-sources.ts';
 

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateController } from '../../../src/schematics/controller.ts';
 import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';

@@ -1,3 +1,4 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Real HashiCorp Vault outage (M101a V8-4) — local-only: CI runs no Vault.
  *
@@ -22,8 +23,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HandlerResult, IRequestContext, ISecretManager } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -33,14 +33,14 @@ import { errorHandler } from '@setu-ts/exceptions';
 
 import { SecretsPlugin } from '../../src/index.ts';
 
-const address = Deno.env.get('VAULT_ADDR');
-const token = Deno.env.get('VAULT_TOKEN');
+const address = process.env['VAULT_ADDR'];
+const token = process.env['VAULT_TOKEN'];
 const skip = address === undefined || token === undefined;
 
 const BOUND_MS = 1000;
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
@@ -53,7 +53,7 @@ async function containerIdForPort(port: number): Promise<string> {
   return ids.split('\n')[0];
 }
 
-describe('REAL Vault outage (M101a V8-4)', { ignore: skip }, () => {
+describe('REAL Vault outage (M101a V8-4)', { skip: skip }, () => {
   it('paused Vault → 503 within the bound and secrets down → unpaused → 200', async () => {
     const base = address!.replace(/\/+$/, '');
     // Seed the secret the route reads.

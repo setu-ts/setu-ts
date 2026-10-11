@@ -10,8 +10,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { classifyDriverError } from '../../src/errors/classify.ts';
 import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
 import { DuplicateKeyError } from '@setu-ts/common';

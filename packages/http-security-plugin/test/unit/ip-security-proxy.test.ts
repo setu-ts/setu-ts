@@ -10,8 +10,7 @@
  * `7.7.7.7, 198.51.100.9` and the leftmost entry — the value the caller chose —
  * became `CLIENT_IP_STATE_KEY`, which the default rate-limit key reads.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { ipSecurityMiddleware } from '../../src/middleware/ip-security-middleware.ts';
 import { createFakeContext } from '../fixtures/fake-request-context.ts';

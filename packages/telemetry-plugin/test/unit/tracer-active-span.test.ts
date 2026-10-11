@@ -7,8 +7,7 @@
  * incidentally by `logger-plugin`'s integration test, which leaves
  * `tracer.ts` below its own package's per-file bar.
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 import { contextToTraceparent, TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
 
 import { TelemetryService } from '../../src/services/telemetry-service.ts';

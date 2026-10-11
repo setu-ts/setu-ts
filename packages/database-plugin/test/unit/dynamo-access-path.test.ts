@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { NormalizedQuery } from '@setu-ts/common';
 import { resolveDynamoAccessPath } from '../../src/adapters/dynamo/dynamo-access-path.ts';
 import { resolveDynamoTarget } from '../../src/adapters/dynamo/dynamo-mapping.ts';

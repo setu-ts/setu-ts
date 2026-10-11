@@ -1,3 +1,5 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The CLI never reads for a move, or writes, through a symbolic link inside a
  * project — on a REAL filesystem, with real links (M101f re-audit N9, N10).
@@ -13,9 +15,8 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { createRecorder } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runAdoptCommand } from '../../src/commands/adopt.ts';
@@ -27,35 +28,35 @@ import { devEntryVariants } from '../../src/devtool/dev-entry.ts';
 import { renderWorkspaceManifest } from '../../src/workspace/manifest.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 
-const fs = createDenoRuntimeServices().fs!;
+const fs = createNodeRuntimeServices().fs!;
 let base = '';
 let outside = '';
 
 beforeEach(async () => {
-  base = await Deno.realPath(await Deno.makeTempDir({ prefix: 'setu-symlink-' }));
+  base = await nodeFs.realpath(await tempDir({ prefix: 'setu-symlink-' }));
   outside = `${base}/outside`;
-  await Deno.mkdir(outside);
+  await nodeFs.mkdir(outside);
 });
 
 afterEach(async () => {
-  await Deno.remove(base, { recursive: true }).catch(() => {});
+  await nodeFs.rm(base, { recursive: true }).catch(() => {});
 });
 
 /** A minimal standalone Deno project the commands accept. */
 async function project(dir: string): Promise<void> {
-  await Deno.mkdir(`${dir}/src`, { recursive: true });
-  await Deno.writeTextFile(
+  await nodeFs.mkdir(`${dir}/src`, { recursive: true });
+  await nodeFs.writeFile(
     `${dir}/deno.json`,
     JSON.stringify({ tasks: { start: 'deno run -A main.ts' } }, null, 2),
   );
-  await Deno.writeTextFile(
+  await nodeFs.writeFile(
     `${dir}/setu.config.ts`,
     'export function createApp(devtool?: { plugins?: readonly IPlugin[]; diagnostics?: ' +
       'KernelDiagnosticsOptions }) { return createApplication({ plugins: [...(devtool?.plugins ' +
       '?? [])], ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } ' +
       ': {}) }); }\n',
   );
-  await Deno.writeTextFile(`${dir}/main.ts`, "import { createApp } from './setu.config.ts';\n");
+  await nodeFs.writeFile(`${dir}/main.ts`, "import { createApp } from './setu.config.ts';\n");
 }
 
 function deps(cwd: string) {
@@ -67,8 +68,8 @@ describe('commands refuse to follow a link inside a project', () => {
   it('adopt does not walk a linked directory, so nothing outside moves (N9)', async () => {
     const dir = `${base}/app`;
     await project(dir);
-    await Deno.writeTextFile(`${outside}/precious.txt`, 'keep me');
-    await Deno.symlink(outside, `${dir}/src/ext`);
+    await nodeFs.writeFile(`${outside}/precious.txt`, 'keep me');
+    await nodeFs.symlink(outside, `${dir}/src/ext`);
     for (const dryRun of [true, false]) {
       const { out, deps: d } = deps(dir);
       expect(
@@ -76,39 +77,39 @@ describe('commands refuse to follow a link inside a project', () => {
       ).toBe(1);
       expect(out.text()).toContain('through a symbolic link');
     }
-    expect(await Deno.readTextFile(`${outside}/precious.txt`)).toBe('keep me');
-    await expect(Deno.stat(`${dir}/setu.workspace.json`)).rejects.toThrow();
+    expect(await nodeFs.readFile(`${outside}/precious.txt`, 'utf8')).toBe('keep me');
+    await expect(nodeFs.stat(`${dir}/setu.workspace.json`)).rejects.toThrow();
   });
 
   it('generate does not write a barrel through a link (N10)', async () => {
     const dir = `${base}/app`;
     await project(dir);
-    await Deno.mkdir(`${dir}/src/controllers`);
-    await Deno.writeTextFile(`${outside}/victim.ts`, 'untouched');
-    await Deno.symlink(`${outside}/victim.ts`, `${dir}/src/controllers/index.ts`);
+    await nodeFs.mkdir(`${dir}/src/controllers`);
+    await nodeFs.writeFile(`${outside}/victim.ts`, 'untouched');
+    await nodeFs.symlink(`${outside}/victim.ts`, `${dir}/src/controllers/index.ts`);
     const { out, deps: d } = deps(dir);
     expect(await runGenerateCommand(parseArgs(['route', 'billing']), d)).not.toBe(0);
     expect(out.text()).toContain('through a symbolic link');
-    expect(await Deno.readTextFile(`${outside}/victim.ts`)).toBe('untouched');
+    expect(await nodeFs.readFile(`${outside}/victim.ts`, 'utf8')).toBe('untouched');
   });
 
   it('devtool enable does not merge into a linked deno.json (N10)', async () => {
     const dir = `${base}/app`;
     await project(dir);
-    const manifest = await Deno.readTextFile(`${dir}/deno.json`);
-    await Deno.writeTextFile(`${outside}/deno.json`, manifest);
-    await Deno.remove(`${dir}/deno.json`);
-    await Deno.symlink(`${outside}/deno.json`, `${dir}/deno.json`);
+    const manifest = await nodeFs.readFile(`${dir}/deno.json`, 'utf8');
+    await nodeFs.writeFile(`${outside}/deno.json`, manifest);
+    await nodeFs.rm(`${dir}/deno.json`);
+    await nodeFs.symlink(`${outside}/deno.json`, `${dir}/deno.json`);
     const { out, deps: d } = deps(dir);
     expect(await runDevtoolCommand(parseArgs(['enable', '--devtool-port', '45999']), d)).toBe(1);
     expect(out.text()).toContain('through a symbolic link');
-    expect(await Deno.readTextFile(`${outside}/deno.json`)).toBe(manifest);
+    expect(await nodeFs.readFile(`${outside}/deno.json`, 'utf8')).toBe(manifest);
   });
 
   it('ports --reallocate does not rewrite a linked main.dev.ts (N10)', async () => {
     const ws = `${base}/ws`;
-    await Deno.mkdir(`${ws}/apps/orders`, { recursive: true });
-    await Deno.writeTextFile(
+    await nodeFs.mkdir(`${ws}/apps/orders`, { recursive: true });
+    await nodeFs.writeFile(
       `${ws}/setu.workspace.json`,
       renderWorkspaceManifest({
         version: 1,
@@ -119,13 +120,13 @@ describe('commands refuse to follow a link inside a project', () => {
         members: [{ name: 'orders', port: 8600, devtoolPort: 8700 }],
       }),
     );
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${ws}/deno.json`,
       JSON.stringify({ workspace: ['./apps/*'], tasks: { dev: workspaceProfile('deno').runAll } }),
     );
     const entry = devEntryVariants(8700)[0]!;
-    await Deno.writeTextFile(`${outside}/main.dev.ts`, entry);
-    await Deno.symlink(`${outside}/main.dev.ts`, `${ws}/apps/orders/main.dev.ts`);
+    await nodeFs.writeFile(`${outside}/main.dev.ts`, entry);
+    await nodeFs.symlink(`${outside}/main.dev.ts`, `${ws}/apps/orders/main.dev.ts`);
     const out = createRecorder();
     expect(
       await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
@@ -137,7 +138,7 @@ describe('commands refuse to follow a link inside a project', () => {
       }),
     ).toBe(1);
     expect(out.text()).toContain('through a symbolic link');
-    expect(await Deno.readTextFile(`${outside}/main.dev.ts`)).toBe(entry);
+    expect(await nodeFs.readFile(`${outside}/main.dev.ts`, 'utf8')).toBe(entry);
   });
 
   it('adopt refuses a link whose name carries a backslash (N11)', async () => {
@@ -145,8 +146,8 @@ describe('commands refuse to follow a link inside a project', () => {
     // into a separator verified a different path from the one then moved.
     const dir = `${base}/app`;
     await project(dir);
-    await Deno.writeTextFile(`${outside}/precious.txt`, 'keep me');
-    await Deno.symlink(outside, `${dir}/src/ext\\x`);
+    await nodeFs.writeFile(`${outside}/precious.txt`, 'keep me');
+    await nodeFs.symlink(outside, `${dir}/src/ext\\x`);
     for (const dryRun of [true, false]) {
       const { out, deps: d } = deps(dir);
       expect(
@@ -154,18 +155,18 @@ describe('commands refuse to follow a link inside a project', () => {
       ).toBe(1);
       expect(out.text()).toContain('backslash');
     }
-    expect(await Deno.readTextFile(`${outside}/precious.txt`)).toBe('keep me');
-    await expect(Deno.stat(`${dir}/setu.workspace.json`)).rejects.toThrow();
+    expect(await nodeFs.readFile(`${outside}/precious.txt`, 'utf8')).toBe('keep me');
+    await expect(nodeFs.stat(`${dir}/setu.workspace.json`)).rejects.toThrow();
   });
 
   it('a manifest member name that is not one path segment is refused (N11)', async () => {
     const ws = `${base}/ws`;
-    await Deno.mkdir(`${ws}/apps`, { recursive: true });
-    await Deno.mkdir(`${outside}/src/discovery`, { recursive: true });
-    await Deno.writeTextFile(`${outside}/src/discovery/services.ts`, 'untouched');
+    await nodeFs.mkdir(`${ws}/apps`, { recursive: true });
+    await nodeFs.mkdir(`${outside}/src/discovery`, { recursive: true });
+    await nodeFs.writeFile(`${outside}/src/discovery/services.ts`, 'untouched');
     for (const name of ['evil\\x', 'a/b', '..']) {
-      if (name === 'evil\\x') await Deno.symlink(outside, `${ws}/apps/${name}`);
-      await Deno.writeTextFile(
+      if (name === 'evil\\x') await nodeFs.symlink(outside, `${ws}/apps/${name}`);
+      await nodeFs.writeFile(
         `${ws}/setu.workspace.json`,
         JSON.stringify({
           version: 1,
@@ -186,32 +187,32 @@ describe('commands refuse to follow a link inside a project', () => {
         }),
       ).toBe(1);
     }
-    expect(await Deno.readTextFile(`${outside}/src/discovery/services.ts`)).toBe('untouched');
+    expect(await nodeFs.readFile(`${outside}/src/discovery/services.ts`, 'utf8')).toBe('untouched');
   });
 
   it('adopt refuses a linked top-level directory even when it is empty (N12)', async () => {
     const dir = `${base}/app`;
     await project(dir);
-    await Deno.mkdir(`${outside}/empty`);
-    await Deno.symlink(`${outside}/empty`, `${dir}/test`);
+    await nodeFs.mkdir(`${outside}/empty`);
+    await nodeFs.symlink(`${outside}/empty`, `${dir}/test`);
     const { out, deps: d } = deps(dir);
     expect(await runAdoptCommand(parseArgs(['--name', 'orders']), d)).toBe(1);
     expect(out.text()).toContain('through a symbolic link');
     // Nothing pruned: the committed link is still there.
-    expect((await Deno.lstat(`${dir}/test`)).isSymlink).toBe(true);
+    expect((await nodeFs.lstat(`${dir}/test`)).isSymbolicLink()).toBe(true);
   });
 
   it('still works for a project reached through a LINKED parent directory', async () => {
     // The root is resolved the same way as each target, so only links INSIDE
     // the project are refused; a project under a linked path is ordinary.
-    await Deno.mkdir(`${base}/real`);
-    await Deno.symlink(`${base}/real`, `${base}/linked`);
+    await nodeFs.mkdir(`${base}/real`);
+    await nodeFs.symlink(`${base}/real`, `${base}/linked`);
     const { out, deps: d } = deps(`${base}/linked`);
     expect(await runNewCommand(parseArgs(['shop']), d)).toBe(0);
     const generated = deps(`${base}/linked/shop`);
     expect(await runGenerateCommand(parseArgs(['route', 'billing']), generated.deps)).toBe(0);
     expect(generated.out.text()).not.toContain('symbolic link');
     expect(out.text()).not.toContain('symbolic link');
-    await Deno.stat(`${base}/real/shop/src/controllers/billing.routes.ts`);
+    await nodeFs.stat(`${base}/real/shop/src/controllers/billing.routes.ts`);
   });
 });

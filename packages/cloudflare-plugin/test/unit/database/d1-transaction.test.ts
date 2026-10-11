@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * D1's deferred-batch transaction.
  *
@@ -7,8 +16,7 @@
  * read-your-own-writes, and the refusal to insert without a key.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CloudflareUnsupportedError, D1Adapter } from '../../../src/index.ts';
 import { SqliteD1 } from '../../d1-fakes.ts';

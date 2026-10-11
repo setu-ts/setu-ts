@@ -1,10 +1,18 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * Background work is by definition work nobody awaits, so the rejection path
  * is the one that matters: an unreported failure here is invisible.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ILogger, LogMetadata } from '@setu-ts/common';
 
 import { resolveWaitUntil } from '../../../src/background/wait-until.ts';

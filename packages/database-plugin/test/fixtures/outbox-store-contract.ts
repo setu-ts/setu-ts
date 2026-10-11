@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { IOutboxStore, IOutboxWriteScope, OutboxRecord } from '@setu-ts/common';
 import { record } from './outbox-store.ts';
 
@@ -50,7 +49,7 @@ export function describeOutboxStoreContract(
     return store;
   }
 
-  describe(`IOutboxStore contract — ${name}`, { ignore }, () => {
+  describe(`IOutboxStore contract — ${name}`, { skip: ignore }, () => {
     afterEach(async () => {
       for (const underTest of made.splice(0)) await underTest.dispose?.();
     });

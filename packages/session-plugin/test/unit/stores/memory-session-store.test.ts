@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { TimerHandle } from '@setu-ts/common';
 
 import { MemorySessionStore } from '../../../src/stores/memory-session-store.ts';

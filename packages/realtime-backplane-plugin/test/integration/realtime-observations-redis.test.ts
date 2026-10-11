@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * M98l realtime observations against a REAL Redis: two replicas, each a real
  * kernel application with the `'redis'` backplane, a WebSocket plugin and the
@@ -19,8 +20,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IWebSocketService, RealtimeDiagnosticsResponse } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -29,7 +29,7 @@ import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
 import { RealtimeBackplanePlugin } from '../../src/index.ts';
 
-const REDIS_URL = Deno.env.get('REDIS_URL')?.replace(/localhost/g, '127.0.0.1');
+const REDIS_URL = process.env['REDIS_URL']?.replace(/localhost/g, '127.0.0.1');
 
 const ROOM_CANARY = 'redis-room-canary-SYNTHETIC-0001';
 const PAYLOAD_CANARY = 'redis-payload-canary-SYNTHETIC-0002';
@@ -38,11 +38,8 @@ const ORIGIN_B = 'redis-origin-b-canary-SYNTHETIC-0004';
 const SESSION_ID = 'b'.repeat(32);
 const SESSION_KEY = new Uint8Array(32).map((_, index) => index + 7);
 
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
+function freePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 async function waitFor(pred: () => boolean, label: string): Promise<void> {
@@ -57,8 +54,8 @@ async function waitFor(pred: () => boolean, label: string): Promise<void> {
 }
 
 async function replica(url: string, topic: string, origin: string, alias: string) {
-  const connectorPort = freePort();
-  const httpPort = freePort();
+  const connectorPort = await freePort();
+  const httpPort = await freePort();
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
@@ -112,7 +109,7 @@ function record(snapshot: ReturnType<typeof source>, operation: string) {
 
 describe('M98l realtime observations over a REAL Redis backplane', () => {
   it('counts the publish on A and the receive on B, and drops A’s own echo', {
-    ignore: REDIS_URL === undefined,
+    skip: REDIS_URL === undefined,
   }, async () => {
     const topic = `m98l-${crypto.randomUUID()}`;
     const a = await replica(REDIS_URL!, topic, ORIGIN_A, 'a');

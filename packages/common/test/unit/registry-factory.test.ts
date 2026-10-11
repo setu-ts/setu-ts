@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { HealthCheckResult, IHealthIndicator, IServiceRegistry } from '../../src/index.ts';
 import { resolveRegistryEntry } from '../../src/index.ts';
 import type { RegistryFactory } from '../../src/index.ts';

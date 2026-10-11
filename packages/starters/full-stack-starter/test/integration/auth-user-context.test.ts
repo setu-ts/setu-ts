@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { RouterContextKey, RouterLoadContext } from '@setu-ts/react-router-plugin';
 import { userContext } from '@setu-ts/react-router-plugin';
 import { getSession } from '@setu-ts/session-plugin';

@@ -2,8 +2,7 @@
  * Unit tests for RabbitMqQueue adapter.
  */
 
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { RabbitMqQueue, validateClient } from '../../src/adapters/rabbitmq-queue.ts';
 import { createFakeAmqpConnection } from '../fixtures/fake-amqplib-client.ts';
 import type { FakeAmqpQueueChannel } from '../fixtures/fake-amqplib-client.ts';

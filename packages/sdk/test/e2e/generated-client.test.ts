@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * End-to-end test for generated client code against the REAL `HttpClient`.
  *
@@ -7,8 +8,7 @@
  * that generated paths are relative and correctly formatted.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createClient, HttpClientError } from '../../src/index.ts';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -29,9 +29,7 @@ function makeFetch(
 
 describe('generated-client e2e', () => {
   it('follows a real 303 and exposes only the target response', async () => {
-    const probe = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-    const port = (probe.addr as Deno.NetAddr).port;
-    probe.close();
+    const port = await nodeUnusedPort();
 
     const app = createApplication({ plugins: [RuntimePlugin()] });
     app.router.get('/redirect', (ctx) => ctx.response.redirect('/target', 303));
@@ -48,9 +46,7 @@ describe('generated-client e2e', () => {
   });
 
   it('narrows an unfollowed 303 (no Location) through the generated guard', async () => {
-    const probe = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-    const port = (probe.addr as Deno.NetAddr).port;
-    probe.close();
+    const port = await nodeUnusedPort();
 
     const app = createApplication({ plugins: [RuntimePlugin()] });
     app.router.get('/redirect', (ctx) => ctx.response.status(303).text('no location'));

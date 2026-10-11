@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { WritePrecondition } from '@setu-ts/common';
 import { sources } from '../fixtures/conditional-sources.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';

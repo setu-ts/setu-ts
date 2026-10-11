@@ -5,8 +5,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { EVENTS_SEAM } from '../../../src/seams/events.ts';
 import { deriveNames } from '../../../src/utils/names.ts';

@@ -1,8 +1,7 @@
 /**
  * @module rest-starter unit tests
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { buildRestPlugins, createRestApp } from '../../src/index.ts';
 import type { RestStarterOptions } from '../../src/options.ts';
 import { CAPABILITIES } from '@setu-ts/common';

@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /**
  * Real-import test: the kafkajs producer event names (X28-1).
  *
@@ -15,8 +14,7 @@
  *
  * Needs no broker: constructing a `Kafka` client and a producer is offline.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   KAFKA_PRODUCER_CONNECT,
   KAFKA_PRODUCER_DISCONNECT,
@@ -24,13 +22,7 @@ import {
 
 describe('REAL kafkajs producer events (guarded)', () => {
   it('accepts the wire values the broker attaches, and rejects the uppercase keys', async () => {
-    let kafkajs: typeof import('npm:kafkajs@2.x');
-    try {
-      kafkajs = await import('npm:kafkajs@2.x');
-    } catch {
-      console.warn('SKIP: npm:kafkajs is not resolvable');
-      return;
-    }
+    const kafkajs = await import('kafkajs');
 
     // The constants the broker attaches equal the real module's own values.
     const kafka = new kafkajs.Kafka({ clientId: 'm90d-real-import', brokers: ['localhost:9092'] });

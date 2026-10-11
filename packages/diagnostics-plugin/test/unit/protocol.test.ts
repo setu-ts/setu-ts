@@ -3,8 +3,7 @@
  * alias), DTO projection against the exact field allowlist, fixed error
  * bodies/statuses, and the client-side projection validators.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ConfigDiagnosticsSnapshot } from '@setu-ts/common';
 

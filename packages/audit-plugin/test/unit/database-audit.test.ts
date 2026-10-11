@@ -1,8 +1,7 @@
 /**
  * Tests for DatabaseAuditStorage.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { DatabaseAuditStorage } from '../../src/storage/database-audit.ts';
 import { FakeAuditDbClient } from '../fixtures/fake-audit-db-client.ts';
 import type { StoredAuditEntry } from '../../src/interfaces/index.ts';

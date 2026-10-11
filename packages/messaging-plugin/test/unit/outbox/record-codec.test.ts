@@ -6,9 +6,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { spy } from '@std/testing/mock';
+import { describe, expect, it } from 'vitest';
+import { vi } from 'vitest';
 import type { OutboxRecord } from '@setu-ts/common';
 import {
   MAX_PUBLISH_HEADER_NAME_BYTES,
@@ -230,15 +229,15 @@ describe('decodeOutboxRecord', () => {
     expect(JSON.parse(over)).toEqual({ orderingKey: 'k', deduplicationId: 'e-1' });
     // The cost the bound exists to avoid is the parse, so the test watches it:
     // the cause alone is the same wherever the check sits.
-    const parse = spy(JSON, 'parse');
+    const parse = vi.spyOn(JSON, 'parse');
     let result: ReturnType<typeof decodeOutboxRecord>;
     try {
       result = decodeOutboxRecord({ ...valid, options: over }, 1024);
     } finally {
-      parse.restore();
+      parse.mockRestore();
     }
     expect(result).toEqual({ ok: false, cause: 'options-too-large' });
-    expect(parse.calls.filter((call) => call.args[0] === over)).toEqual([]);
+    expect(parse.mock.calls.filter((args) => args[0] === over)).toEqual([]);
     // At the bound the same text is parsed and decodes: the bound is exact.
     const at = padded(MAX_STORED_OPTIONS_LENGTH);
     expect(at.length).toBe(MAX_STORED_OPTIONS_LENGTH);

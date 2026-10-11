@@ -7,8 +7,7 @@
  * plugin provides. Three guides once shipped the first mistake, which is why
  * the message has to say it.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import { createApplication } from '../../src/application/application.ts';

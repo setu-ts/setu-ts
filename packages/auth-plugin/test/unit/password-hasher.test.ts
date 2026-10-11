@@ -2,8 +2,7 @@
  * Tests for PasswordHasher.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MalformedPasswordHashError, PasswordHasher } from '../../src/services/password-hasher.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 

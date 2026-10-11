@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { DOCKERFILE, workspaceContainerFiles } from '../../src/workspace/compose.ts';
 import { WORKSPACE_VERSION, type WorkspaceManifest } from '../../src/workspace/manifest.ts';
 import { transportSpec } from '../../src/workspace/transport.ts';

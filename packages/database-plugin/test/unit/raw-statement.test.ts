@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { bindRawStatement, type RawStatementTag } from '../../src/query/raw-statement.ts';
 
 /** A tag that records what the binder built, in reading order. */

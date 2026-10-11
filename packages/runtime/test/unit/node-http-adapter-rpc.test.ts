@@ -1,6 +1,5 @@
 // deno-lint-ignore-file no-explicit-any, require-await
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { NodeHttpAdapter } from '../../src/adapters/node/node-http-adapter.ts';
 import type { NodeServeHost } from '../../src/adapters/node/node-http-adapter.ts';
 

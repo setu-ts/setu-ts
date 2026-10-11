@@ -2,8 +2,7 @@
  * The SAML debug-log sanitizer: library messages can quote attacker-supplied
  * values, so control characters never reach a log line and length is capped.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { describeError } from '../../src/saml/routes.ts';
 

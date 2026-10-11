@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { MAX_PRINTED_NAME_LENGTH, printableSecretName } from '../../src/services/secret-name.ts';
 

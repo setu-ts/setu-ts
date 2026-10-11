@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
 import { UnsupportedRawQueryError } from '../../src/errors.ts';
@@ -195,4 +194,16 @@ describe('contract', () => {
     const port: IDatabaseAdapter = adapter;
     expect(typeof port.createDataSource).toBe('function');
   });
+});
+
+it('refuses an absent instance from untyped input and accepts an explicit transaction page budget', async () => {
+  const client = createFakeBigtableClient(new FakeBigtableStore());
+  expect(() =>
+    new BigtableAdapter({ client } as unknown as ConstructorParameters<typeof BigtableAdapter>[0])
+  ).toThrow(/requires options.instance/);
+  const adapter = new BigtableAdapter({ client, instance: 'i', maxPageFetches: 2 });
+  await adapter.connect();
+  const transaction = await adapter.beginTransaction();
+  await transaction.rollback();
+  await adapter.disconnect();
 });

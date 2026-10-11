@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { adaptPubSubModule } from '../../src/brokers/pubsub-broker.ts';
 import type { PubSubSdkModule } from '../../src/brokers/pubsub-broker.ts';
 import { PubSubSubscriptionBoundElsewhereError } from '../../src/errors.ts';

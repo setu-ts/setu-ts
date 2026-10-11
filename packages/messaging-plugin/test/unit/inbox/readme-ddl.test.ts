@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs/promises';
 /**
  * The README's inbox DDL is the DDL the real suites apply (M108 §3.14): ONE
  * copy of each schema exists, as a fixture in `database-plugin`, and each
@@ -6,16 +7,16 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 const fixture = (name: string): Promise<string> =>
-  Deno.readTextFile(
+  nodeFs.readFile(
     new URL(`../../../../database-plugin/test/fixtures/${name}`, import.meta.url),
+    'utf8',
   );
 
 const readme = (pkg: string): Promise<string> =>
-  Deno.readTextFile(new URL(`../../../../${pkg}/README.md`, import.meta.url));
+  nodeFs.readFile(new URL(`../../../../${pkg}/README.md`, import.meta.url), 'utf8');
 
 /** The fenced SQL blocks of a Markdown document, trailing newline normalized. */
 function sqlFences(markdown: string): string[] {

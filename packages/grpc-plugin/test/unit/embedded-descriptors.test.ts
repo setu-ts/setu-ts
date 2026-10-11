@@ -13,8 +13,7 @@
  * absent, never silently passing on a fake.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   EmbeddedDescriptors,
   healthBase64,
@@ -54,7 +53,7 @@ describe('EmbeddedDescriptors — constants', () => {
   });
 });
 
-describe('EmbeddedDescriptors — revived with the real runtime', { ignore: !runtime }, () => {
+describe('EmbeddedDescriptors — revived with the real runtime', { skip: !runtime }, () => {
   /** Reads a service descriptor out of a constant. */
   function serviceFrom(base64: string, name: string) {
     const service = runtime!.getService(runtime!.reviveDescriptorSet(base64), name);

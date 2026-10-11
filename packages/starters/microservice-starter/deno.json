@@ -2,5 +2,8 @@
   "name": "@setu-ts/microservice-starter",
   "version": "0.8.0",
   "license": "MIT",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
+  }
 }

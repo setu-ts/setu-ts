@@ -1,8 +1,7 @@
 /**
  * Tests for job executor.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ILogger, RetryOptions, ScheduledJob, SchedulerJobHandler } from '@setu-ts/common';
 import { run } from '../../src/jobs/job-executor.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';

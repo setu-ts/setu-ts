@@ -5,8 +5,7 @@
  * assertion on trace IDENTITY, not merely on a parent context being present: a
  * consumer span parented into the wrong trace satisfies `toBeDefined()`.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   CAPABILITIES,
   type IIngressBehavior,

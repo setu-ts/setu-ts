@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { SecretsService } from '../../src/services/secrets-service.ts';
 import type { SecretProvider } from '../../src/interfaces/index.ts';

@@ -15,8 +15,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
@@ -29,7 +28,7 @@ import { MessagingPlugin } from '../../src/index.ts';
 import type { IOutbox } from '../../src/index.ts';
 import { orderPlaced } from '../fixtures/outbox.ts';
 
-const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
+const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
 
 /** Lets the in-memory broker deliver. */
 function settle(ms = 50): Promise<void> {
@@ -37,7 +36,7 @@ function settle(ms = 50): Promise<void> {
 }
 
 describe('a row committing behind the relay (real PostgreSQL)', {
-  ignore: postgresUrl === undefined,
+  skip: postgresUrl === undefined,
 }, () => {
   it('the pending-set relay publishes it on the next tick; an id or createdAt watermark loses it', async () => {
     // Two connections: transaction A holds one open while B commits on the other.

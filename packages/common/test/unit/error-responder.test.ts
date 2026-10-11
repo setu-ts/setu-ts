@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { HandlerResult, IResponse } from '../../src/http.ts';
 import {
@@ -140,4 +139,19 @@ describe('respondWithError', () => {
     expect(typeof ERROR_RESPONDER_STATE_KEY).toBe('string');
     expect(ERROR_RESPONDER_STATE_KEY.length).toBeGreaterThan(0);
   });
+});
+
+import {
+  brandErrorResponder,
+  ERROR_RESPONDER_BRAND,
+  errorResponderOf,
+} from '../../src/errors/error-responder.ts';
+it('shares the branded responder by identity without leaking it through enumeration', () => {
+  const middleware = () => {};
+  const responder = { respond() {} };
+  expect(errorResponderOf(middleware)).toBeUndefined();
+  brandErrorResponder(middleware, responder);
+  expect(errorResponderOf(middleware)).toBe(responder);
+  expect(Object.keys(middleware)).toEqual([]);
+  expect(Object.getOwnPropertyDescriptor(middleware, ERROR_RESPONDER_BRAND)?.writable).toBe(false);
 });

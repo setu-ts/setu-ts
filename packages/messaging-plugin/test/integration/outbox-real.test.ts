@@ -22,8 +22,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   IMessageBroker,
   IOutboxStore,
@@ -52,9 +51,9 @@ import type {
 } from '../../src/index.ts';
 import { FaultStore } from '../fixtures/outbox.ts';
 
-const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
-const rabbitUrl = Deno.env.get('RABBITMQ_URL');
-const redisUrl = Deno.env.get('REDIS_URL');
+const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
+const rabbitUrl = process.env['RABBITMQ_URL'];
+const redisUrl = process.env['REDIS_URL'];
 
 /** One event shape: an ordering key and a sequence number. */
 interface Placed {
@@ -181,7 +180,7 @@ const FAST_BUDGET: OutboxRelayOptions = {
 
 for (const transport of transports) {
   describe(`outbox relay over real PostgreSQL → ${transport.name}`, {
-    ignore: transport.ignore,
+    skip: transport.ignore,
   }, () => {
     it('a business row and its event commit through one unit of work and the scheduled relay delivers it', async () => {
       const pg = await postgresOutboxSchema(postgresUrl!, true);

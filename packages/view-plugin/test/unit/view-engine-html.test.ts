@@ -8,8 +8,7 @@
  * @module
  */
 import { ViewEngine } from '../../src/engines/view-engine.ts';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { html } from 'hono/html';
 
 interface PageProps {

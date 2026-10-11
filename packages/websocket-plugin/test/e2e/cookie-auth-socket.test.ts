@@ -1,3 +1,5 @@
+import { connect } from '../../../../test/node-helpers.ts';
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * End-to-end, cookie-authenticated WebSocket tests — the real-socket half of
  * X3-5 (plans/milestone-73-realtime-authentication.md §3.7–§3.8).
@@ -33,8 +35,7 @@
  *
  * @module
  */
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ISessionService, IWebSocketService } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -73,7 +74,7 @@ interface ProtectedOpenObservation {
 
 /** The outcome of a raw RFC 6455 upgrade handshake. */
 interface RawHandshake {
-  readonly conn: Deno.Conn;
+  readonly conn: Awaited<ReturnType<typeof connect>>;
   readonly statusLine: string;
   readonly headers: Headers;
   /** The `Sec-WebSocket-Key` this client generated, for the accept check. */
@@ -140,11 +141,8 @@ function buildApp(): IKernelApplication {
 }
 
 /** Picks a free ephemeral port on 127.0.0.1 by binding and immediately releasing one. */
-function freePort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function freePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +175,7 @@ async function rawUpgrade(
   path: string,
   cookie: string | undefined,
 ): Promise<RawHandshake> {
-  const conn = await Deno.connect({ hostname, port });
+  const conn = await connect({ hostname, port });
   const key = toBase64(crypto.getRandomValues(new Uint8Array(16)));
 
   const lines = [
@@ -257,7 +255,7 @@ describe('cookie-authenticated WebSocket (e2e, real sockets)', () => {
 
   beforeAll(async () => {
     app = buildApp();
-    port = freePort();
+    port = await freePort();
     await app.start({ port, hostname: '127.0.0.1' });
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);

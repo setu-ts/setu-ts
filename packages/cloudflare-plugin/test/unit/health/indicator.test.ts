@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The indicator must never touch a binding — Cloudflare prohibits I/O outside a
  * request, and a KV read per probe interval is billable — so its inputs are
  * plain facts and the off-platform case is the only status it can act on.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createCloudflareIndicator } from '../../../src/health/indicator.ts';
 

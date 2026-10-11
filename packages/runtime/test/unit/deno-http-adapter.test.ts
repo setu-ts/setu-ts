@@ -11,8 +11,7 @@ import {
   DenoHttpServerHandle,
   isDenoHttpServerHandle,
 } from '../../src/adapters/deno/deno-http-adapter.ts';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Fake host
@@ -173,4 +172,29 @@ describe('deno-http-adapter | isDenoHttpServerHandle', () => {
   it('rejects invalid handles', () => {
     expect(isDenoHttpServerHandle({} as any)).toBe(false);
   });
+});
+
+it('uses the native default host with an ephemeral port and startup callback', async () => {
+  const { defaultDenoServeHost } = await import('../../src/adapters/deno/deno-http-adapter.ts');
+  let address: { hostname: string; port: number } | undefined;
+  const server = defaultDenoServeHost.serve({
+    port: 0,
+    onListen: (value) => {
+      address = value;
+    },
+    fetch: () => new Response('default-host'),
+  });
+  try {
+    expect(address!.hostname).toBe('0.0.0.0');
+    const response = await fetch(`http://127.0.0.1:${address!.port}/`);
+    expect(await response.text()).toBe('default-host');
+  } finally {
+    await server.shutdown();
+  }
+  const request = new Request('http://127.0.0.1/ordinary-http');
+  expect(() => defaultDenoServeHost.upgradeWebSocket!(request)).toThrow();
+  expect(() => defaultDenoServeHost.upgradeWebSocket!(request, { protocol: 'chat' })).toThrow();
+});
+it('refuses foreign server handles on close', async () => {
+  await expect(new DenoHttpAdapter().close({})).rejects.toThrow('Invalid server handle');
 });

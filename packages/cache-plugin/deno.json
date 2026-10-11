@@ -21,6 +21,7 @@
     }
   },
   "imports": {
-    "ioredis": "npm:ioredis@5.x"
+    "ioredis": "npm:ioredis@5.x",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The facades are hand-written rather than imported from
  * `@cloudflare/workers-types`, so their assignability against a real-shaped
@@ -5,8 +14,7 @@
  * the plugin validates configured bindings with.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IKvNamespace, IR2Bucket } from '../../../src/index.ts';
 import {

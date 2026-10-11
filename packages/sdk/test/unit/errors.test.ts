@@ -5,8 +5,7 @@
  * — name, instanceof, message, and field shapes.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { ClientCircuitOpenError, HttpClientError, OpenApiCodegenError } from '../../src/errors.ts';
 
 describe('HttpClientError', () => {

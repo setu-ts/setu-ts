@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { viteDevExternals } from '../../src/dev/vite-dev-externals.ts';
 import type {
   ViteHookContext,

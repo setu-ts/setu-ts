@@ -4,8 +4,7 @@
  * which Protobuf-ES's own lookup does NOT resolve), and extension numbering.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   buildReflectionRegistry,
   reviveServiceDescriptor,

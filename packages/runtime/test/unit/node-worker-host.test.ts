@@ -2,8 +2,7 @@
  * Unit tests for the node worker host (`node:worker_threads` normalization),
  * driven through the injectable {@linkcode NodeWorkerModules} seam.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createNodeWorkerHost } from '../../src/adapters/node/node-worker-host.ts';
 import type { NodeWorkerLike } from '../../src/adapters/node/node-worker-host.ts';

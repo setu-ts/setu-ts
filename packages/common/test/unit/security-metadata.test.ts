@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { SECURITY_METADATA, securityMetadataOf, withSecurityMetadata } from '../../src/index.ts';
 import type { MiddlewareFunction } from '../../src/index.ts';
 

@@ -14,8 +14,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { DynamoAdapter } from '../../src/adapters/dynamo/dynamo-adapter.ts';
 import type { DynamoAdapterOptions } from '../../src/interfaces/index.ts';
 import { UnsupportedRawQueryError } from '../../src/errors.ts';

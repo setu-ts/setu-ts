@@ -2,8 +2,7 @@
  * A worker error that settles no task — an idle worker crashing, or a startup
  * crash with nothing queued — rejects nothing, so it must be reported.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { TaskPool } from '../../src/pool/task-pool.ts';
 import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { WorkerPoolPlugin } from '../../src/index.ts';

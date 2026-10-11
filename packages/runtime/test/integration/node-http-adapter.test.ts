@@ -1,4 +1,5 @@
 // deno-lint-ignore-file no-explicit-any
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Integration tests for Node HTTP adapter — REAL round-trip with @hono/node-server.
  *
@@ -7,18 +8,14 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { NodeHttpAdapter } from '../../src/adapters/node/node-http-adapter.ts';
 
 /**
  * Finds a free TCP port by binding one and releasing it.
  */
-function findFreePort(): number {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function findFreePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 describe('node-http-adapter integration', () => {
@@ -31,7 +28,7 @@ describe('node-http-adapter integration', () => {
     }) => { close(): void };
 
     try {
-      const mod = await import('npm:@hono/node-server@^2.0.0');
+      const mod = await import('@hono/node-server');
       serve = mod.serve;
     } catch {
       // Package not installed — skip
@@ -77,7 +74,7 @@ describe('node-http-adapter integration', () => {
       } as any;
     });
 
-    const port = findFreePort();
+    const port = await findFreePort();
     const handle = await adapter.listen(port, '127.0.0.1');
 
     // C1 test: verify the server handle is a real object, not a Promise

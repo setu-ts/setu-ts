@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { buildBunHost, createBunRuntimeServices } from '../../src/adapters/bun/bun-runtime.ts';
 import type { BunHost, BunModules } from '../../src/adapters/bun/bun-runtime.ts';

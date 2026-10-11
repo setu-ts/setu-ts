@@ -5,8 +5,7 @@
  * composition (the application's own handler stays intact), port-conflict
  * fail-closed behavior, and socket cleanup.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createApplication } from '../../../kernel/src/index.ts';
 import { RuntimePlugin } from '../../../runtime/src/index.ts';

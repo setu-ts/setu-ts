@@ -1,4 +1,5 @@
 // deno-lint-ignore-file no-console -- captures console.error/warn to prove ioredis wrote nothing there.
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Shared real-Redis harness for the connection-error routing suites.
  *
@@ -14,12 +15,12 @@
  *
  * @module
  */
-import { expect } from '@std/expect';
+import { expect } from 'vitest';
 import type { ILogger, IPlugin, LogMetadata } from '../../src/index.ts';
 import { CAPABILITIES } from '../../src/index.ts';
 
 /** The Redis the guarded suites drive, or `undefined` to skip them. */
-export const REDIS_URL: string | undefined = Deno.env.get('REDIS_URL');
+export const REDIS_URL: string | undefined = process.env['REDIS_URL'];
 
 /**
  * `REDIS_URL` with `localhost` pinned to IPv4: on some hosts `localhost`
@@ -100,7 +101,7 @@ export function loggerPlugin(logger: ILogger): IPlugin {
 }
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
@@ -188,7 +189,7 @@ export async function expectOutageRoutedToLogger(scenario: OutageScenario): Prom
     console.error = originalError;
     console.warn = originalWarn;
     if (stopped) {
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
+      await runProcess('docker', { args: ['start', containerId] });
     }
     await scenario.stop();
   }

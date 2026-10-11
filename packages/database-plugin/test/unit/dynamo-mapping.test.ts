@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as dynamoMapping from '../../src/adapters/dynamo/dynamo-mapping.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 
@@ -14,7 +13,8 @@ const { resolveDynamoTarget } = dynamoMapping;
 describe('resolveDynamoTarget — defaults', () => {
   it('an unmapped entity uses its own name as the table and the default partition key', () => {
     const target = resolveDynamoTarget('Widget', undefined);
-    expect(target).toStrictEqual({
+    expect(Object.getPrototypeOf(target.dateAttributes)).toBeNull();
+    expect({ ...target, dateAttributes: { ...target.dateAttributes } }).toStrictEqual({
       table: 'Widget',
       partitionKey: 'id',
       keyColumns: ['id'],
@@ -76,7 +76,8 @@ describe('resolveDynamoTarget — overrides', () => {
     const target = resolveDynamoTarget('User', {
       User: { table: 'users', partitionKey: 'pk' },
     });
-    expect(target).toStrictEqual({
+    expect(Object.getPrototypeOf(target.dateAttributes)).toBeNull();
+    expect({ ...target, dateAttributes: { ...target.dateAttributes } }).toStrictEqual({
       table: 'users',
       partitionKey: 'pk',
       keyColumns: ['pk'],

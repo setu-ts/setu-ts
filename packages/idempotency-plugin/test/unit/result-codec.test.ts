@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { IdempotencyWithinError } from '../../src/errors.ts';
 import { decodeResult, encodeResult } from '../../src/within/result-codec.ts';
 

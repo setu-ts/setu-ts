@@ -12,8 +12,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -22,7 +21,7 @@ import { SessionPlugin } from '@setu-ts/session-plugin';
 import { AuthPlugin, requireAuth } from '../../src/index.ts';
 import { CookieJar } from '../fixtures/sign-in-app.ts';
 
-const BASE = Deno.env.get('KEYCLOAK_URL');
+const BASE = process.env['KEYCLOAK_URL'];
 const REALM = `${BASE}/realms/setu`;
 const POST_LOGOUT = 'http://localhost/signed-out';
 
@@ -117,7 +116,7 @@ async function providerLogin(authorize: string, providerJar: ProviderJar): Promi
   return new URL(submitted.headers.get('location') ?? '');
 }
 
-describe('Keycloak sign-in (real)', { ignore: BASE === undefined }, () => {
+describe('Keycloak sign-in (real)', { skip: BASE === undefined }, () => {
   it('signs a user in through the oauth2 arm, reading userinfo with the access token', async () => {
     const app = await buildApp();
     try {

@@ -1,6 +1,5 @@
 /** Contract tests for the app files emitted by the full-stack template. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { FULL_STACK_APP_FILES } from '../../../src/templates/full-stack-app-files.ts';
 

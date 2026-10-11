@@ -9,5 +9,8 @@
       "env": true,
       "sys": ["hostname", "cpus"]
     }
+  },
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
   }
 }

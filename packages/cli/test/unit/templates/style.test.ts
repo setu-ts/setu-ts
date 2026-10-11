@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MICROSERVICE_RECIPE } from '../../../src/templates/microservice.ts';
 import { REST_RECIPE, REST_TEMPLATE } from '../../../src/templates/rest.ts';
 import { CLASS_BASED_TEMPLATE } from '../../../src/templates/class-based.ts';

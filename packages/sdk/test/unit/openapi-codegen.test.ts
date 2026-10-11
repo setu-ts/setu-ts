@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import * as nodeFsSync from 'node:fs';
+import { describe, expect, it } from 'vitest';
 import { generateOpenApiClient, sanitizeIdentifier } from '../../src/codegen/openapi-codegen.ts';
 import { OpenApiCodegenError } from '../../src/errors.ts';
 import { paramsDocument } from '../fixtures/params-document.ts';
@@ -1011,8 +1011,9 @@ describe('inline schemas are hoisted (X11-9)', () => {
     const generated = generateOpenApiClient(inlineShapesDocument, {
       sdkImport: '../../src/index.ts',
     });
-    const fixture = Deno.readTextFileSync(
+    const fixture = nodeFsSync.readFileSync(
       new URL('../fixtures/inline-shapes-client.ts', import.meta.url),
+      'utf8',
     );
     expect(generated).toBe(fixture);
   });
@@ -1073,8 +1074,9 @@ describe('inline schemas are hoisted (X11-9)', () => {
 describe('fixture equality', () => {
   it('generateOpenApiClient output equals the committed fixture', () => {
     const generated = generateOpenApiClient(usersDocument, { sdkImport: '../../src/index.ts' });
-    const fixture = Deno.readTextFileSync(
+    const fixture = nodeFsSync.readFileSync(
       new URL('../fixtures/generated-client.ts', import.meta.url),
+      'utf8',
     );
     expect(generated).toBe(fixture);
   });
@@ -1097,8 +1099,9 @@ describe('compile regression', () => {
   const generated = generateOpenApiClient(paramsDocument, { sdkImport: '../../src/index.ts' });
 
   it('emits the committed params fixture byte-for-byte', () => {
-    const fixture = Deno.readTextFileSync(
+    const fixture = nodeFsSync.readFileSync(
       new URL('../fixtures/params-client.ts', import.meta.url),
+      'utf8',
     );
     expect(generated).toBe(fixture);
   });
@@ -1580,8 +1583,9 @@ describe('typed error responses (X11-7)', () => {
     const generated = generateOpenApiClient(redirectDocument, {
       sdkImport: '../../src/index.ts',
     });
-    const fixture = Deno.readTextFileSync(
+    const fixture = nodeFsSync.readFileSync(
       new URL('../fixtures/redirect-client.ts', import.meta.url),
+      'utf8',
     );
     expect(generated).toBe(fixture);
   });

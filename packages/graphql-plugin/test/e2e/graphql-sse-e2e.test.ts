@@ -8,8 +8,7 @@
  * latter exposes no response headers — the M51 `Allow` lesson.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { GraphqlPlugin } from '../../src/index.ts';

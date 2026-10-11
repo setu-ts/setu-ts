@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { ERROR_RESPONDER_STATE_KEY } from '../../src/errors/error-responder.ts';
 import { CLIENT_IP_STATE_KEY } from '../../src/state-keys.ts';
 import { validatedStateKey } from '../../src/services/validation.ts';

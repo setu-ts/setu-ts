@@ -10,8 +10,7 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { Constructor, IJwtService, IPrincipal, IRequestContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -39,7 +38,7 @@ import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 
 // Real Zod, guarded (the roles-enforced precedent): only the 400-ordering arm
 // needs it, and it is skipped where the npm specifier cannot load.
-const zodModule = await import('npm:zod@^3.24.0').catch(() => undefined);
+const zodModule = await import('zod-v3').catch(() => undefined);
 const z = zodModule?.z;
 
 const SECRET = 'x'.repeat(40);
@@ -217,7 +216,7 @@ describe('@RequirePolicy through a real application', () => {
   });
 
   it('runs after @Roles and before validation', {
-    ignore: z === undefined,
+    skip: z === undefined,
   }, async () => {
     const { app: started, token } = await start();
     const bad = { title: 42 };

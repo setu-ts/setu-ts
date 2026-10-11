@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The edge cache middleware, driven over a real `IRequestContext` so the
  * short-circuit, the streaming guard, and the header contract are exercised
  * against the committed response surface rather than a stand-in.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRequestContext, IServiceRegistry } from '@setu-ts/common';
 import { createTestContext, MockServiceRegistry } from '@setu-ts/testing';

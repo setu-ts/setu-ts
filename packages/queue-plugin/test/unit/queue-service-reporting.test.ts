@@ -12,8 +12,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ICounter, IMetricsService } from '@setu-ts/common';
 import { QueueService } from '../../src/services/queue-service.ts';

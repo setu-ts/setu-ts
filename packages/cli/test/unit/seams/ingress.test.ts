@@ -1,7 +1,6 @@
 /** Tests for the decorated non-HTTP ingress seam. */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { INGRESS_SEAM } from '../../../src/seams/ingress.ts';
 

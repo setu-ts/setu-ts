@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MetricsRegistry } from '../../src/registry/metrics-registry.ts';
 import type { MetricConfig } from '@setu-ts/common';
 

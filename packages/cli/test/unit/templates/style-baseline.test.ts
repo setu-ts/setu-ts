@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs/promises';
 /**
  * The byte identity of every existing template's output.
  *
@@ -16,8 +17,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { TARGET_RUNTIMES, type TargetRuntime } from '../../../src/constants.ts';
 import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';
 import type { TemplateHost } from '../../../src/templates/registry.ts';
@@ -29,7 +29,7 @@ import {
 } from '../../fixtures/capture-template-baseline.ts';
 
 const baseline = JSON.parse(
-  await Deno.readTextFile(new URL('../../fixtures/template-baseline.json', import.meta.url)),
+  await nodeFs.readFile(new URL('../../fixtures/template-baseline.json', import.meta.url), 'utf8'),
 ) as Record<string, Record<string, string>>;
 
 /**

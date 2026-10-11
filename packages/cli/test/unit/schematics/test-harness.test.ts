@@ -10,8 +10,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { renderEquals, testHarnessFor } from '../../../src/schematics/test-harness.ts';
 import { TARGET_RUNTIMES } from '../../../src/constants.ts';

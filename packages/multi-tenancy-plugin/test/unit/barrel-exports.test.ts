@@ -19,8 +19,7 @@ import {
   tenantMiddleware,
   TenantNotResolvedError,
 } from '../../src/index.ts';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 /** The complete published VALUE surface. Types are excluded (erasable). */
 const EXPECTED_VALUES = [

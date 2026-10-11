@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IAuthorizationPolicyService, IJwtService, IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

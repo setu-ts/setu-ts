@@ -3,8 +3,7 @@
  * controllable clock, and single use.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   addPending,
   MAX_PENDING_ENTRIES,

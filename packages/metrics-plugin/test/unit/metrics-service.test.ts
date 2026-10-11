@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MetricsService } from '../../src/services/metrics-service.ts';
 import type { ICounter, IGauge, IHistogram, ISummary } from '@setu-ts/common';
 

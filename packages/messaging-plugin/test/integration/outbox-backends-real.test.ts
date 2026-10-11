@@ -23,15 +23,14 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import * as dynamoSdk from 'npm:@aws-sdk/client-dynamodb@^3';
+import { describe, expect, it } from 'vitest';
+import * as dynamoSdk from '@aws-sdk/client-dynamodb';
 import {
   CreateTableCommand,
   DeleteTableCommand,
   DescribeTableCommand,
   DynamoDBClient,
-} from 'npm:@aws-sdk/client-dynamodb@^3';
+} from '@aws-sdk/client-dynamodb';
 import type { IDatabaseAdapter, IMessageBroker } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import {
@@ -53,17 +52,17 @@ import type { IOutbox, OutboxRelayOptions } from '../../src/index.ts';
 import { FaultStore, orderPlaced } from '../fixtures/outbox.ts';
 import { describeOutboxRelayProofs } from '../fixtures/outbox-relay-proofs.ts';
 
-const mongoRsUri = Deno.env.get('MONGODB_RS_URI');
-const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
-const bigtableEndpoint = Deno.env.get('BIGTABLE_EMULATOR_ENDPOINT');
-const cosmosEndpoint = Deno.env.get('COSMOS_ENDPOINT');
+const mongoRsUri = process.env['MONGODB_RS_URI'];
+const dynamoEndpoint = process.env['DYNAMODB_ENDPOINT'];
+const bigtableEndpoint = process.env['BIGTABLE_EMULATOR_ENDPOINT'];
+const cosmosEndpoint = process.env['COSMOS_ENDPOINT'];
 /** The well-known emulator key, overridable for a real account. */
-const cosmosKey = Deno.env.get('COSMOS_KEY') ??
+const cosmosKey = process.env['COSMOS_KEY'] ??
   'C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==';
 const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
 
 describeOutboxRelayProofs('Cosmos emulator', async () => {
-  const { CosmosClient } = await import('npm:@azure/cosmos@^4');
+  const { CosmosClient } = await import('@azure/cosmos');
   const client = new CosmosClient({ endpoint: cosmosEndpoint!, key: cosmosKey });
   const { database } = await client.databases.createIfNotExists({ id: 'setu_m107b' });
   const container = `proof_${crypto.randomUUID().replaceAll('-', '')}`;
@@ -126,7 +125,7 @@ async function startFailure(app: IKernelApplication): Promise<unknown> {
   return await app.start().then(() => undefined, (error: unknown) => error);
 }
 
-describe('outbox over a real MongoDB replica set', { ignore: mongoRsUri === undefined }, () => {
+describe('outbox over a real MongoDB replica set', { skip: mongoRsUri === undefined }, () => {
   it('commits a business document and its outbox row in one transaction, and relays it', async () => {
     const adapter = new MongoAdapter({
       url: mongoRsUri!,
@@ -168,7 +167,7 @@ describe('outbox over a real MongoDB replica set', { ignore: mongoRsUri === unde
   });
 });
 
-describe('outbox over real DynamoDB Local', { ignore: dynamoEndpoint === undefined }, () => {
+describe('outbox over real DynamoDB Local', { skip: dynamoEndpoint === undefined }, () => {
   const credentials = { accessKeyId: 'setum107fake', secretAccessKey: 'setum107secret' };
   const region = 'us-east-1';
 
@@ -320,7 +319,7 @@ describe('outbox over real DynamoDB Local', { ignore: dynamoEndpoint === undefin
 });
 
 describe('outbox over the real Bigtable emulator', {
-  ignore: bigtableEndpoint === undefined,
+  skip: bigtableEndpoint === undefined,
 }, () => {
   it('start() refuses with the bigtable reason', async () => {
     const app = appOver(
@@ -338,10 +337,10 @@ describe('outbox over the real Bigtable emulator', {
 });
 
 describe('outbox in a shared Cosmos container (local emulator only)', {
-  ignore: cosmosEndpoint === undefined,
+  skip: cosmosEndpoint === undefined,
 }, () => {
   it('never reads, counts, transitions or purges business documents carrying a status', async () => {
-    const { CosmosClient } = await import('npm:@azure/cosmos@^4');
+    const { CosmosClient } = await import('@azure/cosmos');
     const client = new CosmosClient({ endpoint: cosmosEndpoint!, key: cosmosKey });
     const { database } = await client.databases.createIfNotExists({ id: 'setu_m107' });
     const container = `orders_${suffix}`;

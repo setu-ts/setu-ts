@@ -2,10 +2,8 @@
  * Type-level tests: these assertions are verified by the compiler during
  * `deno check`/`deno test`. Runtime assertions cover the exported constants.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { assertType } from '@std/testing/types';
-import type { IsExact } from '@std/testing/types';
+import { describe, expect, it } from 'vitest';
+import { expectTypeOf } from 'vitest';
 import { PLUGIN_PRIORITY } from '../../src/types.ts';
 import type { HealthStatus, HttpMethod, LogLevel, RuntimePlatform } from '../../src/types.ts';
 import { err, ok } from '../../src/result.ts';
@@ -31,18 +29,20 @@ import type {
 
 describe('shared types', () => {
   it('should type HttpMethod as the standard verb union', () => {
-    assertType<
-      IsExact<HttpMethod, 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS'>
-    >(true);
+    expectTypeOf<HttpMethod>().toEqualTypeOf<
+      'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS'
+    >();
   });
 
   it('should type RuntimePlatform with all supported runtimes', () => {
-    assertType<IsExact<RuntimePlatform, 'node' | 'deno' | 'bun' | 'cloudflare-workers'>>(true);
+    expectTypeOf<RuntimePlatform>().toEqualTypeOf<'node' | 'deno' | 'bun' | 'cloudflare-workers'>();
   });
 
   it('should type HealthStatus and LogLevel as unions', () => {
-    assertType<IsExact<HealthStatus, 'up' | 'down' | 'degraded'>>(true);
-    assertType<IsExact<LogLevel, 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace'>>(true);
+    expectTypeOf<HealthStatus>().toEqualTypeOf<'up' | 'down' | 'degraded'>();
+    expectTypeOf<LogLevel>().toEqualTypeOf<
+      'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace'
+    >();
   });
 
   it('should include standard tokens in StandardCapability', () => {
@@ -62,9 +62,9 @@ describe('utility type narrowing', () => {
   it('should narrow Result via the success discriminant', () => {
     const result: Result<number, Error> = Math.random() >= 0 ? ok(1) : err(new Error('x'));
     if (result.success) {
-      assertType<IsExact<typeof result.value, number>>(true);
+      expectTypeOf<typeof result.value>().toEqualTypeOf<number>();
     } else {
-      assertType<IsExact<typeof result.error, Error>>(true);
+      expectTypeOf<typeof result.error>().toEqualTypeOf<Error>();
     }
     expect(result.success).toBe(true);
   });
@@ -72,7 +72,7 @@ describe('utility type narrowing', () => {
   it('should narrow Option via the present discriminant', () => {
     const option: Option<string> = Math.random() >= 0 ? some('x') : none();
     if (option.present) {
-      assertType<IsExact<typeof option.value, string>>(true);
+      expectTypeOf<typeof option.value>().toEqualTypeOf<string>();
     }
     expect(option.present).toBe(true);
   });
@@ -90,19 +90,19 @@ describe('IResponse', () => {
 describe('CQRS contracts', () => {
   it('should have CqrsRequest with readonly type and data', () => {
     const req: CqrsRequest<{ userId: string }> = { type: 'Test', data: { userId: '123' } };
-    assertType<IsExact<typeof req.type, string>>(true);
+    expectTypeOf<typeof req.type>().toEqualTypeOf<string>();
     void req;
   });
 
   it('should have CqrsCommand extending CqrsRequest', () => {
     const cmd: CqrsCommand<{ name: string }> = { type: 'CreateUser', data: { name: 'John' } };
-    assertType<IsExact<typeof cmd.type, string>>(true);
+    expectTypeOf<typeof cmd.type>().toEqualTypeOf<string>();
     void cmd;
   });
 
   it('should have CqrsQuery extending CqrsRequest', () => {
     const qry: CqrsQuery<{ id: string }> = { type: 'GetUser', data: { id: '123' } };
-    assertType<IsExact<typeof qry.type, string>>(true);
+    expectTypeOf<typeof qry.type>().toEqualTypeOf<string>();
     void qry;
   });
 

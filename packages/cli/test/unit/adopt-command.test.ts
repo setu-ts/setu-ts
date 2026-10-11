@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IFileSystem } from '@setu-ts/common';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
@@ -580,4 +579,98 @@ describe('runAdoptCommand', () => {
     expect(code).toBe(1);
     expect(err.text()).toContain('read-only volume');
   });
+});
+
+it('reports scalar failures while planning top-level and nested adoption paths', async () => {
+  for (const nested of [false, true]) {
+    const fs = createFakeFs(PROJECT);
+    if (nested) fs.readdir = () => Promise.reject('cannot enumerate');
+    else fs.realPath = () => Promise.reject('path unavailable');
+    const result = await planAdoption(fs, '/work/svc', 'apps/svc');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toContain(nested ? 'cannot enumerate' : 'path unavailable');
+    }
+  }
+});
+
+it('prunes only directories and preserves ordinary top-level files', async () => {
+  const fs = createFakeFs({ '/root/config.ts': 'keep' });
+  expect(await pruneAdoptedDirectories(fs, '/root', ['config.ts', 'absent'])).toEqual([]);
+  expect(fs.read('/root/config.ts')).toBe('keep');
+});
+
+it('reports scalar move failures without deleting the original', async () => {
+  const fs = createFakeFs({ '/work/file': 'original' });
+  fs.writeFile = () => Promise.reject('write refused');
+  const result = await moveFile(fs, '/work', { from: 'file', to: 'apps/file' });
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.message).toContain('write refused');
+  expect(fs.has('/work/file')).toBe(true);
+});
+
+it('reports write and entry-read failures without throwing scalar errors', async () => {
+  for (const stage of ['workspace-write', 'entry-read', 'entry-write']) {
+    const h = harness();
+    const read = h.fs.readFile.bind(h.fs);
+    const write = h.fs.writeFile.bind(h.fs);
+    let entryReads = 0;
+    let entryWrites = 0;
+    h.fs.readFile = (path) => {
+      if (path === '/work/svc/apps/svc/main.ts' && ++entryReads === 2 && stage === 'entry-read') {
+        return Promise.reject('read refused');
+      }
+      return read(path);
+    };
+    h.fs.writeFile = (path, bytes) => {
+      if (stage === 'workspace-write' && path === '/work/svc/setu.workspace.json') {
+        return Promise.reject('write refused');
+      }
+      if (path === '/work/svc/apps/svc/main.ts' && ++entryWrites === 2 && stage === 'entry-write') {
+        return Promise.reject('rewrite refused');
+      }
+      return write(path, bytes);
+    };
+    expect(await h.run(['adopt'])).toBe(1);
+    expect(h.err.text()).toContain('refused');
+  }
+});
+
+it('reports a scalar failure from the application log and refuses an unnamed root project', async () => {
+  const h = harness();
+  expect(
+    await runAdoptCommand(parseArgs(['adopt']), {
+      fs: h.fs,
+      cwd: '/work/svc',
+      log: () => {
+        throw 'log refused';
+      },
+      error: h.err.sink,
+    }),
+  ).toBe(1);
+  expect(h.err.text()).toContain('Failed to adopt: log refused');
+  expect(
+    await runAdoptCommand(parseArgs(['adopt']), {
+      fs: createFakeFs(),
+      cwd: '/',
+      log: () => {},
+      error: h.err.sink,
+    }),
+  ).toBe(2);
+});
+
+it('moves a root-directory file without trying to create an empty parent path', async () => {
+  const fs = createFakeFs({ '/file': 'kept' });
+  expect(await moveFile(fs, '/', { from: 'file', to: 'a' })).toEqual({ ok: true });
+  expect(fs.read('/a')).toBe('kept');
+  expect(fs.has('/file')).toBe(false);
+  expect(fs.mkdirs).not.toContain('');
+});
+
+it('reports an Error while resolving an adoption path', async () => {
+  const fs = createFakeFs(PROJECT);
+  fs.realPath = () => Promise.reject(new Error('path unavailable'));
+  const result = await planAdoption(fs, '/work/svc', 'apps/svc');
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.message).toContain('path unavailable');
 });

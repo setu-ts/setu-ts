@@ -61,7 +61,7 @@
     "check:since-tags": "deno run --allow-read --allow-net=jsr.io scripts/check-since-tags.ts",
     "check:changelog-coverage": "deno run --allow-read --allow-run=git scripts/check-changelog-coverage.ts",
     "check:api-docs": "deno run --allow-read --allow-run --allow-env scripts/generate-api-docs.ts --check",
-    "check:compat": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git,docker --allow-write packages/validation-plugin/test/unit/validation-service.test.ts packages/openapi-plugin/test/unit/zod-to-openapi.test.ts packages/openapi-plugin/test/unit/zod4-to-openapi.test.ts packages/openapi-plugin/test/unit/zod4-dedup.test.ts packages/openapi-plugin/test/integration/openapi-zod4-integration.test.ts packages/database-plugin/test/integration/real-import.test.ts packages/database-plugin/test/integration/real-drizzle-adapter.test.ts",
+    "check:compat": "SETU_TEST_MEMBER=packages/validation-plugin pnpm exec vitest run packages/validation-plugin/test/unit/validation-service.test.ts && SETU_TEST_MEMBER=packages/openapi-plugin pnpm exec vitest run packages/openapi-plugin/test/unit/zod-to-openapi.test.ts packages/openapi-plugin/test/unit/zod4-to-openapi.test.ts packages/openapi-plugin/test/unit/zod4-dedup.test.ts packages/openapi-plugin/test/integration/openapi-zod4-integration.test.ts && SETU_TEST_MEMBER=packages/database-plugin pnpm exec vitest run packages/database-plugin/test/integration/real-import.test.ts packages/database-plugin/test/integration/real-drizzle-adapter.test.ts",
     "check:script-coverage": "deno run --allow-run=deno scripts/script-coverage.ts coverage",
     "docs:api": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",
     "release:docs": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",
@@ -70,9 +70,9 @@
     "check:versions": "deno run --allow-read --allow-run=git scripts/version-sweep.ts",
     "check:deploy": "deno run --allow-read --allow-write --allow-run --allow-env --allow-net=jsr.io scripts/check-deploy.ts",
     "deploy:render": "deno run --allow-read --allow-write --allow-run --allow-env scripts/check-deploy.ts --render --write",
-    "test": "deno run --allow-read --allow-run=deno scripts/test-partition.ts",
-    "test:coverage": "rm -rf coverage && deno run --allow-read --allow-run=deno scripts/test-partition.ts --coverage && deno run --allow-run=deno scripts/coverage.ts && deno run --allow-run=deno scripts/script-coverage.ts coverage",
-    "test:coverage:pkg": "deno run --allow-read=deno.json,packages --allow-write=.coverage --allow-run=deno,git scripts/coverage-targeted.ts",
+    "test": "deno run --allow-read --allow-run=deno scripts/test-partition.ts --root-only",
+    "test:coverage": "deno run --allow-read --allow-write=coverage --allow-run=deno scripts/test-root-coverage.ts",
+    "test:coverage:pkg": "deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts --coverage",
     "audit": "deno audit --level=high",
     "audit:ci": "deno run --allow-run=deno scripts/audit.ts",
     "publish:check": "deno publish --dry-run",
@@ -89,7 +89,8 @@
     "lint": "deno lint",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check",
-    "docs:exports": "deno run --allow-read --allow-write --allow-run=deno scripts/generate-package-exports.ts"
+    "docs:exports": "deno run --allow-read --allow-write --allow-run=deno scripts/generate-package-exports.ts",
+    "test:deno-lane": "deno run --allow-read --allow-write=coverage-deno-lane --allow-run=deno scripts/test-deno-lane.ts"
   },
   "compilerOptions": {
     "strict": true,
@@ -104,11 +105,15 @@
   "exclude": [
     "apps/full-stack/build",
     "packages/*/dist",
-    "packages/starters/*/dist"
+    "packages/starters/*/dist",
+    "scripts/codemods"
   ],
   "lint": {
     "exclude": [
-      "website"
+      "website",
+      "scripts/codemods",
+      "vitest.config.ts",
+      "test/node"
     ],
     "rules": {
       "tags": [
@@ -139,7 +144,40 @@
   },
   "imports": {
     "@std/expect": "jsr:@std/expect@^1.0.20",
-    "@std/testing": "jsr:@std/testing@^1.0.19"
+    "@std/testing": "jsr:@std/testing@^1.0.19",
+    "vitest": "npm:vitest@5.0.3",
+    "zod-v3": "npm:zod@^3.24.0",
+    "zod-v4": "npm:zod@^4.4.0",
+    "@vitest/coverage-v8": "npm:@vitest/coverage-v8@5.0.3",
+    "esbuild": "npm:esbuild@0.28.2",
+    "xml-crypto": "npm:xml-crypto@^6",
+    "ioredis": "npm:ioredis@5.x",
+    "@simplewebauthn/server": "npm:@simplewebauthn/server@14.0.3",
+    "drizzle-orm": "npm:drizzle-orm@0.45.2",
+    "pg": "npm:pg@^8.0.0",
+    "@google-cloud/bigtable": "npm:@google-cloud/bigtable@^6",
+    "@azure/cosmos": "npm:@azure/cosmos@^4",
+    "@aws-sdk/client-dynamodb": "npm:@aws-sdk/client-dynamodb@^3",
+    "@prisma/client": "npm:@prisma/client@7.8.0",
+    "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7.10.0",
+    "mongodb": "npm:mongodb@^6.21.0",
+    "graphql": "npm:graphql@^16",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
+    "pino": "npm:pino@10.x",
+    "nodemailer": "npm:nodemailer@^10",
+    "@google-cloud/pubsub": "npm:@google-cloud/pubsub@^6",
+    "amqplib": "npm:amqplib@0.10.x",
+    "kafkajs": "npm:kafkajs@2.x",
+    "nats": "npm:nats@2.x",
+    "@aws-sdk/client-sqs": "npm:@aws-sdk/client-sqs@^3",
+    "react-router": "npm:react-router@8",
+    "@hono/node-server": "npm:@hono/node-server@^2.0.0",
+    "@aws-sdk/client-secrets-manager": "npm:@aws-sdk/client-secrets-manager@^3",
+    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3",
+    "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0",
+    "drizzle-orm/": "npm:drizzle-orm@0.45.2/"
   },
   "publish": {
     "exclude": [

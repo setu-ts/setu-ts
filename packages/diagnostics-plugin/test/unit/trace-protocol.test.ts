@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   isTraceBatchProjection,
@@ -355,4 +354,32 @@ describe('readTraceSourceBatch — copies source lists by index, never by iterat
     expect(reads).toBe(1);
     expect(validated!.records[0]!.serviceAlias).toBe('orders');
   });
+});
+
+it('copies valid link relationships and refuses malformed link fields', () => {
+  const link = { traceId: TRACE, spanId: PARENT };
+  const validated = readTraceSourceBatch(
+    sourceBatch(0, { records: [record(1, { links: [link] })] }),
+    INSTANCE,
+    0,
+    128,
+  )!;
+  const projection = projectTraceBatch(validated, INSTANCE);
+  expect((projection.records as Record<string, unknown>[])[0]!.links).toEqual([link]);
+  expect(isTraceBatchProjection(projection)).toBe(true);
+  for (
+    const invalid of [null, { ...link, extra: true }, { ...link, traceId: 'invalid' }, {
+      ...link,
+      spanId: 'invalid',
+    }]
+  ) {
+    expect(
+      readTraceSourceBatch(
+        sourceBatch(0, { records: [record(1, { links: [invalid] })] }),
+        INSTANCE,
+        0,
+        128,
+      ),
+    ).toBeNull();
+  }
 });

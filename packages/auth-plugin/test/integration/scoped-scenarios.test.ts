@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES, scopeFromParam } from '@setu-ts/common';
 import type { IAuthorizationDiagnosticsSource, ScopeRef } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';

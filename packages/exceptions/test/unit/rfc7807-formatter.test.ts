@@ -11,8 +11,7 @@
  * §9.2). Changing the behavior asserted here would be the silent breaking
  * change §9.4 forbids — new behavior belongs on `rfc9457Formatter`.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { rfc7807Formatter } from '../../src/formatters/rfc7807-formatter.ts';
 import { rfc9457Formatter } from '../../src/formatters/rfc9457-formatter.ts';

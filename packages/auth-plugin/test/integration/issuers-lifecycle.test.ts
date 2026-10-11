@@ -4,8 +4,7 @@
  * not abort the rest of the strategy chain.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ILogger, IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

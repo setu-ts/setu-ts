@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, createMaskRedactor } from '@setu-ts/common';
 import type { ILogger } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

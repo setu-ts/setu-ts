@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { canSign } from '../../src/providers/azure-provider.ts';
 import type { IAzureBlobClient } from '../../src/interfaces/index.ts';
 import {

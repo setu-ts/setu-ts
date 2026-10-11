@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IS3Backend } from '../../../src/interfaces/index.ts';
 import { S3Provider } from '../../../src/providers/s3-provider.ts';
 

@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { parseFormBody } from '../../src/form/form-body.ts';
 import { UnsupportedFormEncodingError } from '../../src/errors/unsupported-form-encoding.ts';
 import { httpStatusHintOf } from '../../src/errors/status-hint.ts';

@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { StaticFilesService } from '../../src/services/static-files-service.ts';
 import type { IStaticFiles } from '../../src/interfaces/index.ts';
 
@@ -61,4 +60,30 @@ describe('StaticFilesService', () => {
     const serviceWithFs = new StaticFilesService({ root: '/tmp/static', fs });
     expect(serviceWithFs).toBeDefined();
   });
+});
+
+it('delegates a missing file to the configured handler', async () => {
+  const fs = {
+    stat: () => Promise.reject(new Error('ENOENT')),
+    readFile: () => Promise.reject(new Error('ENOENT')),
+    readdir: () => Promise.resolve([]),
+    mkdir: () => Promise.resolve(),
+    rm: () => Promise.resolve(),
+    writeFile: () => Promise.resolve(),
+  };
+  const service = new StaticFilesService({ root: '/static', fs });
+  const response = {
+    statusCode: 200,
+    status(value: number) {
+      this.statusCode = value;
+      return this;
+    },
+    send() {
+      return undefined;
+    },
+  };
+  await service.serve(
+    { request: { path: '/missing.txt', method: 'GET', headers: new Headers() }, response } as never,
+  );
+  expect(response.statusCode).toBe(404);
 });

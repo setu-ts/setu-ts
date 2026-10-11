@@ -2,8 +2,7 @@
  * Tests for the Web Crypto buffer helper.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { toBuffer } from '../../src/utils/buffer.ts';
 
 describe('toBuffer', () => {

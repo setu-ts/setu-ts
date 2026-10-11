@@ -12,8 +12,7 @@
  * so they measured depth 0 and documented a fiction (M51b).
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { countResolvedFields, createMaxNodesRule } from '../../src/security/max-nodes.ts';
 import type {
   GraphqlDocumentNodeLike,
@@ -37,7 +36,7 @@ class MockGraphQLError extends Error implements GraphqlGraphQLErrorLike {
 
 // The real parser. The rule reads only `kind`, `name` and `selectionSet`, all
 // of which are structural, so a real `DocumentNode` is assignable to the facade.
-const { parse } = await import('npm:graphql@^16');
+const { parse } = await import('graphql');
 
 function doc(source: string): GraphqlDocumentNodeLike {
   return parse(source) as unknown as GraphqlDocumentNodeLike;

@@ -5,8 +5,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { listSeamSpecs } from '../../../src/seams/registry.ts';
 import { getSchematic, listSchematics } from '../../../src/schematics/registry.ts';

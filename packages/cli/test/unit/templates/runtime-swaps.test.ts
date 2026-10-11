@@ -7,8 +7,7 @@
  * and that nothing else does.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { TargetRuntime } from '../../../src/constants.ts';
 import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';

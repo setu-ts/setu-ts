@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs/promises';
 /**
  * The real-PostgreSQL inbox harness (M108), used by `messaging-plugin`'s inbox
  * suites so the Drizzle table over the committed DDL fixture has ONE
@@ -10,9 +11,9 @@
  *
  * @module
  */
-import { drizzle } from 'npm:drizzle-orm@0.45.2/node-postgres';
-import { bigint, integer, pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
-import { Pool } from 'npm:pg@^8.0.0';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { bigint, integer, pgTable, text } from 'drizzle-orm/pg-core';
+import { Pool } from 'pg';
 import { createDrizzleDatabase } from '../../src/index.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { outboxPostgresDdl, outboxTable } from './outbox-postgres.ts';
@@ -39,7 +40,7 @@ export const peopleTable = pgTable('people', {
 
 /** The committed PostgreSQL inbox DDL — the text the README embeds verbatim. */
 export function inboxPostgresDdl(): Promise<string> {
-  return Deno.readTextFile(new URL('./inbox-postgres.sql', import.meta.url));
+  return nodeFs.readFile(new URL('./inbox-postgres.sql', import.meta.url), 'utf8');
 }
 
 /**

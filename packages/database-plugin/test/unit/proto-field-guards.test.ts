@@ -10,8 +10,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { sources } from '../fixtures/conditional-sources.ts';
 import { fromDocument, resolveCosmosTarget } from '../../src/adapters/cosmos/cosmos-mapping.ts';
 import {

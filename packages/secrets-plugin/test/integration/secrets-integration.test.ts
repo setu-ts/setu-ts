@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ISecretManager } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -11,7 +10,7 @@ describe('Secrets integration (through a real kernel app)', () => {
   it('resolves ISecretManager and reads an env secret back through the public surface', async () => {
     // runtime.env snapshots the process env at RuntimePlugin registration, so set
     // the variable before start(). Test files are the sanctioned env exception.
-    Deno.env.set('INTEGRATION_DB_PASSWORD', 's3cret');
+    process.env['INTEGRATION_DB_PASSWORD'] = 's3cret';
     try {
       const app = createApplication({
         plugins: [RuntimePlugin(), SecretsPlugin()],
@@ -33,7 +32,7 @@ describe('Secrets integration (through a real kernel app)', () => {
 
       await app.stop();
     } finally {
-      Deno.env.delete('INTEGRATION_DB_PASSWORD');
+      delete process.env['INTEGRATION_DB_PASSWORD'];
     }
   });
 

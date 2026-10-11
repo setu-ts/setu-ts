@@ -6,8 +6,7 @@
  * no `dataStore`), never on the strategy alone, so a deliberate custom store
  * stays silent.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ILogger, IPluginContext } from '@setu-ts/common';
 

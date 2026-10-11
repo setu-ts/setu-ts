@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs/promises';
 /**
  * The Cloudflare Workers hybrid (M107 §3.12), at unit level: the shipped
  * `D1Adapter` over a REAL SQLite engine (`cloudflare-plugin`'s `SqliteD1`
@@ -12,8 +13,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createScheduledHandler, D1Adapter, WorkersCron } from '@setu-ts/cloudflare-plugin';
@@ -35,8 +35,9 @@ import { FaultStore, orderPlaced } from '../fixtures/outbox.ts';
 import { describeOutboxRelayProofs } from '../fixtures/outbox-relay-proofs.ts';
 
 /** The committed SQLite/D1 DDL — the text the README embeds verbatim. */
-const SQLITE_DDL = await Deno.readTextFile(
+const SQLITE_DDL = await nodeFs.readFile(
   new URL('../../../database-plugin/test/fixtures/outbox-sqlite.sql', import.meta.url),
+  'utf8',
 );
 
 const EVERY_MINUTE = '* * * * *';

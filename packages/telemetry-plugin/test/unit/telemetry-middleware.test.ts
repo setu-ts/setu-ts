@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { telemetryMiddleware } from '../../src/middleware/telemetry-middleware.ts';
 import type { ISpan, ITelemetryService, NextFunction } from '@setu-ts/common';
 import { createRedactionService, TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';

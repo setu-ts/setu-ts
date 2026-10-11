@@ -22,8 +22,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { HandlerResult, ISseConnection, SseMessage } from '@setu-ts/common';
 import { ChannelRegistry, SseChannelImpl } from '../../src/channels/channel-registry.ts';
 import { encodeSseMessage } from '../../src/utils/sse-frame.ts';

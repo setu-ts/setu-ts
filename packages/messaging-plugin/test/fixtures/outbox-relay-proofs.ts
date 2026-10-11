@@ -1,7 +1,6 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { OutboxService } from '../../src/outbox/outbox-service.ts';
 import { resolveOutboxOptions } from '../../src/outbox/options.ts';
 import {
@@ -29,7 +28,7 @@ export function describeOutboxRelayProofs(
   build: () => Promise<RelayProofBackend>,
   ignore = false,
 ): void {
-  describe(`outbox fencing — ${name}`, { ignore }, () => {
+  describe(`outbox fencing — ${name}`, { skip: ignore }, () => {
     it('a paused relay is fenced after a real claim and another relay settles the row', async () => {
       const backend = await build();
       try {
@@ -64,7 +63,7 @@ export function describeOutboxRelayProofs(
       const backend = await build();
       try {
         await backend.store.verify();
-        const runtime = createDenoRuntimeServices();
+        const runtime = createNodeRuntimeServices();
         const broker = new FakeOutboxBroker();
         broker.behaviour = async () => {
           await new Promise<void>((resolve) => runtime.setTimeout(resolve, 0));
@@ -107,10 +106,8 @@ export function describeOutboxRelayProofs(
         }
         expect(claims).toBeGreaterThanOrEqual(200);
         // The ratio is test evidence, deliberately absent from shipped metrics.
-        Deno.stdout.writeSync(
-          new TextEncoder().encode(
-            `${name}: claims=${claims}, lost=${lostClaims}, lost/claims=${lostClaims / claims}\n`,
-          ),
+        process.stdout.write(
+          `${name}: claims=${claims}, lost=${lostClaims}, lost/claims=${lostClaims / claims}\n`,
         );
       } finally {
         await backend.dispose();

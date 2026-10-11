@@ -5,8 +5,7 @@
  * delete→findById-null, P2025 handling, count, and transaction bridge
  * commit/rollback with data persistence.
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaDataSource, PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import type { RecordedCall } from '../fixtures/fake-prisma-client.ts';

@@ -2,8 +2,7 @@
  * Type and runtime proof that the real OTel producer agrees with the shared
  * W3C trace-context codec.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { contextToTraceparent } from '@setu-ts/common';
 
 import { TelemetryService } from '../../src/services/telemetry-service.ts';

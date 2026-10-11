@@ -5,12 +5,11 @@
  * one such name left every later declaration on the channel waiting forever
  * (M106 audit O4). Guarded with `ignore:` on `RABBITMQ_URL`.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RabbitMqQueue } from '../../src/adapters/rabbitmq-queue.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 
-const url = Deno.env.get('RABBITMQ_URL');
+const url = process.env['RABBITMQ_URL'];
 
 /** Resolves `'resolved'`, `'rejected'` or `'pending'` after `ms`. */
 function outcome(promise: Promise<unknown>, ms: number): Promise<string> {
@@ -25,7 +24,7 @@ function outcome(promise: Promise<unknown>, ms: number): Promise<string> {
 
 describe('REAL RabbitMqQueue name limit (guarded)', () => {
   it('refuses an oversized job name without jamming the channel', {
-    ignore: url === undefined,
+    skip: url === undefined,
   }, async () => {
     const runtime = new FakeRuntimeServices();
     const prefix = `m106-o4-${crypto.randomUUID().slice(0, 8)}`;

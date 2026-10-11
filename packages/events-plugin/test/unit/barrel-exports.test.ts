@@ -4,8 +4,7 @@
  * This test ensures that every exported value from the public package
  * specifier `@setu-ts/events-plugin` is reachable at runtime.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   createDomainEvents,
   defineDomainEvent,

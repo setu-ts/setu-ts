@@ -9,8 +9,7 @@
  * called a detached method rather than through the instance would throw at
  * runtime while a plain-object double kept working (M52c).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ILogger, ITelemetryService, SpanContext } from '@setu-ts/common';
 
 import { ConsoleLogger } from '../../src/loggers/console-logger.ts';

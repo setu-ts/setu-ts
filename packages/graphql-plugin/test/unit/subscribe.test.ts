@@ -2,8 +2,7 @@
  * Tests for execution/subscribe.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { subscribeGraphql } from '../../src/execution/subscribe.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
 import { DocumentCache } from '../../src/execution/document-cache.ts';

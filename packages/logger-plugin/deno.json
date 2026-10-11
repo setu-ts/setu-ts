@@ -9,6 +9,10 @@
     }
   },
   "imports": {
-    "pino": "npm:pino@10.x"
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+    "pino": "npm:pino@10.x",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

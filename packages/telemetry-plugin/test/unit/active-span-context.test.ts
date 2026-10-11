@@ -1,8 +1,7 @@
 /**
  * X34-2 — the read that makes a log line joinable to a span.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ITelemetryService, SpanContext } from '@setu-ts/common';
 
 import { NoopTelemetryService, TelemetryService } from '../../src/services/telemetry-service.ts';

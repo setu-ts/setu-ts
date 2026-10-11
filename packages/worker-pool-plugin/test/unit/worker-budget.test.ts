@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import type { IWorkerBudgetPool } from '../../src/pool/worker-budget.ts';
 

@@ -1,6 +1,6 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /** Real RabbitMQ retries through a kernel app, including TTL tiers and restart recovery. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { Buffer } from 'node:buffer';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -12,8 +12,8 @@ import {
   RecordingLogger,
 } from '../../../common/test/fixtures/redis-connection-errors.ts';
 
-const rabbitUrl = Deno.env.get('RABBITMQ_URL');
-const guard = { ignore: rabbitUrl === undefined };
+const rabbitUrl = process.env['RABBITMQ_URL'];
+const guard = { skip: rabbitUrl === undefined };
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 async function until(check: () => boolean | Promise<boolean>, timeout = 5000): Promise<void> {
   const end = performance.now() + timeout;
@@ -23,10 +23,10 @@ async function until(check: () => boolean | Promise<boolean>, timeout = 5000): P
   }
   throw Error('Timed out waiting for RabbitMQ consumer retry');
 }
-type Amqp = typeof import('npm:amqplib@0.10.x');
+type Amqp = typeof import('amqplib');
 async function fixture(delaysMs: number[] = [200, 800], prefetch = 3, topicSuffix = '') {
   const url = rabbitUrl!.replace('localhost', '127.0.0.1');
-  const amqp = await import('npm:amqplib@0.10.x');
+  const amqp = await import('amqplib');
   const connection = await amqp.connect(url);
   const channel = await connection.createConfirmChannel();
   const queue = `fix2-${crypto.randomUUID()}`;
@@ -75,7 +75,7 @@ async function fixture(delaysMs: number[] = [200, 800], prefetch = 3, topicSuffi
   };
 }
 async function docker(args: string[]): Promise<string> {
-  const result = await new Deno.Command('docker', { args }).output();
+  const result = await runProcess('docker', { args });
   if (!result.success) throw Error(new TextDecoder().decode(result.stderr));
   return new TextDecoder().decode(result.stdout).trim();
 }
@@ -311,8 +311,14 @@ describe('REAL RabbitMQ consumer retry', () => {
         expect(dead.properties.deliveryMode).toBe(2);
         const copied = dead.properties.headers!;
         expect(copied.traceparent).toBe('trace-canary');
-        expect(Object.hasOwn(copied, '__proto__')).toBe(true);
-        expect(copied['__proto__']).toBe('safe');
+        // amqplib decodes a header table with `fields[key] = value`. Deno ships without the
+        // `__proto__` accessor, so that creates an own property and the broker copies it; Node runs
+        // the setter, which ignores a string, so the header never reaches the broker at all.
+        const probe: Record<string, unknown> = {};
+        probe['__proto__'] = 'safe';
+        const assignmentKeepsProto = Object.hasOwn(probe, '__proto__');
+        expect(Object.hasOwn(copied, '__proto__')).toBe(assignmentKeepsProto);
+        if (assignmentKeepsProto) expect(copied['__proto__']).toBe('safe');
         expect(Object.getPrototypeOf(copied)).toBe(Object.prototype);
         expect(copied['x-setu-attempts']).toBe(3);
         expect(copied['x-setu-topic']).toBe(f.topic);

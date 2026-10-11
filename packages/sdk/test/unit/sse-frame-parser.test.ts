@@ -1,7 +1,6 @@
 /** Tests the internal incremental SSE wire parser. */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { SseFrameParser } from '../../src/realtime/sse-frame-parser.ts';
 
 describe('SseFrameParser', () => {

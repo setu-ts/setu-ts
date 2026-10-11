@@ -11,8 +11,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { assembleHandler } from '../../src/handler/server-build.ts';
 
@@ -21,7 +20,7 @@ import { assembleHandler } from '../../src/handler/server-build.ts';
 // absent optional dependency does not turn the suite red.
 let rrModule: Record<string, unknown> | null = null;
 try {
-  rrModule = await import('npm:react-router@8') as unknown as Record<string, unknown>;
+  rrModule = await import('react-router') as unknown as Record<string, unknown>;
 } catch {
   rrModule = null;
 }
@@ -29,7 +28,7 @@ try {
 describe('server-build-real-import', () => {
   it(
     'real npm:react-router@8 import resolves and has createRequestHandler',
-    { ignore: rrModule === null },
+    { skip: rrModule === null },
     () => {
       const createRequestHandler = rrModule?.createRequestHandler;
 

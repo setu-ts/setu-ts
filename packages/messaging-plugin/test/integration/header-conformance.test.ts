@@ -11,8 +11,7 @@
  * An earlier revision of this file drove `InMemoryBroker` alone and would have
  * passed with the other six broken.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { MessageMetadata } from '@setu-ts/common';
 import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';

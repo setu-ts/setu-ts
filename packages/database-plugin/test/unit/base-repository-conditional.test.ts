@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { httpStatusHintOf } from '@setu-ts/common';
 import { BaseRepository } from '../../src/repositories/base-repository.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';

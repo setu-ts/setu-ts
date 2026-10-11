@@ -13,8 +13,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { HealthCheckResult, IPluginContext, IScheduler, ScheduledJob } from '@setu-ts/common';
 import { SchedulerPlugin } from '../../src/plugin/scheduler-plugin.ts';
 import { run, withIngressBehaviors } from '../../src/jobs/job-executor.ts';

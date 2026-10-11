@@ -14,10 +14,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { z as z4 } from 'npm:zod@^4.4.0';
-import { z as z3 } from 'npm:zod@^3.24.0';
+import { describe, expect, it } from 'vitest';
+import { z as z4 } from 'zod-v4';
+import { z as z3 } from 'zod-v3';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IKernelApplication } from '@setu-ts/kernel';

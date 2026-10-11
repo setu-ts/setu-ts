@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IdempotencyClaimRequest, IIdempotencyStore, ILogger } from '@setu-ts/common';
 import type { IRedisIdempotencyClient } from '../../src/interfaces/index.ts';
 import { createClockRuntime } from '../fixtures/clock-runtime.ts';

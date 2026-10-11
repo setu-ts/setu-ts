@@ -10,7 +10,7 @@
  *
  * @module
  */
-import { SignedXml } from 'npm:xml-crypto@^6';
+import { SignedXml } from 'xml-crypto';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import type { IPlugin } from '@setu-ts/common';

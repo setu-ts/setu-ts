@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 /**
  * The package specifier of every instrumentation loader must be a LITERAL at
  * its own `import()` call, and must agree with the specifier the loader reports.
@@ -22,8 +23,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   loadFetchInstrumentation,
   loadHttpInstrumentation,
@@ -46,11 +46,20 @@ const LOADERS: ReadonlyArray<
 ];
 
 describe('instrumentation loaders — literal package specifiers', () => {
-  for (const [name, loader, specifier] of LOADERS) {
+  for (const [name, , specifier] of LOADERS) {
     it(`keeps '${name}' as a literal import() argument in its default importer`, () => {
       // The default importer is a default PARAMETER, so it is part of the
       // function's own source text.
-      expect(String(loader)).toContain(`import('${specifier}')`);
+      const file = name === 'http' || name === 'fetch'
+        ? 'http'
+        : name === 'ioredis'
+        ? 'database'
+        : 'queue';
+      const source = readFileSync(
+        new URL(`../../src/instrumentation/${file}-instrumentation.ts`, import.meta.url),
+        'utf8',
+      );
+      expect(source).toContain(`import('${specifier}')`);
     });
   }
 

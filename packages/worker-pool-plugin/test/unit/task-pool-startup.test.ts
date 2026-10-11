@@ -3,8 +3,7 @@
  * the three ways a slot used to be held with nothing able to release it (M45c
  * security audit findings 1, 2 and 5).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IWorkerHandle, IWorkerHost } from '@setu-ts/common';
 import { TaskPool } from '../../src/pool/task-pool.ts';
 import { WorkerBudget } from '../../src/pool/worker-budget.ts';

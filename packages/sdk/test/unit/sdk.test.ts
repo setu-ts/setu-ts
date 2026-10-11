@@ -4,8 +4,7 @@
  * Covers defaults, injected timing, and validation errors.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createClient } from '../../src/sdk.ts';
 import { HttpClientError } from '../../src/errors.ts';
 import type { ClientRetryPolicy, IClientTiming } from '../../src/http/contracts.ts';

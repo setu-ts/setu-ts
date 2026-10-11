@@ -9,8 +9,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig } from '@setu-ts/common';
 
@@ -26,11 +25,11 @@ async function withEnv(
   vars: Readonly<Record<string, string>>,
   run: () => Promise<void>,
 ): Promise<void> {
-  for (const [key, value] of Object.entries(vars)) Deno.env.set(key, value);
+  for (const [key, value] of Object.entries(vars)) process.env[key] = value;
   try {
     await run();
   } finally {
-    for (const key of Object.keys(vars)) Deno.env.delete(key);
+    for (const key of Object.keys(vars)) delete process.env[key];
   }
 }
 

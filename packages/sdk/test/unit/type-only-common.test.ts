@@ -1,3 +1,5 @@
+import { denoBinary, run as runProcess } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The SDK's `common` imports stay type-only (M98n §3.3, audit row O10): the
  * outbound HTTP collector is a deliberate local copy precisely so the
@@ -7,16 +9,15 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 const SRC = new URL('../../src/', import.meta.url);
 
 async function sourceFiles(dir: URL): Promise<URL[]> {
   const files: URL[] = [];
-  for await (const entry of Deno.readDir(dir)) {
-    const child = new URL(entry.name + (entry.isDirectory ? '/' : ''), dir);
-    if (entry.isDirectory) {
+  for await (const entry of await nodeFs.opendir(dir)) {
+    const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
+    if (entry.isDirectory()) {
       files.push(...await sourceFiles(child));
     } else if (entry.name.endsWith('.ts')) {
       files.push(child);
@@ -30,7 +31,7 @@ describe('@setu-ts/sdk — common imports are type-only', () => {
     const offenders: string[] = [];
     let seen = 0;
     for (const file of await sourceFiles(SRC)) {
-      const text = await Deno.readTextFile(file);
+      const text = await nodeFs.readFile(file, 'utf8');
       for (const match of text.matchAll(/^\s*(import|export)\b([^;]*?)from\s+'([^']+)'/gms)) {
         if (!match[3]!.includes('@setu-ts/common')) {
           continue;
@@ -47,11 +48,11 @@ describe('@setu-ts/sdk — common imports are type-only', () => {
   });
 
   it('no module-graph edge into common carries runtime code', async () => {
-    const output = await new Deno.Command(Deno.execPath(), {
+    const output = await runProcess(denoBinary(), {
       args: ['info', '--json', new URL('index.ts', SRC).pathname],
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
     expect(output.success).toBe(true);
     const graph = JSON.parse(new TextDecoder().decode(output.stdout)) as {
       modules: {

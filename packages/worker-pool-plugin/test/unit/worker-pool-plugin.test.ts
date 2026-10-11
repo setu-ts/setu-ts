@@ -3,8 +3,7 @@
  * registration, health indicator, and onClose shutdown — driven with the
  * fake plugin context.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ICounter, IMetricsService, IWorkerPool, MetricOptions } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';

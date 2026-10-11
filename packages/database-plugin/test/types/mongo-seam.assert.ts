@@ -22,7 +22,7 @@
  *
  * @module
  */
-import { MongoClient } from 'npm:mongodb@^6.21.0';
+import { MongoClient } from 'mongodb';
 import type { IMongoClient } from '../../src/adapters/mongo/mongo-client.ts';
 
 // The assertion. No cast on either side: the type error IS the test.

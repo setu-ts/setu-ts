@@ -14,8 +14,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { OUTBOX_RECORD_KIND } from '@setu-ts/common';
 import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
 import { DatabaseService, OutboxStoreUnavailableError } from '../../src/index.ts';
@@ -26,9 +25,9 @@ import type { OutboxStoreUnderTest } from '../fixtures/outbox-store-contract.ts'
 import { record } from '../fixtures/outbox-store.ts';
 import { postgresOutboxSchema } from '../fixtures/outbox-postgres.ts';
 
-const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
+const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
 const skipPostgres = postgresUrl === undefined;
-const mongoUrl = Deno.env.get('MONGODB_URI');
+const mongoUrl = process.env['MONGODB_URI'];
 const skipMongo = mongoUrl === undefined;
 
 /** A Drizzle-backed service over a fresh schema, with or without the outbox table. */
@@ -63,7 +62,7 @@ describeOutboxStoreContract('database bridge over real PostgreSQL (Drizzle)', as
   };
 }, skipPostgres);
 
-describe('DatabaseOutboxStore over real PostgreSQL', { ignore: skipPostgres }, () => {
+describe('DatabaseOutboxStore over real PostgreSQL', { skip: skipPostgres }, () => {
   it('claims versions across int32 and safe-integer boundaries without losing precision', async () => {
     const { service, dispose } = await postgres(true);
     try {
@@ -150,7 +149,7 @@ describe('DatabaseOutboxStore over real PostgreSQL', { ignore: skipPostgres }, (
   });
 });
 
-describe('DatabaseOutboxStore over a standalone MongoDB', { ignore: skipMongo }, () => {
+describe('DatabaseOutboxStore over a standalone MongoDB', { skip: skipMongo }, () => {
   it('verify refuses with the replica-set reason specifically', async () => {
     const adapter = new MongoAdapter({
       url: mongoUrl!,

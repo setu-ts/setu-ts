@@ -3,9 +3,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { z } from 'npm:zod@^3.24.0';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod-v3';
 import { ZodToOpenApi, zodToOpenApi } from '../../src/transformers/zod-to-openapi.ts';
 
 describe('ZodToOpenApi', () => {
@@ -649,4 +648,35 @@ describe('transformUnion edge cases', () => {
       anyOf: [],
     });
   });
+});
+
+it('projects legacy object-form checks and ignores malformed or absent numeric constraints', () => {
+  const transformer = new ZodToOpenApi();
+  for (const kind of ['ZodString', 'ZodNumber']) {
+    const type = kind === 'ZodString' ? 'string' : 'number';
+    for (const value of [undefined, null, {}, { value: 'bad' }]) {
+      const schema = {
+        _def: {
+          typeName: kind,
+          checks: [{ kind: 'min', value }, { kind: 'max', value }, { kind: 'unknown' }],
+        },
+      } as unknown as Parameters<ZodToOpenApi['transform']>[0];
+      expect(transformer.transform(schema)).toEqual({ type });
+    }
+    const schema = {
+      _def: {
+        typeName: kind,
+        checks: [{ kind: 'min', value: { value: 2 } }, { kind: 'max', value: { value: 9 } }],
+      },
+    } as unknown as Parameters<ZodToOpenApi['transform']>[0];
+    expect(transformer.transform(schema)).toEqual(
+      type === 'string' ? { type, minLength: 2, maxLength: 9 } : { type, minimum: 2, maximum: 9 },
+    );
+  }
+  expect(
+    transformer.transform({ _def: { typeName: 'ZodString', checks: [{ kind: 'uri' }] } } as never),
+  ).toEqual({ type: 'string', format: 'uri' });
+  expect(
+    transformer.transform({ _def: { typeName: 'ZodDefault', defaultValue: () => 7 } } as never),
+  ).toEqual({ default: 7 });
 });

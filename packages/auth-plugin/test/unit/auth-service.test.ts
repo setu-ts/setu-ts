@@ -2,8 +2,7 @@
  * Tests for AuthService.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { AuthService, LocalStrategy } from '../../src/services/auth-service.ts';
 import type { IAuthStrategy, IPrincipal, IRequest } from '@setu-ts/common';
 

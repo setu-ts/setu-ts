@@ -25,8 +25,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { AzureBlobProvider } from '../../src/providers/azure-provider.ts';
 import { GcsProvider } from '../../src/providers/gcs-provider.ts';
 import { S3Provider } from '../../src/providers/s3-provider.ts';

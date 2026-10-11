@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createTerminalPrompter, type PromptChoice } from '../../src/prompt.ts';
 
 // Generic fallback contract only: Enter takes the FIRST choice. WHICH value

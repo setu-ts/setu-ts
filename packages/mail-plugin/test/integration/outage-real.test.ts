@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * §3.7 real-outage bar: drives a **real** Mailpit (SMTP) backend through a
  * **real** stop and restart, asserting `up → (stop) down → (restart) up`.
@@ -10,14 +10,13 @@
  * both workflows, so CI cannot silently stop running it.
  * `test/apps-gate.test.ts` pins the service, port mapping, and env var.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { SmtpProvider } from '../../src/providers/smtp-provider.ts';
 
 // ── Docker stop/start helpers ───────────────────────────────────────────────
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(
       `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
@@ -50,58 +49,49 @@ async function waitTrue(
 }
 
 describe('REAL Mailpit/SMTP outage (§3.7)', () => {
-  it('up → stop → down → restart → up', async () => {
-    const url = Deno.env.get('SMTP_URL');
-    if (url === undefined) {
-      console.log('SKIP: SMTP_URL not set');
-      return;
-    }
+  it(
+    'up → stop → down → restart → up',
+    { skip: process.env['SMTP_URL'] === undefined },
+    async () => {
+      const url = process.env['SMTP_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    let nodemailerPresent = false;
-    try {
-      await import('npm:nodemailer@^10');
-      nodemailerPresent = true;
-    } catch {
-      // npm:nodemailer not available
-    }
-    if (!nodemailerPresent) {
-      console.log('SKIP: npm:nodemailer@^10 not available');
-      return;
-    }
+      await import('nodemailer');
 
-    const parsed = new URL(url);
-    const port = parsed.port === '' ? 1025 : Number(parsed.port);
-    const containerId = await containerIdForPort(port);
+      const parsed = new URL(url);
+      const port = parsed.port === '' ? 1025 : Number(parsed.port);
+      const containerId = await containerIdForPort(port);
 
-    // Connect via the explicit IPv4 loopback so nodemailer never dials the
-    // IPv6 loopback (`::1`), which the scoped test net permission does not
-    // grant and which would throw an uncaught `NotCapable` after the suite.
-    const host = parsed.hostname === 'localhost' ? '127.0.0.1' : parsed.hostname;
+      // Connect via the explicit IPv4 loopback so nodemailer never dials the
+      // IPv6 loopback (`::1`), which the scoped test net permission does not
+      // grant and which would throw an uncaught `NotCapable` after the suite.
+      const host = parsed.hostname === 'localhost' ? '127.0.0.1' : parsed.hostname;
 
-    const provider = new SmtpProvider({ host, port, secure: false });
+      const provider = new SmtpProvider({ host, port, secure: false });
 
-    try {
-      await provider.connect();
-      const probe = provider.isHealthy;
-      expect(typeof probe).toBe('function');
-      if (typeof probe !== 'function') return;
+      try {
+        await provider.connect();
+        const probe = provider.isHealthy;
+        expect(typeof probe).toBe('function');
+        if (typeof probe !== 'function') return;
 
-      // (up) baseline
-      await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
-      expect(await probe()).toBe(true);
+        // (up) baseline
+        await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
+        expect(await probe()).toBe(true);
 
-      // (stop) real Mailpit stop → verify() fails → down
-      await docker(['stop', containerId]);
-      await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
-      expect(await probe()).toBe(false);
+        // (stop) real Mailpit stop → verify() fails → down
+        await docker(['stop', containerId]);
+        await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
+        expect(await probe()).toBe(false);
 
-      // (restart) real Mailpit start → verify() succeeds → up
-      await docker(['start', containerId]);
-      await waitTrue(async () => (await probe()) === true, 'up after restart', 30_000);
-      expect(await probe()).toBe(true);
-    } finally {
-      await provider.disconnect();
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
-    }
-  });
+        // (restart) real Mailpit start → verify() succeeds → up
+        await docker(['start', containerId]);
+        await waitTrue(async () => (await probe()) === true, 'up after restart', 30_000);
+        expect(await probe()).toBe(true);
+      } finally {
+        await provider.disconnect();
+        await runProcess('docker', { args: ['start', containerId] });
+      }
+    },
+  );
 });

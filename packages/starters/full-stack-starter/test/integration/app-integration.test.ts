@@ -1,8 +1,7 @@
 /**
  * @module full-stack-starter integration tests — load-bearing for plugin collisions
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFullStackApp } from '../../src/index.ts';
 import type { IContainer, ILogger, IRequestContext } from '@setu-ts/common';
 import { CachePlugin } from '@setu-ts/cache-plugin';

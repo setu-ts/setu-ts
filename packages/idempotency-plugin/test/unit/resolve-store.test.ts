@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IIdempotencyStore } from '@setu-ts/common';
 import type { IRedisIdempotencyClient } from '../../src/interfaces/index.ts';
 import { resolveStore } from '../../src/stores/resolve-store.ts';
@@ -90,4 +89,23 @@ describe('resolveStore (M109a §3.14)', () => {
     await store.connect(createClockRuntime());
     expect(warnings).toHaveLength(1);
   });
+});
+
+it('loads the real lazy Redis client without opening a connection, and can disconnect it', async () => {
+  for (
+    const config of [
+      { type: 'redis' as const, namespace: 'default', url: 'redis://127.0.0.1:1' },
+      {
+        type: 'redis' as const,
+        namespace: 'explicit',
+        url: 'redis://127.0.0.1:1',
+        keyPrefix: 'custom:',
+        commandTimeoutMs: 0,
+      },
+    ]
+  ) {
+    const store = await resolveStore(config, undefined, () => undefined);
+    expect(store.name).toBe('redis');
+    await store.disconnect?.();
+  }
 });

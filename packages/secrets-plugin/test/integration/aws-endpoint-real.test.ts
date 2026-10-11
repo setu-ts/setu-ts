@@ -17,16 +17,15 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { AwsKmsProvider } from '../../src/providers/aws-kms.ts';
 
-const endpoint = Deno.env.get('AWS_ENDPOINT_URL');
+const endpoint = process.env['AWS_ENDPOINT_URL'];
 let sdkPresent = false;
 if (endpoint !== undefined) {
   try {
-    await import('npm:@aws-sdk/client-secrets-manager@^3');
+    await import('@aws-sdk/client-secrets-manager');
     sdkPresent = true;
   } catch {
     // npm:@aws-sdk/client-secrets-manager not available
@@ -35,12 +34,12 @@ if (endpoint !== undefined) {
 const skip = endpoint === undefined || !sdkPresent;
 
 describe('AwsKmsProvider against a real LocalStack (X28-1)', () => {
-  it('returns null for an absent secret rather than throwing', { ignore: skip }, async () => {
+  it('returns null for an absent secret rather than throwing', { skip: skip }, async () => {
     const provider = new AwsKmsProvider({
       endpoint,
-      region: Deno.env.get('AWS_REGION') ?? 'us-east-1',
-      accessKeyId: Deno.env.get('AWS_ACCESS_KEY_ID') ?? 'test',
-      secretAccessKey: Deno.env.get('AWS_SECRET_ACCESS_KEY') ?? 'test',
+      region: process.env['AWS_REGION'] ?? 'us-east-1',
+      accessKeyId: process.env['AWS_ACCESS_KEY_ID'] ?? 'test',
+      secretAccessKey: process.env['AWS_SECRET_ACCESS_KEY'] ?? 'test',
     });
     try {
       await provider.connect();

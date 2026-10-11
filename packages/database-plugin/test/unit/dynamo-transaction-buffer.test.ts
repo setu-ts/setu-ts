@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createDynamoTransactionBuffer } from '../../src/adapters/dynamo/dynamo-transaction-buffer.ts';
 
 describe('DynamoDB transaction write buffer', () => {
@@ -40,4 +39,12 @@ describe('DynamoDB transaction write buffer', () => {
       full.add({ Put: { TableName: 'Widget', Item: { id: { S: '101' } } } }, { id: { S: '101' } })
     ).toThrow('100 write operations');
   });
+});
+
+it('refuses malformed native writes before buffering them', () => {
+  const buffer = createDynamoTransactionBuffer();
+  expect(() => buffer.add({}, { id: { S: 'one' } })).toThrow(
+    'must contain a Put, Update, or Delete',
+  );
+  expect(buffer.getWrites()).toEqual([]);
 });

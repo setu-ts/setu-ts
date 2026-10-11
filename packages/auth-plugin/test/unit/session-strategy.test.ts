@@ -5,8 +5,7 @@
  * barrel-exported, so these tests import it from its module directly.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IAuthStrategy, IRequest, ISessionService, SessionView } from '@setu-ts/common';
 import { SessionStrategy } from '../../src/strategies/session-strategy.ts';
 

@@ -4,3 +4,6 @@
  * task out (via the enqueue-armed timer) rather than hang forever.
  */
 // Intentionally no defineWorkerTask() call.
+
+// Keep the worker alive on Node too, without ever registering a handler.
+setInterval(() => {}, 1_000);

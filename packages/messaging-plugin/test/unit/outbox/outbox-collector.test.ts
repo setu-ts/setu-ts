@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ICounter, IGauge, IMetricsService } from '@setu-ts/common';
 import { MetricsService } from '@setu-ts/metrics-plugin';
 

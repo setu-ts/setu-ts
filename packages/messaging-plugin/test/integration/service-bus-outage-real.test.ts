@@ -1,3 +1,4 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Real Service Bus outage gate (M95b §3.3) — the 2×2 the letter was opened
  * for. Against this emulator the management probe resolves `undefined` in
@@ -38,8 +39,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -47,11 +47,11 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { MessagingPlugin } from '../../src/index.ts';
 
-const connectionString = Deno.env.get('SERVICEBUS_CONNECTION_STRING');
+const connectionString = process.env['SERVICEBUS_CONNECTION_STRING'];
 const skipReal = connectionString === undefined;
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(
       `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
@@ -67,7 +67,7 @@ interface HealthBody {
 }
 
 describe('REAL Service Bus outage through /health and /ready (M95b §3.3, M101a §3.2)', {
-  ignore: skipReal,
+  skip: skipReal,
 }, () => {
   it('publish → 200; stop → publish rejects → 503 at +0/+3/+7 s; restart → publish → 200', async () => {
     // he-sb is the emulator container the documented run command names; its
@@ -148,7 +148,7 @@ describe('REAL Service Bus outage through /health and /ready (M95b §3.3, M101a 
       // Leave the container RUNNING: R11 records that a second consecutive
       // run against a stopped or dirty emulator fails for reasons unrelated
       // to the change.
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
+      await runProcess('docker', { args: ['start', containerId] });
       await app.stop().catch(() => {});
     }
   });

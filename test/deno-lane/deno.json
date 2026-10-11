@@ -1,0 +1,25 @@
+{
+  "imports": {
+    "vitest": "./vitest-shim.ts",
+    "@std/testing": "jsr:@std/testing@^1.0.19",
+    "@std/expect": "jsr:@std/expect@^1.0.20",
+    "@std/testing/bdd": "jsr:@std/testing@^1.0.19/bdd"
+  },
+  "scopes": {
+    "../../packages/cli/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/diagnostics-plugin/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/realtime-backplane-plugin/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/runtime/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/websocket-plugin/test/": {
+      "vitest": "./vitest-shim.ts"
+    }
+  }
+}

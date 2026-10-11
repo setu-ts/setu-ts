@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * §3.7 real-outage bar: drives a **real** MinIO (S3-compatible) backend
  * through a **real** stop and restart, asserting `up → (stop) down → (restart) up`.
@@ -14,14 +14,13 @@
  * MalformedXML / 404 NoSuchBucket), so the probe reports `down` for a live
  * bucket. This suite would fail at the baseline `up` assertion if F1 regresses.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { S3Provider } from '../../src/providers/s3-provider.ts';
 
 // ── Docker stop/start helpers ───────────────────────────────────────────────
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(
       `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
@@ -70,7 +69,7 @@ async function ensureBucket(
   accessKeyId: string,
   secretAccessKey: string,
 ): Promise<void> {
-  const mod = await import('npm:@aws-sdk/client-s3@^3');
+  const mod = await import('@aws-sdk/client-s3');
   const client = new mod.S3Client({
     endpoint: toIpv4(endpoint),
     region: 'us-east-1',
@@ -85,63 +84,62 @@ async function ensureBucket(
 }
 
 describe('REAL MinIO/S3 outage (§3.7)', () => {
-  it('up → stop → down → restart → up', async () => {
-    const endpoint = Deno.env.get('S3_ENDPOINT_URL');
-    if (endpoint === undefined) {
-      console.log('SKIP: S3_ENDPOINT_URL not set');
-      return;
-    }
+  it(
+    'up → stop → down → restart → up',
+    { skip: process.env['S3_ENDPOINT_URL'] === undefined },
+    async () => {
+      const endpoint = process.env['S3_ENDPOINT_URL'];
+      if (endpoint === undefined) throw new Error('Backend guard failed');
 
-    let sdkPresent = false;
-    try {
-      await import('npm:@aws-sdk/client-s3@^3');
-      sdkPresent = true;
-    } catch {
-      // npm:@aws-sdk/client-s3 not available
-    }
-    if (!sdkPresent) {
-      console.log('SKIP: npm:@aws-sdk/client-s3@^3 not available');
-      return;
-    }
+      await import('@aws-sdk/client-s3');
 
-    const port = new URL(endpoint).port === '' ? 9000 : Number(new URL(endpoint).port);
-    const containerId = await containerIdForPort(port);
+      const port = new URL(endpoint).port === '' ? 9000 : Number(new URL(endpoint).port);
+      const containerId = await containerIdForPort(port);
 
-    const bucket = Deno.env.get('S3_BUCKET') ?? 'm70c-verify';
-    const accessKeyId = Deno.env.get('S3_ACCESS_KEY_ID') ?? 'minioadmin';
-    const secretAccessKey = Deno.env.get('S3_SECRET_ACCESS_KEY') ?? 'minioadmin';
+      const bucket = process.env['S3_BUCKET'] ?? 'm70c-verify';
+      const accessKeyId = process.env['S3_ACCESS_KEY_ID'] ?? 'minioadmin';
+      const secretAccessKey = process.env['S3_SECRET_ACCESS_KEY'] ?? 'minioadmin';
 
-    await ensureBucket(endpoint, bucket, accessKeyId, secretAccessKey);
+      await ensureBucket(endpoint, bucket, accessKeyId, secretAccessKey);
 
-    const provider = new S3Provider({
-      bucket,
-      endpoint: toIpv4(endpoint),
-      region: 'us-east-1',
-      accessKeyId,
-      secretAccessKey,
-    });
+      const provider = new S3Provider({
+        bucket,
+        endpoint: toIpv4(endpoint),
+        region: 'us-east-1',
+        accessKeyId,
+        secretAccessKey,
+      });
 
-    try {
-      await provider.connect();
-      expect(provider.isReady()).toBe(true);
+      try {
+        await provider.connect();
+        expect(provider.isReady()).toBe(true);
 
-      // (up) baseline: F1 regression — forcePathStyle must be set for custom
-      // endpoints; without it the probe reports down for a live bucket.
-      await waitTrue(async () => (await provider.isHealthy()) === true, 'up baseline', 15_000);
-      expect(await provider.isHealthy()).toBe(true);
+        // (up) baseline: F1 regression — forcePathStyle must be set for custom
+        // endpoints; without it the probe reports down for a live bucket.
+        await waitTrue(async () => (await provider.isHealthy()) === true, 'up baseline', 15_000);
+        expect(await provider.isHealthy()).toBe(true);
 
-      // (stop) real MinIO stop → probe reports down
-      await docker(['stop', containerId]);
-      await waitTrue(async () => (await provider.isHealthy()) === false, 'down after stop', 30_000);
-      expect(await provider.isHealthy()).toBe(false);
+        // (stop) real MinIO stop → probe reports down
+        await docker(['stop', containerId]);
+        await waitTrue(
+          async () => (await provider.isHealthy()) === false,
+          'down after stop',
+          30_000,
+        );
+        expect(await provider.isHealthy()).toBe(false);
 
-      // (restart) real MinIO start → probe reports up
-      await docker(['start', containerId]);
-      await waitTrue(async () => (await provider.isHealthy()) === true, 'up after restart', 30_000);
-      expect(await provider.isHealthy()).toBe(true);
-    } finally {
-      await provider.disconnect();
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
-    }
-  });
+        // (restart) real MinIO start → probe reports up
+        await docker(['start', containerId]);
+        await waitTrue(
+          async () => (await provider.isHealthy()) === true,
+          'up after restart',
+          30_000,
+        );
+        expect(await provider.isHealthy()).toBe(true);
+      } finally {
+        await provider.disconnect();
+        await runProcess('docker', { args: ['start', containerId] });
+      }
+    },
+  );
 });

@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IFileSystem, RouteHandler } from '@setu-ts/common';
 import { createPublicFileHandler } from '../../../src/assets/static-assets.ts';
 import { ReactRouterPlugin } from '../../../src/plugin/react-router-plugin.ts';

@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   IIdempotencyService,
   ILogger,
@@ -177,6 +176,8 @@ describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
     try {
       const failure = await Promise.resolve(job()).catch((error: unknown) => error);
       expect((failure as { reason: string }).reason).toBe('store-failed');
+      // Host timers can fire just before the monotonic deadline due to millisecond rounding.
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
       for (let i = 0; i < 3; i++) await job();
       expect(calls).toBe(1);
       // Past its deadline the first purge is stuck: every skip says so at warn (R2-2).

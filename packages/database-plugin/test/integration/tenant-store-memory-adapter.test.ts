@@ -11,8 +11,7 @@
  * @module
  */
 
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { ITenantDataStore, ITenantIsolationStrategy } from '@setu-ts/common';
 
 import { DatabaseService, DatabaseTenantDataStore, MemoryAdapter } from '../../src/index.ts';

@@ -3,8 +3,7 @@
  * bucket, the reserved authenticated slot, burst/refill behavior, hostile
  * traffic isolation, and the UTF-8 header budget.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CONNECTOR_LIMITS, ConnectorLimits } from '../../src/transport/limits.ts';
 import { MutableClock, TEST_SESSION_ID } from '../fixtures/helpers.ts';

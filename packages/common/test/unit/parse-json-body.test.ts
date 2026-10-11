@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { httpStatusHintOf, parseJsonBody } from '../../src/index.ts';
 import { MalformedRequestBodyError } from '../../src/index.ts';
 
