@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Package tests on Node 24 (M111b).** Every member uses Vitest, source export resolution, TC39
+  decorator lowering, shared-resource isolation, and enforced per-file V8 coverage. Deno-only
+  runtime proofs retain a named lane; root tooling stays on Deno. The reproducible codemod, host
+  helpers, count parity report, and CI lane guards accompany the move.
+
 - **A Node build for every package (M111a).** Every workspace member builds with TypeScript `6.0.3`
   (`tsc -b`) to `dist/`, with a generated `package.json` (ESM only, `engines.node >=22`, `exports`
   per subpath, `workspace:^` internal dependencies) and `tsconfig.json`, under a pnpm workspace.
@@ -775,6 +780,14 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- Consolidated SSE writes and cache coalescing settlement cleanup, preserving closed-connection and
+  owner-isolation behavior across runtimes.
+
+- Node filesystem removal now removes an empty directory without recursive deletion, so CLI rollback
+  can restore the original workspace while preserving nonempty directories.
+- Messaging transport headers preserve own `__proto__` fields and framework-header precedence
+  without invoking the object prototype setter.
 
 - **MongoDB refuses an operator-shaped key (`@setu-ts/database-plugin`, M105).** Since M78 a key
   value that was an object — `findById({ $ne: 'x' })`, or such a value inside a composite key —

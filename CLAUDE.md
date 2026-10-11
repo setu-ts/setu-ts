@@ -1,12 +1,13 @@
 # Setu-TS — Session Instructions
 
-Plugin-first enterprise backend framework. **Deno-first toolchain** (Deno 2 workspaces), published
-to **JSR** under `@setu-ts`, consumable from Node/Bun via JSR npm compatibility.
+Plugin-first enterprise backend framework, published to **JSR** under `@setu-ts` and consumable from
+Node/Bun via JSR npm compatibility. Package tests run on Node 24 with pnpm and Vitest. Deno 2
+workspaces retain repository scripts, root tests, and the named native-adapter test lane until
+M111e.
 
-The backend toolchain is Deno-only. The **sole exception** is an application's _frontend build_ —
-the React Router SSR plugin (M44) is built with Vite on the Node/npm toolchain, outside the Deno
-workspace. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and
-never appears in any JSR-published package's dependency graph (see AI_GUIDELINES §12.2).
+The React Router SSR plugin (M44) uses Vite on the Node/npm toolchain for application frontend
+builds. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and never
+appears in any JSR-published package's dependency graph (see AI_GUIDELINES §12.2).
 
 ## Starting a new milestone — READ THESE FIRST (mandatory)
 
@@ -6329,10 +6330,15 @@ deno task check
 deno task test
 ```
 
-All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`). During the
-edit loop, `deno task test:coverage:pkg <members…>` measures only the packages you name and enforces
-the same per-file bar in seconds — but a targeted FAIL is not authoritative (another package's tests
-may cover those lines), and a targeted run is never the coverage evidence a milestone hands back.
+These Deno checks cover formatting, lint, types, and the root tooling suite. Package changes also
+require `pnpm test` and `pnpm test:coverage` on Node 24, plus `deno task test:deno-lane` for the
+retained Deno runtime proofs. `deno task test:coverage` measures root tooling. Every measured source
+file must reach 90% branch/function/line; Node, Deno-lane, and root-script gates enforce their bars
+with nonzero exits. Read the per-file tables as evidence.
+
+For the edit loop, `pnpm test:coverage <members…>` measures those members and the Node tooling
+target. Each member owns its source coverage, so a targeted failure is authoritative. A milestone
+hands back the complete Node, Deno-lane, and root coverage reports.
 
 **A milestone that changes what `packages/cli` GENERATES ALSO boots a scaffolded project — the gates
 above type-check generated output and stop there.** M63 repaired four defects that every one of the
@@ -6394,10 +6400,9 @@ because nothing defined what one was.
   `// deno-lint-ignore-file no-console` with a reason).
 - Unused variables fail lint — delete them; do not underscore-prefix.
 - Run `deno fmt` before `deno task fmt:check`; it also reformats markdown — never hand-wrap tables.
-- `scripts/coverage.ts` tolerates empty coverage only while packages are stubs. It does NOT enforce
-  the per-file 90% bar: `deno task test:coverage` has exited 0 with a `src` file at 80% branch. A
-  green coverage run is NOT proof — read the per-file table yourself and enforce the bar (see the
-  Self-review checklist and "Before reporting a task done").
+- Coverage is per file, across branch, function, and line. The Node runner uses Vitest V8
+  thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses
+  `scripts/script-coverage.ts`. Inspect all three tables before claiming completion.
 - Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
   behind `IRuntimeServices` only.
 - `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). NOTE: `deno lint`'s `no-eval`
@@ -6420,11 +6425,10 @@ because nothing defined what one was.
 
 ## Self-review checklist (bugs that slipped through before — check every time)
 
-- **Per-file coverage, not aggregate — and the gate won't enforce it for you**: the 90% bar applies
-  to every file under `src/` on branch, function, AND line. Read the ANSI-stripped per-file table
-  from `deno task test:coverage` yourself; its exit code is NOT the check (it exits 0 with a file
-  under the bar). Any file below 90% on any of the three means the task is NOT done — write more
-  tests until it clears. Test fixtures belong under `test/` and are excluded from measurement.
+- **Per-file coverage, not aggregate**: every source file must reach 90% on branch, function, AND
+  line. Read the ANSI-stripped Node, Deno-lane, and root-script tables. Any file below 90% means the
+  task is unfinished. Package fixtures under `test/` are excluded from measurement; the Node host
+  helper and runner tooling have their own measured target.
 - **A coverage drop means write more tests, not ship it.** After every change, compare each file you
   touched to its previous branch/function/line numbers. A regression (even one still "passing" the
   silent gate) means you removed, bypassed, or added an untested path — restore it to ≥90% before
@@ -6579,12 +6583,11 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `plans/archive/` on completion in the milestone's own PR — archived, never deleted; removal is the
   maintainer's call. All other prompts/notes are scratchpad only and never committed (see the
   plan-cleanup rule in "Before reporting a task done").
-- Tests: `@std/testing/bdd` (`describe`/`it`) + `@std/expect` (`expect`), in
-  `test/{unit,integration,e2e}/` per package. **Write every test with `describe`/`it` from
-  `@std/testing/bdd` from the very first line — NEVER start with `Deno.test(...)` and convert it
-  later.** `Deno.test` is banned in this repo; a test file's first test-framework import must be
-  `import { describe, it } from '@std/testing/bdd';` and assertions use `expect` from `@std/expect`.
-  Do not scaffold in one style and rewrite to another — that wastes the whole edit.
+- Package tests use `describe`, `it`, hooks, and `expect` from `vitest` in
+  `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` uses `@std/testing/bdd` and
+  `@std/expect` until M111e. Deno-only package proofs use the same Vitest-shaped files through the
+  Deno-lane import-map shim. Write in the runner style appropriate to that location from the first
+  line; `Deno.test` remains banned.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).

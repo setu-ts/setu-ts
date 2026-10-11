@@ -1,6 +1,6 @@
 # Milestone 111b — The Test Suite on Node (every member)
 
-> **Status:** Planning. Branch: `feat/m111b-node-tests`. `develop` and `main` are protected — all
+> **Status:** In progress. Branch: `feat/m111b-node-tests`. `develop` and `main` are protected — all
 > work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
@@ -181,23 +181,24 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
   which retires CLAUDE.md's "a targeted FAIL is not authoritative" caveat (C4). `reportOnFailure` is
   mandatory, since without it a member with one failing test writes no summary and escapes the gate.
 - **Test home:** `test/node/vitest-config.test.ts` asserts the threshold object and
-  `reportOnFailure`; `test/unit/test-node.test.ts` asserts the tooling target is run, and pins the
-  task's grants exactly (a widened grant fails it); the before/after table comparison (§3.7) proves
-  the swap dropped no file unnoticed.
+  `reportOnFailure`; `scripts/codemods/node-runner-core.test.ts` asserts the tooling target is run,
+  and pins the task's grants exactly (a widened grant fails it); the before/after table comparison
+  (§3.7) proves the swap dropped no file unnoticed.
 
 ### 3.7 The swap is proven by counts and tables, not by a green run
 
 - **Decision:** `scripts/codemods/swap-report.ts` compares, per file:
-  - LEAF test counts: Deno's pretty-reporter `./<file> => … ... ok|ignored` lines (leaves are lines
-    with no deeper child) against Vitest's JSON `assertionResults`. A file whose suite is wholly
-    ignored on Deno prints no `=>` line, so its count is taken from the source's `it(` calls
-    instead. A file with FEWER Vitest tests fails the report. A file with MORE is listed too, and
-    each one must carry a classified cause in the report: `deno-uncounted` (the Deno log printed no
-    leaf for it — wholly-ignored suite, or a leaf the parser could not see), or `registration`.
-    `registration` fails the report: it means one test name collected twice, a `describe` callback
-    run twice or a loop registering more cases than on Deno, and is a defect in the conversion. The
-    probe's +944 (18,071 vs 17,127) must be fully attributed before merge; an unclassified gain
-    fails the report;
+  - LEAF test counts: Deno's sequential module headers and indented step names, and its parallel
+    pretty-reporter `./<file> => … ... ok|ignored` lines (leaves are lines with no deeper child)
+    against Vitest's JSON `assertionResults`. A file whose suite is wholly ignored on Deno prints no
+    `=>` line, so its count is taken from the source's `it(` calls instead. A file with FEWER Vitest
+    tests fails the report. A file with MORE is listed too, and each one must carry a classified
+    cause in the report: `deno-uncounted` (the Deno log printed no leaf for it — wholly-ignored
+    suite, or a leaf the parser could not see), or `added-proof` (a new, independently asserted
+    behavioral case added during the conversion), or `registration`. `registration` fails the
+    report: it means one test name collected twice, a `describe` callback run twice or a loop
+    registering more cases than on Deno, and is a defect in the conversion. The probe's +944 (18,071
+    vs 17,127) must be fully attributed before merge; an unclassified gain fails the report;
   - coverage, Deno's table against Vitest's, listing every file that moved down — and, for each, its
     leaf counts on both sides. A file that moved down with EQUAL counts is counting drift (§1) and
     gets tests; one with fewer Vitest tests is a lost test and is restored.
@@ -349,16 +350,16 @@ No package `src/` file changes. The per-file bar is newly enforced by the runner
 `src` file (Node lane) and over `DENO_ONLY_SOURCES` (Deno lane); files that fall below it after the
 swap get tests here (§3.6). The new tooling files are tested as follows.
 
-| Test file (runner)                                 | src covered                         | Key assertions                                                                                                                             |
-| -------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `scripts/codemods/std-to-vitest.test.ts` (tooling) | `scripts/codemods/std-to-vitest.ts` | each rewrite; scope-aware `it`; zod aliases; helpers in scope; `--check` exits 1 when it should                                            |
-| `scripts/codemods/swap-report.test.ts` (tooling)   | `scripts/codemods/swap-report.ts`   | nested and ignored suites parsed; lost test fails; duplicate registration fails; unclassified gain fails; drop listed                      |
-| `test/node/vitest-config.test.ts` (tooling)        | `vitest.config.ts`                  | decorator plugin `pre`; resolution to `src`; projects disjoint and complete; `NODE_EXCLUDED_TESTS` absent; thresholds                      |
-| `test/node/node-helpers.test.ts` (tooling)         | `test/node-helpers.ts`              | a free port binds; a temp dir is removed; `run` returns code and output; `denoBinary` found / named error on empty PATH                    |
-| `test/test-lanes.test.ts` (Deno)                   | `scripts/test-lanes.ts`             | lists exist; sources disjoint from the Node lane; excluded ⊆ lane tests; no lane file imports `vi`; `test/node/` excluded from `deno test` |
-| `test/deno-lane/vitest-shim.test.ts` (Deno lane)   | `test/deno-lane/vitest-shim.ts`     | every call form translates, `skip` included                                                                                                |
-| `test/unit/test-node.test.ts` (Deno)               | `scripts/test-node.ts`              | a failing member fails the run; the tooling target runs; the table lists every file; the task's grants pinned exactly                      |
-| `test/apps-gate.test.ts` (Deno, existing)          | the three workflows                 | the four test steps present as `run:` lines inside each test job, in order; `skip:` guard pins                                             |
+| Test file (runner)                                    | src covered                            | Key assertions                                                                                                                                                        |
+| ----------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/codemods/std-to-vitest.test.ts` (tooling)    | `scripts/codemods/std-to-vitest.ts`    | each rewrite; scope-aware `it`; zod aliases; helpers in scope; `--check` exits 1 when it should                                                                       |
+| `scripts/codemods/swap-report.test.ts` (tooling)      | `scripts/codemods/swap-report.ts`      | nested, sequential, and ignored suites parsed; existing repeated names preserved; lost test fails; duplicate registration fails; unclassified gain fails; drop listed |
+| `test/node/vitest-config.test.ts` (tooling)           | `vitest.config.ts`                     | decorator plugin `pre`; resolution to `src`; projects disjoint and complete; `NODE_EXCLUDED_TESTS` absent; thresholds                                                 |
+| `test/node/node-helpers.test.ts` (tooling)            | `test/node-helpers.ts`                 | a free port binds; a temp dir is removed; `run` returns code and output; `denoBinary` found / named error on empty PATH                                               |
+| `test/test-lanes.test.ts` (Deno)                      | `scripts/test-lanes.ts`                | lists exist; sources disjoint from the Node lane; excluded ⊆ lane tests; no lane file imports `vi`; `test/node/` excluded from `deno test`                            |
+| `test/deno-lane/vitest-shim.test.ts` (Deno lane)      | `test/deno-lane/vitest-shim.ts`        | every call form translates, `skip` included                                                                                                                           |
+| `scripts/codemods/node-runner-core.test.ts` (tooling) | `scripts/codemods/node-runner-core.ts` | a failing member fails the run; the tooling target runs; the table lists every file; the task's grants pinned exactly                                                 |
+| `test/apps-gate.test.ts` (Deno, existing)             | the three workflows                    | the four test steps present as `run:` lines inside each test job, in order; `skip:` guard pins                                                                        |
 
 ## 7. Verification gates
 
@@ -410,3 +411,103 @@ which must show zero failures and every gain classified, and the Bun smoke run r
 - A Node transport for the local diagnostics listener → not scheduled (a feature, not a toolchain
   move).
 - Publishing the converted packages → 111c.
+
+## 10. Approved implementation adjustments and design security review
+
+The maintainer approved four source adjustments during implementation on 2026-10-11 after the
+converted tests demonstrated defects. The original tests-only scope now includes these adjustments:
+
+- Node filesystem removal must remove an empty directory without `recursive`, refuse a nonempty
+  directory, and remove a symbolic link without removing its target. The existing CLI rollback and
+  real SIGINT proofs exercise the application consumer; a real-filesystem regression also exercises
+  the runtime adapter directly.
+- Framework-owned transport headers must retain own keys such as `__proto__` on Node, as they
+  already do on Deno. Header copying must create own data properties and preserve the ordinary
+  object prototype, framework-header precedence, and reserved transport-header behavior.
+
+- Cache coalescing cleanup deletes its private in-flight entry unconditionally. The entry cannot be
+  replaced before settlement cleanup runs; settlement, sequential reuse, and owner isolation remain
+  regression obligations.
+- SSE sends and comments share one guarded enqueue operation. Encoding stays behind that guard, so
+  closed connections still ignore unserializable messages. A retained timer callback after close
+  must not write or repeat cleanup; stream cancellation and backpressure behavior stay covered.
+
+The manifest generator also follows the converted imports, including npm package aliases, and
+preserves the root test commands and esbuild install decision. This is tooling within the approved
+scope. Newly added behavioral proofs are classified separately from recovered Deno collection gaps
+in the swap report; registration gains remain failures.
+
+### 10.1 Completed design review of the approved fixes
+
+**Reviewed flow:** CLI rollback passes paths and a recursive flag through `IFileSystem.rm` to Node
+filesystem operations. An empty directory is removed using the nonrecursive directory operation when
+Node's file removal refuses it. Broker publishing merges validated caller headers and framework
+headers into a fresh transport record, then serializes its own enumerable entries onto the broker
+wire. The review covers these existing flows and their cross-runtime fixes, plus private cache
+settlement and SSE stream cleanup.
+
+**Assets:** files outside the requested removal target; contents of a nonempty directory when a
+nonrecursive operation was requested; transport-header identity, values, precedence and prototype;
+broker payload identity and the existing reserved-header controls.
+
+**Attackers:** a local caller selecting a removal path, including a symbolic link or a nonempty
+folder; a transport-header producer supplying hostile property names or a record with inherited
+properties. No new network listener, credential, numeric budget, or public plugin option is added.
+The original CLI path validation and publish-option validation remain obligations of their callers.
+
+| Threat                                                                                          | Required resolution                                                                               |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Recursive removal used to emulate empty-directory removal deletes contents                      | Use a nonrecursive directory operation; prove refusal with contents intact.                       |
+| Following a symbolic link removes its target                                                    | Remove the link itself; prove target contents remain.                                             |
+| A malformed-key header changes the result prototype or silently disappears                      | Copy only own enumerable entries as own data properties; preserve the ordinary prototype.         |
+| The framework-header merge changes caller/header precedence or permits reserved-header spoofing | Keep existing precedence and validated reserved transport metadata; exercise the broker consumer. |
+
+**Implementation-audit obligations:** exercise empty/nonempty/missing/file/symlink removal with
+positive controls and a negative control that restores the original adapter; send ordinary and
+hostile own header keys through a real broker facade, inspect the captured wire fields and the
+consumer's metadata, and confirm prototype/precedence/reserved-header controls. Restore the original
+assignment as a negative control and observe the hostile-key proof fail on Node. Audit the committed
+tree independently using `.roo/skills/security-audit/SKILL.md`. Report unavailable live backends as
+unexercised. Cache cleanup must remove settled work without crossing owner maps, and SSE must ignore
+late heartbeats and writes after close without repeating cleanup or serializing messages.
+
+### 10.2 Test-tooling adjustments
+
+- Vitest automatically excludes its config entrypoint from instrumentation. The entrypoint
+  re-exports the implementation in `scripts/codemods/node-test-config.ts`; the tooling target
+  measures that implementation and its real decorator transform at the same per-file bar.
+- `packages/cli/src/main.ts` contains the Deno process adapter. It is measured in the Deno lane
+  through the same converted process-boundary tests, rather than leaving that adapter uncovered in
+  Node or installing a Deno global shim.
+- The runtime's real Web Worker test remains in the Deno lane. A Node worker with no handler
+  explicitly stays alive so the worker-pool startup deadline is still the tested condition.
+- WebSocket integration files that prove `app.fetch` upgrades retain their real Deno-host proof in
+  the Deno lane. Node's adapter requires an actual incoming HTTP upgrade event. Existing Node socket
+  e2e proofs remain in the Node lane. The diagnostics unit suites' exact-bound startup proofs also
+  run on Deno; their protocol and refusal cases still run on Node.
+
+- The Deno lane import map scopes its Vitest shim to every retained member’s test directory.
+  Member-level generated npm mappings otherwise override a global import-map entry; a root
+  lane-boundary proof pins these scopes, and the native lane is rerun after manifest generation.
+
+- `deno task test:coverage:pkg` delegates to the same Node coverage runner. Member basenames and
+  workspace paths are accepted; no selection runs all members. The older Deno-only targeted
+  implementation remains as root-tested tooling until M111e, rather than running converted Vitest
+  registrations outside their runner.
+
+- The exact guard-invocation socket proof uses the installed `ws` client for a refused handshake. A
+  standalone Node 24 HTTP upgrade probe confirms that the native client retries a 401, while the
+  refusal proof requires one explicit attempt. Successful upgrades still use the native client.
+
+- Running the Node lane against real backends (every earlier run had left the guarded suites
+  skipped) found two gaps. `realtime-observations-redis.test.ts` binds the Deno-only diagnostics
+  listener, so it joins `DENO_LANE_TESTS` and `NODE_EXCLUDED_TESTS`, with its Deno-lane scope; it
+  runs there whenever `REDIS_URL` is set, as in CI. The RabbitMQ dead-letter proof asserted an own
+  `__proto__` header on a message read back through amqplib, whose decoder assigns
+  `fields[key] = value`: Deno ships without the `__proto__` accessor, so the key arrives, while
+  Node's setter discards a string. The broker copies headers with `Object.fromEntries` and is not at
+  fault; the assertion now probes that assignment and expects the header exactly when the runtime
+  keeps it.
+- The swap report's leaf parser matched test names with `.`, which skips U+2028/U+2029, so a name
+  carrying a Unicode line separator was dropped from the Deno count. Its patterns now use the `s`
+  flag, with a regression in `swap-report.test.ts`.

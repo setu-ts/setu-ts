@@ -52,14 +52,27 @@ where the full validation suite and an optional CodeRabbit review can run. Fork 
 the validated repository-branch PR is the one that can merge. Please do not ask maintainers to run
 those services before the change has been accepted for review.
 
-For work performed in a repository branch, the relevant checks are:
+For work performed in a repository branch, install Node 24, pnpm 12.11.2, and Deno on `PATH`, then
+run `pnpm install --frozen-lockfile`. Deno remains necessary for formatting, lint, type checks,
+repository scripts, Deno CLI subprocess proofs, and the retained runtime lane. The relevant checks
+are:
 
 ```bash
 deno task fmt:check
 deno task lint
 deno task check
 deno task test
+pnpm test
+pnpm test:coverage
+deno task test:deno-lane
+deno task test:coverage
 ```
+
+Package tests import from `vitest`; root tooling tests retain `@std/testing/bdd` and `@std/expect`
+until M111e. Node coverage is measured per member with a 90% per-file branch/function/line bar; a
+failed targeted run is authoritative. Select members with `pnpm test:coverage cli runtime` or
+`deno task test:coverage:pkg cli runtime`; use the member basename or its workspace path. Running
+without selections measures every member.
 
 Changes to a published package also require its documented coverage and publish checks. See
 [AI_GUIDELINES.md](AI_GUIDELINES.md) for the complete engineering requirements that apply once a
