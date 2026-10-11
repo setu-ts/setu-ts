@@ -1319,8 +1319,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   sentence amended to say which part is now gated. Verification also found three holes in the gate
   itself, all closed in M37b on this same branch rather than deferred: the example's own test was
   run by nothing, `test/apps-gate.test.ts` never ran in CI, and `check:apps` left an untracked
-  `apps/cloudflare/.wrangler/` that made a following `release:publish --dry-run` abort) — complete
-  (PR #122)
+  `apps/cloudflare/.wrangler/` that made a following `publish:check` abort) — complete (PR #122)
 - **Milestone 37b** (`apps/*` — DI/decorators and memory-database examples, plus a microservices
   correction). `apps/di-decorators` proves a decorated controller's parameter-level `@Inject` and
   makes manual `container.createScope()` explicit: singleton instances span scopes while scoped
@@ -1343,8 +1342,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   runs there (that step was later removed — `test:coverage` now covers the root `test` directory
   itself, so the file still runs on a runner without the suite executing twice), and
   `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the tree ahead of
-  `release:publish --dry-run`. `apps/compiled-binary` moved off its hardcoded port 4317 to
-  `unusedPort()`) — complete (PR #122)
+  `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to `unusedPort()`) —
+  complete (PR #122)
 - **Milestone 53** (`.github/workflows/ci.yml` + `scripts/check-apps.ts` + guarded Redis tests —
   real-backend CI: making the proofs that matter actually run on every pull request. `apps/realtime`
   and `apps/microservices` both exited **77** unless `REDIS_URL` was set and no CI job set it, so
@@ -1571,10 +1570,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   package asserted its barrel exports**: dropping `rfc9457Formatter` from the exceptions
   `src/index.ts` left 18 other tests green — including the integration test and all three starters,
   which are that barrel's only consumers — plus `deno check`, the 100% per-file coverage bar (a
-  re-export file is fully covered merely by being loaded), and `release:publish --dry-run`, because
-  every test imported the concrete module rather than the barrel. The M52c defect class. Both
-  packages now carry a `barrel-exports.test.ts`, and the exceptions one also pins that the internal
-  Problem Details core does NOT leak into the published surface) — complete (PR #135)
+  re-export file is fully covered merely by being loaded), and `publish:check`, because every test
+  imported the concrete module rather than the barrel. The M52c defect class. Both packages now
+  carry a `barrel-exports.test.ts`, and the exceptions one also pins that the internal Problem
+  Details core does NOT leak into the published surface) — complete (PR #135)
 - **Milestone 57** (`packages/common` + `packages/auth-plugin` + `packages/openapi-plugin` — derived
   OpenAPI security. PR #136 made an operation's requirement DECLARABLE, which left the document as a
   second source of truth: a route could carry `requireAuth()` and declare `security: []`, or carry
@@ -6380,6 +6379,19 @@ see a publish-blocking defect.**
 deno task release:publish --dry-run  # pack, packed-manifest rules, npm lookup and publish dry run
 deno task release:verify <version>  # versions, source workspace ranges, metadata, release contracts
 ```
+
+M51 shipped three separate defects that every one of the four gates and the per-file coverage bar
+passed over, each of which would have stopped the package being published. Each still has a gate:
+
+- **A slow type.** `createDepthLimitRule` was exported from the barrel with an inferred return type,
+  which blocks `.d.ts` generation. `isolatedDeclarations` in the `tsc -b` build now refuses it;
+  every exported function needs a written-out return type.
+- **A package in neither release list.** `packages/graphql-plugin` was a workspace member absent
+  from both `PUBLISHED_PACKAGES` and `UNPUBLISHED_PACKAGES`, so it would simply never have
+  published. Only `release:verify` looks for this.
+- **A README suppressed on jsr.io.** A description-first module JSDoc replaced the README on the JSR
+  page. npm always renders `README.md`, so M111c retired that check (`release:verify` check 5) in
+  favour of "the README exists and is non-empty"; it still applies to versions on JSR.
 
 Run both on a committed tree. M111c replaces the JSR publish dry run: `tsc -b` with
 `isolatedDeclarations` covers its slow-type rule; non-empty README validation replaces JSR's
