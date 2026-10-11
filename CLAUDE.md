@@ -6142,7 +6142,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `npm login` sessions (Low). All four are fixed, each with a test that fails without it: publish
   and release run only on a pushed `v*` tag, every action is pinned to a commit SHA, decompression
   is capped at 64 MiB, and the runbook restricts environment `npm` to `v*` tags and logs out after
-  every login. NOT re-audited, at the maintainer's direction — complete (PR pending)
+  every login. NOT re-audited, at the maintainer's direction — complete (PR #448)
 - **Next milestone** — M111d, the CLI goes Node-first; the `v0.9.0` cut (placeholders, trust, OIDC
   publish) follows it, then M104, the `v0.9.0` client-brief run; see ROADMAP.md.
 
