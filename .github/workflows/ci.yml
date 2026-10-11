@@ -521,7 +521,7 @@ jobs:
           bun-version: 1.4.0
 
       - name: Generated manifests agree with the sources
-        run: deno run --allow-read scripts/node-manifests.ts --check
+        run: deno run --allow-read --allow-env=TSC_WATCHFILE,TSC_NONPOLLING_WATCHER,TSC_WATCHDIRECTORY,NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,TSC_WATCH_POLLINGINTERVAL_LOW,TSC_WATCH_POLLINGINTERVAL_MEDIUM,TSC_WATCH_POLLINGINTERVAL_HIGH,TSC_WATCH_POLLINGCHUNKSIZE_LOW,TSC_WATCH_POLLINGCHUNKSIZE_MEDIUM,TSC_WATCH_POLLINGCHUNKSIZE_HIGH,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_LOW,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_MEDIUM,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_HIGH scripts/node-manifests.ts --check
 
       - name: Pack and boot on Node 24, Node 22 and Bun
         run: deno task check:node-build --require-all
