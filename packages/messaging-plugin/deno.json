@@ -38,11 +38,19 @@
     }
   },
   "imports": {
+    "@aws-sdk/client-dynamodb": "npm:@aws-sdk/client-dynamodb@^3",
+    "@azure/cosmos": "npm:@azure/cosmos@^4",
     "@azure/service-bus": "npm:@azure/service-bus@^7",
     "@google-cloud/pubsub": "npm:@google-cloud/pubsub@^6",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
     "amqplib": "npm:amqplib@0.10.x",
     "ioredis": "npm:ioredis@5.x",
     "kafkajs": "npm:kafkajs@2.x",
-    "nats": "npm:nats@2.x"
+    "mongodb": "npm:mongodb@^6.21.0",
+    "nats": "npm:nats@2.x",
+    "nats/lib/jetstream/jsutil.js": "npm:nats@2.x/lib/jetstream/jsutil.js",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

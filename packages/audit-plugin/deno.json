@@ -11,5 +11,8 @@
       "env": true,
       "sys": ["hostname"]
     }
+  },
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
   }
 }

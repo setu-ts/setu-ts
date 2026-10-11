@@ -21,6 +21,7 @@
     "@opentelemetry/instrumentation-kafkajs": "npm:@opentelemetry/instrumentation-kafkajs@^0.29.0",
     "@opentelemetry/instrumentation-undici": "npm:@opentelemetry/instrumentation-undici@^0.30.0",
     "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
-    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0"
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

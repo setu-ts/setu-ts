@@ -295,8 +295,8 @@ describe('real-backend CI wiring', () => {
       ]
     ) {
       const suite = await Deno.readTextFile(file);
-      expect(suite).toContain("Deno.env.get('KEYCLOAK_URL')");
-      expect(suite).toContain('ignore: BASE === undefined');
+      expect(suite).toContain("process.env['KEYCLOAK_URL']");
+      expect(suite).toContain('skip: BASE === undefined');
     }
     // The realm the sign-in suite logs into: a standard-flow client and a user.
     const realm = await readJson<{
@@ -552,7 +552,7 @@ describe('real-backend CI wiring', () => {
   it('pins the RabbitMQ durability restart suites, their guard, and their grants', async () => {
     // Each suite restarts the CI RabbitMQ service to prove persistent
     // messages/jobs survive it, with a transient control losing its own in the
-    // same restart. They guard with `ignore:` on RABBITMQ_URL, so a deleted
+    // same restart. They guard with `skip:` on RABBITMQ_URL, so a deleted
     // file, a dropped guard, a lost restart, or a lost `docker`/AMQP grant
     // would turn the only proof of durability into a silent skip.
     const suites = [
@@ -564,8 +564,8 @@ describe('real-backend CI wiring', () => {
         `packages/${pkg}/test/integration/durability-real.test.ts`,
       );
       expect(source).toContain(title);
-      expect(source).toContain("Deno.env.get('RABBITMQ_URL')");
-      expect(source).toContain('ignore: rabbitUrl === undefined');
+      expect(source).toContain("process.env['RABBITMQ_URL']");
+      expect(source).toContain('skip: rabbitUrl === undefined');
       expect(source).toContain("docker(['restart', containerId])");
       // The control is what makes the restart discriminate.
       expect(source).toContain('.toEqual([5, 0])');
@@ -587,8 +587,8 @@ describe('real-backend CI wiring', () => {
       'packages/messaging-plugin/test/integration/consumer-retry-real.test.ts',
     );
     expect(source).toContain('REAL RabbitMQ consumer retry');
-    expect(source).toContain("Deno.env.get('RABBITMQ_URL')");
-    expect(source).toContain('ignore: rabbitUrl === undefined');
+    expect(source).toContain("process.env['RABBITMQ_URL']");
+    expect(source).toContain('skip: rabbitUrl === undefined');
     for (
       const scenario of [
         'second tier',
@@ -618,8 +618,8 @@ describe('real-backend CI wiring', () => {
       'packages/messaging-plugin/test/integration/redis-redelivery-real.test.ts',
     );
     expect(source).toContain('REAL Redis Streams redelivery');
-    expect(source).toContain("Deno.env.get('REDIS_URL')");
-    expect(source).toContain('ignore: redisUrl === undefined');
+    expect(source).toContain("process.env['REDIS_URL']");
+    expect(source).toContain('skip: redisUrl === undefined');
     for (
       const scenario of [
         'm1 is redelivered after restart',
@@ -650,7 +650,7 @@ describe('real-backend CI wiring', () => {
 
   it('pins the M101a paused-Redis bound suites, their guard, and their grants', async () => {
     // Each suite `docker pause`s the CI Redis service to prove a command is
-    // bounded. They guard with `ignore:` on REDIS_URL, so a deleted file, a
+    // bounded. They guard with `skip:` on REDIS_URL, so a deleted file, a
     // dropped guard, or a lost `docker`/Redis grant would turn the proof into a
     // silent skip or a permission failure while the rest of CI stays green.
     const suites = [
@@ -663,8 +663,8 @@ describe('real-backend CI wiring', () => {
         `packages/${pkg}/test/integration/outage-real.test.ts`,
       );
       expect(source).toContain(title);
-      expect(source).toContain("Deno.env.get('REDIS_URL')");
-      expect(source).toContain('ignore: redisUrl === undefined');
+      expect(source).toContain("process.env['REDIS_URL']");
+      expect(source).toContain('skip: redisUrl === undefined');
       expect(source).toContain("'pause'");
       const config = await readJson<{
         readonly test?: {
@@ -684,7 +684,7 @@ describe('real-backend CI wiring', () => {
     // database-plugin live-Postgres cells guard on (they need a generated
     // Prisma client). Asserting that here — rather than leaving it implicit —
     // keeps a later reader from mistaking the skipped cells for an oversight,
-    // and pins the `ignore:` guards so an unset variable is reported IGNORED,
+    // and pins the `skip:` guards so an unset variable is reported IGNORED,
     // never passed by an early return.
     //
     // M107 C8: CI now runs PostgreSQL for the OUTBOX suites, on the distinct
@@ -700,20 +700,20 @@ describe('real-backend CI wiring', () => {
       'packages/secrets-plugin/test/integration/vault-outage-real.test.ts',
     );
     expect(vault).toContain('local-only');
-    expect(vault).toContain("Deno.env.get('VAULT_ADDR')");
-    expect(vault).toContain('ignore: skip');
+    expect(vault).toContain("process.env['VAULT_ADDR']");
+    expect(vault).toContain('skip: skip');
     // The header carries the command that runs it, since no doc does.
     expect(vault).toContain('docker run');
     const postgres = await Deno.readTextFile(
       'packages/database-plugin/test/integration/real-drizzle-adapter.test.ts',
     );
-    expect(postgres).toContain("Deno.env.get('POSTGRES_URL')");
-    expect(postgres).toContain('ignore: skipLivePg');
+    expect(postgres).toContain("process.env['POSTGRES_URL']");
+    expect(postgres).toContain('skip: skipLivePg');
   });
 
   it('starts PostgreSQL and a MongoDB replica set for the outbox suites in all three workflows (M107 §6)', async () => {
     // The outbox real-backend suites guard on OUTBOX_POSTGRES_URL and
-    // MONGODB_RS_URI via `ignore:`. A dropped service or variable would turn
+    // MONGODB_RS_URI via `skip:`. A dropped service or variable would turn
     // the proof into a permanent skip while CI stays green, so the service,
     // its health check, the port mappings, the step and both variables are
     // pinned in every workflow that runs the suite.
@@ -764,7 +764,7 @@ describe('real-backend CI wiring', () => {
 
   it('starts the NATS and Kafka backends and declares their endpoints and grants (M90d §3.5)', async () => {
     // The M90d real-backend suites (nats-real / kafka-real) guard on NATS_URL
-    // / KAFKA_BROKERS via `ignore:` — a skipped suite is visible, but a DROPPED
+    // / KAFKA_BROKERS via `skip:` — a skipped suite is visible, but a DROPPED
     // service still turns the proof into a permanent skip while CI stays
     // green. These pins keep both backends, their port mappings, their env
     // vars and their manifest grants from drifting.
@@ -911,4 +911,33 @@ describe('malformedAppDirMessage', () => {
     const msg = malformedAppDirMessage('baz', new RangeError('out of range'));
     expect(msg).toBeNull();
   });
+});
+
+describe('M111b workflow lanes', () => {
+  for (const workflow of ['ci', 'release', 'drift']) {
+    it(`${workflow} gates all four test lanes in the test job`, async () => {
+      const source = await Deno.readTextFile(`.github/workflows/${workflow}.yml`);
+      const job = workflow === 'ci'
+        ? 'deno'
+        : workflow === 'release'
+        ? 'release'
+        : 'fresh-resolution';
+      const testJob = source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
+      expect(testJob).toBeDefined();
+      const commands = [
+        'node scripts/codemods/std-to-vitest.ts --check',
+        'pnpm test:coverage',
+        'deno task test:deno-lane',
+        'deno task test:coverage',
+      ];
+      let previous = -1;
+      for (const command of commands) {
+        const index = testJob!.indexOf(command);
+        expect(index).toBeGreaterThan(previous);
+        previous = index;
+      }
+      expect(source).toContain('pnpm/action-setup@v4');
+      expect(source).toContain('pnpm install --frozen-lockfile');
+    });
+  }
 });

@@ -49,7 +49,7 @@
  * @module
  */
 
-import { partitionTests, ROOTS } from './test-partition-rules.ts';
+import { discoverTestFiles, partitionTests, ROOTS } from './test-partition-rules.ts';
 
 /** Permissions the suite itself runs under, matching the previous single task. */
 const TEST_FLAGS = [
@@ -92,7 +92,9 @@ if (import.meta.main) {
   // A bare positional is refused, though: this script owns the file list, so a
   // path here would be a mistake, and silently running the whole suite is what
   // happened when an unhandled `--help` was ignored during development.
-  const passthrough = Deno.args.filter((argument) => argument !== '--coverage');
+  const passthrough = Deno.args.filter((argument) =>
+    argument !== '--coverage' && argument !== '--root-only'
+  );
   const positional = passthrough.filter((argument) => !argument.startsWith('-'));
   if (positional.length > 0) {
     console.error(
@@ -107,7 +109,14 @@ if (import.meta.main) {
   // run after this see the merged picture and the per-file bar still applies to
   // the whole suite rather than to either phase.
   const coverageFlags = coverage ? ['--coverage=coverage', '--coverage-raw-data-only'] : [];
-  const { isolated, hermetic, reasons } = await partitionTests();
+  const rootOnly = Deno.args.includes('--root-only');
+  const files = rootOnly
+    ? (await discoverTestFiles()).filter((path) =>
+      path.startsWith('test/') && !path.startsWith('test/node/') &&
+      !path.startsWith('test/deno-lane/')
+    )
+    : undefined;
+  const { isolated, hermetic, reasons } = await partitionTests(files);
 
   if (isolated.length === 0 || hermetic.length === 0) {
     // Either side being empty means the classification collapsed — most likely a
@@ -150,7 +159,13 @@ if (import.meta.main) {
   // set.
   const hermeticCode = await runPhase(
     `phase 2 — ${hermetic.length} hermetic suites, in parallel`,
-    ['--parallel', `--ignore=${isolated.join(',')}`, ...ROOTS, ...coverageFlags, ...passthrough],
+    [
+      '--parallel',
+      `--ignore=${[...isolated, ...(rootOnly ? ['test/node/', 'test/deno-lane/'] : [])].join(',')}`,
+      ...(rootOnly ? ['test'] : ROOTS),
+      ...coverageFlags,
+      ...passthrough,
+    ],
   );
 
   // Both phases run even when the first fails, so one red phase does not hide

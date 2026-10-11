@@ -300,6 +300,16 @@ describe('externalAliases — the member import map (§10, correction 10)', () =
   });
 });
 
+it('maps aliased test dependencies to their real npm package', () => {
+  const input = member('packages/openapi-plugin', '@setu-ts/openapi-plugin', {
+    'test/alias.test.ts': "import { z } from 'zod-v3'; import { v } from 'zod-v4/v4';",
+  });
+  expect([...externalAliases(input)]).toEqual([
+    ['zod-v3', 'npm:zod@^3.24.0'],
+    ['zod-v4/v4', 'npm:zod@^4.4.0/v4'],
+  ]);
+});
+
 describe('renderDenoJson — splices only the imports block', () => {
   const aliases = new Map([['hono', 'npm:hono@^4.12.30']]);
 
@@ -487,7 +497,7 @@ describe('small helpers', () => {
 
 describe('runNodeManifests — the I/O seam, against a throwaway workspace', () => {
   async function workspace(): Promise<string> {
-    const root = await Deno.makeTempDir({ prefix: 'setu-node-manifests-' });
+    const root = await Deno.makeTempDir({ dir: '.tmp', prefix: 'setu-node-manifests-' });
     await Deno.writeTextFile(`${root}/deno.json`, '{"workspace":["./packages/a"]}');
     await Deno.mkdir(`${root}/packages/a/src`, { recursive: true });
     await Deno.writeTextFile(

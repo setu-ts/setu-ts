@@ -208,6 +208,17 @@ jobs:
         with:
           deno-version: 2.9.6
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+
+      - name: Install Node test dependencies
+        run: pnpm install --frozen-lockfile
+
       # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on
       # KEYCLOAK_URL. A step rather than a `services:` container because the
       # realm is imported at startup — `start-dev --import-realm` is a COMMAND
@@ -450,7 +461,11 @@ jobs:
         id: test
         if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        run: deno task test --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
+        run: |
+          node scripts/codemods/std-to-vitest.ts --check
+          pnpm test:coverage
+          deno task test:deno-lane --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
+          deno task test:coverage --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
 
       - name: Attribute drift and summarize gates
         id: report

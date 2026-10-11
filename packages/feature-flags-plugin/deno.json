@@ -4,6 +4,7 @@
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "@launchdarkly/node-server-sdk": "npm:@launchdarkly/node-server-sdk@^9"
+    "@launchdarkly/node-server-sdk": "npm:@launchdarkly/node-server-sdk@^9",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

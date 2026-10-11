@@ -41,6 +41,8 @@
     "@setu-ts/view-plugin": "workspace:^",
     "@setu-ts/websocket-plugin": "workspace:^",
     "@types/node": "^24",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "5.0.3",
+    "zod-v3": "npm:zod@^3.24.0"
   }
 }

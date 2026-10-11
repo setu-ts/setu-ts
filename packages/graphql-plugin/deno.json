@@ -10,6 +10,7 @@
     }
   },
   "imports": {
-    "graphql": "npm:graphql@^16"
+    "graphql": "npm:graphql@^16",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

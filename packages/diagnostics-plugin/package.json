@@ -39,6 +39,7 @@
     "@setu-ts/telemetry-plugin": "workspace:^",
     "@setu-ts/websocket-plugin": "workspace:^",
     "@types/node": "^24",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
   }
 }

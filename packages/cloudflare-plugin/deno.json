@@ -7,5 +7,8 @@
     "permissions": {
       "env": true
     }
+  },
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
   }
 }

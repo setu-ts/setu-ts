@@ -114,7 +114,7 @@ describe('dependency drift gate configuration', () => {
     // Matched as an env KEY, not as a substring: the workflow's own comment
     // explains why the variable is inert and must not trip this pin.
     expect(text).not.toMatch(/^\s*DENO_FLAGS:/m);
-    for (const task of ['check', 'test']) {
+    for (const task of ['check', 'test:deno-lane', 'test:coverage']) {
       expect(text).toContain(
         `deno task ${task} --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen`,
       );

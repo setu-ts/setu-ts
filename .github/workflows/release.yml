@@ -195,6 +195,17 @@ jobs:
         with:
           deno-version: 2.9.6
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+
+      - name: Install Node test dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Frozen dependency install
         run: deno ci
 
@@ -369,7 +380,16 @@ jobs:
       - name: Type check
         run: deno task check
 
-      - name: Test with coverage
+      - name: Async assertion guard
+        run: node scripts/codemods/std-to-vitest.ts --check
+
+      - name: Node package tests with coverage
+        run: pnpm test:coverage
+
+      - name: Deno runtime proofs with coverage
+        run: deno task test:deno-lane
+
+      - name: Root and script tests with coverage
         run: deno task test:coverage
 
       # ── Consistency ──────────────────────────────────────────────────────

@@ -16,6 +16,7 @@
     "@aws-sdk/client-secrets-manager": "npm:@aws-sdk/client-secrets-manager@^3",
     "@azure/identity": "npm:@azure/identity@^4",
     "@azure/keyvault-secrets": "npm:@azure/keyvault-secrets@^4",
-    "@google-cloud/secret-manager": "npm:@google-cloud/secret-manager@^5"
+    "@google-cloud/secret-manager": "npm:@google-cloud/secret-manager@^5",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

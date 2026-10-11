@@ -98,6 +98,13 @@ const BUILD_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
 };
 
 /** The members whose `src` references the `Deno` global get its ambient types (plan §3.6). */
+const TEST_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
+  'vitest': '5.0.3',
+  '@vitest/coverage-v8': '5.0.3',
+  'esbuild': '0.28.2',
+  '@hono/node-server': '^2.0.0',
+};
+
 const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli'];
 
 /** The package whose manifest the §3.4 safeguard-2 guard applies to. */
@@ -493,12 +500,14 @@ export function renderPnpmWorkspace(dirs: readonly string[]): string {
     "# member's build is `tsc -b`, which orders its own references.\n" +
     'ignoreWorkspaceCycles: true\n' +
     '\n' +
-    '# Install scripts are denied, never approved: both are transitive deps of\n' +
+    '# Google SDK install scripts are denied: both are transitive deps of\n' +
     '# the Google Cloud SDKs the tests reach only through fakes and guarded\n' +
     '# suites. pnpm 12 refuses a frozen install while either is undecided.\n' +
     'allowBuilds:\n' +
     '  protobufjs: false\n' +
-    '  sse4_crc32: false\n'
+    '  sse4_crc32: false\n' +
+    '  # The TC39 decorator transformer requires its native build.\n' +
+    '  esbuild: true\n'
   );
 }
 
@@ -512,7 +521,14 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
         packageManager: 'pnpm@12.11.2',
         engines: { node: '>=22' },
         workspaces: dirs,
-        devDependencies: { ...BUILD_DEV_DEPENDENCIES },
+        type: 'module',
+        scripts: {
+          test:
+            'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts',
+          'test:coverage':
+            'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts --coverage',
+        },
+        devDependencies: { ...BUILD_DEV_DEPENDENCIES, ...TEST_DEV_DEPENDENCIES },
       },
       null,
       2,
@@ -610,7 +626,8 @@ export function externalAliases(member: MemberInput): ReadonlyMap<string, string
       const base = basePackageName(spec);
       const range = EXTERNAL_RANGES[base];
       if (range === undefined) continue;
-      aliases.set(spec, `npm:${base}@${range}${spec.slice(base.length)}`);
+      const target = range.startsWith('npm:') ? range : `npm:${base}@${range}`;
+      aliases.set(spec, `${target}${spec.slice(base.length)}`);
     }
   }
   return aliases;

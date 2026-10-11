@@ -24,6 +24,13 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
+  'vitest': '5.0.3',
+  'zod-v3': 'npm:zod@^3.24.0',
+  'zod-v4': 'npm:zod@^4.4.0',
+  'xml-crypto': '^6',
+  '@simplewebauthn/server': '14.0.3',
+  '@prisma/adapter-pg': '^7.10.0',
+  'pg': '^8.0.0',
   'hono': '^4.12.30',
   '@hono/node-server': '^2.0.0',
   '@opentelemetry/api': '^1.9.0',

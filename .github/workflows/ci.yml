@@ -237,6 +237,13 @@ jobs:
         with:
           node-version: 24
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+
+      - name: Install Node test dependencies
+        run: pnpm install --frozen-lockfile
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
@@ -435,11 +442,16 @@ jobs:
         env:
           ALLOW_SKIP: cloudflare
 
-      # One suite run, not two. `test:coverage` runs the same `packages test`
-      # paths as `deno task test` (the root `test/` directory included, so
-      # `test/apps-gate.test.ts` executes on a runner) and adds instrumentation
-      # on top, so a separate `Test` step only re-ran everything.
-      - name: Test with coverage
+      - name: Async assertion guard
+        run: node scripts/codemods/std-to-vitest.ts --check
+
+      - name: Node package tests with coverage
+        run: pnpm test:coverage
+
+      - name: Deno runtime proofs with coverage
+        run: deno task test:deno-lane
+
+      - name: Root and script tests with coverage
         run: deno task test:coverage
 
   boundary-compatibility:

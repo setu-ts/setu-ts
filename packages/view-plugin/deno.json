@@ -28,6 +28,7 @@
   "imports": {
     "hono/html": "npm:hono@^4.12.30/html",
     "hono/jsx": "npm:hono@^4.12.30/jsx",
-    "hono/utils/html": "npm:hono@^4.12.30/utils/html"
+    "hono/utils/html": "npm:hono@^4.12.30/utils/html",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

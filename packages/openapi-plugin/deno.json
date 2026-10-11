@@ -5,6 +5,9 @@
   "exports": "./src/index.ts",
   "imports": {
     "npm:zod@^3.24.0": "npm:zod@^3.24.0",
-    "npm:zod@^4.4.0": "npm:zod@^4.4.0"
+    "npm:zod@^4.4.0": "npm:zod@^4.4.0",
+    "vitest": "npm:vitest@5.0.3",
+    "zod-v3": "npm:zod@^3.24.0",
+    "zod-v4": "npm:zod@^4.4.0"
   }
 }
