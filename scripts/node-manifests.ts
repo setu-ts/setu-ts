@@ -41,6 +41,9 @@
  */
 
 import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
+import { PACKAGE_METADATA } from './jsr-metadata.ts';
+import { REPOSITORY_URL } from './npm-release-gate.ts';
+import { auditSideEffects, SIDE_EFFECT_MODULES } from './side-effects.ts';
 import {
   EXTERNAL_RANGES,
   type Override,
@@ -391,6 +394,12 @@ function sortedRecord(map: ReadonlyMap<string, string>): Record<string, string> 
 }
 
 export function renderPackageJson(member: MemberInput, classified: ClassifiedMember): string {
+  const description = PACKAGE_METADATA[member.name.replace(/^@setu-ts\//, '')]?.description;
+  if (description === undefined) throw new Error(`${member.name}: missing package description`);
+  const effects = Object.keys(SIDE_EFFECT_MODULES).filter((path) =>
+    path.startsWith(`${member.dir}/`)
+  )
+    .map((path) => distPath(path.slice(member.dir.length + 1), '.js'));
   const exports: Record<string, { types: string; default: string }> = {};
   for (const entry of member.exports) {
     exports[entry.subpath] = {
@@ -401,10 +410,16 @@ export function renderPackageJson(member: MemberInput, classified: ClassifiedMem
   const pkg: Record<string, unknown> = {
     name: member.name,
     version: member.version,
+    description,
+    repository: { type: 'git', url: REPOSITORY_URL, directory: member.dir },
+    homepage: `https://github.com/setu-ts/setu-ts/tree/main/${member.dir}`,
+    bugs: { url: 'https://github.com/setu-ts/setu-ts/issues' },
+    publishConfig: { access: 'public' },
+    sideEffects: effects.length === 0 ? false : effects,
     type: 'module',
     license: 'MIT',
     engines: { node: '>=22' },
-    files: ['dist', 'README.md'],
+    files: ['dist', 'src', 'README.md', 'LICENSE'],
     exports,
     scripts: { build: 'tsc -b' },
   };
@@ -573,8 +588,8 @@ export function renderTsconfigBase(): string {
 
 /**
  * §3.4 safeguard 2: `decorator-plugin`'s manifest may not carry a `sideEffects`
- * that lets a bundler drop `Symbol.metadata` installation. In 111a no manifest
- * declares `sideEffects`; the guard is for 111c.
+ * that lets a bundler drop `Symbol.metadata` installation. M111c emits an
+ * explicit retention list; this guard remains the independent backstop.
  */
 export function checkDecoratorSideEffects(dir: string, content: string): string | null {
   let parsed: Record<string, unknown>;
@@ -673,7 +688,7 @@ export function renderDenoJson(raw: string, aliases: ReadonlyMap<string, string>
 }
 
 /** Generates every committed file from the pure inputs. */
-export function generateWorkspace(members: readonly MemberInput[]): GenerationResult {
+export function generateWorkspace(members: readonly MemberInput[], license = ''): GenerationResult {
   const files = new Map<string, string>();
   const refusals: string[] = [];
 
@@ -689,6 +704,13 @@ export function generateWorkspace(members: readonly MemberInput[]): GenerationRe
   const classified: ClassifiedMember[] = [];
   const dirs: string[] = [];
   for (const member of members) {
+    if (PACKAGE_METADATA[member.name.replace(/^@setu-ts\//, '')] === undefined) {
+      refusals.push(`${member.name}: missing package description`);
+    }
+    const sourceFiles = new Map(
+      [...member.files].filter(([file]) => file.startsWith(`${member.dir}/src/`)),
+    );
+    refusals.push(...auditSideEffects(sourceFiles).refusals);
     if (member.dir === DECORATOR_PLUGIN_DIR && member.currentPackageJson !== undefined) {
       const violation = checkDecoratorSideEffects(member.dir, member.currentPackageJson);
       if (violation !== null) refusals.push(violation);
@@ -713,6 +735,7 @@ export function generateWorkspace(members: readonly MemberInput[]): GenerationRe
     const member = members[i] as MemberInput;
     const cls = classified[i] as ClassifiedMember;
     files.set(`${member.dir}/package.json`, renderPackageJson(member, cls));
+    files.set(`${member.dir}/LICENSE`, license);
     files.set(`${member.dir}/tsconfig.json`, renderTsconfig(member, cls));
     files.set(`${member.dir}/deno.json`, renderDenoJson(member.denoJson, externalAliases(member)));
   }
@@ -835,7 +858,10 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
     return 2;
   }
   const members = await readMembers(root);
-  const { files, refusals } = generateWorkspace(members);
+  const { files, refusals } = generateWorkspace(
+    members,
+    await Deno.readTextFile(`${root}/LICENSE`),
+  );
   if (refusals.length > 0) {
     for (const refusal of refusals) console.error(`✗ ${refusal}`);
     console.error(`${refusals.length} refusal(s).`);

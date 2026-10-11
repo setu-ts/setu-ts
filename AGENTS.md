@@ -67,7 +67,7 @@ deno task test:coverage      # read the ANSI-stripped PER-FILE table; the exit c
 A milestone that adds or changes a package also runs, on a **committed** tree:
 
 ```bash
-deno task publish:check
+deno task release:publish --dry-run
 deno task release:verify <version>
 ```
 

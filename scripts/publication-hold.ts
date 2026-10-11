@@ -1,6 +1,6 @@
 /**
  * The decidable half of the publication hold: which listed holds apply to a
- * release, and the message that refuses it. `scripts/publish-packages.ts`
+ * release, and the message that refuses it. `scripts/npm-publish.ts`
  * refuses with it; `scripts/verify-release.ts` reports with it.
  *
  * @module

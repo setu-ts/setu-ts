@@ -1,6 +1,22 @@
 {
   "name": "@setu-ts/decorator-plugin",
   "version": "0.8.0",
+  "description": "Optional NestJS-style decorators and reflection, without reflect-metadata",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/decorator-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/decorator-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": [
+    "./dist/metadata/symbol-metadata.js"
+  ],
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -8,7 +24,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "src",
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {

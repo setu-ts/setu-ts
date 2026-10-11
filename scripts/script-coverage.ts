@@ -45,6 +45,10 @@ const THRESHOLD = 90;
  * gate then refuses a run that omits it.
  */
 export const SCRIPT_TARGETS: readonly string[] = [
+  'scripts/side-effects.ts',
+  'scripts/npm-release-gate.ts',
+  'scripts/npm-placeholders.ts',
+  'scripts/tar-read.ts',
   'scripts/check-docs.ts',
   'scripts/check-prose-assertions.ts',
   // The behaviour gate's pure core: fence selection, definition
@@ -114,9 +118,9 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // goes red, and the cost surfaces later as an intermittent failure somewhere
   // else entirely.
   'scripts/test-partition-rules.ts',
-  // The publication hold's decision. `publish-packages.ts` runs it at the top
+  // The publication hold's decision. `npm-publish.ts` runs it at the top
   // level and is the process seam; this carries the bar. Its failure mode is a
-  // SILENT PUBLISH: a held package reaching JSR, where a version is immutable.
+  // SILENT PUBLISH: a held package reaching npm, where a version is immutable.
   'scripts/publication-hold.ts',
 ];
 

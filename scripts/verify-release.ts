@@ -8,22 +8,15 @@
  * deno run --allow-read scripts/verify-release.ts 0.2.0
  * ```
  *
- * Verifies eight things a green test suite cannot:
+ * Verifies eleven things a green test suite cannot:
  *
  * 1. Every publishable package carries exactly the expected version — so the
- *    tag, the CHANGELOG entry, and what lands on JSR all agree.
- * 2. Every cross-package `jsr:@setu-ts/*` specifier resolves to the
- *    version being published. This is the one that bites on a prerelease: a
- *    `^0.1.0` range does NOT match `0.1.0-alpha.1` under semver, so a bump
- *    that misses a specifier ships packages whose dependencies cannot resolve
- *    — and `deno publish` does not warn about it.
+ *    tag, the CHANGELOG entry, and what lands on npm all agree.
+ * 2. Every source manifest uses workspace:^ for shipped internal dependencies.
  * 3. The published and unpublished lists together account for every workspace
  *    member, so a newly added package cannot be silently left out.
  * 4. No publishable package is a stub (`export {}` with nothing else).
- * 5. Every entrypoint's module JSDoc opens with `@module`, so the package's
- *    README.md is what renders on jsr.io rather than a one-line JSDoc blurb.
- *    See the long comment at check 5 — six packages shipped without a visible
- *    README in `v0.1.0-alpha.2` because of this.
+ * 5. Every published member carries a non-empty README.md for npm rendering.
  * 6. No package `src` tree contains a computed `import()` without a
  *    `computed-specifier` marker (M70e). JSR's npm-compatibility rewrite is
  *    static and reaches only a literal `import('npm:…')`; a computed specifier
@@ -31,19 +24,21 @@
  *    gate catches the cause on every PR; this is the release backstop.
  * 7. `CHANGELOG.md` carries a non-empty section for this version. The release
  *    workflow builds the GitHub Release body from it AFTER publishing, and a
- *    JSR version cannot be republished — so a missing section must fail here,
+ *    npm version cannot be republished — so a missing section must fail here,
  *    before anything is uploaded, rather than leaving a red job over packages
  *    that are already live.
  * 8. The release workflow generates and attaches `resolved-set.json`. That
  *    artifact preserves the complete lockfile resolved set for the published
  *    version; a workflow edit that silently drops it must fail before release.
  *
+ * 11. Every source manifest carries npm publish metadata and source/file entries.
+ *
  * Exits non-zero and prints every problem found, rather than stopping at the
  * first — a release is easier to fix in one pass.
  *
  * It also REPORTS every publication hold in `PUBLICATION_HOLDS` without
  * failing on it. CI runs this on every pull request, so failing would turn
- * every unrelated PR red; `scripts/publish-packages.ts` is where a hold
+ * every unrelated PR red; `scripts/npm-publish.ts` is where a hold
  * refuses.
  * 9. Every pull request merged since the previous `v*` tag is represented in the
  *    shipping changelog section, and no milestone PR's entry sits under an
@@ -54,6 +49,7 @@
  *    (`scripts/release-shape.ts`).
  */
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
+import { packedManifestProblems } from './npm-release-gate.ts';
 import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
 import { versionSiteProblems } from './version-sites.ts';
@@ -92,9 +88,6 @@ async function readConfig(dir: string): Promise<PackageConfig | null> {
 
 // ── 1 & 2: versions and cross-package specifiers ────────────────────────────
 
-// Matches `jsr:@setu-ts/<pkg>@<range>` anywhere in an import value.
-const CROSS_PACKAGE = /^jsr:@setu-ts\/([a-z-]+)@(.+)$/;
-
 for (const dir of PUBLISHED_PACKAGES) {
   const config = await readConfig(dir);
   if (!config) {
@@ -119,41 +112,10 @@ for (const dir of PUBLISHED_PACKAGES) {
     ),
   );
 
-  for (const [alias, specifier] of Object.entries(config.imports ?? {})) {
-    // Only in-repo packages are checked; a third-party specifier is not ours.
-    if (!alias.startsWith('@setu-ts/')) continue;
-
-    const match = CROSS_PACKAGE.exec(specifier);
-    if (!match) {
-      // A cross-package import that is not a `jsr:` specifier — typically a
-      // relative path like `../common/src/index.ts`. It resolves inside the
-      // workspace and therefore survives `deno check`, the test suite, AND
-      // `deno publish --dry-run`, because all three resolve from the repo. It
-      // does NOT survive a real publish: JSR builds the module graph from the
-      // package tarball, where `../common` is outside the root, and the
-      // publish fails with `Module not found "file:///common/src/index.ts"`.
-      // metrics-plugin and telemetry-plugin both shipped this way and were
-      // caught only when the release reached them.
-      problems.push(
-        `${dir}: import "${alias}" is "${specifier}", not a jsr: specifier — ` +
-          `it resolves in the workspace but breaks on publish. Use ` +
-          `"jsr:${alias}@^${expected}".`,
-      );
-      continue;
-    }
-
-    // A caret range on a prerelease (`^0.1.0-alpha.1`) matches that prerelease
-    // and later versions of the same tuple. A caret range on the plain version
-    // (`^0.1.0`) does NOT match any prerelease of it. Require the range to name
-    // the exact version being published, in either bare or caret form.
-    const range = match[2];
-    if (range !== expected && range !== `^${expected}`) {
-      problems.push(
-        `${dir}: import "${alias}" is pinned at "${range}" but ${expected} is being published — ` +
-          `the published package would have an unresolvable dependency`,
-      );
-    }
-  }
+  const manifest = JSON.parse(await Deno.readTextFile(`${dir}/package.json`));
+  problems.push(
+    ...packedManifestProblems(manifest, expected, true).map((problem) => `${dir}: ${problem}`),
+  );
 }
 
 // ── 3: the two lists must cover the whole workspace ─────────────────────────
@@ -180,21 +142,6 @@ for (const listed of accounted) {
 
 // ── 4 & 5: entrypoint must be real, and must not hide its README ────────────
 
-/**
- * The leading `/** … *\/` block of a source file, with the comment delimiters
- * and each line's ` * ` prefix stripped — i.e. the JSDoc body as deno_doc sees
- * it. Returns null when the file does not open with a block comment.
- */
-function leadingJsDoc(source: string): string | null {
-  const match = /^\s*\/\*\*([\s\S]*?)\*\//.exec(source);
-  if (!match) return null;
-  return match[1]
-    .split('\n')
-    .map((line) => line.replace(/^\s*\*\s?/, ''))
-    .join('\n')
-    .trim();
-}
-
 for (const dir of PUBLISHED_PACKAGES) {
   let source: string;
   try {
@@ -211,35 +158,8 @@ for (const dir of PUBLISHED_PACKAGES) {
     problems.push(`${dir}: src/index.ts exports nothing — a stub must not be published`);
   }
 
-  // The entrypoint's module JSDoc must open with `@module`, so that the prose
-  // after it is NOT parsed as a module description.
-  //
-  // WHY THIS IS LOAD-BEARING. A JSR package has a `readmeSource` setting whose
-  // default is `jsdoc`, and JSR renders the README only as a FALLBACK: in
-  // `render_docs_html`, the entrypoint's module doc is built first, and the
-  // README is substituted only `if index_module_doc.sections.docs.is_none()`.
-  // deno_doc drops prose that FOLLOWS a tag, so a block opening with `@module`
-  // has no description, the fallback fires, and the README renders. A block
-  // whose description comes first and ends with `@module` DOES have a
-  // description — so that one-paragraph blurb becomes the whole package page
-  // and the hand-written README is never shown.
-  //
-  // Six packages (cli, feature-flags-, multi-tenancy-, openapi-, queue-,
-  // storage-plugin) shipped in v0.1.0-alpha.2 with no visible README for
-  // exactly this reason. Nothing else catches it: the README is present in the
-  // published tarball's manifest, so `deno publish --dry-run`, the gates, and
-  // the coverage bar are all green — the loss is only visible on jsr.io.
-  const jsDoc = leadingJsDoc(source);
-  if (jsDoc === null) {
-    problems.push(
-      `${dir}: src/index.ts has no leading module JSDoc — add one opening with \`@module\``,
-    );
-  } else if (!jsDoc.startsWith('@module')) {
-    problems.push(
-      `${dir}: src/index.ts module JSDoc does not open with \`@module\` — its description ` +
-        `would replace README.md on jsr.io. Move \`@module\` to the first line of the block.`,
-    );
-  }
+  const readme = await Deno.readTextFile(`${dir}/README.md`).catch(() => '');
+  if (readme.trim() === '') problems.push(`${dir}: README.md is missing or empty`);
 }
 
 // ── 6: no computed import() without a marker in packages/*/src ─────────────
@@ -270,7 +190,7 @@ for (const hit of audit.prefixed) {
 // ── 7: the changelog must carry this version's release notes ───────────────
 
 // Checked here rather than in the workflow's release step, which runs after the
-// publish: JSR versions are immutable, so a problem discovered there cannot be
+// publish: npm versions cannot be reused, so a problem discovered there cannot be
 // fixed by re-running the job. The runbook writes the entry in step 1 and runs
 // this in step 2, so the ordering already matches.
 const changelog = await Deno.readTextFile('CHANGELOG.md').catch(() => null);
@@ -336,6 +256,8 @@ if (releaseWorkflow === null) {
   const requiredWorkflowFragments = [
     'name: Generate resolved-set artifact',
     'release:resolved-set',
+    'actions/upload-artifact@',
+    'actions/download-artifact@',
     'resolved-set.json#resolved-set.json',
   ];
   for (const fragment of requiredWorkflowFragments) {
@@ -350,7 +272,7 @@ if (releaseWorkflow === null) {
 
 // ── Report ──────────────────────────────────────────────────────────────────
 
-// Reported, never a problem: `publish-packages.ts` is what refuses a held
+// Reported, never a problem: `npm-publish.ts` is what refuses a held
 // release. Printed first so it is visible whether verification passes or not.
 for (const hold of activeHolds(PUBLICATION_HOLDS, PUBLISHED_PACKAGES)) {
   console.warn(`⚠ publication hold — ${hold.packageDir}: ${hold.reason}`);

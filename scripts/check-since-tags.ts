@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-console -- a gate must print actionable findings.
 /**
  * The `@since` gate: every tag is checked against the version that SHIPPED the
- * symbol it sits on — at symbol level, fetched from the jsr.io registry.
+ * symbol it sits on — from JSR through 0.8.x, and npm tarball sources thereafter.
  *
  * The class this closes is X50-2 and PR #286's cause, named there as
  * systematic: a release branch bumps each package manifest to the shipping
@@ -43,7 +43,9 @@
  * @module
  */
 
-/** The JSR scope every published package ships under. */
+import { gunzipBounded, readTar } from './tar-read.ts';
+
+/** The scope every published package ships under. */
 const SCOPE = '@setu-ts';
 
 /** The registry fetched when no override is injected. */
@@ -113,6 +115,7 @@ export interface FetchLike {
     readonly ok: boolean;
     readonly status: number;
     readonly text: () => Promise<string>;
+    readonly arrayBuffer?: () => Promise<ArrayBuffer>;
   }>;
 }
 
@@ -120,6 +123,8 @@ export interface FetchLike {
 export interface SinceRunOptions {
   /** Registry root; defaults to `https://jsr.io`. */
   readonly registryBase?: string;
+  /** npm registry root; defaults to https://registry.npmjs.org. */
+  readonly npmRegistryBase?: string;
   /** The parsed root manifest; defaults to reading `deno.json`. */
   readonly manifest?: WorkspaceManifest;
   /** File reader; defaults to `Deno.readTextFile`. */
@@ -525,6 +530,7 @@ export async function defaultListSourceFiles(
  */
 export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult> {
   const registryBase = options.registryBase ?? DEFAULT_REGISTRY_BASE;
+  const npmRegistryBase = options.npmRegistryBase ?? 'https://registry.npmjs.org';
   const fetchImpl = options.fetchImpl ?? ((url: string) => fetch(url));
   const readFile = options.readFile ?? ((path: string) => Deno.readTextFile(path));
   const listSourceFiles = options.listSourceFiles ?? defaultListSourceFiles;
@@ -547,12 +553,18 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
     >
   >();
 
-  const metaFor = (packageName: string) => {
-    const cached = metaCache.get(packageName);
+  const npmVersions = new Map<string, Record<string, { dist?: { tarball?: string } }>>();
+  const metaFor = (packageName: string, npm: boolean) => {
+    const key = `${npm ? 'npm' : 'jsr'}:${packageName}`;
+    const cached = metaCache.get(key);
     if (cached !== undefined) return cached;
     const pending = (async () => {
       try {
-        const response = await fetchImpl(`${registryBase}/${packageName}/meta.json`);
+        const response = await fetchImpl(
+          npm
+            ? `${npmRegistryBase}/${packageName.replace('/', '%2f')}`
+            : `${registryBase}/${packageName}/meta.json`,
+        );
         if (!response.ok) {
           // Only 404 means the package is absent. A 429 or a 5xx is the
           // registry declining to answer, and reading that as "unpublished"
@@ -562,14 +574,15 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
           throw new Error(`HTTP ${response.status}`);
         }
         const parsed = JSON.parse(await response.text()) as {
-          versions?: Record<string, unknown>;
+          versions?: Record<string, { dist?: { tarball?: string } }>;
         };
+        if (npm) npmVersions.set(packageName, parsed.versions ?? {});
         return { kind: 'ok' as const, versions: Object.keys(parsed.versions ?? {}) };
       } catch (error) {
         return { kind: 'unreachable' as const, reason: String(error) };
       }
     })();
-    metaCache.set(packageName, pending);
+    metaCache.set(key, pending);
     return pending;
   };
 
@@ -594,6 +607,31 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
     })();
     fileCache.set(url, pending);
     return pending;
+  };
+
+  const tarCache = new Map<string, Promise<ReadonlyMap<string, Uint8Array> | null>>();
+  const npmFileFor = async (
+    packageName: string,
+    version: string,
+    modulePath: string,
+  ): Promise<string | null> => {
+    const url = npmVersions.get(packageName)?.[version]?.dist?.tarball;
+    if (typeof url !== 'string') throw new Error(`${packageName}@${version}: no npm tarball URL`);
+    let pending = tarCache.get(url);
+    if (pending === undefined) {
+      pending = (async () => {
+        const response = await fetchImpl(url);
+        if (response.status === 404) return null;
+        if (!response.ok) throw new Error(`npm tarball HTTP ${response.status}`);
+        if (response.arrayBuffer === undefined) {
+          throw new Error('npm tarball response lacks arrayBuffer');
+        }
+        return readTar(await gunzipBounded(new Uint8Array(await response.arrayBuffer())));
+      })();
+      tarCache.set(url, pending);
+    }
+    const bytes = (await pending)?.get(`package/${modulePath}`);
+    return bytes === undefined ? null : new TextDecoder().decode(bytes);
   };
 
   const pushSkip = (tag: SinceTag, reason: string): void => {
@@ -635,7 +673,9 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
           );
           continue;
         }
-        const meta = await metaFor(packageName);
+        const triple = releaseTriple(tag.version)!;
+        const npm = compareDecimal(triple[0], '0') > 0 || compareDecimal(triple[1], '8') > 0;
+        const meta = await metaFor(packageName, npm);
         if (meta.kind === 'unreachable') {
           pushSkip(tag, `the registry could not be reached: ${meta.reason}`);
           continue;
@@ -676,9 +716,11 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
           : `${checked} (the last release of the ${tag.version} line)`;
         let content: string | null;
         try {
-          content = await fileFor(
-            registryFileUrl(registryBase, packageName, checked, modulePathFor(member, file)),
-          );
+          content = npm
+            ? await npmFileFor(packageName, checked, modulePathFor(member, file))
+            : await fileFor(
+              registryFileUrl(registryBase, packageName, checked, modulePathFor(member, file)),
+            );
         } catch (error) {
           pushSkip(tag, String(error));
           continue;

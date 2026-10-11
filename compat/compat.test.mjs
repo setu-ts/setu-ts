@@ -1,30 +1,22 @@
 // deno-lint-ignore-file no-console -- harness output is the report (AI_GUIDELINES §11.6).
 /**
- * Node/Bun compatibility suite.
- *
- * Consumes the PUBLISHED packages through JSR's npm compatibility layer, which
- * is the only way these runtimes can consume this repo: cross-package
- * specifiers are `jsr:@setu-ts/*` and optional heavy deps are `npm:*`,
- * neither of which Node or Bun resolves from the working tree. JSR rewrites
- * both at publish time, so the published artifact is the unit under test
- * (AI_GUIDELINES §4.5, §6.4).
- *
- * Run with `node compat.test.mjs` or `bun compat.test.mjs`. Exits non-zero on
- * the first failed check.
+ * Compatibility proof against the published npm packages, on Node and Bun.
+ * Breadth covers every workspace member; the core packages also serve requests.
+ * This tests the last release (latest), independently of the source workspace.
  */
 import { createServer } from 'node:net';
 import { readdirSync, readFileSync } from 'node:fs';
 
-import { CAPABILITIES } from '@jsr/setu-ts__common';
-import { createApplication } from '@jsr/setu-ts__kernel';
-import { detectRuntime, RuntimePlugin } from '@jsr/setu-ts__runtime';
-import { LoggerPlugin } from '@jsr/setu-ts__logger-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { detectRuntime, RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
 
 /** The runtime this process is executing on, as the framework should see it. */
 const host = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
 
 /**
- * Workspace members deliberately absent from `package.json`, by JSR npm name.
+ * Workspace members deliberately absent from `package.json`, by npm name.
  *
  * A package belongs here only between its introduction and its FIRST publish —
  * it cannot be installed before it exists on the registry, and demanding it
@@ -90,20 +82,20 @@ function rebind(target) {
 }
 
 /**
- * Reads the Deno workspace and returns every member's JSR npm package name.
+ * Reads the Deno workspace and returns every member's npm package name.
  *
  * The workspace is the authority on what the framework ships, so the compat
  * suite derives its expected surface from it rather than from its own
  * `package.json` — otherwise a new package could be added to the repo and
  * silently never checked on Node or Bun.
  *
- * @returns {string[]} Sorted `@jsr/setu-ts__*` names.
+ * @returns {string[]} Sorted `@setu-ts/*` names.
  */
 function workspacePackageNames() {
   const root = JSON.parse(readFileSync('../deno.json', 'utf8'));
   return root.workspace
     .map((entry) => JSON.parse(readFileSync(`../${entry.replace(/^\.\//, '')}/deno.json`, 'utf8')))
-    .map((cfg) => cfg.name.replace('@setu-ts/', '@jsr/setu-ts__'))
+    .map((cfg) => cfg.name.replace('@setu-ts/', '@setu-ts/'))
     .sort();
 }
 
@@ -220,46 +212,15 @@ check('stop() releases the listening port', rebound === null, rebound ?? undefin
 //    carries the latter, not the former, so the first shape alone would pass
 //    against the exact broken build).
 //
-//    Guarded by version: while the installed packages are at or below
-//    0.1.0-alpha.8 (the last release that shipped the defect) the check reports
-//    pending rather than failing — a hard check would turn this PR red for the
-//    very defect it fixes. Once a newer version is installed the guard lifts
-//    and a surviving `npm:` inside import( fails the suite.
-const LAST_BROKEN = '0.1.0-alpha.8';
-const FIXED_IN = '0.1.0-alpha.9';
-
-/** Compares two `0.1.0[-alpha.N]` versions; -1/0/1. Unparseable → 0 (don't gate). */
-function compareVersions(a, b) {
-  const parse = (v) => {
-    const m = /^(\d+)\.(\d+)\.(\d+)(?:-alpha\.(\d+))?$/.exec(v);
-    if (!m) return null;
-    return {
-      major: Number(m[1]),
-      minor: Number(m[2]),
-      patch: Number(m[3]),
-      pre: m[4] !== undefined ? Number(m[4]) : null,
-    };
-  };
-  const pa = parse(a);
-  const pb = parse(b);
-  if (pa === null || pb === null) return 0;
-  for (const key of ['major', 'minor', 'patch']) {
-    if (pa[key] !== pb[key]) return pa[key] < pb[key] ? -1 : 1;
-  }
-  // Same tuple: a release (pre === null) sorts after any prerelease.
-  if (pa.pre === null && pb.pre === null) return 0;
-  if (pa.pre === null) return 1;
-  if (pb.pre === null) return -1;
-  return pa.pre === pb.pre ? 0 : pa.pre < pb.pre ? -1 : 1;
-}
-
+//    npm never received those historical broken builds, so there is no
+//    version guard. Scan every installed member's dist, including jsr: imports.
 /**
  * Returns `source` with every comment blanked to spaces — same length, so
  * offsets are preserved. String-aware: a `//` or `/*` inside a string literal
  * is not a comment (the audited artifacts carry `npm:` strings and `deno add`
  * install-command text that contain `//`).
  *
- * Why: JSR's npm-compat build keeps JSDoc comments in the published `.js`,
+ * Why: emitted JavaScript retains JSDoc comments,
  * and this repo's loader JSDoc literally spells the indirection shape
  * (`(spec) => import(spec)`) to document why it must not recur. A detector
  * that scans comments would flag the FIXED artifact for its own explanation.
@@ -323,7 +284,7 @@ function stripComments(source) {
 
 /** Offsets of every `import( "npm:…` / `import('npm:…` / `import(`npm:…` call. */
 function npmImportOccurrences(source) {
-  const re = /import\s*\(\s*["'`]npm:/g;
+  const re = /import\s*\(\s*["'`](?:npm|jsr):/g;
   const hits = [];
   let m;
   while ((m = re.exec(stripComments(source))) !== null) hits.push(m.index);
@@ -372,7 +333,11 @@ function listJsFiles(dir) {
   return out;
 }
 
-for (const name of ['@jsr/setu-ts__grpc-plugin', '@jsr/setu-ts__telemetry-plugin']) {
+for (
+  const name of Object.keys(JSON.parse(readFileSync('package.json', 'utf8')).dependencies).filter((
+    name,
+  ) => name.startsWith('@setu-ts/'))
+) {
   const pkgDir = `node_modules/${name}`;
   let version;
   try {
@@ -382,29 +347,22 @@ for (const name of ['@jsr/setu-ts__grpc-plugin', '@jsr/setu-ts__telemetry-plugin
     continue;
   }
 
-  if (compareVersions(version, LAST_BROKEN) <= 0) {
-    console.log(
-      `  pend ${name} @ ${version} — npm:-in-import check pending, fixed in ${FIXED_IN}, not yet published`,
-    );
-    continue;
-  }
-
   const npmInImport = [];
   const indirection = [];
-  for (const file of listJsFiles(`${pkgDir}/src`)) {
+  for (const file of listJsFiles(`${pkgDir}/dist`)) {
     const source = readFileSync(file, 'utf8');
     const rel = file.replace(`${pkgDir}/`, '');
     if (npmImportOccurrences(source).length > 0) npmInImport.push(rel);
     if (parameterizedImporterOccurrences(source).length > 0) indirection.push(rel);
   }
   const details = [
-    npmInImport.length > 0 ? `npm: inside import(): ${npmInImport.join(', ')}` : '',
+    npmInImport.length > 0 ? `npm:/jsr: inside import(): ${npmInImport.join(', ')}` : '',
     indirection.length > 0 ? `parameterized importer: ${indirection.join(', ')}` : '',
   ]
     .filter(Boolean)
     .join('; ');
   check(
-    `${name} @ ${version} ships no non-literal npm: path into import()`,
+    `${name} @ ${version} ships no npm:/jsr: or parameterized path into import()`,
     npmInImport.length === 0 && indirection.length === 0,
     details,
   );

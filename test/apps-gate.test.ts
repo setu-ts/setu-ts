@@ -539,7 +539,7 @@ describe('real-backend CI wiring', () => {
       // carrying either is an invalid workflow — and the text pins above would
       // still pass. Assert their absence too.
       expect(text).not.toMatch(/^\s+command:/m);
-      expect(text).not.toMatch(/^\s+environment:/m);
+      expect(text).not.toMatch(/^ {8}environment:/m);
       expect(text).toContain('-p 127.0.0.1:9000:9000');
       expect(text).toContain('S3_ENDPOINT_URL: http://localhost:9000');
       // Mailpit (mail SMTP outage suite)
@@ -913,6 +913,84 @@ describe('malformedAppDirMessage', () => {
   });
 });
 
+describe('M111c npm workflow boundaries', () => {
+  it('confines publish identity to the npm environment job with scripts disabled', async () => {
+    const text = await Deno.readTextFile('.github/workflows/release.yml');
+    const jobs = '\n' + text.split('\njobs:\n')[1];
+    expect(text.split('\njobs:\n')[0]).not.toContain('id-token: write');
+    expect([...jobs.matchAll(/^ {2}([a-z]+):$/gm)].map((m) => m[1])).toEqual([
+      'gates',
+      'publish',
+      'release',
+    ]);
+    const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
+    expect(text.match(/id-token: write/g)).toHaveLength(1);
+    for (
+      const fragment of [
+        'needs: gates',
+        'environment: npm',
+        'contents: read',
+        'id-token: write',
+        'persist-credentials: false',
+        'registry-url: https://registry.npmjs.org',
+        'pnpm install --frozen-lockfile --ignore-scripts',
+        'deno task release:publish',
+      ]
+    ) expect(publish).toContain(fragment);
+    expect(publish).not.toContain('secrets.');
+    expect(text).not.toContain('NODE_AUTH_TOKEN');
+    expect(publish).not.toMatch(/run:.*test/);
+    expect(jobs.split('\n  gates:')[1].split('\n  publish:')[0]).not.toContain('id-token');
+    expect(jobs.split('\n  release:')[1]).not.toContain('id-token');
+  });
+  it('publishes only from a pushed v* tag; a manual run rehearses without an identity', async () => {
+    // Security audit F1: a manual dispatch with a false dry-run input once made a real
+    // OIDC publish from any branch, skipping the tag-only release checks.
+    const text = await Deno.readTextFile('.github/workflows/release.yml');
+    const jobs = '\n' + text.split('\njobs:\n')[1];
+    const gates = jobs.split('\n  gates:')[1].split('\n  publish:')[0];
+    const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
+    const release = jobs.split('\n  release:')[1];
+    const tagOnly = "if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')";
+    expect(publish).toContain(tagOnly);
+    expect(release).toContain(tagOnly);
+    expect(text).not.toMatch(/dry_run|inputs\./);
+    expect(publish).not.toContain('--dry-run');
+    expect(gates).toMatch(
+      /if: github\.event_name == 'workflow_dispatch'\n\s+run: deno task release:publish --dry-run/,
+    );
+  });
+  it('pins every action in the release workflow to a full commit SHA', () => {
+    // Security audit F2: the publish job can mint an npm OIDC token, so an action
+    // that moved under a tag (or a branch, as setup-deno@v2 is) could publish.
+    const text = Deno.readTextFileSync('.github/workflows/release.yml');
+    const uses = [...text.matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)];
+    expect(uses.length).toBeGreaterThanOrEqual(10);
+    for (const [, ref, comment] of uses) {
+      expect(ref).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
+      expect(comment).toMatch(/# v\d+\.\d+\.\d+/);
+    }
+  });
+  it('arms each compatibility suite only on a successful npm scope probe', async () => {
+    const text = await Deno.readTextFile('.github/workflows/compat.yml');
+    for (const job of ['node-compat', 'bun-compat']) {
+      const block = text.split(`\n  ${job}:`)[1].split(/\n {2}[a-z]+-compat:/)[0];
+      for (
+        const fragment of [
+          'id: scope',
+          '--retry 3',
+          'registry.npmjs.org/@setu-ts%2fcommon',
+          "404) echo 'published=false'",
+          "200) echo 'published=true'",
+          'exit 1',
+          "if: steps.scope.outputs.published == 'true'",
+        ]
+      ) expect(block).toContain(fragment);
+      expect(block.match(/if: steps.scope.outputs.published/g)).toHaveLength(2);
+    }
+  });
+});
+
 describe('M111b workflow lanes', () => {
   for (const workflow of ['ci', 'release', 'drift']) {
     it(`${workflow} gates all four test lanes in the test job`, async () => {
@@ -920,7 +998,7 @@ describe('M111b workflow lanes', () => {
       const job = workflow === 'ci'
         ? 'deno'
         : workflow === 'release'
-        ? 'release'
+        ? 'gates'
         : 'fresh-resolution';
       const testJob = source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
       expect(testJob).toBeDefined();
@@ -936,7 +1014,8 @@ describe('M111b workflow lanes', () => {
         expect(index).toBeGreaterThan(previous);
         previous = index;
       }
-      expect(source).toContain('pnpm/action-setup@v4');
+      // release.yml pins actions to commit SHAs (security audit F2); the others use the tag.
+      expect(source).toMatch(/pnpm\/action-setup@(?:v4\b|[0-9a-f]{40} # v4\.)/);
       // The drift job resolves every declared range fresh, so its package
       // suites see this week's versions; the PR and release jobs test the
       // committed lock.
@@ -949,4 +1028,24 @@ describe('M111b workflow lanes', () => {
       }
     });
   }
+});
+
+describe('M111c declared artifact coverage', () => {
+  it('declares the complete npm package set and retires the JSR task', async () => {
+    const workspace = JSON.parse(await Deno.readTextFile('package.json'));
+    const compat = JSON.parse(await Deno.readTextFile('compat/package.json'));
+    const expected = await Promise.all(
+      workspace.workspaces.map(async (dir: string) =>
+        JSON.parse(await Deno.readTextFile(`${dir}/package.json`)).name
+      ),
+    );
+    expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
+    expect(expected).toHaveLength(51);
+    expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
+    const deno = JSON.parse(await Deno.readTextFile('deno.json'));
+    expect(deno.tasks['publish:check']).toBeUndefined();
+    expect(deno.tasks['release:publish']).toContain('scripts/npm-publish.ts');
+    expect(deno.tasks['release:placeholders']).toContain('scripts/write-npm-placeholders.ts');
+    await expect(Deno.stat('compat/.npmrc')).rejects.toThrow();
+  });
 });

@@ -7,6 +7,18 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
 import { DecoratedController } from './dist/controller.js';
 
+import { readFileSync } from 'node:fs';
+const packages = Object.keys(
+  JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).dependencies,
+).filter((name) => name.startsWith('@setu-ts/'));
+if (packages.length !== 51) {
+  throw new Error(`Expected 51 installed members, found ${packages.length}`);
+}
+for (const name of packages) {
+  const surface = await import(name);
+  if (Object.keys(surface).length === 0) throw new Error(`${name} exposes no surface`);
+}
+console.log(`IMPORTED-OK ${packages.length} installed npm packages`);
 const port = Number(process.argv[2]);
 const app = createApplication({
   plugins: [RuntimePlugin(), DecoratorPlugin({ controllers: [DecoratedController] })],
@@ -27,7 +39,13 @@ try {
     failure = `/json answered ${JSON.stringify(plain)}`;
   } else if (decorated.status !== 200 || decorated.body.decorated !== true) {
     failure = `/decorated answered ${JSON.stringify(decorated)}`;
-  } else console.log(`BOOT-OK ${JSON.stringify({ json: plain.body, decorated: decorated.body })}`);
+  } else {
+    console.log(
+      `BOOT-OK ${
+        JSON.stringify({ imported: packages.length, json: plain.body, decorated: decorated.body })
+      }`,
+    );
+  }
 } catch (error) {
   failure = String(error?.stack ?? error);
 } finally {

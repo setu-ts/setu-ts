@@ -9,6 +9,7 @@ async function readWorkflow(): Promise<string> {
 
 /** @returns The file's lowercase extension, without the dot. */
 function extensionOf(file: string): string {
+  if (file.endsWith('/LICENSE')) return 'license';
   return file.slice(file.lastIndexOf('.') + 1).toLowerCase();
 }
 
@@ -95,7 +96,18 @@ describe('dependency drift gate configuration', () => {
     // only under Node, after `check:node-build` has npm-installed the packed
     // tarballs, and imports the tsc-compiled `./dist/controller.js` — no Deno
     // gate resolves it, so the fresh-lock resolution must not either.
-    const nonSource = new Set(['json', 'md', 'txt', 'prisma', 'html', 'gitkeep', 'sql', 'mjs']);
+    // M111c's generated LICENSE copies are tarball data, not source modules.
+    const nonSource = new Set([
+      'json',
+      'md',
+      'txt',
+      'prisma',
+      'html',
+      'gitkeep',
+      'sql',
+      'mjs',
+      'license',
+    ]);
     const sources = tracked.filter((file) => !nonSource.has(extensionOf(file)));
     expect(sources.length).toBeGreaterThan(2000);
 

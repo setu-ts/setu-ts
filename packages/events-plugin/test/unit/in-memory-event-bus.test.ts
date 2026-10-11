@@ -142,12 +142,13 @@ describe('InMemoryEventBus', () => {
     });
 
     const event = new TestEvent({ value: 'test' });
-    const start = Date.now();
     await bus.publish(event);
-    const elapsed = Date.now() - start;
 
+    // The handler finishes only after a macrotask; seeing it complete the
+    // moment publish resolves is the proof publish awaited it. (A wall-clock
+    // elapsed >= 10 check flaked: Node can fire a 10 ms timer at 9 ms by
+    // Date.now().)
     expect(completed).toBe(true);
-    expect(elapsed).toBeGreaterThanOrEqual(10);
   });
 
   it('should fire-and-forget in async:true mode', async () => {
@@ -159,18 +160,19 @@ describe('InMemoryEventBus', () => {
     }
 
     let completed = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
     bus.subscribe('TestEvent', async () => {
-      await new Promise((r) => setTimeout(r, 50));
+      await gate;
       completed = true;
     });
 
     const event = new TestEvent({ value: 'test' });
-    const start = Date.now();
     await bus.publish(event);
-    const elapsed = Date.now() - start;
 
-    expect(elapsed).toBeLessThan(50); // publish resolved before handler completed
+    // The handler is still parked on the gate, so publish resolved first.
     expect(completed).toBe(false);
+    release();
 
     // Wait for handlers to settle
     await bus.whenIdle();

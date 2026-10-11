@@ -8,8 +8,8 @@
  * 2. `pnpm pack` every member into `.tmp/node-pack/` and refuse any tarball
  *    whose shipped dependency fields still name `workspace:`.
  * 3. In an empty project, a PLAIN `npm install` (deliberately not pnpm — it is
- *    the repository's tool, not the consumer's) of `kernel`, `runtime` and
- *    `decorator-plugin` plus their transitive `@setu-ts` closure.
+ *    the repository's tool, not the consumer's) of all 51
+ *    release members, each imported and checked for an exported surface.
  * 4. Compile the fixture's decorated controller with the repository's `tsc`
  *    and run `scripts/fixtures/node-boot/boot.mjs` on Node 24, Node 22 and
  *    Bun: each must serve a JSON route and the decorated controller.
@@ -26,14 +26,12 @@
 import {
   classifyLeg,
   decideOutcome,
-  installClosure,
   type LegResult,
   workspaceProtocolSpecifiers,
 } from './node-build-gate.ts';
 
 const PACK_DIR = '.tmp/node-pack';
 const BOOT_DIR = '.tmp/node-boot';
-const BOOT_ROOTS = ['@setu-ts/kernel', '@setu-ts/runtime', '@setu-ts/decorator-plugin'];
 
 /** Runs a command, returning its exit code and combined output. */
 async function run(
@@ -89,19 +87,15 @@ await Deno.remove(PACK_DIR, { recursive: true }).catch(() => {});
 await Deno.mkdir(PACK_DIR, { recursive: true });
 const packDir = await Deno.realPath(PACK_DIR);
 const tarballOf = new Map<string, string>();
-const dependenciesOf = new Map<string, string[]>();
 const refusals: string[] = [];
 for (const dir of root.workspaces) {
   const manifest = JSON.parse(await Deno.readTextFile(`${dir}/package.json`)) as {
     name: string;
     dependencies?: Record<string, string>;
   };
-  dependenciesOf.set(
-    manifest.name,
-    Object.keys(manifest.dependencies ?? {}).filter((name) => name.startsWith('@setu-ts/')),
-  );
   const packed = await step(`pack ${manifest.name}`, 'pnpm', [
     'pack',
+    '--ignore-scripts',
     '--pack-destination',
     packDir,
   ], dir);
@@ -121,7 +115,7 @@ if (refusals.length > 0) {
   Deno.exit(1);
 }
 
-const closure = installClosure(BOOT_ROOTS, dependenciesOf);
+const closure = [...tarballOf.keys()];
 await Deno.remove(BOOT_DIR, { recursive: true }).catch(() => {});
 await Deno.mkdir(BOOT_DIR, { recursive: true });
 for await (const entry of Deno.readDir('scripts/fixtures/node-boot')) {
@@ -150,6 +144,10 @@ const runLeg = async (name: string, cmd: string, args: readonly string[], probe:
 await runLeg('node 24', 'node', [], ['--version']);
 await runLeg('node 22', 'npx', ['-y', 'node@22'], ['-y', 'node@22', '--version']);
 await runLeg('bun', 'bun', [], ['--version']);
+
+await step('esbuild tree-shaking bundle', 'node', ['bundle.mjs'], BOOT_DIR);
+const bundled = await run('node', ['bundled.mjs', String(freePort())], BOOT_DIR);
+legs.push(classifyLeg('esbuild / node 24', bundled.code, bundled.output));
 
 const outcome = decideOutcome(legs, requireAll);
 for (const line of outcome.lines) console.log(line);

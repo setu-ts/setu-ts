@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **npm publishing machinery (M111c).** All 51 manifests gain publish metadata, `src` and LICENSE in
+  their tarballs, and audited `sideEffects` declarations. The decorator metadata module is retained;
+  other members declare `false`. Publishing packs with pnpm, checks the packed manifest and registry
+  version, and publishes with npm; CI separates gates from the OIDC publish job. README-only
+  placeholders support the future one-time bootstrap. Nothing is published here. JSR's
+  dry-run/slow-type and `@module`-first checks are replaced by the TypeScript build, npm dry run,
+  and non-empty README check. Historical `@since` claims stay on JSR through 0.8.x; later claims
+  read npm tarball sources. Compatibility declares all 51 npm packages and arms on publish.
+
 - **Package tests on Node 24 (M111b).** Every member uses Vitest, source export resolution, TC39
   decorator lowering, shared-resource isolation, and enforced per-file V8 coverage. Deno-only
   runtime proofs retain a named lane; root tooling stays on Deno. The reproducible codemod, host

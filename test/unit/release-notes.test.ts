@@ -66,9 +66,11 @@ describe('isPrerelease', () => {
 describe('buildReleaseBody', () => {
   it('carries a pinned install line, the notes, and the pre-alpha.8 note', () => {
     const body = buildReleaseBody('### Added\n\n- A thing.', '0.1.0-alpha.9');
-    // Pinned, because JSR never points `latest` at a prerelease — an unpinned
-    // instruction in the release notes installs nothing.
-    expect(body).toContain('jsr:@setu-ts/kernel@0.1.0-alpha.9');
+    // Pinned so a reader installs the release they are reading.
+    expect(body).toContain(
+      'npm install @setu-ts/kernel@0.1.0-alpha.9 @setu-ts/runtime@0.1.0-alpha.9',
+    );
+    expect(body).not.toContain('jsr:');
     expect(body).toContain('- A thing.');
     expect(body).toContain('Releases before `v0.1.0-alpha.8` shipped as tags only');
   });
@@ -213,7 +215,7 @@ const SUITE_CONSUMERS: readonly {
 }[] = [
   {
     workflow: '.github/workflows/release.yml',
-    job: 'release',
+    job: 'gates',
     expectedStep: (step) => step,
   },
   {
