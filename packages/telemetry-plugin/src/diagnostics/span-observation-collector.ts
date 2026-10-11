@@ -66,7 +66,7 @@ const MAX_LINKS = TRACE_COLLECTOR_LIMITS.linksPerSpan;
  *
  * @internal
  */
-export const TRACE_COLLECTOR_ERRORS = {
+export const TRACE_COLLECTOR_ERRORS: Readonly<Record<string, string>> = {
   badOptions: 'Trace diagnostics: the diagnostics option must be an object.',
   notEnabled: 'Trace diagnostics: enabled must be the literal true.',
   badServiceAlias: 'Trace diagnostics: serviceAlias must be a string.',

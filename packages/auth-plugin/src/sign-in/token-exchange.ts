@@ -20,7 +20,7 @@ import type { ProviderTokens, TokenEndpointAuth } from '../interfaces/index.ts';
 import { MAX_RESPONSE_BYTES } from '../issuers/key-set-cache.ts';
 
 /** The response body cap for a token or userinfo endpoint. */
-export const MAX_TOKEN_RESPONSE_BYTES = MAX_RESPONSE_BYTES;
+export const MAX_TOKEN_RESPONSE_BYTES: number = MAX_RESPONSE_BYTES;
 
 /** Why an exchange or profile read did not produce usable data. */
 export type TokenExchangeFailure =

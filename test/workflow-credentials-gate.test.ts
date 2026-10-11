@@ -192,9 +192,10 @@ describe('workflow checkout credentials', () => {
   it('reads each step in isolation', async () => {
     // The step bound is load-bearing: without it, one job's
     // `persist-credentials: false` would satisfy the assertion for every
-    // checkout after it in the same file. `ci.yml` has seven, including the browser job.
+    // checkout after it in the same file. `ci.yml` has eight, including the browser job
+    // and the M111a node-build job.
     const steps = (await checkoutSteps()).filter((step) => step.workflow === 'ci.yml');
-    expect(steps.length).toBe(7);
+    expect(steps.length).toBe(8);
     for (const step of steps) {
       const body = step.body.join('\n');
       expect(body.match(/uses:\s*actions\/checkout@/g)?.length).toBe(1);

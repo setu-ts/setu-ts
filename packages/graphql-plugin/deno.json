@@ -8,5 +8,8 @@
       "net": true,
       "env": true
     }
+  },
+  "imports": {
+    "graphql": "npm:graphql@^16"
   }
 }

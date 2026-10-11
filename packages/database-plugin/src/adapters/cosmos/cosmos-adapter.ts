@@ -11,7 +11,7 @@
  * The client is supplied inject-or-lazy (AI_GUIDELINES §12.2):
  * {@linkcode CosmosAdapterOptions.client} (preferred — the application
  * constructs it, which is also how a managed-identity client reaches the
- * adapter) or a lazy literal `import('npm:@azure/cosmos@^4')` at
+ * adapter) or a lazy literal `import('@azure/cosmos')` at
  * {@linkcode connect} time.
  *
  * The Cosmos DB for MongoDB API is NOT served here: it speaks the MongoDB wire

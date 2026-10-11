@@ -9,7 +9,7 @@
  *
  * The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * {@linkcode MongoAdapterOptions.client} (preferred — the application
- * constructs and configures it) or a lazy literal `import('npm:mongodb@^6.21.0')`
+ * constructs and configures it) or a lazy literal `import('mongodb')`
  * at {@linkcode connect} time. Transactions use a driver session and refuse
  * late — at {@linkcode beginTransaction}, never at {@linkcode connect} — so a
  * standalone `mongod` that never opens one is still a valid deployment.

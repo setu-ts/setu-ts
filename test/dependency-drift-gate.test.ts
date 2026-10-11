@@ -91,7 +91,11 @@ describe('dependency drift gate configuration', () => {
     // Every extension under those roots is either a source the resolution must
     // cover or a documented non-source. A new one lands in neither list and
     // fails here, which is a decision to take rather than a hole to acquire.
-    const nonSource = new Set(['json', 'md', 'txt', 'prisma', 'html', 'gitkeep', 'sql']);
+    // `mjs`: the M111a boot fixture (`scripts/fixtures/node-boot/boot.mjs`) runs
+    // only under Node, after `check:node-build` has npm-installed the packed
+    // tarballs, and imports the tsc-compiled `./dist/controller.js` — no Deno
+    // gate resolves it, so the fresh-lock resolution must not either.
+    const nonSource = new Set(['json', 'md', 'txt', 'prisma', 'html', 'gitkeep', 'sql', 'mjs']);
     const sources = tracked.filter((file) => !nonSource.has(extensionOf(file)));
     expect(sources.length).toBeGreaterThan(2000);
 

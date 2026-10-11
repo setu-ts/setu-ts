@@ -1,6 +1,6 @@
 /**
  * Real-load tests for `loadRequestHandler` — drives the entire loader chain
- * (import of local ESM module → .default unwrap → npm:react-router import →
+ * (import of local ESM module → .default unwrap → react-router import →
  * assembleHandler).
  *
  * @module
@@ -42,7 +42,7 @@ export default {
     const { handler, createLoadContext } = await loadRequestHandler(modulePath, 'production');
 
     expect(typeof handler).toBe('function');
-    // The factory came from the REAL npm:react-router@8 module, so the provider
+    // The factory came from the REAL react-router@8 module, so the provider
     // it builds is an instance of the class the handler's instanceof tests.
     expect(typeof createLoadContext().set).toBe('function');
     // We proved the load chain works: module import (.default unwrap) + rr import
@@ -64,7 +64,7 @@ export const entry = { module: { default: async () => {} } };
     const { handler, createLoadContext } = await loadRequestHandler(modulePath, 'production');
 
     expect(typeof handler).toBe('function');
-    // The factory came from the REAL npm:react-router@8 module, so the provider
+    // The factory came from the REAL react-router@8 module, so the provider
     // it builds is an instance of the class the handler's instanceof tests.
     expect(typeof createLoadContext().set).toBe('function');
   });
@@ -91,7 +91,7 @@ export default {
     const modulePath = `${tmpDir}/server-build.mjs`;
     await Deno.writeTextFile(modulePath, moduleContent);
 
-    // Use the optional rrImportHook parameter to simulate a failed npm:react-router import.
+    // Use the optional rrImportHook parameter to simulate a failed react-router import.
     // This covers the catch block (lines 78-83) in server-build.ts where we throw about
     // the missing react-router package.
     await expect(
@@ -100,7 +100,7 @@ export default {
           throw new Error('Module not found: fake-react-router');
         },
       }),
-    ).rejects.toThrow("Failed to import 'npm:react-router@8'");
+    ).rejects.toThrow("Failed to import 'react-router'");
   });
 
   it('default loadRequestHandler path unwraps .default from module namespace', async () => {

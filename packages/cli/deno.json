@@ -6,10 +6,6 @@
     ".": "./src/index.ts",
     "./main": "./src/main.ts"
   },
-  "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.8.0"
-  },
   "lint": {
     "rules": {
       "exclude": [

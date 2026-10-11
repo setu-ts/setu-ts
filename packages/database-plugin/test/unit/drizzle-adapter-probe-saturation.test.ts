@@ -218,7 +218,7 @@ describe('DrizzleAdapter completed-query count (M101a V8-3)', () => {
     await adapter.connect();
     await adapter.rawQuery('SELECT 1');
     expect(readQueryProgress(adapter)).toBe(1);
-    adapter[DRIZZLE_QUERY_HANDLE]();
+    (adapter as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE]();
     expect(readQueryProgress(adapter)).toBe(QUERY_PROGRESS_UNOBSERVABLE);
   });
 

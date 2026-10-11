@@ -3,9 +3,6 @@
   "version": "0.8.0",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0"
-  },
   "tests": {
     "permissions": {
       "read": true,
@@ -13,5 +10,17 @@
       "env": true,
       "net": true
     }
+  },
+  "imports": {
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/context-async-hooks": "npm:@opentelemetry/context-async-hooks@^2.0.0",
+    "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0",
+    "@opentelemetry/instrumentation-amqplib": "npm:@opentelemetry/instrumentation-amqplib@^0.67.0",
+    "@opentelemetry/instrumentation-http": "npm:@opentelemetry/instrumentation-http@^0.220.0",
+    "@opentelemetry/instrumentation-ioredis": "npm:@opentelemetry/instrumentation-ioredis@^0.68.0",
+    "@opentelemetry/instrumentation-kafkajs": "npm:@opentelemetry/instrumentation-kafkajs@^0.29.0",
+    "@opentelemetry/instrumentation-undici": "npm:@opentelemetry/instrumentation-undici@^0.30.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0"
   }
 }

@@ -4,7 +4,7 @@
  * XML signature verification is where SAML implementations fail — through
  * signature-wrapping attacks that verify one element and trust another — so
  * the plugin does not hand-write it. `@node-saml/node-saml` is loaded through a
- * literal `npm:` import, awaited in `register()`, so a missing package or a
+ * literal dynamic import, awaited in `register()`, so a missing package or a
  * Workers deployment without `nodejs_compat` fails at startup rather than at
  * the first login.
  *
@@ -16,11 +16,11 @@ import type { SamlModule } from '../interfaces/index.ts';
 import type { SamlConstructor } from './engine.ts';
 
 /** The specifier the lazy import loads; named in every load failure. */
-export const SAML_SPECIFIER = 'npm:@node-saml/node-saml@^5';
+export const SAML_SPECIFIER = '@node-saml/node-saml';
 
 /** Imports the real library. A literal specifier, so JSR's npm rewrite reaches it. */
 export function importSamlModule(): Promise<unknown> {
-  return import('npm:@node-saml/node-saml@^5');
+  return import('@node-saml/node-saml');
 }
 
 /**
@@ -48,7 +48,7 @@ export function adaptSamlModule(module: unknown): SamlConstructor {
  * import.
  *
  * @param injected - The provider's `module` option, if any
- * @param load - The importer; the real `npm:` import unless a test substitutes one
+ * @param load - The importer; the real dynamic import unless a test substitutes one
  * @returns The `SAML` constructor
  * @throws {SamlRuntimeLoadError} When the import fails or the module is unusable
  */

@@ -5,16 +5,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.8.0",
-    "@setu-ts/testing": "jsr:@setu-ts/testing@^0.8.0",
-    "@setu-ts/decorator-plugin": "jsr:@setu-ts/decorator-plugin@^0.8.0",
-    "@hono/hono": "jsr:@hono/hono@^4.12.30"
-  },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@hono/hono/jsx"
+    "jsxImportSource": "hono/jsx"
   },
   "test": {
     "permissions": {
@@ -31,5 +24,10 @@
   "tasks": {
     "test": "deno test --trace-leaks",
     "test:coverage": "deno test --coverage=coverage"
+  },
+  "imports": {
+    "hono/html": "npm:hono@^4.12.30/html",
+    "hono/jsx": "npm:hono@^4.12.30/jsx",
+    "hono/utils/html": "npm:hono@^4.12.30/utils/html"
   }
 }

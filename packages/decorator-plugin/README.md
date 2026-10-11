@@ -263,6 +263,17 @@ schema and a description the declaration does not carry.
 
 Discovery failures are logged as warnings and never crash the application.
 
+## Node and Bun: the `Symbol.metadata` carrier
+
+Node 24 and Bun 1.4 do not define `Symbol.metadata`, which TC39 decorators store their metadata
+under. Importing `@setu-ts/decorator-plugin` installs it once, write-if-absent:
+`Symbol.metadata ??= Symbol.for('Symbol.metadata')`. This is a deliberate global mutation at module
+load; on Deno, which defines the symbol, it does nothing. Import the package before any module that
+defines a decorated class — an `import { Controller } from '@setu-ts/decorator-plugin'` in that
+module already guarantees it. A class evaluated first, or a bundle that dropped the import as
+side-effect-free, fails at definition with `DecoratorMetadataUnavailableError`, whose message names
+both remedies.
+
 ## Security
 
 `@Roles` and `@Permissions` are **enforced by default**: each decorated route's chain gets

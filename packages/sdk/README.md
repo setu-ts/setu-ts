@@ -567,7 +567,6 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 
 | Export                          | Kind      |
 | ------------------------------- | --------- |
-| `ClientIdempotencyOptions`      | interface |
 | `createApiKeyAuthInterceptor`   | function  |
 | `createBearerAuthInterceptor`   | function  |
 | `createClient`                  | function  |
@@ -581,9 +580,9 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 | `HttpClientError`               | class     |
 | `OpenApiCodegenError`           | class     |
 | `CircuitBreakerPolicy`          | interface |
+| `ClientIdempotencyOptions`      | interface |
 | `ClientOptions`                 | interface |
 | `ClientRateLimitPolicy`         | interface |
-| `ClientRetryPolicy`             | type      |
 | `ClientRequest`                 | interface |
 | `ClientRequestContext`          | interface |
 | `ClientResponse`                | interface |
@@ -613,6 +612,7 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 | `BackoffStrategy`               | type      |
 | `ClientRequestInterceptor`      | type      |
 | `ClientResponseInterceptor`     | type      |
+| `ClientRetryPolicy`             | type      |
 | `RealtimeClientState`           | type      |
 | `SseClientState`                | type      |
 | `SseEventMap`                   | type      |

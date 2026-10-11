@@ -402,10 +402,10 @@ MIT
 | `GeneratedFile`    | interface |
 | `PromptChoice`     | interface |
 | `Prompter`         | interface |
-| `PromptSelection`  | type      |
 | `SchematicOptions` | interface |
 | `AppLoader`        | type      |
 | `ModuleLoader`     | type      |
+| `PromptSelection`  | type      |
 | `Schematic`        | type      |
 | `TemplateName`     | type      |
 

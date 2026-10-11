@@ -35,7 +35,7 @@ import {
   runIndicatorRaw,
 } from '../services/health-service.ts';
 import { createSelfIndicator } from '../indicators/self-indicator.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * The inert, disabled health-diagnostics source (M98d). Registered when the
@@ -137,7 +137,7 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
 
   return {
     name: 'health-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.HEALTH, CAPABILITIES.HEALTH_DIAGNOSTICS],
     priority: 100,
 

@@ -39,7 +39,7 @@ export const MAX_CLOCK_SKEW_MS = 60_000;
  * ceilings, never from one relay's own options, so replicas running different
  * lease settings never poison each other's live claims.
  */
-export const MAX_CLAIM_HORIZON_MS = MAX_CLAIM_LEASE_MS + MAX_CLOCK_SKEW_MS;
+export const MAX_CLAIM_HORIZON_MS: number = MAX_CLAIM_LEASE_MS + MAX_CLOCK_SKEW_MS;
 
 /**
  * Reads usable claim fields without incrementing an exhausted version.
@@ -72,7 +72,7 @@ export function claimStateOf(
  *
  * @internal
  */
-export const MAX_STORED_OPTIONS_LENGTH = 6 *
+export const MAX_STORED_OPTIONS_LENGTH: number = 6 *
     (2 * MAX_PUBLISH_ID_BYTES +
       MAX_PUBLISH_HEADERS * (MAX_PUBLISH_HEADER_NAME_BYTES + MAX_PUBLISH_HEADER_VALUE_BYTES)) +
   MAX_PUBLISH_HEADERS * 6 +

@@ -54,7 +54,7 @@ import type {
 import { discoverControllers } from '../discovery/controller-discovery.ts';
 import { findUnresolvableParameters, resolveParameters } from '../resolvers/parameter-resolver.ts';
 import { className, isHandlerResult, joinPaths } from '../internal.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Options for {@linkcode DecoratorPlugin}.
@@ -1087,7 +1087,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
   const ingress = dedup(opts.ingress ?? []);
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.METADATA_STORE],
     // Real dependency edges (not priority luck): a REPLACEMENT provider
     // registered at a higher priority number still lands before this plugin,

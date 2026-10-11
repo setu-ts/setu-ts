@@ -37,7 +37,7 @@ import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profil
 export const LIBS_DIR = 'libs';
 
 /** The member glob that makes Deno treat a library as part of the workspace. */
-export const LIBS_GLOB = `./${LIBS_DIR}/*`;
+export const LIBS_GLOB: string = `./${LIBS_DIR}/*`;
 
 /**
  * The library's import specifier: `@<scope>/<name>`.

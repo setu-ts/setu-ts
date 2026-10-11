@@ -24,7 +24,7 @@ export const PENDING_SESSION_KEY = '__setu_auth_pending';
 export const MAX_PENDING_ENTRIES = 3;
 
 /** How long an entry may sit before the callback refuses it, in milliseconds. */
-export const PENDING_TTL_MS = 10 * 60 * 1000;
+export const PENDING_TTL_MS: number = 10 * 60 * 1000;
 
 /** One sign-in attempt awaiting its provider callback. */
 export interface PendingEntry {

@@ -23,7 +23,7 @@
  *
  * @since 0.1.0
  */
-export const IMMUTABLE_PATTERN =
+export const IMMUTABLE_PATTERN: RegExp =
   /[.-](?![0-9]{4}-[0-9]{2}-[0-9]{2}\.)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i;
 
 /**

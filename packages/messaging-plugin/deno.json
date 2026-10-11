@@ -38,7 +38,11 @@
     }
   },
   "imports": {
+    "@azure/service-bus": "npm:@azure/service-bus@^7",
     "@google-cloud/pubsub": "npm:@google-cloud/pubsub@^6",
-    "@azure/service-bus": "npm:@azure/service-bus@^7"
+    "amqplib": "npm:amqplib@0.10.x",
+    "ioredis": "npm:ioredis@5.x",
+    "kafkajs": "npm:kafkajs@2.x",
+    "nats": "npm:nats@2.x"
   }
 }

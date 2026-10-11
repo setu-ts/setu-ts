@@ -15,7 +15,7 @@ import {
   HttpCollector,
   MIDDLEWARE_PRIORITY,
 } from '../collectors/http-collector.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Creates a metrics plugin.
@@ -58,7 +58,7 @@ export function MetricsPlugin(options?: MetricsPluginOptions): IPlugin {
 
   return {
     name: 'metrics-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.METRICS],
     priority: 100,
 

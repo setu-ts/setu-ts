@@ -99,8 +99,8 @@ export function adaptAzureModule(
  */
 export async function loadAzureModule(): Promise<AzureSdkModule> {
   const [secretsMod, identityMod] = await Promise.all([
-    import('npm:@azure/keyvault-secrets@^4'),
-    import('npm:@azure/identity@^4'),
+    import('@azure/keyvault-secrets'),
+    import('@azure/identity'),
   ]);
   return {
     SecretClient: secretsMod.SecretClient,

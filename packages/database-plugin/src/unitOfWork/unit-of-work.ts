@@ -10,7 +10,7 @@ import type { DatabaseAdapterType } from '../interfaces/index.ts';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
-  type NativeDrizzleQueryHandle,
+  type DrizzleQueryHandleProvider,
   readDrizzleQueryHandle,
 } from '../query/drizzle-query.ts';
 
@@ -31,24 +31,29 @@ export class UnitOfWork implements IUnitOfWork {
     /** Factory that creates a repository for the given entity name. */
     private readonly _repoFactory: (entity: string) => IRepository<unknown>,
     /** Adapter identity for package-created scopes; omitted by legacy direct callers. */
-    private readonly _adapterType?: DatabaseAdapterType,
-  ) {}
+    private readonly _adapterType?: DatabaseAdapterType | undefined,
+  ) {
+    // The typed-query seam (M70j) is attached here rather than declared as a
+    // computed-key method: a computed-key class member cannot be emitted under
+    // `isolatedDeclarations` (TS9038) even with an explicit type, so the
+    // symbol key is assigned through the structural provider cast and read
+    // back structurally by `readDrizzleQueryHandle` — the runtime shape is
+    // unchanged.
+    (this as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE] = () => {
+      assertDrizzleAdapter(this._adapterType);
+      const handle = readDrizzleQueryHandle(this._transaction);
+      if (handle.scope !== 'transaction') {
+        throw new Error(
+          "Drizzle query access expected 'transaction' scope but received 'outer' scope.",
+        );
+      }
+      return handle;
+    };
+  }
 
   /** @inheritdoc */
   getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id> {
     return this._repoFactory(entity) as IRepository<Entity, Id>;
-  }
-
-  /** Provide the transaction-scoped native Drizzle object through the internal protocol. */
-  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
-    assertDrizzleAdapter(this._adapterType);
-    const handle = readDrizzleQueryHandle(this._transaction);
-    if (handle.scope !== 'transaction') {
-      throw new Error(
-        "Drizzle query access expected 'transaction' scope but received 'outer' scope.",
-      );
-    }
-    return handle;
   }
 
   /**

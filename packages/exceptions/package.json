@@ -1,0 +1,38 @@
+{
+  "name": "@setu-ts/exceptions",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/feature-flags-plugin": "workspace:^",
+    "@setu-ts/http-security-plugin": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/multi-tenancy-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
+    "@setu-ts/storage-plugin": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3"
+  }
+}

@@ -157,10 +157,10 @@ function buildGcpClientOptions(endpoint?: string): Record<string, unknown> | und
  * Lazily imports the GCP Secret Manager SDK. Only exercised on the lazy path.
  *
  * @returns The SDK module
- * @throws {Error} If `npm:@google-cloud/secret-manager` cannot be resolved
+ * @throws {Error} If `@google-cloud/secret-manager` cannot be resolved
  */
 export async function loadGcpModule(): Promise<GcpSdkModule> {
-  return await import('npm:@google-cloud/secret-manager@^5') as unknown as GcpSdkModule;
+  return await import('@google-cloud/secret-manager') as unknown as GcpSdkModule;
 }
 
 /**

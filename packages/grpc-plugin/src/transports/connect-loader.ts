@@ -10,11 +10,11 @@
  * naming the specifier, rather than degrading into a router that silently
  * answers `404`.
  *
- * Each default importer keeps its `npm:` specifier as a **literal** at the
- * `import()` call. JSR's npm-compatibility rewrite is static and reaches only a
- * literal argument; a specifier routed through a parameter, a map lookup, or a
- * `(spec) => import(spec)` indirection ships `npm:` verbatim and cannot load on
- * Node or Bun (X7-3).
+ * Each default importer keeps its bare package specifier as a **literal** at
+ * the `import()` call. A bundler, a type checker and the repository's import
+ * audit see only a literal argument; a specifier routed through a parameter, a
+ * map lookup, or a `(spec) => import(spec)` indirection hides the dependency
+ * from all three (X7-3, which lost it from the published artifact).
  *
  * @module
  */
@@ -31,10 +31,10 @@ import type {
 
 /** The four specifiers the runtime is assembled from, in load order. */
 const SPECIFIERS = {
-  connect: 'npm:@connectrpc/connect@^2.1.2',
-  protocol: 'npm:@connectrpc/connect@^2.1.2/protocol',
-  protobuf: 'npm:@bufbuild/protobuf@^2.7.0',
-  wkt: 'npm:@bufbuild/protobuf@^2.7.0/wkt',
+  connect: '@connectrpc/connect',
+  protocol: '@connectrpc/connect/protocol',
+  protobuf: '@bufbuild/protobuf',
+  wkt: '@bufbuild/protobuf/wkt',
 } as const;
 
 /**
@@ -157,8 +157,8 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
 /**
  * A zero-argument dynamic import for one of the four runtime modules. The
  * zero-argument shape is deliberate: a specifier reaching `import()` through a
- * parameter is invisible to JSR's static npm-compatibility rewrite, so the
- * literal must sit at the `import()` call itself.
+ * parameter is invisible to static analysis, so the literal must sit at the
+ * `import()` call itself.
  */
 export type ConnectImporter = () => Promise<unknown>;
 
@@ -171,18 +171,17 @@ export interface ConnectImporters {
 }
 
 /**
- * The default importers. Each keeps its `npm:` specifier as a literal at the
- * `import()` call, which is the only form that survives JSR's static
- * npm-compatibility rewrite and loads on Node and Bun. Exported (module-only,
- * not barrel) so the loader test can assert each default's source is a literal
- * `import('npm:…')` — the property the old stringified-`import(specifier)`
+ * The default importers. Each keeps its bare specifier as a literal at the
+ * `import()` call, the form static analysis can see. Exported (module-only, not
+ * barrel) so the loader test can assert each default's source is a literal
+ * `import('…')` — the property the old stringified-`import(specifier)`
  * assertion pinned and the published artifact lost.
  */
 export const DEFAULT_IMPORTERS: ConnectImporters = {
-  connect: () => import('npm:@connectrpc/connect@^2.1.2'),
-  protocol: () => import('npm:@connectrpc/connect@^2.1.2/protocol'),
-  protobuf: () => import('npm:@bufbuild/protobuf@^2.7.0'),
-  wkt: () => import('npm:@bufbuild/protobuf@^2.7.0/wkt'),
+  connect: () => import('@connectrpc/connect'),
+  protocol: () => import('@connectrpc/connect/protocol'),
+  protobuf: () => import('@bufbuild/protobuf'),
+  wkt: () => import('@bufbuild/protobuf/wkt'),
 };
 
 /**

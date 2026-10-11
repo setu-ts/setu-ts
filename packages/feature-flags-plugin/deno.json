@@ -2,5 +2,8 @@
   "name": "@setu-ts/feature-flags-plugin",
   "version": "0.8.0",
   "license": "MIT",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "imports": {
+    "@launchdarkly/node-server-sdk": "npm:@launchdarkly/node-server-sdk@^9"
+  }
 }

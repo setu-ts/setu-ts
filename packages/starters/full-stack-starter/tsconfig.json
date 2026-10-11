@@ -1,0 +1,69 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../audit-plugin"
+    },
+    {
+      "path": "../../cache-plugin"
+    },
+    {
+      "path": "../../common"
+    },
+    {
+      "path": "../../config-plugin"
+    },
+    {
+      "path": "../../cqrs-plugin"
+    },
+    {
+      "path": "../../events-plugin"
+    },
+    {
+      "path": "../../exceptions"
+    },
+    {
+      "path": "../../feature-flags-plugin"
+    },
+    {
+      "path": "../../kernel"
+    },
+    {
+      "path": "../../mail-plugin"
+    },
+    {
+      "path": "../../multi-tenancy-plugin"
+    },
+    {
+      "path": "../../notification-plugin"
+    },
+    {
+      "path": "../../react-router-plugin"
+    },
+    {
+      "path": "../../runtime"
+    },
+    {
+      "path": "../../scheduler-plugin"
+    },
+    {
+      "path": "../../secrets-plugin"
+    },
+    {
+      "path": "../microservice-starter"
+    },
+    {
+      "path": "../../static-plugin"
+    },
+    {
+      "path": "../../storage-plugin"
+    }
+  ]
+}

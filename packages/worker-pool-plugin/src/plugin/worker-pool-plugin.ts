@@ -22,7 +22,7 @@ import {
 } from '../services/worker-pool-service.ts';
 import { validateSizingOptions } from '../services/sizing.ts';
 import { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'worker-pool-plugin';
@@ -50,7 +50,7 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
   validateSizingOptions(options);
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     // `CAPABILITIES.METRICS` is optional: absent it nothing changes. Declaring
     // it here is what ORDERS MetricsPlugin's register() before this one when
     // it is present — the resolver turns an optional token whose provider

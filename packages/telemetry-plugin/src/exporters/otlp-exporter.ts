@@ -29,7 +29,7 @@ export async function loadOtlpExporter(
   }
 
   const mod = await import(
-    'npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0'
+    '@opentelemetry/exporter-trace-otlp-http'
   );
   return mod.OTLPTraceExporter;
 }

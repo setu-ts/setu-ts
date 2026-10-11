@@ -2,7 +2,7 @@
  * Redis-backed cache store using ioredis (lazy-loaded or injected).
  *
  * Client resolution mirrors the M10 database-plugin pattern: prefer injected
- * `options.client`; otherwise lazy `import('npm:ioredis@5.x')`.
+ * `options.client`; otherwise lazy `import('ioredis')`.
  *
  * @module
  */
@@ -15,10 +15,10 @@ import type { IRedisClient } from '../interfaces/index.ts';
  * Lazily load ioredis at runtime. Pin to 5.x for stability.
  *
  * @returns The ioredis constructor
- * @throws {Error} If the npm:ioredis package cannot be resolved
+ * @throws {Error} If the ioredis package cannot be resolved
  */
-async function loadIoredis(): Promise<typeof import('npm:ioredis@5.x').Redis> {
-  const mod = await import('npm:ioredis@5.x');
+async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
+  const mod = await import('ioredis');
   return mod.Redis;
 }
 

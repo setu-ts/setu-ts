@@ -24,7 +24,7 @@ export class RedisModuleError extends Error {
  * Pure and synchronous, so the transport's construction path is unit-testable
  * with a fake module and never needs the real driver installed.
  *
- * @param module - The module to adapt, typically `import('npm:ioredis@5.x')`
+ * @param module - The module to adapt, typically `import('ioredis')`
  * @returns A facade whose `create` builds a client, forwarding the transport's
  * client options (the command timeout) to the constructor
  * @throws {RedisModuleError} When the module exposes no constructor
@@ -74,7 +74,7 @@ export function toRedisLoadFailure(error: unknown): RedisModuleError {
     return error;
   }
   return new RedisModuleError(
-    "Failed to load npm:ioredis@5.x. Install it to use the 'redis' realtime " +
+    "Failed to load ioredis. Install it to use the 'redis' realtime " +
       'backplane transport, or inject client and subscriber through options. ' +
       `Cause: ${error instanceof Error ? error.message : String(error)}`,
   );
@@ -83,7 +83,7 @@ export function toRedisLoadFailure(error: unknown): RedisModuleError {
 /**
  * Lazily imports `ioredis`.
  *
- * Performs a real `import('npm:ioredis@5.x')`; the driver is resolved by the
+ * Performs a real `import('ioredis')`; the driver is resolved by the
  * runtime at call time and is not part of this package's dependency graph.
  *
  * @returns The adapted module facade
@@ -92,7 +92,7 @@ export function toRedisLoadFailure(error: unknown): RedisModuleError {
  */
 export async function loadRedisModule(): Promise<IRedisModule> {
   try {
-    const module = await import('npm:ioredis@5.x');
+    const module = await import('ioredis');
     return adaptRedisModule(module);
   } catch (error) {
     throw toRedisLoadFailure(error);

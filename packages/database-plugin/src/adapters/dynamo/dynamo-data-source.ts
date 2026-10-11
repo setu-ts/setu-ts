@@ -119,7 +119,7 @@ export function createDynamoDataSource(
   client: IDynamoClient,
   entity: string,
   mappings: Readonly<Record<string, DynamoEntityMapping>> | undefined,
-  maxPageFetches = DEFAULT_MAX_PAGE_FETCHES,
+  maxPageFetches: number = DEFAULT_MAX_PAGE_FETCHES,
   transactionBuffer?: IDynamoTransactionBuffer,
 ): IDynamoAccessPathReportingDataSource {
   const target = resolveDynamoTarget(entity, mappings);

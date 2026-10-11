@@ -513,7 +513,7 @@ export interface SamlProfile {
 /**
  * The structural shape of the SAML library module, injected
  * through {@linkcode SamlProvider.module} instead of the lazy
- * `npm:@node-saml/node-saml@^5` import — on a runtime where dynamic `npm:`
+ * `@node-saml/node-saml` import — on a runtime where dynamic package
  * imports are unavailable, or to pin a vetted build.
  *
  * Only the `SAML` class is read; it is checked to be a constructor when the
@@ -583,7 +583,7 @@ export interface SamlProvider {
   readonly store?: ISamlRequestStore;
   /**
    * An injected SAML library module; skips the lazy
-   * `npm:@node-saml/node-saml@^5` import.
+   * `@node-saml/node-saml` import.
    */
   readonly module?: SamlModule;
 }

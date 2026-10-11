@@ -1,0 +1,46 @@
+{
+  "name": "@setu-ts/decorator-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/cqrs-plugin": "workspace:^",
+    "@setu-ts/di-plugin": "workspace:^",
+    "@setu-ts/events-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/messaging-plugin": "workspace:^",
+    "@setu-ts/multi-tenancy-plugin": "workspace:^",
+    "@setu-ts/openapi-plugin": "workspace:^",
+    "@setu-ts/queue-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@setu-ts/view-plugin": "workspace:^",
+    "@setu-ts/websocket-plugin": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * GcsProvider — Google Cloud Storage via lazy `npm:@google-cloud/storage@^7`.
+ * GcsProvider — Google Cloud Storage via lazy `@google-cloud/storage`.
  *
  * Follows the M25 inject-or-lazy pattern: accept an injected
  * {@linkcode IGcsClient} facade, or lazily import and adapt the SDK.
@@ -231,7 +231,7 @@ export function adaptGcsModule(
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadGcsModule(): Promise<GcsSdkModule> {
-  return await import('npm:@google-cloud/storage@^7') as unknown as GcsSdkModule;
+  return await import('@google-cloud/storage') as unknown as GcsSdkModule;
 }
 
 /**

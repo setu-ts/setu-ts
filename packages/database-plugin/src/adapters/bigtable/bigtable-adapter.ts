@@ -16,7 +16,7 @@
  *
  * The client is supplied inject-or-lazy (AI_GUIDELINES §12.2):
  * `options.client` — the route for a client built with non-default
- * credentials — or a lazy literal `import('npm:@google-cloud/bigtable@^6')` at
+ * credentials — or a lazy literal `import('@google-cloud/bigtable')` at
  * {@linkcode BigtableAdapter.connect} time.
  *
  * @module

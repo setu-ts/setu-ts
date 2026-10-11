@@ -18,7 +18,7 @@ import { CloudBrokerUnavailableError } from '../errors.ts';
  *
  * @param runtime - The runtime services
  * @param backend - Human-readable backend name (e.g. "GCP Pub/Sub")
- * @param specifier - The npm specifier (e.g. "npm:@google-cloud/pubsub@^6")
+ * @param specifier - The npm specifier (e.g. "@google-cloud/pubsub")
  * @throws {CloudBrokerUnavailableError} When platform is Cloudflare Workers
  */
 export function assertNotCloudflareWorkers(

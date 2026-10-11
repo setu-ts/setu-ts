@@ -4,16 +4,18 @@
  * @module
  */
 
-import denoJson from '../deno.json' with { type: 'json' };
+import { VERSION } from './version.ts';
 
 /**
- * The CLI's version, read from the package's own `deno.json`.
+ * The CLI's version, re-exported from `src/version.ts` (M111a plan §3.5).
  *
- * A static JSON module import rather than a duplicated literal, so the release
- * script's version bump is the single source of truth and `--version` can
- * never drift from the published package version.
+ * One literal rather than a duplicated one, so the release script's version
+ * bump is the single source of truth and `--version` can never drift from the
+ * published package version. The former `deno.json` JSON import left
+ * `rootDir` under the Node build and `deno.json` does not ship in an npm
+ * tarball; the literal lives in `version.ts` beside the sources it versions.
  */
-export const VERSION: string = denoJson.version;
+export { VERSION };
 
 /**
  * The name of the CLI executable.

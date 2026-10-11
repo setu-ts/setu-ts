@@ -17,6 +17,16 @@ docs/api/
 # npm compatibility artifacts (compat test suites)
 node_modules/
 
+# The Node build output (M111a): every member's `tsc -b` writes dist/, and the
+# incremental build state sits beside it. Generated, never committed. The root
+# pnpm-lock.yaml is COMMITTED (the pack gate runs `pnpm install
+# --frozen-lockfile` against it); only per-package lockfiles, which pnpm
+# workspaces never write, would be generated here.
+dist/
+*.tsbuildinfo
+packages/*/pnpm-lock.yaml
+packages/starters/*/pnpm-lock.yaml
+
 # Environment files
 .env
 .env.*

@@ -56,6 +56,7 @@
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
 import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
+import { versionSiteProblems } from './version-sites.ts';
 import { extractReleaseNotes } from './release-notes.ts';
 import {
   checkChangelogPrs,
@@ -104,6 +105,19 @@ for (const dir of PUBLISHED_PACKAGES) {
   if (config.version !== expected) {
     problems.push(`${dir}: version is ${config.version ?? '(missing)'}, expected ${expected}`);
   }
+
+  // M111a §3.5: the version lives at THREE sites per member — deno.json, the
+  // generated package.json, and the src/version.ts literal the npm build
+  // ships. A bump that misses either new site publishes a package whose
+  // npm manifest or runtime VERSION disagrees with the tag.
+  problems.push(
+    ...versionSiteProblems(
+      dir,
+      expected,
+      await Deno.readTextFile(`${dir}/package.json`).catch(() => null),
+      await Deno.readTextFile(`${dir}/src/version.ts`).catch(() => null),
+    ),
+  );
 
   for (const [alias, specifier] of Object.entries(config.imports ?? {})) {
     // Only in-repo packages are checked; a third-party specifier is not ours.
@@ -242,6 +256,14 @@ for (const finding of audit.findings) {
       `\`computed-specifier\` marker — JSR's static npm-compatibility rewrite ` +
       `cannot see a non-literal specifier, so any npm: string would ship ` +
       `verbatim and fail to load on Node or Bun. ${finding.snippet}`,
+  );
+}
+// M111a §3.8: Node resolves neither prefix, so a published package carrying
+// one cannot load there at all.
+for (const hit of audit.prefixed) {
+  problems.push(
+    `${hit.file}:${hit.line}: "${hit.specifier}" is an npm:/jsr:-prefixed import — ` +
+      `Node resolves neither; write the bare package name.`,
   );
 }
 

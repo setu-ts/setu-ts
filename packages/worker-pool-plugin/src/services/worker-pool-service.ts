@@ -77,7 +77,7 @@ export class WorkerPoolService implements IWorkerPool {
      * Present only when the application registered `CAPABILITIES.METRICS`.
      * Threaded into every pool this service creates.
      */
-    private readonly collector?: WorkerPoolCollector,
+    private readonly collector?: WorkerPoolCollector | undefined,
   ) {
     this.sizing = readSizingOptions(options);
     this.host = options?.host ?? runtime.workers;

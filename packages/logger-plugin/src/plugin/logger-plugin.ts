@@ -28,7 +28,7 @@ import type { PinoFactory, PinoLoggerOptions } from '../loggers/pino-logger.ts';
 import { TraceEnrichedLogger } from '../loggers/trace-enriched-logger.ts';
 import { createRequestLoggerMiddleware } from '../middleware/request-logger.ts';
 import type { RequestLoggerOptions } from '../middleware/request-logger.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Selects the underlying logger implementation.
@@ -65,7 +65,7 @@ export interface LoggerPluginOptions {
   readonly excludePaths?: readonly string[];
   /**
    * Inject a pre-loaded Pino factory for the pino transport, bypassing
-   * the `import('npm:pino')` path. Useful for tests.
+   * the `import('pino')` path. Useful for tests.
    *
    * @since 0.1.0
    */
@@ -116,7 +116,7 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     dependencies: ['runtime'],
     provides: [CAPABILITIES.LOGGER],
     priority: PLUGIN_PRIORITY.HIGH,

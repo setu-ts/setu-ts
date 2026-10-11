@@ -66,7 +66,7 @@ import type {
   SubscriptionDefinition,
   SubscriptionEntry,
 } from '../interfaces/index.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Creates a capability token for a named messaging instance.
@@ -271,7 +271,7 @@ export function MessagingPlugin(
 
   return {
     name: pluginName,
-    version: denoJson.version,
+    version: VERSION,
     provides: [
       token,
       ...(outboxOptions === undefined ? [] : [outboxToken]),

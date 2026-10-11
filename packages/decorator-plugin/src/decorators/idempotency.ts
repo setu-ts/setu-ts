@@ -11,6 +11,8 @@
  * @module
  * @since 0.9.0
  */
+import '../metadata/symbol-metadata.ts';
+
 import type { IdempotentRouteOptions } from '@setu-ts/common';
 import { methodDecorator } from '../metadata/context-bridge.ts';
 import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';

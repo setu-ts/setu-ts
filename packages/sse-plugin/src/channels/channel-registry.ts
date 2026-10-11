@@ -95,10 +95,10 @@ export class SseChannelImpl implements SseChannel {
 }
 
 /** Backpressure cap: when backlog exceeds this, send becomes a no-op after close. */
-export const SSE_MAX_BACKLOG_BYTES = 1 * 1024 * 1024; // 1 MiB
+export const SSE_MAX_BACKLOG_BYTES: number = 1 * 1024 * 1024; // 1 MiB
 
 /** High-water mark for the ReadableStream (bytes). */
-export const SSE_HWM_BYTES = 64 * 1024; // 64 KiB
+export const SSE_HWM_BYTES: number = 64 * 1024; // 64 KiB
 
 /**
  * Registry mapping channel names to {@linkcode SseChannelImpl} instances.

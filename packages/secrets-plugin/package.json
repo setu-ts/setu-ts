@@ -1,0 +1,57 @@
+{
+  "name": "@setu-ts/secrets-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-secrets-manager": "^3",
+    "@azure/identity": "^4",
+    "@azure/keyvault-secrets": "^4",
+    "@google-cloud/secret-manager": "^5"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-secrets-manager": {
+      "optional": true
+    },
+    "@azure/identity": {
+      "optional": true
+    },
+    "@azure/keyvault-secrets": {
+      "optional": true
+    },
+    "@google-cloud/secret-manager": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-secrets-manager": "^3",
+    "@azure/identity": "^4",
+    "@azure/keyvault-secrets": "^4",
+    "@google-cloud/secret-manager": "^5",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3"
+  }
+}

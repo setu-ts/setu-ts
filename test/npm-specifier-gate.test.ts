@@ -38,6 +38,11 @@ describe('npm-specifier gate (whole packages/ tree)', () => {
     expect(result.findings).toEqual([]);
   });
 
+  it('finds no npm:/jsr:-prefixed import specifier in packages/*/src (M111a §3.8)', async () => {
+    const result = await auditPackageSources('packages');
+    expect(result.prefixed).toEqual([]);
+  });
+
   it('visited a non-zero number of source files (walker is not vacuous)', async () => {
     const result = await auditPackageSources('packages');
     expect(result.filesVisited).toBeGreaterThan(0);

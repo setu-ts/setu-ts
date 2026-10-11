@@ -1,0 +1,49 @@
+{
+  "name": "@setu-ts/runtime",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker/define-worker-task.d.ts",
+      "default": "./dist/worker/define-worker-task.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.0",
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "ws": "^8.18.0"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@setu-ts/cache-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@types/deno": "2.7.0",
+    "@types/node": "^24",
+    "@types/ws": "^8.18.2",
+    "typescript": "6.0.3",
+    "ws": "^8.18.0"
+  }
+}

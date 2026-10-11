@@ -11,6 +11,8 @@
  *
  * @module
  */
+import '../metadata/symbol-metadata.ts';
+
 import { classOrMethodDecorator, methodDecorator } from '../metadata/context-bridge.ts';
 import type {
   SetuClassOrMethodDecorator,

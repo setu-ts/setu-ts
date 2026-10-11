@@ -53,7 +53,7 @@ export interface SnsPublisherOptions {
  * Lazy-load the AWS SNS SDK v3.
  */
 export async function loadSnsModule(): Promise<SnsSdkModule> {
-  const mod = await import('npm:@aws-sdk/client-sns@^3');
+  const mod = await import('@aws-sdk/client-sns');
   return mod as unknown as SnsSdkModule;
 }
 

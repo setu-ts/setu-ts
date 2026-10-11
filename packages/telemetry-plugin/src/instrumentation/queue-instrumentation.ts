@@ -2,22 +2,22 @@
  * Queue instrumentation loaders for amqplib and kafkajs.
  *
  * Loads `@opentelemetry/instrumentation-amqplib` and
- * `@opentelemetry/instrumentation-kafkajs` via lazy `npm:` imports.
+ * `@opentelemetry/instrumentation-kafkajs` via lazy dynamic imports.
  * Honors the inject-or-lazy seam.
  *
- * Each default `importFn` keeps its `npm:` specifier as a **literal** at the
- * `import()` call — the only form that survives JSR's static
- * npm-compatibility rewrite and loads on Node or Bun (X7-3).
+ * Each default `importFn` keeps its package specifier as a **literal** at the
+ * `import()` call — the only form static analysis (a bundler, the type
+ * checker, the repository's import audit) can see (X7-3).
  *
  * @module
  * @since 0.2.0
  */
 
-/** The `npm:` specifier the amqplib loader resolves. */
-const AMQLIB_SPECIFIER = 'npm:@opentelemetry/instrumentation-amqplib@^0.67.0';
+/** The package specifier the amqplib loader resolves. */
+const AMQLIB_SPECIFIER = '@opentelemetry/instrumentation-amqplib';
 
-/** The `npm:` specifier the kafkajs loader resolves. */
-const KAFKAJS_SPECIFIER = 'npm:@opentelemetry/instrumentation-kafkajs@^0.29.0';
+/** The package specifier the kafkajs loader resolves. */
+const KAFKAJS_SPECIFIER = '@opentelemetry/instrumentation-kafkajs';
 
 /**
  * Constructs an amqplib instrumentation instance from a loaded module.
@@ -45,7 +45,7 @@ export function createAmqplibInstrumentation(
 export async function loadAmqplibInstrumentation(
   configArg: unknown | undefined,
   importFn: () => Promise<Record<string, unknown>> = () =>
-    import('npm:@opentelemetry/instrumentation-amqplib@^0.67.0'),
+    import('@opentelemetry/instrumentation-amqplib'),
 ): Promise<{ instance: unknown; specifier: string }> {
   const mod = await importFn();
   const instance = createAmqplibInstrumentation(mod, configArg);
@@ -78,7 +78,7 @@ export function createKafkaJsInstrumentation(
 export async function loadKafkaJsInstrumentation(
   configArg: unknown | undefined,
   importFn: () => Promise<Record<string, unknown>> = () =>
-    import('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0'),
+    import('@opentelemetry/instrumentation-kafkajs'),
 ): Promise<{ instance: unknown; specifier: string }> {
   const mod = await importFn();
   const instance = createKafkaJsInstrumentation(mod, configArg);

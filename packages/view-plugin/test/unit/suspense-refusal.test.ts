@@ -7,8 +7,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createElement as h, Suspense } from '@hono/hono/jsx';
-import { html } from '@hono/hono/html';
+import { createElement as h, Suspense } from 'hono/jsx';
+import { html } from 'hono/html';
 
 import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { UnresolvedSuspenseError } from '../../src/index.ts';

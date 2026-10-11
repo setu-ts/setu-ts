@@ -78,9 +78,9 @@ export interface RouteRegistrationEvent {
 // order. LinearRouter matches routes linearly and yields all candidates;
 // it also never raises RegExpRouter's UnsupportedPathError on overlapping
 // param patterns. Extracted params are strings either way.
-import { Hono } from '@hono/hono';
-import { LinearRouter } from '@hono/hono/router/linear-router';
-import type { Context as HonoContext, Next as HonoNext } from '@hono/hono';
+import { Hono } from 'hono';
+import { LinearRouter } from 'hono/router/linear-router';
+import type { Context as HonoContext, Next as HonoNext } from 'hono';
 
 /**
  * Programmatic router implementing {@linkcode IRouterApi}. Supports all 7

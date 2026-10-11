@@ -69,10 +69,10 @@ export function adaptSesModule(mod: SesSdkModule, options: SesProviderOptions): 
  * Lazily imports the AWS SESv2 SDK. Only exercised on the lazy path.
  *
  * @returns The SDK module
- * @throws {Error} If `npm:@aws-sdk/client-sesv2` cannot be resolved
+ * @throws {Error} If `@aws-sdk/client-sesv2` cannot be resolved
  */
 export async function loadSesModule(): Promise<SesSdkModule> {
-  return await import('npm:@aws-sdk/client-sesv2@^3') as unknown as SesSdkModule;
+  return await import('@aws-sdk/client-sesv2') as unknown as SesSdkModule;
 }
 
 /** Maps an {@linkcode OutgoingMail} to a `SendEmailCommand` input. */

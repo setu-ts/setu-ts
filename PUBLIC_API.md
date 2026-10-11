@@ -12535,6 +12535,19 @@ carry full JSDoc.
 > `@Inject(...)`; both are positional, the Nth entry binding the Nth argument. `@Params` is checked
 > against the handler's own signature, which the legacy parameter decorators never were.
 
+> **Importing the package installs `Symbol.metadata` when the runtime lacks it.** Node 24 and Bun
+> 1.4 do not define the well-known symbol, so TypeScript's decorator emit hands every decorator
+> `context.metadata === undefined`. Evaluating `@setu-ts/decorator-plugin` sets
+> `Symbol.metadata ??= Symbol.for('Symbol.metadata')` once, at module load — a write-if-absent
+> global mutation, the one module-level exception to AI_GUIDELINES §11.5 (maintainer-approved for
+> M111a). On Deno, which defines the symbol, it is a no-op. The registered key is the one `tsx`,
+> esbuild and Bun's compiler already use, so two copies of the package and those transforms agree on
+> one carrier. A decorated class evaluated **before** the package is imported — or a bundle that
+> dropped the import as side-effect-free — fails at class definition with a named
+> `DecoratorMetadataUnavailableError` whose message gives both remedies, rather than a bare
+> `TypeError`; the package manifest declares no `sideEffects: false`, and the Node manifest
+> generator refuses one that would let a bundler drop the installing module.
+
 ### Values (decorator-plugin exports)
 
 | Export                                                       | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |

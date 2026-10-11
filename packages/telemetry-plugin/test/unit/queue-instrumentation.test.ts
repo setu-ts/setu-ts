@@ -90,7 +90,7 @@ describe('queue-instrumentation', () => {
     const result = await loadAmqplibInstrumentation(undefined, importFn);
     expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-amqplib@^0.67.0');
+    expect(result.specifier).toBe('@opentelemetry/instrumentation-amqplib');
   });
 
   it('loadKafkaJsInstrumentation should use an injected zero-argument importFn', async () => {
@@ -102,7 +102,7 @@ describe('queue-instrumentation', () => {
     const result = await loadKafkaJsInstrumentation(undefined, importFn);
     expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0');
+    expect(result.specifier).toBe('@opentelemetry/instrumentation-kafkajs');
   });
 
   it('loadAmqplibInstrumentation should reject when importFn rejects', async () => {

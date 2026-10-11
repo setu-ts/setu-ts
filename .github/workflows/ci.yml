@@ -466,6 +466,45 @@ jobs:
       - name: Boundary compatibility matrix
         run: deno task check:compat
 
+  # M111a §3.10: every member builds with tsc, packs with pnpm, and installs
+  # with PLAIN npm into an empty project that then serves a request and a
+  # tsc-compiled decorated controller on Node 24, Node 22 and Bun. The Deno
+  # gates cannot see any of it, and without a job the Node build rots before
+  # the test suite moves to Node (111b). `--require-all` turns a missing
+  # runtime into a failure rather than a reported skip.
+  node-build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    name: Node build (pack and boot)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Installs and executes the packed tarballs' third-party dependencies;
+          # it runs no git command at all.
+          persist-credentials: false
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # pnpm comes from the root package.json's `packageManager` pin.
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Generated manifests agree with the sources
+        run: deno run --allow-read scripts/node-manifests.ts --check
+
+      - name: Pack and boot on Node 24, Node 22 and Bun
+        run: deno task check:node-build --require-all
+
   # Deployment artifacts are YAML and Dockerfiles: `deno fmt`, `deno lint` and
   # `deno check` cannot see a defect in any of them. Only building the images
   # and applying the manifests to a real cluster can, and each of these has

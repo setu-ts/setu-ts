@@ -42,7 +42,6 @@ import {
   readPoolCapacity,
 } from '../../health/database-capacity.ts';
 import { isPoolExhaustion } from '../../errors/classify.ts';
-import type { DatabasePoolCapacity } from '../../interfaces/index.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
 import { UnsupportedIsolationLevelError, UnsupportedQueryFeatureError } from '../../errors.ts';
@@ -212,22 +211,14 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Internal capacity-reader seam (M90b). Attached in the constructor ONLY
-   * when `poolStats` is configured; `DatabasePlugin` feature-detects it, and
-   * every other adapter — built-in or custom — carries no member, so
-   * `common`'s port and every non-Drizzle registration stay unchanged.
+   * The internal capacity-reader seams (M90b, M101a V8-3) are attached in the
+   * constructor under their symbol keys — see the constructor for what is
+   * attached when. They are NOT declared as class members: a computed-key
+   * member cannot be emitted under `isolatedDeclarations` (TS9038) even with
+   * an explicit type, so the keys are assigned through a symbol-keyed record
+   * cast and read back the same way (`database-capacity.ts`), leaving the
+   * runtime shape and the feature-detection contract unchanged.
    */
-  [DATABASE_POOL_CAPACITY]?: () => DatabasePoolCapacity;
-
-  /**
-   * Internal completed-query count (M101a V8-3). Attached beside
-   * {@linkcode DATABASE_POOL_CAPACITY} — only with `poolStats`, since the
-   * indicator consults it only to tell a saturated pool from a hung database.
-   * Returns `null` once the typed query seam has handed out the native
-   * instance, since those queries never cross the adapter and cannot be
-   * counted.
-   */
-  [DATABASE_QUERY_PROGRESS]?: () => number | null;
 
   /** Queries this adapter has seen resolve: `rawQuery` and every data-source call. */
   #completedQueries = 0;
@@ -266,10 +257,21 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     // what it returns, validated at read time by the plugin.
     const poolStats = (this._options as DrizzleAdapterOptions | undefined)?.poolStats;
     if (poolStats !== undefined) {
-      this[DATABASE_POOL_CAPACITY] = poolStats;
-      this[DATABASE_QUERY_PROGRESS] = () =>
+      const seams = this as unknown as Record<symbol, unknown>;
+      seams[DATABASE_POOL_CAPACITY] = poolStats;
+      seams[DATABASE_QUERY_PROGRESS] = () =>
         this.#nativeHandleIssued ? null : this.#completedQueries;
     }
+    // The typed-query seam (M70j) is attached here rather than declared as a
+    // computed-key method for the same TS9038 reason recorded on the capacity
+    // seams above; `readDrizzleQueryHandle` reads it structurally.
+    (this as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE] = () => {
+      if (!this._db || !this._configuredDatabase) {
+        throw new Error('DrizzleAdapter is not connected — call connect() first');
+      }
+      this.#nativeHandleIssued = true;
+      return { database: this._configuredDatabase, query: this._db, scope: 'outer' };
+    };
   }
 
   /** @inheritdoc */
@@ -281,7 +283,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     this._supportsIsolation = configured.supportsIsolation;
 
     try {
-      const orm = await import('npm:drizzle-orm@0.45.2');
+      const orm = await import('drizzle-orm');
       const ns = orm as Record<string, unknown>;
       // The explicit option wins; otherwise the instance's own dialect object
       // names it. Drizzle publishes no dialect discriminant, so the class name
@@ -420,15 +422,6 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       }
       return false;
     }
-  }
-
-  /** Provide the exact configured instance to the package's typed Drizzle accessor. */
-  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
-    if (!this._db || !this._configuredDatabase) {
-      throw new Error('DrizzleAdapter is not connected — call connect() first');
-    }
-    this.#nativeHandleIssued = true;
-    return { database: this._configuredDatabase, query: this._db, scope: 'outer' };
   }
 
   /**

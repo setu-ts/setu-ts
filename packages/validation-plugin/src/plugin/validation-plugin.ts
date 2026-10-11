@@ -13,7 +13,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { ValidationService } from '../services/validation-service.ts';
 import type { ErrorFormat, ValidationErrorFormatter } from '../formatters/error-formatter.ts';
 import { resolveFormatter } from '../formatters/error-formatter.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Options for {@linkcode ValidationPlugin}.
@@ -83,7 +83,7 @@ export function ValidationPlugin(options?: ValidationPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.VALIDATION],
     priority: PLUGIN_PRIORITY.HIGH,
 

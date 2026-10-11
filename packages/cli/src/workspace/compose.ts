@@ -45,10 +45,10 @@ import type { TransportSpec } from './transport.ts';
 export const DOCKER_DIR = 'docker';
 
 /** The generated Compose file's path, relative to the workspace root. */
-export const COMPOSE_FILE = `${DOCKER_DIR}/compose.yaml`;
+export const COMPOSE_FILE: string = `${DOCKER_DIR}/compose.yaml`;
 
 /** The generated Dockerfile's path, relative to the workspace root. */
-export const DOCKERFILE = `${DOCKER_DIR}/Dockerfile`;
+export const DOCKERFILE: string = `${DOCKER_DIR}/Dockerfile`;
 
 /**
  * The generated ignore file's path — at the workspace ROOT, not beside the

@@ -827,7 +827,7 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
  * `connect()` throw — the same guarantee the `'custom'` arm gives
  * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * `client` is an already-constructed structural `IMongoClient`, and absent it
- * the adapter performs a literal `import('npm:mongodb@^6.21.0')` at connect time.
+ * the adapter performs a literal `import('mongodb')` at connect time.
  *
  * @example
  * ```typescript
@@ -932,7 +932,7 @@ export type MongoAdapterOptions =
     /**
      * An already-constructed `IMongoClient`.
      *
-     * When present, the lazy `import('npm:mongodb@^6.21.0')` never runs — the
+     * When present, the lazy `import('mongodb')` never runs — the
      * seam that keeps the branching unit-testable.
      */
     readonly client: IMongoClient;
@@ -1032,7 +1032,7 @@ export type DynamoAdapterOptions =
     /**
      * An already-constructed {@linkcode IDynamoClient}.
      *
-     * When present, the lazy `import('npm:@aws-sdk/client-dynamodb@^3')`
+     * When present, the lazy `import('@aws-sdk/client-dynamodb')`
      * never runs — the seam that keeps the branching unit-testable — and the
      * client is never destroyed on `disconnect()`, because it belongs to the
      * application.
@@ -1059,7 +1059,7 @@ export type DynamoAdapterOptions =
  * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * `client` is an already-constructed structural {@linkcode IDynamoClient},
  * and absent it the adapter performs a literal
- * `import('npm:@aws-sdk/client-dynamodb@^3')` at connect time.
+ * `import('@aws-sdk/client-dynamodb')` at connect time.
  *
  * @example
  * ```typescript
@@ -1184,7 +1184,7 @@ export type CosmosAdapterOptions =
     /**
      * An already-constructed `ICosmosClient`.
      *
-     * When present, the lazy `import('npm:@azure/cosmos@^4')` never runs — the
+     * When present, the lazy `import('@azure/cosmos')` never runs — the
      * seam that keeps the branching unit-testable.
      */
     readonly client: ICosmosClient;
@@ -1320,7 +1320,7 @@ export type BigtableAdapterOptions =
     /**
      * An already-constructed `IBigtableClient`.
      *
-     * When present, the lazy `import('npm:@google-cloud/bigtable@^6')` never
+     * When present, the lazy `import('@google-cloud/bigtable')` never
      * runs — the seam that keeps the branching unit-testable.
      */
     readonly client: IBigtableClient;

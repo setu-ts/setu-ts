@@ -269,7 +269,7 @@ export interface GraphqlRuntime {
  *
  * This is deliberately looser than the internal {@linkcode GraphqlRuntime}:
  * it references only the public {@linkcode GraphqlSchemaLike} and `unknown`,
- * so a genuine `npm:graphql` module is assignable to it **without a cast** —
+ * so a genuine `graphql` module is assignable to it **without a cast** —
  * `adaptGraphqlModule(graphql)` type-checks, which is the X6-3 gate. The
  * precise structural types live on `GraphqlRuntime` (internal); the loader
  * bridges the two with a per-member cast, so nothing here is read at runtime.

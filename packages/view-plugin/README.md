@@ -196,11 +196,11 @@ is stateless and touches no backend, and a probe must not fabricate reachability
 
 | Export                    | Kind     |
 | ------------------------- | -------- |
-| `raw`                     | function |
 | `renderView`              | function |
 | `ViewPlugin`              | function |
 | `UnresolvedSuspenseError` | class    |
 | `ViewRenderError`         | class    |
+| `raw`                     | const    |
 | `ViewPluginOptions`       | type     |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

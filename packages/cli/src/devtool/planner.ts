@@ -167,7 +167,7 @@ export function factoryRefusal(source: string): string | undefined {
 }
 
 /** The starter-composed factory's signature opening, as this package renders it. */
-export const STARTER_FACTORY_MARK = `export async function ${CONFIG_EXPORT}(`;
+export const STARTER_FACTORY_MARK: string = `export async function ${CONFIG_EXPORT}(`;
 
 /**
  * Names why a config module composed through a starter factory cannot host the

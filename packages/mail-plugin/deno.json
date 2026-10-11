@@ -3,9 +3,6 @@
   "version": "0.8.0",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "imports": {
-    "@hono/hono": "jsr:@hono/hono@^4.12.30"
-  },
   "test": {
     "permissions": {
       "read": true,
@@ -18,7 +15,15 @@
       "run": [
         "docker"
       ],
-      "sys": ["hostname"]
+      "sys": [
+        "hostname"
+      ]
     }
+  },
+  "imports": {
+    "@aws-sdk/client-sesv2": "npm:@aws-sdk/client-sesv2@^3",
+    "hono/html": "npm:hono@^4.12.30/html",
+    "hono/jsx": "npm:hono@^4.12.30/jsx",
+    "nodemailer": "npm:nodemailer@^10"
   }
 }

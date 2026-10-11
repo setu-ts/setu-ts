@@ -20,7 +20,7 @@ export class AuditService implements IAuditLogger {
   constructor(
     private readonly storage: IAuditStorage,
     private readonly runtime: IRuntimeServices,
-    private readonly redaction?: IRedactionService,
+    private readonly redaction?: IRedactionService | undefined,
   ) {}
 
   /**

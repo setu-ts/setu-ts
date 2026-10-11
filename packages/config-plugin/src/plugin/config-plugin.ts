@@ -22,7 +22,7 @@ import {
 } from '../diagnostics/provenance.ts';
 import type { ConfigPluginOptions } from '../options.ts';
 import { loadConfig } from '../services/load-config.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'config-plugin';
@@ -41,7 +41,7 @@ const PLUGIN_NAME = 'config-plugin';
  * @example
  * ```typescript
  * import { ConfigPlugin } from '@setu-ts/config-plugin';
- * import { z } from 'npm:zod';
+ * import { z } from 'zod';
  *
  * const AppConfigSchema = z.object({
  *   PORT: z.coerce.number().default(3000),
@@ -67,7 +67,7 @@ export function ConfigPlugin(options?: ConfigPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     dependencies: [CAPABILITIES.RUNTIME],
     provides: [CAPABILITIES.CONFIG, CAPABILITIES.CONFIG_DIAGNOSTICS],
     consumes: [CAPABILITIES.RUNTIME],

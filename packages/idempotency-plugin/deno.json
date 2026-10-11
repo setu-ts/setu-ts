@@ -22,5 +22,8 @@
         "127.0.0.1:8086"
       ]
     }
+  },
+  "imports": {
+    "ioredis": "npm:ioredis@5.x"
   }
 }

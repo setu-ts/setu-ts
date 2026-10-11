@@ -5,4 +5,4 @@
  * @module
  * @since 0.6.0
  */
-export { raw } from '@hono/hono/html';
+export { raw } from 'hono/html';

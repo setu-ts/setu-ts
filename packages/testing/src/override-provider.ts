@@ -7,7 +7,7 @@ import type {
   ProviderOptions,
 } from '@setu-ts/common';
 
-import manifest from '../deno.json' with { type: 'json' };
+import { VERSION } from './version.ts';
 
 /**
  * The container the overriding plugin publishes in place of the real one.
@@ -111,7 +111,7 @@ export function overrideProvider<T>(
 ): IPlugin {
   return {
     name: `test-provider-override.${token}`,
-    version: manifest.version,
+    version: VERSION,
     dependencies: [CAPABILITIES.DI_CONTAINER],
     priority: PLUGIN_PRIORITY.NORMAL,
     register(ctx: IPluginContext): void {

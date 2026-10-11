@@ -3,12 +3,12 @@
  * {@linkcode ICosmosClient} facade the adapter operates against, plus the
  * inject-or-lazy loader that supplies the real module on the lazy path.
  *
- * The adapter never imports `npm:@azure/cosmos` directly: it accepts a client
+ * The adapter never imports `@azure/cosmos` directly: it accepts a client
  * through {@linkcode CosmosAdapterOptions.client} (preferred — the application
  * constructs and configures it, which is also how a managed-identity or
  * connection-string client reaches the adapter) or loads it lazily at
  * `connect()` time. The loader performs a real, literal
- * `import('npm:@azure/cosmos@^4')`, so the seam is not a global-hook shim that
+ * `import('@azure/cosmos')`, so the seam is not a global-hook shim that
  * only tests populate (the CLAUDE.md pitfall: a `globalThis.__x` loader throws
  * in production even when the package is installed).
  *
@@ -201,7 +201,7 @@ export interface CosmosSdkModule {
 
 /**
  * The client loader seam — an injected client (no import), or a lazy loader
- * that performs the real `npm:@azure/cosmos@^4` import.
+ * that performs the real `@azure/cosmos` import.
  *
  * @since 0.2.0
  */
@@ -230,9 +230,9 @@ export function createInjectedClientLoader(client: ICosmosClient): CosmosClientL
 
 /**
  * A lazy loader that constructs a client from the literal
- * `npm:@azure/cosmos@^4` specifier at `connect()` time.
+ * `@azure/cosmos` specifier at `connect()` time.
  *
- * Performs a real `import('npm:@azure/cosmos@^4')`; the SDK is resolved by the
+ * Performs a real `import('@azure/cosmos')`; the SDK is resolved by the
  * runtime at call time and is not part of this package's dependency graph.
  *
  * @param endpoint - The account endpoint (for example `https://acct.documents.azure.com:443/`)
@@ -244,7 +244,7 @@ export async function createLazyClientLoader(
   endpoint: string,
   key: string,
 ): Promise<CosmosClientLoader> {
-  const mod = await import('npm:@azure/cosmos@^4') as unknown as CosmosSdkModule;
+  const mod = await import('@azure/cosmos') as unknown as CosmosSdkModule;
   return {
     createClient: (): Promise<ICosmosClient> =>
       Promise.resolve(new mod.CosmosClient({ endpoint, key })),
