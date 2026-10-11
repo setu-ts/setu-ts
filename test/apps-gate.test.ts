@@ -937,7 +937,16 @@ describe('M111b workflow lanes', () => {
         previous = index;
       }
       expect(source).toContain('pnpm/action-setup@v4');
-      expect(source).toContain('pnpm install --frozen-lockfile');
+      // The drift job resolves every declared range fresh, so its package
+      // suites see this week's versions; the PR and release jobs test the
+      // committed lock.
+      if (workflow === 'drift') {
+        expect(source).toContain('rm pnpm-lock.yaml');
+        expect(source).toContain('pnpm install --no-frozen-lockfile');
+        expect(source).not.toContain('pnpm install --frozen-lockfile');
+      } else {
+        expect(source).toContain('pnpm install --frozen-lockfile');
+      }
     });
   }
 });

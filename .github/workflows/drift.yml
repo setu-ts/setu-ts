@@ -216,8 +216,20 @@ jobs:
         with:
           version: 12.11.2
 
-      - name: Install Node test dependencies
-        run: pnpm install --frozen-lockfile
+      # The package suites run on Node since M111b, so they must see this week's
+      # resolution too: installing the committed pnpm-lock.yaml would test the
+      # locked versions and report a drifted ioredis, amqplib, kafkajs, mongodb
+      # or AWS SDK as a green `test` row. The committed lock is kept for the
+      # report's comparison, then removed so pnpm resolves every declared range
+      # fresh. Like the backend steps below it carries continue-on-error, so a
+      # failed resolution reaches the report instead of skipping it.
+      - name: Resolve Node test dependencies fresh
+        id: node-resolve
+        continue-on-error: true
+        run: |
+          cp pnpm-lock.yaml "$RUNNER_TEMP/pnpm-lock.committed.yaml"
+          rm pnpm-lock.yaml
+          pnpm install --no-frozen-lockfile
 
       # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on
       # KEYCLOAK_URL. A step rather than a `services:` container because the
@@ -476,6 +488,7 @@ jobs:
           LINT_OUTCOME: ${{ steps.lint.outcome }}
           CHECK_OUTCOME: ${{ steps.check.outcome }}
           TEST_OUTCOME: ${{ steps.test.outcome }}
+          NODE_RESOLUTION_OUTCOME: ${{ steps.node-resolve.outcome }}
         run: |
           report="$RUNNER_TEMP/dependency-drift.md"
           if [ "$RESOLUTION_OUTCOME" = success ]; then
@@ -484,14 +497,35 @@ jobs:
             printf '%s\n' '## Dependency drift' '' \
               'Fresh resolution failed before the gates could run. The resolve step emits an error annotation naming the owning workspace package and source file.' > "$report"
           fi
+          # The Node side of the same question: every resolved `name@version`
+          # key (packages and snapshots) the fresh pnpm lock added or dropped
+          # against the committed one. Rows start with "| `" so they raise the
+          # issue exactly as the Deno table's rows do.
+          if [ "$NODE_RESOLUTION_OUTCOME" = success ]; then
+            keys() { sed -n "s/^  '\{0,1\}\([^ ']*@[0-9][^ ']*\)'\{0,1\}:\$/\1/p" "$1" | sort -u; }
+            keys "$RUNNER_TEMP/pnpm-lock.committed.yaml" > "$RUNNER_TEMP/pnpm-keys.committed"
+            keys pnpm-lock.yaml > "$RUNNER_TEMP/pnpm-keys.fresh"
+            {
+              printf '%s\n' '' '## Node dependency drift (pnpm)' ''
+              if cmp -s "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh"; then
+                echo 'The fresh pnpm resolution matches the committed pnpm-lock.yaml.'
+              else
+                printf '%s\n' '| Resolution | Change |' '| --- | --- |'
+                comm -23 "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh" | sed 's/.*/| `&` | removed |/'
+                comm -13 "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh" | sed 's/.*/| `&` | added |/'
+              fi
+            } >> "$report"
+          fi
           printf '%s\n' '' '## Fresh-resolution gates' '' \
             '| Gate | Result |' '| --- | --- |' \
             "| resolve | $RESOLUTION_OUTCOME |" \
+            "| node-resolve | $NODE_RESOLUTION_OUTCOME |" \
             "| fmt | $FORMAT_OUTCOME |" \
             "| lint | $LINT_OUTCOME |" \
             "| check | $CHECK_OUTCOME |" \
             "| test | $TEST_OUTCOME |" >> "$report"
           if grep -q '^| `' "$report" || [ "$RESOLUTION_OUTCOME" != success ] || \
+            [ "$NODE_RESOLUTION_OUTCOME" != success ] || \
             [ "$FORMAT_OUTCOME" = failure ] || [ "$LINT_OUTCOME" = failure ] || \
             [ "$CHECK_OUTCOME" = failure ] || [ "$TEST_OUTCOME" = failure ]; then
             echo 'action_required=true' >> "$GITHUB_OUTPUT"
