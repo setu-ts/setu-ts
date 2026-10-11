@@ -23,24 +23,24 @@
     "@setu-ts/common": "workspace:^"
   },
   "peerDependencies": {
-    "@connectrpc/connect": "^2.1.2",
-    "@bufbuild/protobuf": "^2.7.0"
+    "@bufbuild/protobuf": "^2.7.0",
+    "@connectrpc/connect": "^2.1.2"
   },
   "peerDependenciesMeta": {
-    "@connectrpc/connect": {
+    "@bufbuild/protobuf": {
       "optional": true
     },
-    "@bufbuild/protobuf": {
+    "@connectrpc/connect": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@connectrpc/connect": "^2.1.2",
     "@bufbuild/protobuf": "^2.7.0",
+    "@connectrpc/connect": "^2.1.2",
+    "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
-    "@setu-ts/health-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

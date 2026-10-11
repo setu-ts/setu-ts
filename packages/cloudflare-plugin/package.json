@@ -23,14 +23,14 @@
     "@setu-ts/common": "workspace:^"
   },
   "devDependencies": {
+    "@setu-ts/database-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
-    "@setu-ts/websocket-plugin": "workspace:^",
-    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
     "@setu-ts/session-plugin": "workspace:^",
     "@setu-ts/testing": "workspace:^",
-    "@setu-ts/scheduler-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@setu-ts/websocket-plugin": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

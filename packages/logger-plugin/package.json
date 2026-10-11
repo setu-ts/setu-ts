@@ -31,10 +31,10 @@
     }
   },
   "devDependencies": {
-    "pino": "10.x",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "pino": "10.x",
+    "typescript": "6.0.3"
   }
 }

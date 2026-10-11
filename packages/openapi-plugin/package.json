@@ -23,14 +23,14 @@
     "@setu-ts/common": "workspace:^"
   },
   "devDependencies": {
-    "@setu-ts/kernel": "workspace:^",
-    "@setu-ts/runtime": "workspace:^",
-    "@setu-ts/health-plugin": "workspace:^",
-    "@setu-ts/metrics-plugin": "workspace:^",
-    "@setu-ts/validation-plugin": "workspace:^",
-    "@setu-ts/decorator-plugin": "workspace:^",
     "@setu-ts/auth-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@setu-ts/decorator-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

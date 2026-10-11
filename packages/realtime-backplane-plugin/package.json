@@ -31,12 +31,12 @@
     }
   },
   "devDependencies": {
-    "ioredis": "5.x",
+    "@setu-ts/diagnostics-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/websocket-plugin": "workspace:^",
-    "@setu-ts/diagnostics-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "ioredis": "5.x",
+    "typescript": "6.0.3"
   }
 }

@@ -378,6 +378,11 @@ export function findSrcCycle(
 }
 
 /** Renders one member's `package.json` content (two-space JSON, trailing newline). */
+/** A dependency map as an object with its keys in code-unit order, independent of insertion order. */
+function sortedRecord(map: ReadonlyMap<string, string>): Record<string, string> {
+  return Object.fromEntries([...map].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
 export function renderPackageJson(member: MemberInput, classified: ClassifiedMember): string {
   const exports: Record<string, { types: string; default: string }> = {};
   for (const entry of member.exports) {
@@ -397,16 +402,17 @@ export function renderPackageJson(member: MemberInput, classified: ClassifiedMem
     scripts: { build: 'tsc -b' },
   };
   if (classified.dependencies.size > 0) {
-    pkg.dependencies = Object.fromEntries(classified.dependencies);
+    pkg.dependencies = sortedRecord(classified.dependencies);
   }
   if (classified.peerDependencies.size > 0) {
-    pkg.peerDependencies = Object.fromEntries(classified.peerDependencies);
+    const peers = sortedRecord(classified.peerDependencies);
+    pkg.peerDependencies = peers;
     pkg.peerDependenciesMeta = Object.fromEntries(
-      [...classified.peerDependencies.keys()].map((name) => [name, { optional: true }]),
+      Object.keys(peers).map((name) => [name, { optional: true }]),
     );
   }
   if (classified.devDependencies.size > 0) {
-    pkg.devDependencies = Object.fromEntries(classified.devDependencies);
+    pkg.devDependencies = sortedRecord(classified.devDependencies);
   }
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
@@ -713,7 +719,13 @@ async function readJson(path: string): Promise<unknown | null> {
 
 /** Every `.ts`/`.tsx` file under `dir`, repository-relative. */
 async function* walkSources(root: string, dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(`${root}/${dir}`)) {
+  // Sorted, because `readDir` yields filesystem order — which differs between
+  // a developer's disk and a CI checkout, and so would reorder the generated
+  // manifests and fail `--check` on a tree that is not out of date.
+  const entries: Deno.DirEntry[] = [];
+  for await (const entry of Deno.readDir(`${root}/${dir}`)) entries.push(entry);
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory) {
       if (entry.name === 'node_modules' || entry.name === 'dist') continue;

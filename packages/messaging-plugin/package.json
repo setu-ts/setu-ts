@@ -23,24 +23,18 @@
     "@setu-ts/common": "workspace:^"
   },
   "peerDependencies": {
-    "@google-cloud/pubsub": "^6",
     "@azure/service-bus": "^7",
-    "kafkajs": "2.x",
-    "nats": "2.x",
+    "@google-cloud/pubsub": "^6",
     "amqplib": "0.10.x",
-    "ioredis": "5.x"
+    "ioredis": "5.x",
+    "kafkajs": "2.x",
+    "nats": "2.x"
   },
   "peerDependenciesMeta": {
-    "@google-cloud/pubsub": {
-      "optional": true
-    },
     "@azure/service-bus": {
       "optional": true
     },
-    "kafkajs": {
-      "optional": true
-    },
-    "nats": {
+    "@google-cloud/pubsub": {
       "optional": true
     },
     "amqplib": {
@@ -48,25 +42,31 @@
     },
     "ioredis": {
       "optional": true
+    },
+    "kafkajs": {
+      "optional": true
+    },
+    "nats": {
+      "optional": true
     }
   },
   "devDependencies": {
-    "@google-cloud/pubsub": "^6",
     "@azure/service-bus": "^7",
-    "kafkajs": "2.x",
-    "nats": "2.x",
+    "@google-cloud/pubsub": "^6",
+    "@setu-ts/cloudflare-plugin": "workspace:^",
+    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@types/amqplib": "^0.10.8",
+    "@types/node": "^24",
     "amqplib": "0.10.x",
     "ioredis": "5.x",
-    "@setu-ts/kernel": "workspace:^",
-    "@setu-ts/runtime": "workspace:^",
-    "@setu-ts/database-plugin": "workspace:^",
-    "@setu-ts/testing": "workspace:^",
-    "@setu-ts/scheduler-plugin": "workspace:^",
-    "@setu-ts/cloudflare-plugin": "workspace:^",
-    "@setu-ts/health-plugin": "workspace:^",
-    "@setu-ts/metrics-plugin": "workspace:^",
-    "@types/amqplib": "^0.10.8",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "kafkajs": "2.x",
+    "nats": "2.x",
+    "typescript": "6.0.3"
   }
 }

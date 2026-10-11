@@ -31,18 +31,18 @@
     }
   },
   "devDependencies": {
-    "ioredis": "5.x",
+    "@setu-ts/cloudflare-plugin": "workspace:^",
     "@setu-ts/database-plugin": "workspace:^",
-    "@setu-ts/kernel": "workspace:^",
-    "@setu-ts/runtime": "workspace:^",
     "@setu-ts/decorator-plugin": "workspace:^",
-    "@setu-ts/validation-plugin": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
-    "@setu-ts/sdk": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
     "@setu-ts/messaging-plugin": "workspace:^",
     "@setu-ts/queue-plugin": "workspace:^",
-    "@setu-ts/cloudflare-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/sdk": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@types/node": "^24",
+    "ioredis": "5.x",
+    "typescript": "6.0.3"
   }
 }

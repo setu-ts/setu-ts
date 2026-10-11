@@ -20,17 +20,17 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@setu-ts/kernel": "workspace:^",
     "@setu-ts/common": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
-    "@setu-ts/rest-starter": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
     "@setu-ts/messaging-plugin": "workspace:^",
     "@setu-ts/queue-plugin": "workspace:^",
     "@setu-ts/resilience-plugin": "workspace:^",
+    "@setu-ts/rest-starter": "workspace:^",
     "@setu-ts/telemetry-plugin": "workspace:^"
   },
   "devDependencies": {
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

@@ -36,12 +36,12 @@
   },
   "devDependencies": {
     "@aws-sdk/client-sesv2": "^3",
-    "nodemailer": "^10",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
-    "hono": "^4.12.30",
     "@setu-ts/view-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "hono": "^4.12.30",
+    "nodemailer": "^10",
+    "typescript": "6.0.3"
   }
 }

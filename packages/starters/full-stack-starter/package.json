@@ -20,30 +20,30 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@setu-ts/kernel": "workspace:^",
-    "@setu-ts/common": "workspace:^",
-    "@setu-ts/exceptions": "workspace:^",
-    "@setu-ts/runtime": "workspace:^",
-    "@setu-ts/microservice-starter": "workspace:^",
-    "@setu-ts/cache-plugin": "workspace:^",
-    "@setu-ts/events-plugin": "workspace:^",
-    "@setu-ts/cqrs-plugin": "workspace:^",
-    "@setu-ts/scheduler-plugin": "workspace:^",
     "@setu-ts/audit-plugin": "workspace:^",
-    "@setu-ts/secrets-plugin": "workspace:^",
-    "@setu-ts/storage-plugin": "workspace:^",
-    "@setu-ts/mail-plugin": "workspace:^",
+    "@setu-ts/cache-plugin": "workspace:^",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/cqrs-plugin": "workspace:^",
+    "@setu-ts/events-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/feature-flags-plugin": "workspace:^",
-    "@setu-ts/notification-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/mail-plugin": "workspace:^",
+    "@setu-ts/microservice-starter": "workspace:^",
     "@setu-ts/multi-tenancy-plugin": "workspace:^",
+    "@setu-ts/notification-plugin": "workspace:^",
     "@setu-ts/react-router-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/secrets-plugin": "workspace:^",
     "@setu-ts/static-plugin": "workspace:^",
-    "@setu-ts/config-plugin": "workspace:^"
+    "@setu-ts/storage-plugin": "workspace:^"
   },
   "devDependencies": {
     "@setu-ts/decorator-plugin": "workspace:^",
     "@setu-ts/session-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

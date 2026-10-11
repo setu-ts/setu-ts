@@ -24,10 +24,10 @@
     "@setu-ts/kernel": "workspace:^"
   },
   "devDependencies": {
-    "@setu-ts/runtime": "workspace:^",
-    "@setu-ts/di-plugin": "workspace:^",
     "@setu-ts/decorator-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@setu-ts/di-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

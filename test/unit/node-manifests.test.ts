@@ -355,6 +355,39 @@ describe('generateWorkspace — rendered files', () => {
     expect(refusals).toEqual([]);
   });
 
+  it('renders dependency keys sorted, whatever order the sources were read in', () => {
+    // CI regression: `readDir` order differs between disks, and the manifests
+    // came out with test devDependencies in a different order on the runner.
+    const sources = {
+      'test/b.test.ts': "import { r } from '@setu-ts/runtime';",
+      'test/a.test.ts': "import { k } from '@setu-ts/kernel';",
+      'src/index.ts': "import { x } from '@setu-ts/common';\nconst w = await import('ws');",
+    };
+    const forward = member('packages/cache', '@setu-ts/cache', sources);
+    const reversed = member(
+      'packages/cache',
+      '@setu-ts/cache',
+      Object.fromEntries(Object.entries(sources).reverse()),
+    );
+    const render = (m: MemberInput) =>
+      generateWorkspace([COMMON, kernel, RUNTIME, m]).files.get('packages/cache/package.json')!;
+    expect(render(reversed)).toBe(render(forward));
+    const pkg = JSON.parse(render(forward));
+    for (
+      const field of ['dependencies', 'peerDependencies', 'peerDependenciesMeta', 'devDependencies']
+    ) {
+      const keys = Object.keys(pkg[field]);
+      expect(keys).toEqual([...keys].sort());
+    }
+    expect(Object.keys(pkg.devDependencies)).toEqual([
+      '@setu-ts/kernel',
+      '@setu-ts/runtime',
+      '@types/node',
+      'typescript',
+      'ws',
+    ]);
+  });
+
   it('maps every export subpath to its dist .js and .d.ts twins', () => {
     const pkg = JSON.parse(files.get('packages/kernel/package.json')!);
     expect(pkg.exports).toEqual({

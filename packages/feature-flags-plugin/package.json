@@ -34,7 +34,7 @@
     "@launchdarkly/node-server-sdk": "^9",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

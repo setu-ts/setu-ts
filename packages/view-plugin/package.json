@@ -24,10 +24,10 @@
     "hono": "^4.12.30"
   },
   "devDependencies": {
-    "@setu-ts/testing": "workspace:^",
-    "@setu-ts/runtime": "workspace:^",
     "@setu-ts/decorator-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

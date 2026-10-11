@@ -24,18 +24,18 @@
   },
   "peerDependencies": {
     "@aws-sdk/client-secrets-manager": "^3",
-    "@azure/keyvault-secrets": "^4",
     "@azure/identity": "^4",
+    "@azure/keyvault-secrets": "^4",
     "@google-cloud/secret-manager": "^5"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-secrets-manager": {
       "optional": true
     },
-    "@azure/keyvault-secrets": {
+    "@azure/identity": {
       "optional": true
     },
-    "@azure/identity": {
+    "@azure/keyvault-secrets": {
       "optional": true
     },
     "@google-cloud/secret-manager": {
@@ -44,14 +44,14 @@
   },
   "devDependencies": {
     "@aws-sdk/client-secrets-manager": "^3",
-    "@azure/keyvault-secrets": "^4",
     "@azure/identity": "^4",
+    "@azure/keyvault-secrets": "^4",
     "@google-cloud/secret-manager": "^5",
-    "@setu-ts/kernel": "workspace:^",
-    "@setu-ts/runtime": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }

@@ -23,12 +23,15 @@
     "@setu-ts/common": "workspace:^"
   },
   "peerDependencies": {
+    "@aws-sdk/client-sns": "^3",
     "@aws-sdk/client-sqs": "^3",
     "amqplib": "0.10.x",
-    "ioredis": "5.x",
-    "@aws-sdk/client-sns": "^3"
+    "ioredis": "5.x"
   },
   "peerDependenciesMeta": {
+    "@aws-sdk/client-sns": {
+      "optional": true
+    },
     "@aws-sdk/client-sqs": {
       "optional": true
     },
@@ -37,23 +40,20 @@
     },
     "ioredis": {
       "optional": true
-    },
-    "@aws-sdk/client-sns": {
-      "optional": true
     }
   },
   "devDependencies": {
+    "@aws-sdk/client-sns": "^3",
     "@aws-sdk/client-sqs": "^3",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@types/amqplib": "^0.10.8",
+    "@types/node": "^24",
     "amqplib": "0.10.x",
     "ioredis": "5.x",
-    "@aws-sdk/client-sns": "^3",
-    "@setu-ts/kernel": "workspace:^",
-    "@setu-ts/runtime": "workspace:^",
-    "@setu-ts/metrics-plugin": "workspace:^",
-    "@setu-ts/health-plugin": "workspace:^",
-    "@setu-ts/logger-plugin": "workspace:^",
-    "@types/amqplib": "^0.10.8",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "typescript": "6.0.3"
   }
 }

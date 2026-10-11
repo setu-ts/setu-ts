@@ -27,15 +27,15 @@
     "@setu-ts/common": "workspace:^"
   },
   "devDependencies": {
-    "@setu-ts/kernel": "workspace:^",
     "@setu-ts/cache-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/multi-tenancy-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/testing": "workspace:^",
-    "@setu-ts/exceptions": "workspace:^",
-    "hono": "^4.12.30",
     "@setu-ts/view-plugin": "workspace:^",
-    "@setu-ts/multi-tenancy-plugin": "workspace:^",
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "hono": "^4.12.30",
+    "typescript": "6.0.3"
   }
 }

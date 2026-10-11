@@ -23,7 +23,7 @@
     "@setu-ts/common": "workspace:^"
   },
   "devDependencies": {
-    "typescript": "6.0.3",
-    "@types/node": "^24"
+    "@types/node": "^24",
+    "typescript": "6.0.3"
   }
 }
