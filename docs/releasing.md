@@ -1,176 +1,84 @@
-# Releasing to JSR
+# Releasing to npm
 
-Packages are published to [JSR](https://jsr.io) under the `@setu-ts` scope. **JSR versions are
-immutable** — a published version can be yanked, but never deleted or replaced. Every step below is
-designed so that mistakes are caught before that point.
+The npm publisher ships all 51 workspace members as `@setu-ts/*`. M111c builds the machinery; it
+publishes nothing. The first real npm release, `v0.9.0`, waits for M111d's npm scaffolding. Existing
+versions through `0.8.0` remain on JSR. npm versions cannot be reused.
 
-## One-time setup
+## One-time setup — at the cut, after M111d
 
-These run once for the whole project, not once per release.
+The `@setu-ts` npm organization was claimed on 2026-10-10 by `dkpaul91`. Create the GitHub `npm`
+environment with the maintainer as required reviewer. Use Node ≥22.14.0 and npm ≥11.15.0 for the
+trust commands (publishing itself requires npm ≥11.5.1). Never create an npm token or add an npm
+authentication secret to a workflow.
 
-### 1. The scope
+1. Run `npm login` locally with the maintainer account and 2FA, then generate the README-only
+   `0.0.0-bootstrap.0` placeholders:
 
-`@setu-ts` must exist. Create it at [jsr.io/new](https://jsr.io/new) — fill in the **Scope** box
-only (`setu-ts`, without the `@`).
+   ```fish
+   deno task release:placeholders
+   for dir in .tmp/npm-placeholders/*
+       read -P "2FA code for $dir: " otp
+       npm publish "$dir" --tag bootstrap --access public --ignore-scripts --otp "$otp"; or break
+   end
+   ```
 
-### 2. The packages
+   The placeholders only create names. Inspect the output first; it contains no framework code. A
+   partial run can be resumed by publishing only missing names, checked with `npm view`.
 
-**Creating the scope is not enough. Every package must also exist before anything can be published
-to it.**
+2. Prepare the reviewed `0.9.0` release tree before configuring trust. Then configure all 51
+   packages immediately before tagging. npm's 2FA skip window covers a scripted trust loop:
 
-This is the step that is easy to miss, because nothing warns you until a publish fails:
+   ```fish
+   for dir in .tmp/npm-placeholders/*
+       set name (node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).name" "$dir/package.json")
+       npm trust github "$name" --file release.yml --repo setu-ts/setu-ts --env npm --allow-publish --yes; or break
+   end
+   ```
 
-```
-error: Following packages don't exist, follow the links and create them:
-- https://jsr.io/new?scope=setu-ts&package=common&from=cli
-```
+   A new configuration expires unless its first successful publish THROUGH that configuration
+   completes within two days. Saving it does not validate it. Preserve `release.yml`'s filename and
+   environment `npm`, since both are part of the trust claim.
 
-`deno publish` will not create them for you. It can only print one creation link per package, and it
-cannot even do that without a terminal — in CI it simply fails. At 35 packages, doing it by hand
-means 35 web forms.
+3. Within two days, push the reviewed `v0.9.0` tag. This is the first real publish, through OIDC,
+   and validates every configuration while generating provenance. Follow the verification below.
+   Confirm each configuration with `npm trust list <package>`.
 
-Instead, create them all through the JSR API:
+4. Deprecate every placeholder and remove its tag:
 
-```fish
-# Create a personal access token at https://jsr.io/account/tokens
-env JSR_TOKEN=jsrp_… deno task release:create-packages
-```
+   ```fish
+   for dir in .tmp/npm-placeholders/*
+       set name (node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).name" "$dir/package.json")
+       npm deprecate "$name@0.0.0-bootstrap.0" 'Name placeholder; install 0.9.0 or later.'; or break
+       npm dist-tag rm "$name" bootstrap; or break
+   end
+   ```
 
-The script is idempotent — packages that already exist are reported and skipped — so it is safe to
-re-run after a partial failure. Pass `--dry-run` to see what it would create without a token.
+   In every package's publishing-access settings, select **Require two-factor authentication and
+   disallow tokens**. This leaves trusted publishing working. No npm token exists at any point.
 
-#### The weekly package-creation quota
-
-**A scope may create only 20 new packages per rolling 7-day window by default.** This release needs
-35, so the first run stops two-thirds of the way through:
-
-```
-[21/35] FAILED @setu-ts/metrics-plugin — HTTP 400: {
-  "code": "weeklyPackageLimitExceeded",
-  "message": "Exceeded weekly limit of 20 new packages for scope."
-}
-```
-
-No dry run can predict this — the quota is only evaluated on a real write.
-
-Request an increase at `https://jsr.io/@setu-ts/~/settings` → **Quotas** → _Request scope quota
-increase_. Choose **New packages per week** (not _Total packages_, which is a different quota) and
-give a concrete reason: what the scope is, why it is many small packages, and the exact package
-names still needed. Requests are reviewed by a human, so vague ones stall.
-
-The scope's three quotas and what they mean for a 35-package release:
-
-| Quota                     | Default | Relevance                                                     |
-| ------------------------- | ------- | ------------------------------------------------------------- |
-| Total packages            | 100     | Fine — 35 fits.                                               |
-| New packages per week     | **20**  | **The constraint.** Blocks any release creating more than 20. |
-| Publish attempts per week | 1000    | Fine — 35 versions is nothing.                                |
-
-If the increase is declined, the window is rolling: packages created together free up together, so
-waiting a week lets the remaining batch be created in one go.
-
-### 3. Link the GitHub repository
-
-For each package, or via scope settings, link `setu-ts/setu-ts` in JSR. This is what lets the
-tag-triggered workflow publish using the runner's OIDC identity instead of a long-lived token.
-
-Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
+The procedure follows [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) and
+[npm trust](https://docs.npmjs.com/cli/v11/commands/npm-trust).
 
 ## Cutting a release
 
-### 1. Prepare, on a `release/…` branch
+### 1. Prepare on a release branch
 
-`develop` is where every milestone and fix integrates; `main` holds only the last release. Cut the
-release branch from `develop`:
+Cut a `release/vX.Y.Z` branch from `develop` in an isolated worktree. `main` holds only the last
+release. From `0.9.0`, a patch is normal; a minor carries batched breaking changes. Read the
+shipping CHANGELOG section: a `BREAKING` entry requires a minor. `release:verify` refuses a breaking
+patch or a quiet minor unless `--allow-quiet-minor` is deliberate.
 
 ```fish
-git fetch origin
-git switch -c release/v0.3.0 origin/develop
+deno task release:bump 0.9.0 --dry-run
+deno task release:bump 0.9.0
+deno run -A scripts/node-manifests.ts --write
 ```
 
-- **Choose the number from the shipping section, not from habit.** From `0.9.0` a patch is the
-  normal release and a minor is the exception (ROADMAP "Versioning policy from 0.9.0"). Read the
-  `Unreleased` section once: a `BREAKING` entry means a minor, none means a patch. `release:verify`
-  check 10 (`scripts/release-shape.ts`) refuses a patch whose section carries a `BREAKING` entry,
-  and refuses a minor whose section carries none unless you pass `--allow-quiet-minor` — say so
-  deliberately rather than spending a minor by accident, since every caret pin then needs a manual
-  bump for nothing.
+The bump refuses a dirty tree. Read its diff and residual sweep; never bump an `@since` tag. Member
+manifests carry `workspace:^` internal dependencies. pnpm rewrites them to the current `^<version>`
+only during pack, and the publisher checks the packed result before upload. New members need their
+own placeholder and trust configuration before their first real release.
 
-- **Run the bump, then read what it did:**
-
-  ```fish
-  deno task release:bump 0.9.0 --dry-run    # the plan: every file and its replacement count
-  deno task release:bump 0.9.0              # the same, written; refuses a dirty tree
-  ```
-
-  `scripts/bump-version.ts` moves every site the bullets below describe — the members' `version`,
-  every `@setu-ts/<pkg>@<old>` reference by package name (manifests, the SDK's pinned import-map
-  value and inline specifiers, lockfiles including their `major.minor` shorthand, the Dockerfiles'
-  quoted errors, the guides' install snippets), `SDK_VERSION`, the chart's `appVersion`, the
-  rendered manifests' version label, both `Unreleased` headings, and `POST_ALPHA_MINOR_LINES` when a
-  new minor line opens — then re-sweeps the result with `check:versions`' own reader and fails on a
-  residual reference. It never rewrites a bare version number (the range and the `@since` traps
-  below are why), honours `version:history` markers, and prints the steps it cannot take. **The
-  bullets below are kept as the record of WHY each site exists**; after a bump, read them as the
-  checklist the tool's residual list points at, not as steps to repeat by hand.
-
-- Bump `version` in every workspace member's `deno.json`.
-- **Bump the cross-package specifiers to match, and do not trust the count in this sentence.** Under
-  semver a `^0.1.0` range does **not** match a `0.1.0-alpha.1` prerelease, so a version bump that
-  misses one publishes a package whose dependencies cannot resolve — and `deno publish` does not
-  warn. Two distinct groups exist and it is easy to bump only the first: 16 manifests pin
-  `jsr:@setu-ts/{common,kernel,runtime}@^<version>`, and the **three starters plus `static-plugin`
-  pin the whole plugin set** — 68 more specifiers naming 38 distinct packages, which cutting
-  `v0.3.0` found only because `grep` was re-run after the three-package bump reported success. Match
-  on the package name, not on an enumeration:
-
-  ```fish
-  grep -rn 'jsr:@setu-ts/[a-z0-9-]*@^\?<old-version>' packages/*/deno.json packages/*/*/deno.json
-  ```
-
-  It must come back empty before you go further. `release:verify` checks resolvability afterwards,
-  which is the backstop — but it reports a broken tree rather than preventing one.
-- **First-time publishers.** A workspace member present in `PUBLISHED_PACKAGES` can still fail to
-  publish if the JSR package was never created and the repo never linked — a failure that surfaces
-  only in the release workflow, long after the branch merged. Before the first release that ships a
-  new member, run `release:create-packages` (a JSR package must exist before it can be published)
-  and `release:link-repos` (tokenless OIDC publishing requires the repo link). Both are idempotent,
-  and both are worth running BEFORE the release PR merges rather than after: nothing about them
-  depends on the merge, and doing it first means the tag run cannot discover a missing package once
-  the PR has already landed. A third token step, `release:set-metadata`, runs AFTER the publish and
-  is covered in step 4 — a new package's page is blank without it.
-
-  Verify rather than trust the script's own report — `release:verify` does not look at the registry,
-  so nothing else checks this. Every package must exist AND carry a repo link:
-
-  ```fish
-  deno task release:verify-repos
-  ```
-
-  The command exits unsuccessfully for a missing package, an absent repository link, or a link to
-  anything other than `setu-ts/setu-ts`.
-
-  `view-plugin` (M92) was the last one, in `v0.6.0`. The M35 `sdk` release recorded the same step
-  for the one before it — though only the ordering half, because the compat suite did not exist yet
-  when `sdk` first published, which is why the sequencing below was unverified until `view-plugin`
-  hit it.
-
-  **And once it has published — in a FOLLOW-UP PR, never in the release PR itself — move it into the
-  compat suite.** A package that has never been on JSR sits in `PENDING_FIRST_PUBLISH` in
-  `compat/compat.test.mjs`, because `bun install` cannot fetch a package that does not exist and
-  demanding it would deadlock the milestone PR that introduces it. The release PR deadlocks the same
-  way and for the same reason: `node-compat` and `bun-compat` run on **every** pull request and
-  resolve `latest` from the registry, so a dependency on a package the tag run has not published yet
-  fails at install. Measured while cutting `v0.6.0`, with `kernel` as the control:
-  `jsr.io/@setu-ts/view-plugin/meta.json` and `npm.jsr.io/@jsr/setu-ts__view-plugin` both answered
-  `404` while both of `kernel`'s answered `200`. `release:create-packages` does not change that — it
-  creates an empty package, and an empty package has no version to resolve.
-
-  So the order is: release PR (compat untouched) → merge → tag → publish → **then** a follow-up PR
-  that deletes the `PENDING_FIRST_PUBLISH` entry and adds `@jsr/setu-ts__<name>` to
-  `compat/package.json` dependencies. Do not leave that follow-up unopened: while the entry stands,
-  check 1 keeps passing while the package is covered on Deno and nowhere else, which is the exact
-  coverage hole that check exists to catch.
 - **`packages/sdk/deno.json` maps the specifier to a PINNED version, and a `^`-only sed misses the
   value.** Its `imports` entry reads `"jsr:@setu-ts/common@^X": "jsr:@setu-ts/common@X"`; a sweep
   that rewrites `@^<old>` moves the key and leaves the value on the previous release, so
@@ -278,292 +186,88 @@ git switch -c release/v0.3.0 origin/develop
   the wrong releases (M90h). `test/docs-gate.test.ts` refuses a heading with no matching CHANGELOG
   section, so a forgotten rename fails the suite rather than shipping.
 
-### 2. Verify
+### 2. Verify the committed tree
 
 ```fish
 deno task fmt:check; and deno task lint; and deno task check; and deno task test:coverage
-deno task release:verify 0.3.0
+pnpm test:coverage
+deno task release:verify 0.9.0
 deno task check:versions
+deno task check:node-build --require-all
 deno task release:publish --dry-run
 ```
 
-`release:verify` check 9 (`scripts/changelog-prs.ts`) now performs the first and third of the three
-release-cutting changelog checks that each saved a release: every pull request merged since the
-previous tag is represented in the shipping section (a `feat/m<id>-…` PR by its `M<id>`, any other
-PR that changed a published `src/` tree by its `#<number>`), and no milestone's entry sits under an
-already-published heading. The second check — the section does not contradict itself — is still
-yours: read it once as a whole.
+The npm dry run builds once, packs all 51 with scripts disabled, checks each exact packed manifest,
+performs the packument lookup, and runs `npm publish <tarball> --dry-run`. It refuses publication
+holds, stale internal ranges, missing metadata and missing `dist` or `src` file entries. Only HTTP
+404 means a new package; registry errors fail the publisher. An existing version is skipped, so
+retries resume. A prerelease uses tag `next`; an ordinary release uses `latest`.
 
-**A publication hold blocks every release.** `PUBLICATION_HOLDS` in `scripts/release-packages.ts`
-names packages that must not reach JSR yet, and why. While a hold applies, `release:publish` refuses
-before publishing anything, `--dry-run` included, and names each hold. `release:verify` prints a
-`⚠ publication hold` line but does not fail, because CI runs it on every pull request. If the dry
-run refuses, either finish the work the hold names or remove the hold on purpose, in its own
-reviewed change. Do not move the package to `UNPUBLISHED_PACKAGES` to get past it: the released
-CLI's `--devtool` scaffolding imports `@setu-ts/diagnostics-plugin`, so skipping that package ships
-a CLI whose generated projects cannot install.
+`release:verify` checks version sites, source `workspace:^` ranges, release-list coverage, non-stub
+exports, non-empty READMEs, manifest metadata, release assets, changelog PRs and release shape.
+JSR's slow-type dry run is replaced by `tsc -b` with `isolatedDeclarations`; the `@module`-first
+rule is retired because npm renders README.md. The `@since` gate reads JSR through 0.8.x and later
+claims from npm tarball `package/src/` sources. `check:versions` still catches stale specifiers
+outside manifests; fixtures remain data.
 
-`check:versions` sweeps the sites the other two gates structurally cannot see. `release:verify`
-reads manifests and `check:docs` reads Markdown, which leaves TypeScript `src` trees and lockfiles
-covered by nothing — and a stale `@setu-ts` specifier there still **resolves**, because the previous
-version really is on JSR. Measured: reverting one `packages/sdk/src` specifier leaves `deno check`,
-the full suite, `publish:check` and `release:verify` **all green**, and publishes a package that
-depends on the release before the one being cut. It runs on both the PR and tag paths, pinned in
-`test/unit/release-notes.test.ts`. Test fixtures are deliberately out of scope: a fixture's version
-is data, not a dependency — `add.test.ts` hard-codes `@^1` precisely to prove `setu add` preserves
-an existing pin.
+### 3. Merge, tag, and let CI publish
 
-`release:verify` checks five things the test suite cannot: version agreement across all publishable
-packages, cross-package specifier resolvability, that the published and unpublished lists together
-account for every workspace member, that no stub is in the publish list, and that every entrypoint's
-module JSDoc opens with `@module` so the package's README is what renders on jsr.io.
-
-> **A green `--dry-run` is not proof the publish will succeed.** The dry run resolves modules from
-> the workspace; a real publish builds the graph from the package tarball, where a sibling package
-> is not on disk. A cross-package import written as a relative path —
-> `"@setu-ts/common": "../common/src/index.ts"` — therefore passes `deno check`, the full test
-> suite, and `deno publish --dry-run`, then fails on the real publish with:
->
-> ```
-> failed to build module graph: Module not found "file:///common/src/index.ts".
-> ```
->
-> `metrics-plugin` and `telemetry-plugin` both shipped this way and were caught only when the
-> release reached package 21 of 35. `release:verify` now rejects any `@setu-ts/*` import that is not
-> a `jsr:` specifier, so this class cannot reach a publish again — but only if you actually run it.
-
-### 3. Merge, then publish
-
-Open the PR from `release/vX.Y.Z` into **`main`** (pass `--base main` to `gh pr create` explicitly
-even though `main` is the default branch — every PR names its base), request the review with
-`gh pr comment <pr> --body '@coderabbitai review'` (AI_GUIDELINES §16.7), let CI pass, and merge it
-**with a merge commit**. The `main` ruleset refuses squash and rebase: either would give `main` a
-commit `develop` does not have, and every later release and back-merge would conflict on it. Merging
-into `main` also redeploys the public website — Cloudflare Workers Builds watches `main` — which is
-why only a release reaches it. Then switch to `main` and bring it up to the merge commit, so
-verification, publishing and the tag all run on what `main` now holds — staying on `release/vX.Y.Z`
-would tag its pre-merge commit:
+Open the release PR into `main`, request the normal review, and merge with a merge commit. Tag the
+merged commit, after confirming its SHA and running release verification there:
 
 ```fish
-git switch main
-git pull --ff-only origin main
-deno task release:verify 0.3.0
-env JSR_TOKEN=jsrp_… deno task release:publish
+git tag v0.9.0 <reviewed-main-merge-sha>
+git push origin v0.9.0
 ```
 
-**Publish before tagging.** The tag is a record of what shipped; if the publish fails partway you do
-not want a tag claiming otherwise. Once it succeeds:
+`release.yml` has three jobs. `gates` has `contents: read`, runs every test lane and release gate,
+and uploads `resolved-set.json`. `publish` needs gates, names environment `npm`, and alone holds
+`id-token: write` (plus `contents: read`). It checks out without credentials, installs with
+`--ignore-scripts`, builds, packs and publishes with scripts disabled, and runs no tests. It uses
+OIDC alone; there is no npm token. `release` needs publish, holds `contents: write`, downloads the
+resolved-set artifact and creates the GitHub Release. A manual workflow dry run runs the gates and
+publisher without uploading a version or creating a Release.
 
-> **`0.1.0-alpha.9` announcement note.** The release notes must state that `@setu-ts/grpc-plugin`
-> now loads on Node and Bun (X7-3), and that the Connect/Protobuf-ES packages are installed with the
-> host runtime's package manager — the plugin no longer bundles them. The native
-> `application/grpc+proto` transport and the default `basePath` reachability are **not** claimed;
-> those are M70i's decision (register rows X7-2 / X7-4).
+The publisher requires npm ≥11.5.1 and adds `--provenance` on GitHub Actions. A local dry run cannot
+establish OIDC or live provenance; the first tag run supplies that proof. Back-merge `main` into
+`develop` with a merge commit after the release, preserving reviewed history.
 
-```fish
-git tag v0.3.0
-git push origin v0.3.0
-```
+## If publishing stops partway
 
-**Then back-merge `main` into `develop`.** The release branch's version bumps, lockfile updates and
-CHANGELOG rename exist only on `main` until this lands, so the next milestone would otherwise start
-from pre-release manifests:
+Re-run the workflow against the same reviewed tag. The publisher skips versions already in the
+packument and stops on the first failure. Retry inside the two-day trust window during bootstrap. If
+an unused trust configuration expires, delete it in npm's package settings, recreate it with
+`npm trust github`, then complete its first OIDC publish within two days. Do not regenerate trust
+for packages whose first publish already validated it.
 
-```fish
-gh pr create --base develop --head main --title 'chore(release): back-merge v0.3.0 into develop' \
-  --body 'Brings the v0.3.0 release commits onto develop.'
-```
-
-No review is requested on a back-merge: it carries only commits already reviewed on their way into
-`main` (AI_GUIDELINES §16.7). Merge it with a **merge commit** as well: a squash would leave
-`develop` without `main`'s history, so the next release PR would re-apply this one's changes and
-conflict. A defect in a published release that cannot wait for the next one follows the same shape
-from a `hotfix/…` branch cut from `main`: PR into `main`, patch release, back-merge.
-
-### 4. Set the page metadata — every release, not only a first publish
-
-```fish
-env JSR_TOKEN=jsrp_… deno task release:set-metadata
-```
-
-**This is the easiest step in the whole runbook to forget, and forgetting it is invisible everywhere
-but jsr.io.** A package's description and its "Works with" runtime flags live on the PACKAGE, never
-in a published version: `deno publish` uploads a tarball and never touches them, so they stay empty
-however many times a package publishes. Nothing local can see it — the tarball is correct, every
-gate is green, and `release:verify` reads manifests with `--allow-read` and no network, so it cannot
-look at the registry at all. It is the same class of loss as the suppressed READMEs at
-`v0.1.0-alpha.2`.
-
-`v0.6.0` shipped exactly this way: `@setu-ts/view-plugin` published green and its page showed a
-blank description and six greyed-out `?` runtime badges, while all 47 older packages showed both.
-The metadata table was complete and correct the whole time — the script had simply never been run,
-because this step did not exist here. The maintainer found it by opening the page.
-
-Run it on **every** release, not only one that adds a package: it is idempotent (a package already
-matching is reported and skipped), and an edited description in `scripts/jsr-metadata.ts` reaches
-jsr.io by no other route. Then confirm, because the script's own report is not the registry's:
-
-```fish
-curl -s https://api.jsr.io/scopes/setu-ts/packages/<pkg> |
-deno eval "const d = await new Response(Deno.stdin.readable).json();
-const emptyDescription = d.description === '';
-const emptyRuntimeCompat = Object.keys(d.runtimeCompat ?? {}).length === 0;
-console.log(
-  emptyDescription ? 'EMPTY description' : emptyRuntimeCompat ? 'EMPTY runtimeCompat' : 'ok',
-  d.runtimeCompat,
-);"
-```
-
-An empty `description` or a `runtimeCompat` of `{}` means the page is blank for that package.
-
-### Publishing from CI instead
-
-Once the repository is linked (setup step 3), pushing a `v*` tag is sufficient —
-`.github/workflows/release.yml` re-runs the four gates, checks the tag matches the package versions,
-and publishes with OIDC provenance. No token secret is needed.
-
-Note that a tag-triggered run uses the workflow and scripts **as they exist at the tagged commit**,
-not on `main`.
-
-> **The tag-triggered workflow could not publish until `v0.1.0-alpha.2`.** Its publish step ran
-> `publish-packages.ts` with only `--allow-read --allow-run=deno`, so the script died on
-> `Deno.env.get('JSR_TOKEN')` before touching a single package. All three runs before that fix
-> failed the same way, and `v0.1.0-alpha.1` was published by hand from a terminal. A passing
-> `--dry-run` does not catch it: the registry lookup that needs `--allow-net` is skipped under
-> `--dry-run`, so the dry run exercises neither missing permission.
-
-> **The release job needs the same backend containers as CI.** Its gates re-run the full suite, and
-> `test/apps-gate.test.ts` asserts `REDIS_URL` is reachable whenever `CI` is set — which GitHub sets
-> in **every** workflow, not only `ci.yml`. `release.yml` shipped without the `redis` and
-> `elasticmq` services, so that assertion failed and the job died before publishing anything: it is
-> what killed the `v0.1.0-alpha.5` run, which then had to be published by hand. Both workflows now
-> declare the same `env` and `services` block, and `apps-gate.test.ts` pins it on `release.yml` as
-> well, so the pair cannot drift apart again. Nothing local reproduces this — the assertion is
-> deliberately vacuous off CI, so the first evidence is the tag run itself.
-
-> **And it is not enough for them to agree once.** M80 added DynamoDB Local and M82 the Cloud
-> Bigtable emulator to `ci.yml` only, so both guarded suites skipped silently on every tag run while
-> passing on every PR — a weaker gate in front of an immutable publish, and invisible because only
-> `REDIS_URL` carries a reachability assertion. The parity rule is now DERIVED from `ci.yml` in
-> `test/unit/release-notes.test.ts` rather than hand-listed, so a backend added to the PR job is
-> automatically required of the tag job too. Note the Bigtable emulator is a STEP, not a service
-> container — its image's default command is a shell, and a `services` block cannot set one — so it
-> needs its own assertion.
-
-## Tokenless CI publishing needs each package linked to the repository
-
-JSR accepts a GitHub Actions OIDC identity only for a package it knows belongs to the repository:
-
-> To publish from GitHub Actions, you must first link your package to your GitHub repository from
-> your package settings in JSR.
-
-Without the link, `deno publish` gets as far as uploading and then fails with
-
-```
-error: Failed to publish @setu-ts/common@0.1.0-alpha.2
-Caused by:
-    The actor that this request was authenticated for is not authorized to
-    access this resource. (actorNotAuthorized)
-```
-
-`v0.1.0-alpha.1` never hit this because it was published from a terminal with a token, where the
-link is irrelevant. Linking is one web form per package, so:
-
-```bash
-env JSR_TOKEN=jsrp_… deno task release:link-repos
-```
-
-Idempotent, and it prints a settings URL for anything it could not link. Run it once; after that the
-tag-triggered workflow is self-sufficient.
-
-## Why publishing goes through a script
-
-`deno publish` from the workspace root publishes **all 40 members**, including the `sdk` and starter
-stubs that export nothing — and there is no per-package private flag. Since versions are immutable,
-an accidental stub publish is permanent.
-
-`scripts/publish-packages.ts` therefore walks the explicit allow-list in
-`scripts/release-packages.ts`, one package at a time, in dependency order, halting on the first
-failure so dependents never publish against a missing version.
-
-## If a publish fails partway
-
-Nothing needs undoing — re-run `deno task release:publish` and it resumes from where it stopped.
-
-This works because the script asks the registry whether each package already carries the version
-being released, and skips the ones that do:
-
-```
-[1/35] packages/common — already at 0.1.0-alpha.1, skipping
-...
-[21/35] packages/metrics-plugin
-```
-
-That check is load-bearing, not an optimisation. **JSR versions are immutable, so re-publishing an
-existing one is an error, not a no-op** — without the skip, a resumed run would die on the first
-already-published package and never reach the ones that still need publishing. A registry lookup
-that fails for any other reason (network, 5xx) does _not_ skip: the package is published and
-`deno publish` is left to be the authority, so a transient error can never silently drop a package
-from a release.
-
-A publish that stops because a package does not exist is the quota case above, not a defect: the
-packages already published are complete and resolvable, provided nothing in the published set
-depends on something in the unpublished set. Only `common` and `kernel` are depended upon in-repo,
-and the publish order puts them first, so a partial run is always internally consistent.
+As a last-resort recovery when CI cannot be restored, the maintainer may locally publish the real
+release with npm login and 2FA using `deno task release:publish`. This produces no provenance and
+therefore does not satisfy the cut's provenance exit criterion. It is a fallback requiring an
+explicit maintainer decision, never the normal bootstrap path.
 
 ## The GitHub Release object
 
-The tag-triggered workflow creates it automatically, as the LAST step — after the publish, so a
-failure there cannot cost the publish. The body comes from `scripts/release-notes.ts`, which lifts
-this version's `CHANGELOG.md` section and wraps it in the two things a Releases-tab reader needs and
-the changelog does not carry: a **pinned** install line (see the `latest` gotcha below — an unpinned
-instruction installs nothing on a prerelease) and a note that the earlier tags have no Release
-object. The `--prerelease` flag is derived from the version, so `1.0.0` stops being marked one
-without anyone remembering to edit the workflow.
+The final job derives its body from the version's CHANGELOG section. It carries a pinned
+`npm install @setu-ts/kernel@<version> @setu-ts/runtime@<version>` line so an older Release installs
+its own version, and derives prerelease status from the version. Historical alpha tags without
+Release objects remain unfilled.
 
-Tags `v0.1.0-alpha.1` … `v0.1.0-alpha.7` carry no Release object by decision and are not backfilled;
-their notes live in `CHANGELOG.md`. `v0.1.0-alpha.8`'s was created by hand.
+If only this job fails, recover it without republishing:
 
-**If that step goes red, do NOT re-run the job.** The packages are already on JSR by then, versions
-there are immutable, and a re-run fails on every package in the list. Create the object by hand:
-
-```bash
-version=0.1.0-alpha.9   # the version that just published — the ONLY line to edit
-prerelease=$(case "$version" in *-*) echo --prerelease ;; esac)
-mkdir -p .tmp &&
-deno task release:resolved-set "$version" .tmp/resolved-set.json &&
-deno run --allow-read scripts/release-notes.ts "$version" > .tmp/notes.md &&
-gh release create "v$version" --verify-tag --title "v$version" \
-  --notes-file .tmp/notes.md \
-  .tmp/resolved-set.json#resolved-set.json \
-  $prerelease
+```fish
+set version 0.9.0
+set prerelease
+if string match -q '*-*' "$version"
+    set prerelease --prerelease
+end
+mkdir -p .tmp; and deno task release:resolved-set "$version" .tmp/resolved-set.json; and deno run --allow-read scripts/release-notes.ts "$version" > .tmp/notes.md; and gh release create "v$version" --verify-tag --title "v$version" --notes-file .tmp/notes.md .tmp/resolved-set.json#resolved-set.json $prerelease
 ```
 
-Everything after the first line is derived, deliberately: hardcoding the flag would mark the first
-stable release a prerelease, and hardcoding the version in three places invites the one typo this
-recovery path cannot afford. The `case` is the same idiom the workflow step uses, so the manual path
-and the automatic one cannot disagree about what counts as a prerelease.
-
-### Resolved dependency set
-
-Every GitHub Release also carries `resolved-set.json`. It wraps the complete committed `deno.lock`
-under the release version, including exact transitive versions and integrity hashes. That is the
-framework's reproducibility guarantee: rebuilding the tagged framework tree with its lockfile uses
-the reviewed resolution. It does **not** freeze an application's own dependency graph — Node/Bun
-resolve JSR's npm-compatible dependencies with the application's package manager, and Deno resolves
-the application's ranges with its lockfile.
-
-The workflow creates the artifact before publish using:
-
-```bash
-deno task release:resolved-set <version> .tmp/resolved-set.json
-```
-
-The post-publish recovery command above runs the same task and attaches the same asset, so a
-manually recovered release preserves this guarantee.
-
-`release:verify` checks the workflow contract for both generation and attachment, so deleting either
-side is a release-blocking error rather than a missing asset discovered after publication.
+`--verify-tag` prevents a mistyped version from creating a new tag. The workflow checks whether the
+Release already exists before creating it. `resolved-set.json` wraps committed `deno.lock` with the
+release version; M111e will move it to pnpm. It reproduces the framework build, while an application
+still resolves its own dependency graph. `release:verify` requires generation, upload, download and
+attachment across the jobs.
 
 ### Dependency drift
 
@@ -588,49 +292,12 @@ rather than by hand — `rm deno.lock && deno install --frozen=false`, then `den
 tracked sources, then `deno ci` to confirm the result installs frozen. Resolving only one of those
 two halves produces a lockfile that passes `deno check` and fails `deno ci`.
 
-The `&&` is load-bearing rather than stylistic. The workflow step runs under `set -euo pipefail`; a
-block pasted into an interactive shell does not, so without it a failed extraction still leaves a
-truncated `/tmp/notes.md` behind and the next line publishes a release with empty notes.
+## Prereleases and installation timing
 
-`--verify-tag` matters more here than in the workflow: without it `gh release create` creates a
-missing tag from the default branch, so a mistyped version would publish a release pointing at
-whatever `main` happens to be rather than at the commit that was released.
-
-The step is idempotent — it exits early when the release already exists — so a re-run for any other
-reason will not collide with an object created this way.
-
-## Prerelease gotchas
-
-**These stopped applying at `v0.2.0`**, which dropped the prerelease suffix — see the CHANGELOG
-entry for why. They are kept because they bite on any future `-alpha`/`-beta`/`-rc` release, and
-because every tag from `v0.1.0-alpha.1` to `v0.1.0-alpha.10` shipped under them. Neither is a
-defect.
-
-The first no longer applies to a `0.x` release: JSR points `latest` at the current one, so a bare
-`deno add jsr:@setu-ts/kernel` resolves. The second still applies to **every** release, prerelease
-or not — Deno's dependency-age policy is about publication time, not version shape.
-
-### `latest` is not set, so bare installs fail
-
-JSR does not point a package's `latest` at a prerelease. `meta.json` shows `"latest": null` even
-though the version is live, and consumers get:
-
-```
-error: jsr:@setu-ts/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@setu-ts/kernel@^0.1.0-alpha.3
-```
-
-Every install instruction for a prerelease must carry an explicit version. Check the README and
-CHANGELOG before announcing a prerelease — unpinned examples are the easiest thing to get wrong.
-
-### Deno refuses versions younger than 24 hours
-
-Deno's minimum-dependency-age policy (default 24h) blocks freshly published versions:
-
-```
-A newer matching version was found, but it was not used because it was newer than the
-specified minimum dependency date ... pass the --minimum-dependency-age flag
-```
+Prereleases publish under `next`, keeping `latest` on the ordinary release. Install a prerelease
+with an explicit version or `@next`. Release notes always pin the version. Deno's dependency-age
+policy can still block a just-published dependency on the Deno path; the maintainer's immediate
+smoke check can use `--min-dep-age 0`.
 
 ## API documentation
 
@@ -690,25 +357,33 @@ To smoke-test a release immediately, pass `--min-dep-age 0`. This resolves itsel
 affects only the maintainer verifying the release, not ordinary users — but it will surprise you
 every time if it is not written down.
 
-## Verifying a release actually works
+## Verifying the real npm release
 
-A green publish is not proof the artifact is usable. After publishing, install from JSR into a
-throwaway directory — never the workspace, whose import map resolves locally and would mask a broken
-published dependency — and serve one request:
+A green publish does not prove the artifact works. In an empty directory under `.tmp/`, install with
+plain npm, then run a request on Node 24 and Bun. Keep this outside the workspace import map.
 
 ```fish
-mkdir /tmp/relcheck; and cd /tmp/relcheck; and echo '{}' > deno.json
-deno add --min-dep-age 0 jsr:@setu-ts/kernel@^0.1.0-alpha.3 jsr:@setu-ts/runtime@^0.1.0-alpha.3
+mkdir -p .tmp/npm-release-proof; and cd .tmp/npm-release-proof
+npm init -y
+npm install @setu-ts/kernel @setu-ts/runtime
 ```
 
-```typescript
+Save `proof.mjs` with:
+
+```javascript
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-
 const app = createApplication({ plugins: [RuntimePlugin()] });
 app.router.get('/hello', (ctx) => ctx.response.json({ ok: true }));
 await app.start();
-const res = await app.inject({ method: 'GET', url: '/hello' });
-console.log(res.statusCode, res.body); // 200 {"ok":true}
+const response = await app.inject({ method: 'GET', url: '/hello' });
+console.log(response.statusCode, response.body);
 await app.stop();
 ```
+
+Run `node proof.mjs` and `bun proof.mjs`; require 200 and `{"ok":true}`. Inspect
+`npm view <package>@0.9.0 dist.attestations --json` and `npm view <package> dist-tags --json` for
+all 51 names: provenance must exist and `latest` must name `0.9.0`. Confirm descriptions, repository
+links and README on npm. The weekly compat suite installs/imports all 51 and serves real sockets on
+Node/Bun. Before the first publish, its explicit scope probe reports HTTP 404 and skips; HTTP 200
+arms the suite, and any other status fails.

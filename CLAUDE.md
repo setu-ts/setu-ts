@@ -1319,7 +1319,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   sentence amended to say which part is now gated. Verification also found three holes in the gate
   itself, all closed in M37b on this same branch rather than deferred: the example's own test was
   run by nothing, `test/apps-gate.test.ts` never ran in CI, and `check:apps` left an untracked
-  `apps/cloudflare/.wrangler/` that made a following `publish:check` abort) — complete (PR #122)
+  `apps/cloudflare/.wrangler/` that made a following `release:publish --dry-run` abort) — complete
+  (PR #122)
 - **Milestone 37b** (`apps/*` — DI/decorators and memory-database examples, plus a microservices
   correction). `apps/di-decorators` proves a decorated controller's parameter-level `@Inject` and
   makes manual `container.createScope()` explicit: singleton instances span scopes while scoped
@@ -1342,8 +1343,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   runs there (that step was later removed — `test:coverage` now covers the root `test` directory
   itself, so the file still runs on a runner without the suite executing twice), and
   `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the tree ahead of
-  `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to `unusedPort()`) —
-  complete (PR #122)
+  `release:publish --dry-run`. `apps/compiled-binary` moved off its hardcoded port 4317 to
+  `unusedPort()`) — complete (PR #122)
 - **Milestone 53** (`.github/workflows/ci.yml` + `scripts/check-apps.ts` + guarded Redis tests —
   real-backend CI: making the proofs that matter actually run on every pull request. `apps/realtime`
   and `apps/microservices` both exited **77** unless `REDIS_URL` was set and no CI job set it, so
@@ -1570,10 +1571,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   package asserted its barrel exports**: dropping `rfc9457Formatter` from the exceptions
   `src/index.ts` left 18 other tests green — including the integration test and all three starters,
   which are that barrel's only consumers — plus `deno check`, the 100% per-file coverage bar (a
-  re-export file is fully covered merely by being loaded), and `publish:check`, because every test
-  imported the concrete module rather than the barrel. The M52c defect class. Both packages now
-  carry a `barrel-exports.test.ts`, and the exceptions one also pins that the internal Problem
-  Details core does NOT leak into the published surface) — complete (PR #135)
+  re-export file is fully covered merely by being loaded), and `release:publish --dry-run`, because
+  every test imported the concrete module rather than the barrel. The M52c defect class. Both
+  packages now carry a `barrel-exports.test.ts`, and the exceptions one also pins that the internal
+  Problem Details core does NOT leak into the published surface) — complete (PR #135)
 - **Milestone 57** (`packages/common` + `packages/auth-plugin` + `packages/openapi-plugin` — derived
   OpenAPI security. PR #136 made an operation's requirement DECLARABLE, which left the document as a
   second source of truth: a route could carry `requireAuth()` and declare `security: []`, or carry
@@ -6376,30 +6377,17 @@ for is unobservable under a blanket grant.
 see a publish-blocking defect.**
 
 ```bash
-deno task publish:check              # deno publish --dry-run, on a COMMITTED tree
-deno task release:verify <version>   # version agreement, specifier resolvability, workspace
-                                     # coverage, no stub in the list, @module-first
+deno task release:publish --dry-run  # pack, packed-manifest rules, npm lookup and publish dry run
+deno task release:verify <version>  # versions, source workspace ranges, metadata, release contracts
 ```
 
-M51 shipped three separate defects that every one of the four gates and the per-file coverage bar
-passed over, each of which would have stopped the package reaching JSR:
-
-- **A slow type.** `createDepthLimitRule` was exported from the barrel with an inferred return type.
-  JSR rejects that because it blocks automatic `.d.ts` generation — and the CI comment is explicit
-  that the generated `.d.ts` is what the Node and Bun compat jobs consume, so the dry run gates
-  both. Every exported function needs a written-out return type; `deno check` does not care.
-- **A package in neither release list.** `packages/graphql-plugin` was a workspace member absent
-  from both `PUBLISHED_PACKAGES` and `UNPUBLISHED_PACKAGES`, so it would simply never have
-  published. Only `release:verify` looks for this.
-- **A README suppressed on jsr.io.** `src/index.ts` opened its module JSDoc with the description
-  instead of `@module`, which makes JSR render that blurb as the whole package page instead of the
-  README. The README still ships in the tarball, so nothing else can see the loss — `release:verify`
-  check 5 exists precisely for it.
-
-`publish:check` refuses a dirty tree (`--allow-dirty` is deliberately not passed), so run it AFTER
-committing — a "failure" that turns out to be uncommitted changes is not a result. Note also that a
-green `--dry-run` does NOT prove a real publish works: it skips the already-published check, which
-is what needs `--allow-net` (see the `alpha.2` entry above).
+Run both on a committed tree. M111c replaces the JSR publish dry run: `tsc -b` with
+`isolatedDeclarations` covers its slow-type rule; non-empty README validation replaces JSR's
+`@module`-first rendering rule. The publisher checks the exact tarball it hands to npm, including
+internal dependency ranges, repository metadata, public access, and shipped sources and licence. Its
+dry run also performs the packument lookup: the old dry run skipped it, which hid the missing
+network permission that stopped `v0.1.0-alpha.2`. A green dry run still cannot prove OIDC or live
+provenance; that proof belongs to the first npm cut after M111d.
 
 **A milestone whose plan names a committed-tree security audit — or whose diff crosses a trust
 boundary — is ALSO security-audited before it merges**, following
@@ -6567,10 +6555,10 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
   NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
   points, confirm one test drives BOTH under a non-default configuration.
-- **Run the two publish gates on the committed tree.** `deno task publish:check` and
+- **Run the two publish gates on the committed tree.** `deno task release:publish --dry-run` and
   `deno task release:verify <version>` — see the Verification section for the three M51 defects that
   every other gate passed over. A milestone whose package cannot publish is not done, and CI's
-  `JSR publish dry-run` job will say so on the PR after you have handed it back.
+  `npm publish dry-run` job will say so on the PR after you have handed it back.
 - **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table, the
   grep result, and the exit status of both publish gates. "Done" without that evidence is not done.
 - **Flip the milestone's status IN the milestone PR, before it merges.** A completed milestone is

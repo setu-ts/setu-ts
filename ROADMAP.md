@@ -13760,7 +13760,7 @@ Deno: the toolchain is what is coupled.
 | Scripts                  | 33 of 39 `scripts/*.ts` use `Deno.*`.                                                                                                                                                                       |
 | CI                       | `ci.yml`, `release.yml`, `drift.yml`, `website.yml` run Deno; `compat.yml` already runs Node 24 and Bun against the PUBLISHED packages.                                                                     |
 | CLI                      | Deno is the default target of every generated project; `src/main.ts` is the Deno process boundary; `--runtime node` projects install `@jsr/…` packages through `.npmrc`.                                    |
-| npm scope                | `@setu-ts` is unclaimed on npm (`@setu-ts/kernel` → 404). **Claiming it is a maintainer action and blocks 111c.**                                                                                           |
+| npm scope                | `@setu-ts` claimed 2026-10-10 by `dkpaul91`; `@setu-ts/kernel` → 404 until the first npm publish.                                                                                                           |
 
 **What the move changes in meaning, not only in syntax** — each needs a decision inside its letter,
 not a silent loss:
@@ -13838,37 +13838,22 @@ runner, before anything is published to npm.
   run (a converted suite that silently collects fewer tests is the failure this guards against); one
   run under Bun as a smoke, not a gate.
 
-### Milestone 111c: First npm Publish
+### Milestone 111c: npm Publishing Machinery
 
-**Objective:** the framework is installable as `@setu-ts/*` from npm, published by CI.
+**Objective:** build and prove the npm publishing machinery with dry runs; do not cut a release.
 
-- **Blocked on the maintainer claiming the `@setu-ts` npm organization.**
-- Decide `sideEffects` per package behind an audit of top-level statements (111a ships none, which
-  npm reads as "every file has side effects" — correct, merely less tree-shakeable). The
-  `decorator-plugin` manifest may not omit `./dist/metadata/symbol-metadata.js`; the manifest
-  generator refuses it.
-- Trusted publishing (GitHub OIDC, `npm publish --provenance`) from `release.yml`; no long-lived
-  token. The JSR lesson applies: the first real publish exercises paths a dry run skips.
-- `scripts/release-packages.ts`'s dependency-ordered allow-list is reused; pnpm rewrites
-  `workspace:^` to the real version at pack time, so packages are packed with `pnpm pack`, never a
-  bare `npm publish` from the workspace. A release check refuses any tarball whose `package.json`
-  still carries a `workspace:` specifier, which would install for nobody.
-- **pnpm is the repository's tool, not the consumer's.** Published packages are ordinary npm
-  tarballs; `npm install`, Yarn, pnpm and Bun all install them, and the exit proof below uses plain
-  `npm`, deliberately not pnpm.
-- `release:verify` checks re-pointed at npm (`npm view` for already-published and `@since`), or
-  retired with a reason.
-- `compat/` switches from `@jsr/setu-ts__*` to `@setu-ts/*` and becomes the post-publish proof on
-  Node and Bun.
-- **Version:** the first npm release is `v0.9.0`, already a minor under the Versioning Policy below;
-  the install path changes for every consumer, so its release notes lead with the migration.
-- **Bootstrap publish.** npm trusted publishing can only be configured on a package that already
-  exists, so the 51 packages are created once by a manual first publish (maintainer, locally, with
-  `npm login` and 2FA), then each is configured to trust `release.yml`. Every later release is
-  tokenless. The JSR precedent: `release:create-packages` + `release:link-repos` played the same
-  role there.
-- **Exit:** a bare `npm install @setu-ts/kernel @setu-ts/runtime` in an empty directory serves a
-  request on Node 24 and Bun; `npm view` shows provenance on all packages.
+- The `@setu-ts` npm organization was claimed on 2026-10-10 by `dkpaul91`.
+- Generate publish metadata and per-member licences; ship `dist/`, `src/`, README and LICENSE. Audit
+  `sideEffects`; retain the decorator metadata module and prove it under esbuild.
+- Pack all 51 members with `pnpm pack`, verify the packed manifest, look up each version even in a
+  dry run, and publish the tarball with npm in dependency order. Refuse stale internal ranges.
+- Split `release.yml` into gates, publish and release; only publish holds `id-token: write`,
+  installs/packs/publishes with scripts disabled, and uses environment `npm`. No npm token.
+- Switch release verification, CI dry runs and compat to npm. Keep historical `@since` claims
+  through 0.8.x on JSR and read later claims from npm tarballs' shipped source.
+- Generate README-only `0.0.0-bootstrap.0` placeholders for the maintainer's one-time name creation.
+- **Exit:** all 51 dry runs, Node 24/22 and Bun pack-and-boot proofs, bundle proof and negative
+  controls pass on a committed tree. Publishing and live provenance belong to the cut after 111d.
 
 ### Milestone 111d: The CLI Goes Node-First
 
@@ -13883,6 +13868,24 @@ runner, before anything is published to npm.
   target first; the Deno target keeps one boot gate.
 - **Exit:** every template scaffolds, installs, type-checks, lints and boots on Node from a clean
   checkout.
+
+### The v0.9.0 cut — after 111c and 111d
+
+The first npm release is `v0.9.0`; `v0.8.0` remains the last JSR release. The CLI must first
+scaffold npm projects, because it pins generated projects to its own version.
+
+1. The maintainer publishes the README-only placeholders locally with npm login and 2FA under tag
+   `bootstrap`, creating all 51 names without a token.
+2. Configure each package to trust `release.yml`, repository `setu-ts/setu-ts`, environment `npm`
+   using npm ≥11.15.0. Configure trust immediately before tagging: each configuration must complete
+   its first successful OIDC publish within two days or it expires.
+3. Tag `v0.9.0`: CI publishes the first real versions through OIDC, validating all configurations
+   and producing provenance. Deprecate placeholders, remove their tag, and disallow tokens.
+4. **Exit:** a bare npm install of kernel/runtime serves a request on Node 24 and Bun, and npm
+   reports provenance on all 51 real packages.
+
+pnpm is the repository's pack tool; consumers may use npm, Yarn, pnpm or Bun. The exit proof uses
+plain npm in an empty directory. See `docs/releasing.md` for commands and partial-failure recovery.
 
 ### Milestone 111e: Tooling, Scripts and CI
 
@@ -13909,7 +13912,7 @@ own tests and the Deno-target CLI gate.
 
 - `CLAUDE.md`, `AI_GUIDELINES.md` (the Deno-first statement, §12.2's `npm:` lazy-import wording, the
   test-style rule), `ARCHITECTURE.md`, `PUBLIC_API.md` install lines, every package README, `docs/`,
-  and `docs/releasing.md`.
+  and the remaining toolchain prose in `docs/releasing.md`.
 - `docs/upgrading.md` entry: switching an existing project from `jsr:@setu-ts/*` / `@jsr/setu-ts__*`
   to `@setu-ts/*`.
 - Each JSR package's README and description point to npm; the JSR versions stay (JSR versions are
@@ -13917,14 +13920,9 @@ own tests and the Deno-target CLI gate.
 - **Exit:** `check:docs` green and a repo-wide search for `deno task`, `jsr:@setu-ts` and
   `Deno-first` returns only historical records and the Deno adapter.
 
-**Sequencing.** 111a → 111b → 111c is the critical path: nothing is published to npm before the
-suite runs on Node. 111d and 111e can proceed in parallel after 111b. Deno keeps receiving security
-releases throughout, so the Deno gates stay authoritative until each letter replaces them.
-
-**Decision — `v0.9.0` is the first npm release (maintainer, 2026-10-10).** `v0.8.0` stays the last
-JSR release; `v0.9.0` is held until 111c and ships to npm, so it is the version that moves the
-install path. M104 (the client-brief run) is re-pointed at the npm artifacts. The `0.10.0` sentence
-in 111c is superseded by this decision.
+**Sequencing.** 111a → 111b → 111c (machinery) → 111d (Node-first CLI) → the `v0.9.0` cut →
+111e/111f. The cut is held until both 111c and 111d are complete. M104 is re-pointed at npm
+artifacts. Deno gates stay authoritative until the later tooling milestones replace them.
 
 ---
 
@@ -14172,7 +14170,7 @@ patch by construction and gains nothing new here.
 | 110b      | ✅     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |
 | 111a      | ✅     | every member — a Node build: pnpm workspaces, `tsc` to `dist/`, `npm:` lazy imports as optional peers ([#446](https://github.com/setu-ts/setu-ts/pull/446))                                                                                   |
 | 111b      | ✅     | every member — the test suite on Node under Vitest, per-file 90% enforced by the runner ([#447](https://github.com/setu-ts/setu-ts/pull/447))                                                                                                 |
-| 111c      | ⬜     | every member + release tooling — first npm publish (`@setu-ts`, trusted publishing, provenance)                                                                                                                                               |
+| 111c      | ⬜     | every member + release tooling — npm publishing machinery (dry runs; the cut follows 111d)                                                                                                                                                    |
 | 111d      | ⬜     | cli — Node-first: npm `bin`, Node as the default generated target                                                                                                                                                                             |
 | 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |
 | 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                 |
