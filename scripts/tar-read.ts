@@ -40,6 +40,42 @@ function pax(bytes: Uint8Array): ReadonlyMap<string, string> {
   return result;
 }
 
+/** Upper bound on an unpacked registry tarball. The largest member today unpacks to about
+ * 3.2 MB (`cli`), so this leaves about 20× headroom while keeping a crafted gzip from
+ * exhausting memory (security audit F3: 518 KiB once grew memory by about 1 GiB).
+ */
+export const MAX_UNPACKED_TARBALL_BYTES: number = 64 * 1024 * 1024;
+
+/** Gunzips untrusted bytes, refusing (and cancelling the stream) past `limit` unpacked bytes.
+ * @throws {Error} When the output would exceed `limit`, or the input is not valid gzip.
+ */
+export async function gunzipBounded(
+  compressed: Uint8Array<ArrayBuffer>,
+  limit: number = MAX_UNPACKED_TARBALL_BYTES,
+): Promise<Uint8Array> {
+  const reader = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))
+    .getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      throw new Error(`gzip: unpacked size exceeds ${limit} bytes`);
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
 /** Reads regular files from a complete ustar archive, including local/global pax path overrides.
  * @throws {Error} On corrupt headers, invalid lengths or truncated payloads.
  */

@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { readTar } from '../../scripts/tar-read.ts';
+import { gunzipBounded, MAX_UNPACKED_TARBALL_BYTES, readTar } from '../../scripts/tar-read.ts';
 import { archive, paxRecord, tarEntry } from '../fixtures/tar-fixture.ts';
 
 describe('ustar/pax reader', () => {
@@ -45,5 +45,22 @@ describe('ustar/pax reader', () => {
     for (const body of ['abc', 'x path=x\n', '999 path=x\n', '1 x\n', '9 path=x!', '5 ab\n']) {
       expect(() => readTar(archive(tarEntry('pax', body, 'x')))).toThrow();
     }
+  });
+
+  it('gunzips within the bound and refuses output past it', async () => {
+    const gzip = async (bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> =>
+      new Uint8Array(
+        await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')))
+          .arrayBuffer(),
+      );
+    const small = new TextEncoder().encode('hello tar');
+    expect(await gunzipBounded(await gzip(small))).toEqual(small);
+    // 2 MiB of zeros compresses to a few KiB: the shape of a decompression bomb.
+    const bomb = await gzip(new Uint8Array(2 * 1024 * 1024));
+    expect(bomb.length).toBeLessThan(64 * 1024);
+    await expect(gunzipBounded(bomb, 1024 * 1024)).rejects.toThrow('exceeds 1048576 bytes');
+    expect((await gunzipBounded(bomb, 2 * 1024 * 1024)).length).toBe(2 * 1024 * 1024);
+    await expect(gunzipBounded(new Uint8Array([1, 2, 3]))).rejects.toThrow();
+    expect(MAX_UNPACKED_TARBALL_BYTES).toBe(64 * 1024 * 1024);
   });
 });

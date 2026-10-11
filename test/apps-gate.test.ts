@@ -943,6 +943,34 @@ describe('M111c npm workflow boundaries', () => {
     expect(jobs.split('\n  gates:')[1].split('\n  publish:')[0]).not.toContain('id-token');
     expect(jobs.split('\n  release:')[1]).not.toContain('id-token');
   });
+  it('publishes only from a pushed v* tag; a manual run rehearses without an identity', async () => {
+    // Security audit F1: a manual dispatch with a false dry-run input once made a real
+    // OIDC publish from any branch, skipping the tag-only release checks.
+    const text = await Deno.readTextFile('.github/workflows/release.yml');
+    const jobs = '\n' + text.split('\njobs:\n')[1];
+    const gates = jobs.split('\n  gates:')[1].split('\n  publish:')[0];
+    const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
+    const release = jobs.split('\n  release:')[1];
+    const tagOnly = "if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')";
+    expect(publish).toContain(tagOnly);
+    expect(release).toContain(tagOnly);
+    expect(text).not.toMatch(/dry_run|inputs\./);
+    expect(publish).not.toContain('--dry-run');
+    expect(gates).toMatch(
+      /if: github\.event_name == 'workflow_dispatch'\n\s+run: deno task release:publish --dry-run/,
+    );
+  });
+  it('pins every action in the release workflow to a full commit SHA', () => {
+    // Security audit F2: the publish job can mint an npm OIDC token, so an action
+    // that moved under a tag (or a branch, as setup-deno@v2 is) could publish.
+    const text = Deno.readTextFileSync('.github/workflows/release.yml');
+    const uses = [...text.matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)];
+    expect(uses.length).toBeGreaterThanOrEqual(10);
+    for (const [, ref, comment] of uses) {
+      expect(ref).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
+      expect(comment).toMatch(/# v\d+\.\d+\.\d+/);
+    }
+  });
   it('arms each compatibility suite only on a successful npm scope probe', async () => {
     const text = await Deno.readTextFile('.github/workflows/compat.yml');
     for (const job of ['node-compat', 'bun-compat']) {
@@ -985,7 +1013,8 @@ describe('M111b workflow lanes', () => {
         expect(index).toBeGreaterThan(previous);
         previous = index;
       }
-      expect(source).toContain('pnpm/action-setup@v4');
+      // release.yml pins actions to commit SHAs (security audit F2); the others use the tag.
+      expect(source).toMatch(/pnpm\/action-setup@(?:v4\b|[0-9a-f]{40} # v4\.)/);
       // The drift job resolves every declared range fresh, so its package
       // suites see this week's versions; the PR and release jobs test the
       // committed lock.

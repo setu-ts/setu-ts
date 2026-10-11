@@ -447,3 +447,16 @@ before merge.
 | Published tarball content           | A dev dependency, test file or local path ships                | `files` limits the tarball; packed-manifest checks run on the exact bytes uploaded (§3.4); dry run lists contents in CI. |
 | Dependency ranges in tarballs       | A stale or `workspace:` range installs the wrong or no version | `workspace:` and non-`^<version>` in-repo ranges refused before upload (§3.4).                                           |
 | `@since` / compat network fetches   | Registry responses parsed as trusted                           | Read-only fetches; the tar reader bounds sizes and refuses malformed headers; nothing fetched is executed by the gates.  |
+
+> **Correction — committed-tree security audit, 2026-10-12 (fixed on this branch, not re-audited at
+> the maintainer's direction).** The audit of `c8f1f86d` failed on four findings this design review
+> missed. F1 (Medium): trust is bound to `release.yml` and environment `npm` but NOT to a ref, and a
+> `workflow_dispatch` with the dry-run input false made a real OIDC publish from any branch,
+> skipping the tag-only checks. The publish and release jobs now run only on a pushed `v*` tag, a
+> manual run rehearses the publisher inside the gates job, and the runbook restricts environment
+> `npm` to `v*` tags (the control a branch cannot edit away). F2 (Medium): the publish job ran
+> actions referenced by movable tags (`setup-deno@v2` is a branch); every action in `release.yml` is
+> now pinned to a commit SHA. F3 (Low): the `@since` gate gunzipped registry tarballs without a
+> bound; `gunzipBounded` caps output at 64 MiB. F4 (Low): "no npm token at any point" was false,
+> since `npm login` stores a publish-capable session token; the runbook now logs out at the end of
+> every step that logs in. All four carry a test that fails without the fix.

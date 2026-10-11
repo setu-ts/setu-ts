@@ -256,8 +256,8 @@ if (releaseWorkflow === null) {
   const requiredWorkflowFragments = [
     'name: Generate resolved-set artifact',
     'release:resolved-set',
-    'actions/upload-artifact@v4',
-    'actions/download-artifact@v4',
+    'actions/upload-artifact@',
+    'actions/download-artifact@',
     'resolved-set.json#resolved-set.json',
   ];
   for (const fragment of requiredWorkflowFragments) {

@@ -43,7 +43,7 @@
  * @module
  */
 
-import { readTar } from './tar-read.ts';
+import { gunzipBounded, readTar } from './tar-read.ts';
 
 /** The scope every published package ships under. */
 const SCOPE = '@setu-ts';
@@ -626,9 +626,7 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
         if (response.arrayBuffer === undefined) {
           throw new Error('npm tarball response lacks arrayBuffer');
         }
-        const compressed = new Uint8Array(await response.arrayBuffer());
-        const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'));
-        return readTar(new Uint8Array(await new Response(stream).arrayBuffer()));
+        return readTar(await gunzipBounded(new Uint8Array(await response.arrayBuffer())));
       })();
       tarCache.set(url, pending);
     }

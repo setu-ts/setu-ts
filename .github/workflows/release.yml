@@ -2,19 +2,22 @@ name: Release
 
 # Publishes the implemented workspace packages to npm.
 #
-# Triggered by pushing a `v*` tag (e.g. `v0.1.0-alpha.1`), or manually via
-# workflow_dispatch with `dry_run: true` to rehearse without uploading.
+# Triggered by pushing a `v*` tag (e.g. `v0.9.0`). A manual workflow_dispatch is
+# a rehearsal only: it runs the gates and a publish DRY RUN inside the gates job,
+# which holds no id-token, and the publish job does not run at all. A real publish
+# exists only on a pushed tag. The `npm` environment is also restricted to `v*`
+# tags (docs/releasing.md), because a manual run on a branch executes that
+# branch's copy of this file and so could remove the guard below.
+#
+# Every action is pinned to a full commit SHA: the publish job can mint an npm
+# OIDC token, so an action that moved under a tag could publish with valid
+# provenance.
 #
 # npm versions cannot be reused. The gates below run before anything is uploaded.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Simulate the publish without uploading'
-        type: boolean
-        default: true
 
 permissions: {}
 
@@ -170,7 +173,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # actions/checkout writes the job token into the local git config by
           # default, so every step after it can push. This job now requests
@@ -186,15 +189,15 @@ jobs:
           # be blocked by its own gate for a reason unrelated to the release.
           fetch-depth: 0
 
-      - uses: denoland/setup-deno@v2
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: 2.9.6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 12.11.2
 
@@ -407,9 +410,15 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: deno task release:resolved-set "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/resolved-set.json"
 
+      # A manual run rehearses the publisher here, where no OIDC token can be
+      # requested, instead of in the publish job.
+      - name: Rehearse the publisher (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        run: deno task release:publish --dry-run
+
       - name: Upload resolved-set artifact
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: resolved-set
           path: ${{ runner.temp }}/resolved-set.json
@@ -417,49 +426,47 @@ jobs:
 
   publish:
     needs: gates
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     environment: npm
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - uses: pnpm/action-setup@v4
-      - uses: denoland/setup-deno@v2
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: 2.9.6
       - name: Install build dependencies without lifecycle scripts
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Publish
-        run: |
-          deno task release:publish \
-            ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+        run: deno task release:publish
 
   release:
     needs: publish
-    if: startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: denoland/setup-deno@v2
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: 2.9.6
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: resolved-set
           path: ${{ runner.temp }}
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

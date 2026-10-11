@@ -7,12 +7,22 @@ versions through `0.8.0` remain on JSR. npm versions cannot be reused.
 ## One-time setup — at the cut, after M111d
 
 The `@setu-ts` npm organization was claimed on 2026-10-10 by `dkpaul91`. Create the GitHub `npm`
-environment with the maintainer as required reviewer. Use Node ≥22.14.0 and npm ≥11.15.0 for the
-trust commands (publishing itself requires npm ≥11.5.1). Never create an npm token or add an npm
-authentication secret to a workflow.
+environment with the maintainer as required reviewer, and set its deployment branches and tags to
+**Selected** with the single tag rule `v*`. Add a repository tag ruleset that lets only the
+maintainer create or move `v*` tags. The environment rule is the control that matters: a manual
+`workflow_dispatch` runs the dispatched branch's own copy of `release.yml`, so the workflow's
+tag-only guard on the publish job can be edited away on a branch, while the environment refuses to
+hand an OIDC token to anything but a `v*` tag. Use Node ≥22.14.0 and npm ≥11.15.0 for the trust
+commands (publishing itself requires npm ≥11.5.1). Never create an npm access token and never add an
+npm authentication secret to a workflow.
 
-1. Run `npm login` locally with the maintainer account and 2FA, then generate the README-only
-   `0.0.0-bootstrap.0` placeholders:
+`npm login` is the one exception to "no token": it stores a session token in `~/.npmrc` that can
+publish `@setu-ts` packages until it is revoked. Log in at the start of each step below that needs
+it and run `npm logout` (which revokes that token on the registry) at the end of the same step, so
+no session outlives a sitting.
+
+1. Run `npm login` locally with the maintainer account and 2FA, then generate and publish the
+   README-only `0.0.0-bootstrap.0` placeholders, and run `npm logout` when the loop finishes:
 
    ```fish
    deno task release:placeholders
@@ -35,9 +45,10 @@ authentication secret to a workflow.
    end
    ```
 
-   A new configuration expires unless its first successful publish THROUGH that configuration
-   completes within two days. Saving it does not validate it. Preserve `release.yml`'s filename and
-   environment `npm`, since both are part of the trust claim.
+   Log in before the loop and run `npm logout` after it. A new configuration expires unless its
+   first successful publish THROUGH that configuration completes within two days. Saving it does not
+   validate it. Preserve `release.yml`'s filename and environment `npm`, since both are part of the
+   trust claim.
 
 3. Within two days, push the reviewed `v0.9.0` tag. This is the first real publish, through OIDC,
    and validates every configuration while generating provenance. Follow the verification below.
@@ -54,7 +65,9 @@ authentication secret to a workflow.
    ```
 
    In every package's publishing-access settings, select **Require two-factor authentication and
-   disallow tokens**. This leaves trusted publishing working. No npm token exists at any point.
+   disallow tokens**. This leaves trusted publishing working. Then run `npm logout`. From here on no
+   token, session or otherwise, can publish; only `release.yml` on a `v*` tag in environment `npm`
+   can.
 
 The procedure follows [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) and
 [npm trust](https://docs.npmjs.com/cli/v11/commands/npm-trust).
@@ -225,8 +238,11 @@ and uploads `resolved-set.json`. `publish` needs gates, names environment `npm`,
 `id-token: write` (plus `contents: read`). It checks out without credentials, installs with
 `--ignore-scripts`, builds, packs and publishes with scripts disabled, and runs no tests. It uses
 OIDC alone; there is no npm token. `release` needs publish, holds `contents: write`, downloads the
-resolved-set artifact and creates the GitHub Release. A manual workflow dry run runs the gates and
-publisher without uploading a version or creating a Release.
+resolved-set artifact and creates the GitHub Release. Both `publish` and `release` run only for a
+pushed `v*` tag. A manual `workflow_dispatch` is always a rehearsal: it runs the gates and then the
+publisher's dry run INSIDE the gates job, which cannot request an OIDC token, and neither later job
+runs. Every action in the workflow is pinned to a full commit SHA, with its version in a comment;
+update a pin by resolving the new tag to its commit, never by switching back to a tag.
 
 The publisher requires npm ≥11.5.1 and adds `--provenance` on GitHub Actions. A local dry run cannot
 establish OIDC or live provenance; the first tag run supplies that proof. Back-merge `main` into
