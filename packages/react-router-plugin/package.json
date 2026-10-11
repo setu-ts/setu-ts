@@ -1,6 +1,20 @@
 {
   "name": "@setu-ts/react-router-plugin",
   "version": "0.8.0",
+  "description": "React Router v7 framework-mode SSR with file-based routing, as a plugin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/react-router-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/react-router-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -8,7 +22,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "src",
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {

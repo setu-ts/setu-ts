@@ -20,6 +20,7 @@ import {
   type MemberInput,
   normalizeExports,
   renderDenoJson,
+  renderPackageJson,
   renderPnpmWorkspace,
   renderRootPackageJson,
   runNodeManifests,
@@ -258,7 +259,7 @@ describe('the decorator-plugin sideEffects guard (§3.4 safeguard 2)', () => {
     const decorated = member(dir, '@setu-ts/decorator-plugin', { 'src/index.ts': 'export {};' }, {
       currentPackageJson: '{"sideEffects":false}',
     });
-    const other = member('packages/other', '@setu-ts/other', { 'src/index.ts': 'export {};' }, {
+    const other = member('packages/other', '@setu-ts/common', { 'src/index.ts': 'export {};' }, {
       currentPackageJson: '{"sideEffects":false}',
     });
     const refusals = generateWorkspace([decorated, other]).refusals;
@@ -373,10 +374,10 @@ describe('generateWorkspace — rendered files', () => {
       'test/a.test.ts': "import { k } from '@setu-ts/kernel';",
       'src/index.ts': "import { x } from '@setu-ts/common';\nconst w = await import('ws');",
     };
-    const forward = member('packages/cache', '@setu-ts/cache', sources);
+    const forward = member('packages/cache', '@setu-ts/cache-plugin', sources);
     const reversed = member(
       'packages/cache',
-      '@setu-ts/cache',
+      '@setu-ts/cache-plugin',
       Object.fromEntries(Object.entries(sources).reverse()),
     );
     const render = (m: MemberInput) =>
@@ -406,7 +407,7 @@ describe('generateWorkspace — rendered files', () => {
     });
     expect(pkg.type).toBe('module');
     expect(pkg.engines).toEqual({ node: '>=22' });
-    expect(pkg.files).toEqual(['dist', 'README.md']);
+    expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE']);
   });
 
   it('marks every peer optional', () => {
@@ -499,10 +500,11 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
   async function workspace(): Promise<string> {
     const root = await Deno.makeTempDir({ dir: '.tmp', prefix: 'setu-node-manifests-' });
     await Deno.writeTextFile(`${root}/deno.json`, '{"workspace":["./packages/a"]}');
+    await Deno.writeTextFile(`${root}/LICENSE`, 'test license\n');
     await Deno.mkdir(`${root}/packages/a/src`, { recursive: true });
     await Deno.writeTextFile(
       `${root}/packages/a/deno.json`,
-      '{"name":"@setu-ts/a","version":"0.8.0","exports":"./src/index.ts"}',
+      '{"name":"@setu-ts/common","version":"0.8.0","exports":"./src/index.ts"}',
     );
     await Deno.writeTextFile(`${root}/packages/a/src/index.ts`, "import { Hono } from 'hono';");
     return root;
@@ -518,6 +520,9 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
       expect(await runNodeManifests(['--check'], root)).toBe(1);
       expect(await runNodeManifests(['--write'], root)).toBe(0);
       expect(await runNodeManifests(['--check'], root)).toBe(0);
+      await Deno.writeTextFile(`${root}/packages/a/LICENSE`, 'drift');
+      expect(await runNodeManifests(['--check'], root)).toBe(1);
+      await Deno.writeTextFile(`${root}/packages/a/LICENSE`, 'test license\n');
       const path = `${root}/packages/a/package.json`;
       const pkg = JSON.parse(await Deno.readTextFile(path));
       expect(pkg.dependencies).toEqual({ hono: '^4.12.30' });
@@ -543,5 +548,45 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
 
   it('agrees with the committed tree', async () => {
     expect(await runNodeManifests(['--check'])).toBe(0);
+  });
+});
+
+describe('npm publish metadata', () => {
+  it('emits all named fields and includes source and license', () => {
+    const inputs = [COMMON, member('packages/decorator-plugin', '@setu-ts/decorator-plugin')];
+    const generated = generateWorkspace(inputs, 'license bytes');
+    for (const input of inputs) {
+      const pkg = JSON.parse(generated.files.get(`${input.dir}/package.json`)!);
+      for (
+        const field of [
+          'description',
+          'repository',
+          'homepage',
+          'bugs',
+          'publishConfig',
+          'sideEffects',
+        ]
+      ) expect(Object.hasOwn(pkg, field)).toBe(true);
+      expect(pkg.repository).toEqual({
+        type: 'git',
+        url: 'git+https://github.com/setu-ts/setu-ts.git',
+        directory: input.dir,
+      });
+      expect(pkg.publishConfig).toEqual({ access: 'public' });
+      expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE']);
+      expect(generated.files.get(`${input.dir}/LICENSE`)).toBe('license bytes');
+      expect(pkg.sideEffects).toEqual(
+        input === COMMON ? false : ['./dist/metadata/symbol-metadata.js'],
+      );
+    }
+  });
+  it('refuses missing descriptions in generation and the renderer', () => {
+    const unknown = member('packages/unknown', '@setu-ts/unknown');
+    expect(generateWorkspace([unknown]).refusals).toContain(
+      '@setu-ts/unknown: missing package description',
+    );
+    expect(() => renderPackageJson(unknown, classifyMember(unknown, new Map()).classified)).toThrow(
+      'description',
+    );
   });
 });

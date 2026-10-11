@@ -1,6 +1,20 @@
 {
   "name": "@setu-ts/testing",
   "version": "0.8.0",
+  "description": "Test app factory, mock plugins, and request injection for Setu-TS",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/testing"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/testing",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -8,7 +22,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "src",
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {

@@ -1,6 +1,20 @@
 {
   "name": "@setu-ts/microservice-starter",
   "version": "0.8.0",
+  "description": "createMicroserviceApp — REST plus messaging, queues, resilience, and telemetry",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/starters/microservice-starter"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/starters/microservice-starter",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -8,7 +22,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "src",
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {
