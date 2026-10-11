@@ -794,9 +794,11 @@ All notable changes to this project are documented here. The format follows
   Bun and Workers send none. The Node adapter now removes that default whenever the framework
   response is a byte or stream body that sets no type, matching the Fetch standard, which implies a
   type only for a string body. Explicit types (`send`, `text`, `json`, a set header) are unchanged.
-  A Node client that relied on the injected `text/plain` must now set the header itself.
-  `NodeServeHost.serve`'s `fetch` callback gains an optional second `env` parameter (node-server's
-  `{ outgoing }`); a host that never passes it is unaffected.
+  A Node client that relied on the injected `text/plain` must now set the header itself. A body with
+  no type can now be MIME-sniffed by a browser, as it already could on the other runtimes: set a
+  type on any streamed body that may carry untrusted bytes, or send
+  `X-Content-Type-Options: nosniff`. `NodeServeHost.serve`'s `fetch` callback gains an optional
+  second `env` parameter (node-server's `{ outgoing }`); a host that never passes it is unaffected.
 
 - **MongoDB refuses an operator-shaped key (`@setu-ts/database-plugin`, M105).** Since M78 a key
   value that was an object — `findById({ $ne: 'x' })`, or such a value inside a composite key —

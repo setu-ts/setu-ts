@@ -459,14 +459,15 @@ folder; a transport-header producer supplying hostile property names or a record
 properties. No new network listener, credential, numeric budget, or public plugin option is added.
 The original CLI path validation and publish-option validation remain obligations of their callers.
 
-| Threat                                                                                          | Required resolution                                                                               |
-| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Recursive removal used to emulate empty-directory removal deletes contents                      | Use a nonrecursive directory operation; prove refusal with contents intact.                       |
-| Following a symbolic link removes its target                                                    | Remove the link itself; prove target contents remain.                                             |
-| A malformed-key header changes the result prototype or silently disappears                      | Copy only own enumerable entries as own data properties; preserve the ordinary prototype.         |
-| The framework-header merge changes caller/header precedence or permits reserved-header spoofing | Keep existing precedence and validated reserved transport metadata; exercise the broker consumer. |
-| Removing node-server's default drops a type the application set                                 | Strip only when the framework response is bytes or a stream and names no `content-type`.          |
-| The `writeHead` wrapper leaks into later responses on a kept-alive connection                   | Wrap the one exchange's `outgoing` for one call, restoring the original before delegating.        |
+| Threat                                                                                          | Required resolution                                                                                                                                               |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recursive removal used to emulate empty-directory removal deletes contents                      | Use a nonrecursive directory operation; prove refusal with contents intact.                                                                                       |
+| Following a symbolic link removes its target                                                    | Remove the link itself; prove target contents remain.                                                                                                             |
+| A malformed-key header changes the result prototype or silently disappears                      | Copy only own enumerable entries as own data properties; preserve the ordinary prototype.                                                                         |
+| The framework-header merge changes caller/header precedence or permits reserved-header spoofing | Keep existing precedence and validated reserved transport metadata; exercise the broker consumer.                                                                 |
+| Removing node-server's default drops a type the application set                                 | Strip only when the framework response is bytes or a stream and names no `content-type`.                                                                          |
+| An untyped body loses `text/plain` and becomes MIME-sniffable as HTML in a browser              | Accepted for runtime parity (Deno, Bun and Workers already send no type); documented in the CHANGELOG: set a type on streamed untrusted bytes, or send `nosniff`. |
+| The `writeHead` wrapper leaks into later responses on a kept-alive connection                   | Wrap the one exchange's `outgoing` for one call, restoring the original before delegating.                                                                        |
 
 **Implementation-audit obligations:** exercise empty/nonempty/missing/file/symlink removal with
 positive controls and a negative control that restores the original adapter; send ordinary and
