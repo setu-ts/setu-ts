@@ -469,8 +469,17 @@ jobs:
         with:
           deno-version: 2.9.6
 
+      # The matrix files are Vitest suites since M111b, so they run on Node.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+
       - name: Install frozen dependencies
-        run: deno ci
+        run: pnpm install --frozen-lockfile
 
       # The ordinary suite can pass with only one supported third-party major
       # installed. This targeted matrix makes the declared boundary claims

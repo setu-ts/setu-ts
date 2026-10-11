@@ -28,8 +28,20 @@ export async function tempDir(options: { prefix?: string; dir?: string } = {}): 
   return mkdtemp(resolve(base, options.prefix ?? 'test-'));
 }
 
-/** Find Deno for tests of generated Deno projects; absence is a failure, never a skip. */
-export function denoBinary(path = process.env.PATH ?? ''): string {
+/** The running Deno executable, or `undefined` under any other runtime. */
+function runningDeno(): string | undefined {
+  return 'Deno' in globalThis ? process.execPath : undefined;
+}
+
+/**
+ * Find Deno for tests of generated Deno projects; absence is a failure, never a skip.
+ *
+ * Under Deno (the browser gate's harness) the running executable is the answer: that harness grants
+ * read access to the workspace only, so a PATH scan cannot see the binary and would report it
+ * missing.
+ */
+export function denoBinary(path = process.env.PATH ?? '', self = runningDeno()): string {
+  if (self !== undefined) return self;
   for (const directory of path.split(delimiter).filter(Boolean)) {
     const candidate = resolve(directory, process.platform === 'win32' ? 'deno.exe' : 'deno');
     try {

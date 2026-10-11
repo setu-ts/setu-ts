@@ -53,6 +53,7 @@ describe('Node test host helpers', () => {
   it('finds Deno on PATH and names the missing-binary requirement', () => {
     expect(denoBinary()).toMatch(/deno/);
     expect(() => denoBinary('')).toThrow('deno is required on PATH');
+    expect(denoBinary('', '/opt/deno/bin/deno')).toBe('/opt/deno/bin/deno');
   });
 });
 
