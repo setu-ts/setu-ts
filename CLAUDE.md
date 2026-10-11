@@ -6113,7 +6113,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Low findings — `deno.lock` pinning `source-map-js@1.2.1`, which failed CI's audit job, and the
   untyped-body change leaving such bodies MIME-sniffable undocumented — both fixed afterwards and
   NOT re-audited, at the maintainer's direction. Not run locally: Keycloak, Postgres-backed Drizzle
-  and Prisma, Pub/Sub, Service Bus, Cosmos, LocalStack, Vault — complete (PR pending)
+  and Prisma, Pub/Sub, Service Bus, Cosmos, LocalStack, Vault — complete (PR #447)
 - **Next milestone** — M111c, the first npm publish; M104 — the `v0.9.0` client-brief run — follows
   the `v0.9.0` cut; see ROADMAP.md.
 
