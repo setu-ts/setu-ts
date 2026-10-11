@@ -5,16 +5,15 @@
  * verifies that the graphql package can be lazily imported and used.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 describe('graphql real import', () => {
   it('successfully imports and uses graphql module', async () => {
     // Guarded real import - this is the actual npm:graphql package
-    let graphql: typeof import('npm:graphql') | null = null;
+    let graphql: typeof import('graphql') | null = null;
 
     try {
-      graphql = await import('npm:graphql@^16');
+      graphql = await import('graphql');
     } catch (_e) {
       // Skip test if graphql is not installed
       return;
@@ -46,10 +45,10 @@ describe('graphql real import', () => {
   });
 
   it('executes a simple query', async () => {
-    let graphql: typeof import('npm:graphql') | null = null;
+    let graphql: typeof import('graphql') | null = null;
 
     try {
-      graphql = await import('npm:graphql@^16');
+      graphql = await import('graphql');
     } catch (_e) {
       return;
     }

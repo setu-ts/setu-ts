@@ -2,8 +2,7 @@
  * Unit tests for the worker-pool contracts: protocol guards and the
  * WORKER_POOL capability token.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   CAPABILITIES,

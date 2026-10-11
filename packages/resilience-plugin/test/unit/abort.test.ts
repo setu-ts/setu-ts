@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { abortReasonOf, linkAbort, throwIfAborted } from '../../src/patterns/abort.ts';
 import { TimeoutError } from '../../src/errors.ts';
 
@@ -116,4 +115,19 @@ describe('linkAbort', () => {
     // Every disposed link is inert: no controller followed the outer abort.
     expect(controllers.every((c) => !c.signal.aborted)).toBe(true);
   });
+});
+
+it('normalizes absent and scalar abort reasons and disposes both no-listener paths', () => {
+  const empty = new AbortController();
+  expect(abortReasonOf(empty.signal).message).toBe('The operation was aborted');
+  const outer = new AbortController();
+  outer.abort('stop');
+  expect(abortReasonOf(outer.signal).message).toBe('stop');
+  const inner = new AbortController();
+  linkAbort(undefined, inner)();
+  const dispose = linkAbort(outer.signal, inner);
+  dispose();
+  expect(inner.signal.aborted).toBe(true);
+  expect(inner.signal.reason).toBe('stop');
+  expect(() => throwIfAborted(inner.signal)).toThrow('stop');
 });

@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { HandlerResult } from '@setu-ts/common';
 import type { PopulateLoadContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { bridgeRequestToRR } from '../../src/handler/request-bridge.ts';
@@ -304,6 +303,22 @@ describe('request-bridge', () => {
     expect(respState.status).toBe(200);
     expect(receivedSignal).toBeDefined();
     expect(receivedSignal!.aborted).toBe(false);
+  });
+  it('sends an empty buffered body for a bodyless 204 response', async () => {
+    const { ctx, respState } = buildCtx();
+    let sent: unknown;
+    ctx.response.send = (body) => {
+      sent = body;
+      return { __handlerResult: true } as HandlerResult;
+    };
+    await bridgeRequestToRR(
+      ctx,
+      () => Promise.resolve(new Response(null, { status: 204 })),
+      createFakeLoadContextFactory(),
+    );
+    expect(respState.status).toBe(204);
+    expect(sent).toEqual(new Uint8Array());
+    expect(respState.streamed).toBe(false);
   });
 });
 

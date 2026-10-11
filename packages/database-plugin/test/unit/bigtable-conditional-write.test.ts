@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { preconditionTest } from '../../src/adapters/bigtable/bigtable-scan.ts';

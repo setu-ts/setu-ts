@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import type {
@@ -1466,4 +1465,40 @@ describe('ServiceBusBroker — delivered metadata (X28-4)', () => {
     expect('messageId' in metadata).toBe(false);
     expect('timestamp' in metadata).toBe(false);
   });
+});
+
+it('nacks malformed reply deliveries without a logger and ignores a callback retained after inbox close', async () => {
+  let deliver: Parameters<IServiceBusTransport['open']>[2] | undefined;
+  let abandoned = 0;
+  const transport: IServiceBusTransport = {
+    send: () => Promise.resolve(),
+    open: (_topic, _subscription, callback) => {
+      deliver = callback;
+      return Promise.resolve({ close: () => Promise.resolve() });
+    },
+    createSubscription: () => Promise.resolve(),
+    deleteSubscription: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+  };
+  const broker = new ServiceBusBroker(createRuntime(), {
+    serialize: JSON.stringify,
+    deserialize: JSON.parse,
+  }, { client: transport });
+  await broker.connect();
+  const pending = broker.request('topic', {}).catch((error: unknown) => error);
+  for (let i = 0; i < 10 && deliver === undefined; i++) await Promise.resolve();
+  expect(deliver).toBeDefined();
+  const message = {
+    payload: '{',
+    ack: () => {},
+    nack: () => {
+      abandoned++;
+    },
+  };
+  await deliver!(message);
+  expect(abandoned).toBe(1);
+  await broker.disconnect();
+  await pending;
+  await deliver!(message);
+  expect(abandoned).toBe(1);
 });

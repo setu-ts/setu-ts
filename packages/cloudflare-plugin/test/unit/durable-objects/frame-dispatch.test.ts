@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The local copy of the frame validator and dispatcher.
  *
@@ -7,8 +16,7 @@
  * plugin subscribed to the same backplane.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import { dispatchFrame, isRealtimeFrame } from '../../../src/durable-objects/frame-dispatch.ts';

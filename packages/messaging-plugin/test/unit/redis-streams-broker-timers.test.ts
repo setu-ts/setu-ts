@@ -13,8 +13,7 @@
  * Timeout object that coerces to its numeric id, so `Number()` happened to
  * round-trip. Any runtime whose handle does not coerce leaked outright.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';

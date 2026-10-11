@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { parseArgs } from '../../src/args.ts';
 import { resolveNewChoices } from '../../src/commands/new-interactive.ts';
 import type { PromptChoice, Prompter } from '../../src/prompt.ts';
@@ -262,3 +261,31 @@ describe('resolveNewChoices', () => {
     expect(questions).toEqual(['Runtime?', 'Template?']);
   });
 });
+
+for (
+  const question of [
+    'Runtime?',
+    'Code style?',
+    'Message broker?',
+    'Job queue?',
+    'How should the workspace members reach each other?',
+  ]
+) {
+  it(`stops at a cancelled ${question} prompt`, async () => {
+    const asked: string[] = [];
+    const argv = question.includes('workspace') ? ['svc', '--workspace'] : ['svc'];
+    const result = await resolveNewChoices(parseArgs(argv), {
+      select(current, choices) {
+        asked.push(current);
+        return Promise.resolve(
+          current === question ? { kind: 'cancelled' as const } : {
+            kind: 'answer' as const,
+            value: current === 'Template?' ? 'microservice' : choices[0]!.value,
+          },
+        );
+      },
+    }, () => {});
+    expect(result).toEqual({ kind: 'cancelled' });
+    expect(asked.at(-1)).toBe(question);
+  });
+}

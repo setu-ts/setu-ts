@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { conditionalDelete, conditionalUpdate } from '../../src/repositories/conditional-write.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { projectFiles, resolveHost, servedRoutes } from '../../../src/templates/project-files.ts';
 import type { TargetRuntime } from '../../../src/constants.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';

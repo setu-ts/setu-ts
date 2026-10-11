@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { generateWsRoute } from '../../../src/schematics/ws-route.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { options } from './_shared.ts';

@@ -16,15 +16,14 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { MessagingPlugin, ReplyInboxUnavailableError } from '../../src/index.ts';
 
-const connectionString = Deno.env.get('SERVICEBUS_CONNECTION_STRING');
+const connectionString = process.env['SERVICEBUS_CONNECTION_STRING'];
 
 /**
  * Entities declared in the emulator config this suite expects.
@@ -50,7 +49,7 @@ async function until(predicate: () => boolean, budgetMs = 20000): Promise<void> 
   }
 }
 
-describe('ServiceBusBroker — Service Bus emulator E2E', { ignore: !connectionString }, () => {
+describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionString }, () => {
   /**
    * Runs `body` against a freshly started app and stops it afterwards.
    *

@@ -12,8 +12,7 @@
  * pool eventually recovers either way, so these tests would pass without the
  * fix.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';

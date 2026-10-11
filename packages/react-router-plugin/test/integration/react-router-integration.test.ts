@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Integration tests for the React Router plugin.
  *
@@ -11,8 +12,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { errorHandler, forbidden } from '@setu-ts/exceptions';
@@ -26,11 +26,8 @@ import { createFakeLoadContextFactory } from '../fixtures/fake-handler.ts';
 type RouterMethod = (p: string, h: RouteHandler) => void;
 
 /** Bind an ephemeral port, release it, return the number. */
-function findFreePort(): number {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function findFreePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 /** Read a whole `ReadableStream<Uint8Array>` body to a string. */
@@ -60,7 +57,7 @@ function fakeLoader(
 
 describe('react-router integration (real socket)', () => {
   it('streams an SSR document over the socket through the catch-all', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const handler: SsrRequestHandler = (_request, _loadContext) =>
       Promise.resolve(
@@ -102,7 +99,7 @@ describe('react-router integration (real socket)', () => {
   });
 
   it('does NOT shadow a 2-static app route (/api/health) with the catch-all', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const handler: SsrRequestHandler = (_request, _loadContext) =>
       Promise.resolve(
@@ -143,7 +140,7 @@ describe('react-router integration (real socket)', () => {
   });
 
   it('keeps SSR HTML refusals distinct from RFC 9457 kernel refusals', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
     const handler: SsrRequestHandler = () =>
       Promise.resolve(
         new Response('<html><body>route boundary: forbidden</body></html>', {

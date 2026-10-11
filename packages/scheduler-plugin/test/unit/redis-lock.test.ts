@@ -1,8 +1,7 @@
 /**
  * Tests for RedisLock with fake ioredis client.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   createRedisLockClient,
   DEFAULT_REDIS_COMMAND_TIMEOUT_MS,

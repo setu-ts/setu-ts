@@ -6,8 +6,7 @@
  * package is absent (cache-plugin redis-store precedent).
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RedisRateLimitStore, validateClient } from '../../src/stores/redis-rate-limit-store.ts';
 import type { IRateLimitRedisClient } from '../../src/stores/redis-rate-limit-store.ts';
 import { FakeIoredisClient } from '../fixtures/fake-ioredis-client.ts';
@@ -170,7 +169,7 @@ describe('RedisRateLimitStore', () => {
     it('can lazy-import npm:ioredis@5.x and get a constructor', async () => {
       let RedisCtor: unknown;
       try {
-        const mod = await import('npm:ioredis@5.x');
+        const mod = await import('ioredis');
         RedisCtor = mod.Redis;
       } catch {
         // ioredis not available — skip this test
@@ -182,7 +181,7 @@ describe('RedisRateLimitStore', () => {
 
     it('reaches the real ioredis constructor through the lazy path', async () => {
       try {
-        await import('npm:ioredis@5.x');
+        await import('ioredis');
       } catch {
         // ioredis not available — skip this test
         return;

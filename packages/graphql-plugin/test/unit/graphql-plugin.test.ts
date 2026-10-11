@@ -2,8 +2,7 @@
  * Tests for graphql-plugin.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import { GraphqlPlugin } from '../../src/plugin/graphql-plugin.ts';
 import type { ResolverMap } from '../../src/interfaces/options.ts';

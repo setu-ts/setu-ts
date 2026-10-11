@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createPrismaDataSource } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 

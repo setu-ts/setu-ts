@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Integration test for SSE plugin — real socket round-trip.
  *
@@ -10,8 +11,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -21,11 +21,8 @@ import { CAPABILITIES } from '@setu-ts/common';
 import { SsePlugin } from '../../src/index.ts';
 
 /** Bind a port, release it, return the port number. */
-function findFreePort(): number {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function findFreePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 /** Consume all chunks from a `ReadableStream<Uint8Array>` body until done. */
@@ -83,7 +80,7 @@ function decodeSseFrames(rawChunks: string[]): SseFrame[] {
 
 describe('SSE Integration (real plugin end-to-end)', () => {
   it('should deliver HTTP 200 with text/event-stream content-type and a streamed data frame', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const app = createApplication({
       plugins: [RuntimePlugin(), SsePlugin()],
@@ -121,7 +118,7 @@ describe('SSE Integration (real plugin end-to-end)', () => {
   });
 
   it('should deliver heartbeat comment frames on the socket', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const app = createApplication({
       plugins: [RuntimePlugin(), SsePlugin({ heartbeatMs: 30 })],
@@ -181,7 +178,7 @@ describe('SSE Integration (real plugin end-to-end)', () => {
   });
 
   it('should track connectionCount through lifecycle', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
     let serviceRef: ISseService | null = null;
 
     const app = createApplication({
@@ -229,7 +226,7 @@ describe('SSE Integration (real plugin end-to-end)', () => {
   });
 
   it('should fire id event and custom event types', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const app = createApplication({
       plugins: [RuntimePlugin(), SsePlugin()],
@@ -267,7 +264,7 @@ describe('SSE Integration (real plugin end-to-end)', () => {
   });
 
   it('should include retry frame when retryMs is provided', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const app = createApplication({
       plugins: [RuntimePlugin(), SsePlugin({ retryMs: 5000 })],

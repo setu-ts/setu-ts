@@ -1,7 +1,6 @@
+import * as nodeFs from 'node:fs/promises';
 /** D1 deferred commits over the adapter's real node:sqlite double. @module */
-import { describe, it } from '@std/testing/bdd';
-import { afterAll, beforeAll } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { ITransactionalIdempotencyStore, RegistryFactory } from '@setu-ts/common';
 import { D1Adapter } from '@setu-ts/cloudflare-plugin';
@@ -41,8 +40,9 @@ describe('within-d1: real SQLite', () => {
   };
   beforeAll(async () => {
     d1 = new SqliteD1(
-      (await Deno.readTextFile(
+      (await nodeFs.readFile(
         new URL('../../../database-plugin/test/fixtures/idempotency-sqlite.sql', import.meta.url),
+        'utf8',
       )).replaceAll('setu_idempotency', claims),
       `CREATE TABLE ${business} (id TEXT PRIMARY KEY, name TEXT NOT NULL)`,
     );

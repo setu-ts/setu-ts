@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * End-to-end WebSocket tests — a real kernel application bound to a real TCP
  * port, with real browser-grade `WebSocket` clients connecting to it.
@@ -8,8 +9,7 @@
  * connection registry, and rooms, over genuine sockets.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
@@ -53,11 +53,8 @@ function closed(socket: WebSocket): Promise<void> {
 }
 
 /** Picks a free ephemeral port by binding and immediately releasing one. */
-function freePort(): number {
-  const listener = Deno.listen({ port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function freePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 describe('WebSocket plugin (e2e, real sockets)', () => {
@@ -65,7 +62,7 @@ describe('WebSocket plugin (e2e, real sockets)', () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WebSocketPlugin()],
     });
-    const port = freePort();
+    const port = await freePort();
     await app.start({ port });
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
@@ -93,7 +90,7 @@ describe('WebSocket plugin (e2e, real sockets)', () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WebSocketPlugin()],
     });
-    const port = freePort();
+    const port = await freePort();
     await app.start({ port });
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
@@ -138,7 +135,7 @@ describe('WebSocket plugin (e2e, real sockets)', () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WebSocketPlugin()],
     });
-    const port = freePort();
+    const port = await freePort();
     app.router.get('/health', (ctx) => ctx.response.json({ ok: true }));
     await app.start({ port });
 
@@ -158,7 +155,7 @@ describe('WebSocket plugin (e2e, real sockets)', () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WebSocketPlugin()],
     });
-    const port = freePort();
+    const port = await freePort();
     await app.start({ port });
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
@@ -187,7 +184,7 @@ describe('WebSocket plugin (e2e, real sockets)', () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WebSocketPlugin({ maxConnections: 1 })],
     });
-    const port = freePort();
+    const port = await freePort();
     await app.start({ port });
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);

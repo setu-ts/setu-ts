@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { parseMultipart } from '../../src/form/multipart-parser.ts';
 
 /** Helper: build a multipart body with a known boundary. */

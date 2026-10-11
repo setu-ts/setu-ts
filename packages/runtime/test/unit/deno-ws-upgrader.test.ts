@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { upgradeResponse } from '../../../../test/node-helpers.ts';
+import { describe, expect, it } from 'vitest';
 import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
 import { UPGRADE_INTENT } from '@setu-ts/common';
 import {
@@ -104,7 +104,7 @@ describe('bindDenoSocketToSink', () => {
 describe('DenoHttpAdapter WebSocket upgrade (post-M70a)', () => {
   function build(options?: { omitUpgrade?: boolean; upgradeThrows?: unknown }) {
     const socket = fakeSocket();
-    const response = new Response(null, { status: 101 });
+    const response = upgradeResponse(null, { status: 101 });
     const upgradeCalls: { request: Request; protocol?: string }[] = [];
     let frameworkHandlerCalls = 0;
 

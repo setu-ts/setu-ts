@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { MiddlewareFunction } from '@setu-ts/common';
 import { createNoopTracerHost, TelemetryPlugin } from '../../src/plugin/telemetry-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -14,11 +13,32 @@ import manifest from '../../deno.json' with { type: 'json' };
 
 /** Whether `npm:` imports are available in this environment. */
 function canImportNpm(): boolean {
-  try {
-    return Deno.permissions.querySync({ name: 'import' }).state === 'granted';
-  } catch {
-    return false;
-  }
+  return true;
+}
+
+/** A recording logger satisfying the ILogger surface the reporter uses. */
+function createRecordingLogger() {
+  const lines: Array<{
+    level: string;
+    message: string;
+    metadata?: Record<string, unknown> | undefined;
+  }> = [];
+  const record = (level: string) => (message: string, metadata?: Record<string, unknown>): void => {
+    lines.push({ level, message, metadata });
+  };
+  return {
+    lines,
+    logger: {
+      level: 'debug' as never,
+      fatal: record('fatal'),
+      error: record('error'),
+      warn: record('warn'),
+      info: record('info'),
+      debug: record('debug'),
+      trace: record('trace'),
+      child: () => ({ level: 'debug' as never }) as never,
+    } as never,
+  };
 }
 
 describe('TelemetryPlugin', () => {
@@ -64,9 +84,8 @@ describe('TelemetryPlugin', () => {
     expect(mock.middlewareAdded).toHaveLength(0);
   });
 
-  it({
-    name: 'should take the real loadOtelTracerProvider path (console) and register the service',
-    ignore: !canImportNpm(),
+  it('should take the real loadOtelTracerProvider path (console) and register the service', {
+    skip: !canImportNpm(),
   }, async () => {
     // Guarded (not swallowed): with imports available this drives the real
     // lazy-load path in loadOtelTracerProvider and must register a usable
@@ -568,32 +587,6 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
   });
 
   // --- Instrumentation outcomes are reported through ctx.logger (M70e §3.6) ---
-
-  /** A recording logger satisfying the ILogger surface the reporter uses. */
-  function createRecordingLogger() {
-    const lines: Array<{
-      level: string;
-      message: string;
-      metadata?: Record<string, unknown> | undefined;
-    }> = [];
-    const record =
-      (level: string) => (message: string, metadata?: Record<string, unknown>): void => {
-        lines.push({ level, message, metadata });
-      };
-    return {
-      lines,
-      logger: {
-        level: 'debug' as never,
-        fatal: record('fatal'),
-        error: record('error'),
-        warn: record('warn'),
-        info: record('info'),
-        debug: record('debug'),
-        trace: record('trace'),
-        child: () => ({ level: 'debug' as never }) as never,
-      } as never,
-    };
-  }
 
   it('warns and omits query strings when redact mode has no service', async () => {
     const mock = createMockContext();
@@ -1149,9 +1142,8 @@ describe('TelemetryPlugin — M98g trace diagnostics availability matrix', () =>
     ).toThrow();
   });
 
-  it({
-    name: 'drives the ACTIVE collector through the real built-in provider (guarded)',
-    ignore: !canImportNpm(),
+  it('drives the ACTIVE collector through the real built-in provider (guarded)', {
+    skip: !canImportNpm(),
   }, async () => {
     // Guarded (not swallowed): with imports available this drives the real
     // lazy-load path with the diagnostics option and must register a source
@@ -1193,4 +1185,36 @@ describe('TelemetryPlugin — M98g registration metadata', () => {
     // The optional edge on the logger capability is unchanged.
     expect(plugin.optionalDependencies).toEqual([CAPABILITIES.LOGGER]);
   });
+});
+
+it('reports bounded or unknown sampler ratios from the configured provider', async () => {
+  for (const ratio of [undefined, NaN, 'invalid', -1, 2]) {
+    const mock = createMockContext();
+    await TelemetryPlugin({
+      serviceName: 'sampling',
+      exporter: 'console',
+      sampling: { type: 'traceidratio', ...(ratio === undefined ? {} : { ratio }) } as never,
+      diagnostics: { enabled: true, serviceAlias: 'sampling', operations: {} },
+    }).register(mock.ctx);
+    const batch = mock.ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS)
+      .read('instance', 0);
+    expect(batch.sampler).toEqual(
+      typeof ratio !== 'number' && ratio !== undefined || Number.isNaN(ratio)
+        ? { kind: 'unknown' }
+        : {
+          kind: 'traceidratio',
+          ratio: ratio === undefined ? 1 : Math.min(Math.max(ratio as number, 0), 1),
+        },
+    );
+    await mock.shutdownHooks[0]!();
+  }
+});
+
+it('reports the built-in context activation outcome through the available logger', async () => {
+  const mock = createMockContext();
+  const { logger, lines } = createRecordingLogger();
+  (mock.ctx as { logger: unknown }).logger = logger;
+  await TelemetryPlugin({ serviceName: 'activation', exporter: 'console' }).register(mock.ctx);
+  expect(lines.some((line) => line.message.includes('Span context activation'))).toBe(true);
+  await mock.shutdownHooks[0]!();
 });

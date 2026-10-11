@@ -3,8 +3,7 @@
  * sync contract (gauges always equal `stats()`), the counter push sites, and
  * the deliberate split between admitted-then-failed and never-admitted.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';

@@ -5,8 +5,7 @@
  * canary-free projection against the hostile-DTO fixture, and the
  * independently computed protocol-v1 fixture vectors.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type {
   ConfigDiagnosticsSnapshot,
@@ -20,7 +19,11 @@ import type {
   ISchedulerDiagnosticsSource,
   ITraceDiagnosticsSource,
 } from '@setu-ts/common';
-import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
+import {
+  createConnectorHandler,
+  refusalResponse,
+  validateProtocolHeaders,
+} from '../../src/transport/connector-handler.ts';
 import { currentInspectorsManifest, projectConfigSnapshot } from '../../src/protocol/protocol.ts';
 import { isEventResponseProjection } from '../../src/protocol/event-protocol.ts';
 import { isAuthorizationBatchProjection } from '../../src/protocol/authorization-protocol.ts';
@@ -2055,6 +2058,20 @@ describe('Connector handler — queue observations (M98f)', () => {
 });
 
 describe('Connector handler — trace observations (M98g)', () => {
+  it('refuses a trace source with a foreign version or instance', async () => {
+    for (const field of ['version', 'instanceId']) {
+      const source: ITraceDiagnosticsSource = {
+        read: (instance, after) =>
+          ({
+            ...traceBatch(instance, after),
+            [field]: field === 'version' ? 2 : 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+          }) as never,
+      };
+      const view = await sendTraces(await traceHarness(source), 'after=0&limit=16');
+      expect(view.status).toBe(field === 'version' ? 400 : 401);
+    }
+  });
+
   /** A well-formed trace source batch at the requested cursor. */
   function traceBatch(instanceId: string, after: number): Record<string, unknown> {
     return {
@@ -2546,6 +2563,20 @@ describe('Connector handler — event observation operation (M98j)', () => {
 });
 
 describe('Connector handler — authorization explanations (M98h)', () => {
+  it('refuses a source with a foreign version or instance', async () => {
+    for (const field of ['version', 'instanceId']) {
+      const source: IAuthorizationDiagnosticsSource = {
+        read: (instance, after) =>
+          ({
+            ...authorizationBatch(instance, after),
+            [field]: field === 'version' ? 2 : 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+          }) as never,
+      };
+      const view = await sendAuthorization(await authorizationHarness(source), 'after=0&limit=16');
+      expect(view.status).toBe(field === 'version' ? 400 : 401);
+    }
+  });
+
   /** A well-formed authorization source batch at the requested cursor. */
   function authorizationBatch(instanceId: string, after: number): Record<string, unknown> {
     return {
@@ -2776,4 +2807,141 @@ describe('Connector handler — authorization explanations (M98h)', () => {
     expect(view.status).toEqual(200);
     expect(view.body.state).toEqual('collection-failed');
   });
+});
+
+it('rejects missing and unsafe protocol header fields before authentication', () => {
+  const valid = {
+    'x-setu-session': TEST_SESSION_ID,
+    'x-setu-sequence': '1',
+    'x-setu-mac': 'a'.repeat(64),
+  };
+  expect(validateProtocolHeaders(fakeRequest({ url: `http://${HOST}/v1/status`, headers: valid })))
+    .not.toBeNull();
+  for (
+    const headers of [
+      {},
+      { ...valid, 'x-setu-session': '' },
+      { ...valid, 'x-setu-sequence': '' },
+      { ...valid, 'x-setu-sequence': '9007199254740992' },
+      { ...valid, 'x-setu-sequence': '12345678901234567' },
+      { ...valid, 'x-setu-instance': 'bad' },
+      { ...valid, 'x-setu-mac': '' },
+    ]
+  ) {
+    expect(validateProtocolHeaders(fakeRequest({ url: `http://${HOST}/v1/status`, headers })))
+      .toBeNull();
+  }
+});
+
+it('refuses source snapshots and batches carrying an unsupported version or another instance', async () => {
+  for (const operation of ['snapshot', 'events']) {
+    for (const field of ['version', 'instanceId']) {
+      const value = field === 'version' ? 2 : 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+      const options = operation === 'snapshot'
+        ? { snapshot: { ...minimalSnapshot(), [field]: value } }
+        : { batch: { ...minimalBatch(), [field]: value } };
+      const { handler, session, key } = await buildHarness(options);
+      session.bindInstance(TEST_INSTANCE_ID);
+      const target = operation === 'snapshot' ? '/v1/snapshot' : '/v1/events?after=0&limit=16';
+      const mac = await signRequest(crypto.subtle, key, target, 1, TEST_INSTANCE_ID);
+      const view = inspect(
+        await handler(fakeRequest({
+          url: `http://${HOST}${target}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': TEST_SESSION_ID,
+            'x-setu-sequence': '1',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        })),
+      );
+      expect(view.status).toBe(field === 'version' ? 400 : 401);
+    }
+  }
+});
+
+it('bounds anonymous malformed requests and refuses oversized or failing kernel sources', async () => {
+  const raw = await buildHarness();
+  let limited = false;
+  for (let i = 0; i < 200; i++) {
+    const view = inspect(
+      await raw.handler(
+        fakeRequest({ method: 'POST', url: `http://${HOST}/v1/status`, headers: { host: HOST } }),
+      ),
+    );
+    if (view.status === 429) limited = true;
+  }
+  expect(limited).toBe(true);
+  for (const mode of ['oversized', 'range', 'revoked']) {
+    const h = await buildHarness(
+      mode === 'oversized'
+        ? {
+          snapshot: {
+            ...minimalSnapshot(),
+            nodes: [{ id: 'p', kind: 'plugin', label: 'x'.repeat(300_000), version: '1' }],
+          },
+        }
+        : undefined,
+    );
+    h.session.bindInstance(TEST_INSTANCE_ID);
+    const target = mode === 'range' || mode === 'scalar'
+      ? '/v1/events?after=0&limit=16'
+      : '/v1/snapshot';
+    if (mode === 'range' || mode === 'scalar') {
+      h.source.read = () => {
+        throw mode === 'range' ? new RangeError('cursor') : 'private';
+      };
+    }
+    if (mode === 'revoked') {
+      const original = h.source.snapshot.bind(h.source);
+      h.source.snapshot = () => {
+        const value = original();
+        h.session.revoke();
+        return value;
+      };
+    }
+    const mac = await signRequest(crypto.subtle, h.key, target, 1, TEST_INSTANCE_ID);
+    const view = inspect(
+      await h.handler(
+        fakeRequest({
+          url: `http://${HOST}${target}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': TEST_SESSION_ID,
+            'x-setu-sequence': '1',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toBe(mode === 'range' ? 400 : mode === 'revoked' ? 401 : 503);
+    expect(view.bodyText).not.toContain('private');
+  }
+});
+
+it('requires the instance after pairing and refuses a response signing failure', async () => {
+  const h = await buildHarness();
+  h.session.bindInstance(TEST_INSTANCE_ID);
+  const missing = inspect(await h.handler(await statusRequest(h.key, 1)));
+  expect(missing.status).toBe(401);
+  const target = '/v1/snapshot';
+  const mac = await signRequest(crypto.subtle, h.key, target, 2, TEST_INSTANCE_ID);
+  h.session.sign = () => Promise.resolve(null);
+  const failed = inspect(
+    await h.handler(
+      fakeRequest({
+        url: `http://${HOST}${target}`,
+        headers: {
+          host: HOST,
+          'x-setu-session': TEST_SESSION_ID,
+          'x-setu-sequence': '2',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    ),
+  );
+  expect(failed.status).toBe(401);
 });

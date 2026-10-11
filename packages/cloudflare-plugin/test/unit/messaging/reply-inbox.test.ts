@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The inbox is the only path a reply can take, so a drop dooms every in-flight
  * request — which is why `onClosed` exists and why closing deliberately must
  * NOT fire it. Getting that backwards would reject the caller's own teardown.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import { openReplyInbox } from '../../../src/messaging/reply-inbox.ts';

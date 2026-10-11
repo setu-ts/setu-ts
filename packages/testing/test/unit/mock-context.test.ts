@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { _getDefaults, createTestContext, MockResponse } from '../../src/mock-context.ts';
 import { MockServiceRegistry } from '../../src/mock-registry.ts';
 import {

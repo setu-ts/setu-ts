@@ -4,8 +4,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   createIORedisInstrumentation,
   loadIORedisInstrumentation,

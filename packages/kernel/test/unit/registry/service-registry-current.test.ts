@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { ServiceRegistry } from '../../../src/registry/service-registry.ts';
 
 describe('ServiceRegistry.isCurrent (M98h)', () => {

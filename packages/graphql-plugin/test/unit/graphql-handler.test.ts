@@ -2,8 +2,7 @@
  * Tests for graphql-handler.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createGraphqlHandler } from '../../src/http/graphql-handler.ts';
 import { GraphqlService } from '../../src/services/graphql-service.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';

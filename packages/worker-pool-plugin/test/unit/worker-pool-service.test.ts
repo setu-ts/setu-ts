@@ -2,8 +2,7 @@
  * Unit tests for WorkerPoolService — host resolution, lazy pool creation,
  * option merging, unavailability behavior, stats aggregation, and shutdown.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { WorkerPoolService } from '../../src/services/worker-pool-service.ts';
 import { budgetLimitOf } from '../../src/services/worker-pool-service.ts';

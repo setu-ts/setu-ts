@@ -9,8 +9,7 @@
  * path.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { runWithRetry } from '../../src/retry/retry-strategy.ts';
 import { HttpClientError } from '../../src/errors.ts';
 import type { IClientTiming } from '../../src/http/contracts.ts';

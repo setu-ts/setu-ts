@@ -4,8 +4,7 @@
  * These assertions are decided by `deno task check` — if a required member is
  * ever dropped or an optional one is narrowed away, this file stops compiling.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   EntityKey,
   FilterComparison,

@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { Render } from '../../src/decorators/view.ts';
 import { Controller, Get } from '../../src/index.ts';

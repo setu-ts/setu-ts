@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { FormBody, FormFile, FormValue } from '../../src/form/form-body.ts';
 import { parseFormBody } from '../../src/form/form-body.ts';
 

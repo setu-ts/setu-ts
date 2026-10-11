@@ -1,5 +1,5 @@
 import type { EntityKey, IDataSource } from '@setu-ts/common';
-import { expect } from '@std/expect';
+import { expect } from 'vitest';
 
 /** Exercises both atomic outcomes and reads every persisted effect from the backend. */
 export async function conditionalContract(

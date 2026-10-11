@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { EntityKey } from '@setu-ts/common';
 import { countingObserver, edit, outboxHarness, row, WALL_START } from '../../fixtures/outbox.ts';
 import { MAX_CLAIM_HORIZON_MS } from '../../../src/outbox/record-codec.ts';

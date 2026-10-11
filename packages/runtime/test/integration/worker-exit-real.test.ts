@@ -12,8 +12,7 @@
  * unsettled forever — which is the defect (a permanently leaked pool slot) that
  * `onExit` exists to close.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { isWorkerReadySignal, isWorkerTaskReply } from '@setu-ts/common';
 import { createNodeWorkerHost } from '../../src/adapters/node/node-worker-host.ts';

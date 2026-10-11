@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ILogger, MessageMetadata } from '@setu-ts/common';
 import { IntegrationEventRejectedError } from '../../../src/index.ts';
 import { deriveInboxIds } from '../../../src/inbox/inbox-key.ts';

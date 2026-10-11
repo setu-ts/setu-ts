@@ -8,8 +8,7 @@
  * heartbeat/protocol-ping scheduler.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   GraphqlConnectionInfo,
   GraphqlOperationContext,
@@ -913,4 +912,96 @@ describe('createWsHandlers', () => {
     expect(receivedParams?.query).toBe('{ hello }');
     expect(resolveCallCount).toBe(2);
   });
+});
+
+it('enforces the init deadline and contains late or failed heartbeat writes', async () => {
+  const { fake, runtime } = createFakeRuntime();
+  const handlers = createWsHandlers(
+    createMockService(() => ({ kind: 'single', status: 200, result: {} })),
+    {
+      heartbeatMs: 10,
+      connectionInitWaitMs: 5,
+    },
+    runtime,
+  );
+  const conn = createMockConnection();
+  await handlers.onMessage!(conn, new TextEncoder().encode('ignored before open'));
+  expect(conn.closed).toBeUndefined();
+  handlers.onOpen!(conn, mockContext);
+  const timers = [...fake.timers.values()];
+  timers[0]!.fn();
+  expect(conn.closed?.code).toBe(4408);
+  timers[1]!.fn();
+  expect(conn.sent).toEqual([]);
+  handlers.onClose!(conn, { code: 1000 } as CloseEvent);
+  expect(fake.activeTimerCount).toBe(0);
+
+  const live = createMockConnection();
+  handlers.onOpen!(live, mockContext);
+  await handlers.onMessage!(
+    live,
+    new TextEncoder().encode(encodeFrame({ type: GQL_CONNECTION_INIT })),
+  );
+  expect(decodeFrame(live.sent[0]!)?.type).toBe(GQL_CONNECTION_ACK);
+  live.send = () => {
+    throw new Error('closed writer');
+  };
+  expect(() => fake.runTimers()).not.toThrow();
+  handlers.onClose!(live, { code: 1000 } as CloseEvent);
+  expect(fake.activeTimerCount).toBe(0);
+});
+
+it('refuses a scalar onConnect failure without exposing the thrown value', async () => {
+  const { runtime } = createFakeRuntime();
+  const handlers = createWsHandlers(
+    createMockService(() => ({ kind: 'single', status: 200, result: {} })),
+    {
+      onConnect: () => {
+        throw 'private failure';
+      },
+    },
+    runtime,
+  );
+  const conn = createMockConnection();
+  handlers.onOpen!(conn, mockContext);
+  await handlers.onMessage!(conn, encodeFrame({ type: GQL_CONNECTION_INIT }));
+  expect(conn.closed).toEqual({ code: 4403, reason: 'Forbidden' });
+  handlers.onClose!(conn, { code: 1000 } as CloseEvent);
+});
+
+it('excludes array variables from the subscription parameters', async () => {
+  let captured: GraphqlRequestParams | undefined;
+  const { runtime } = createFakeRuntime();
+  const handlers = createWsHandlers(
+    createMockService((params) => {
+      captured = params;
+      return { kind: 'single', status: 200, result: {} };
+    }),
+    {},
+    runtime,
+  );
+  const conn = createMockConnection();
+  await init(handlers, conn);
+  await handlers.onMessage!(
+    conn,
+    encodeFrame({ type: GQL_SUBSCRIBE, id: 'array', payload: { query: '{ x }', variables: [] } }),
+  );
+  expect(captured?.query).toBe('{ x }');
+  expect(captured?.variables).toBeUndefined();
+  handlers.onClose!(conn, { code: 1000 } as CloseEvent);
+});
+
+it('allows close before open and repeat close after init', async () => {
+  const { fake, runtime } = createFakeRuntime();
+  const handlers = createWsHandlers(
+    createMockService(() => ({ kind: 'single', status: 200, result: {} })),
+    {},
+    runtime,
+  );
+  const conn = createMockConnection();
+  handlers.onClose!(conn, { code: 1000 } as CloseEvent);
+  await init(handlers, conn);
+  handlers.onClose!(conn, { code: 1000 } as CloseEvent);
+  handlers.onClose!(conn, { code: 1000 } as CloseEvent);
+  expect(fake.activeTimerCount).toBe(0);
 });

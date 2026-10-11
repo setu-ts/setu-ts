@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { renderPrometheus } from '../../src/renderers/prometheus-renderer.ts';
 import type { MetricSnapshot } from '../../src/interfaces/index.ts';
 
@@ -1118,4 +1117,32 @@ describe('renderPrometheus', () => {
 
     expect(result).toContain('test_gauge 0');
   });
+});
+
+it('renders incomplete label snapshots and a histogram without buckets deterministically', () => {
+  const values = new Map([
+    ['', { value: 1 }],
+    ['without-labels', { value: 2 }],
+    ['empty-labels', { value: 3, labels: {} }],
+  ]);
+  expect(
+    renderPrometheus([{
+      name: 'partial',
+      type: 'counter',
+      help: 'partial',
+      labels: ['missing'],
+      values,
+    }]),
+  )
+    .toContain('partial{} 3');
+  expect(
+    renderPrometheus([{
+      name: 'latency',
+      type: 'histogram',
+      help: 'latency',
+      labels: [],
+      values: new Map([['', { value: 2, sum: 3 }]]),
+    }]),
+  )
+    .toContain('latency_sum 3\nlatency_count 2');
 });

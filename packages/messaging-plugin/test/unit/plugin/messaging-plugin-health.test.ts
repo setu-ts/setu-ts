@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HealthCheckResult, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 import { MessagingPlugin } from '../../../src/plugin/messaging-plugin.ts';

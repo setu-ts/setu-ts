@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IdempotencyClaimRequest, IIdempotencyStore } from '@setu-ts/common';
 import { MemoryIdempotencyStore } from '../../src/stores/memory-store.ts';
 import { createClockRuntime } from '../fixtures/clock-runtime.ts';

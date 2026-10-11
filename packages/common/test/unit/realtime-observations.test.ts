@@ -1,3 +1,4 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * The one realtime observation collector (M98l): option validation, the
  * per-kind state and gauge rules, retention, latching, close, clamping and
@@ -6,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type {
   IRealtimeDiagnosticsSource,
@@ -410,21 +410,29 @@ describe('createRealtimeObservationCollector', () => {
     });
 
     it('keeps an unobserved rejection unhandled (a derived promise, not a side branch)', async () => {
-      const backplane = collector('backplane');
-      const reason = new Error('unhandled');
-      const unhandled: unknown[] = [];
-      const listener = (event: PromiseRejectionEvent): void => {
-        unhandled.push(event.reason);
-        event.preventDefault();
-      };
-      globalThis.addEventListener('unhandledrejection', listener);
-      try {
+      const output = await runProcess(process.execPath, {
+        args: [
+          '--experimental-transform-types',
+          '--input-type=module',
+          '-e',
+          `
+        import { createRealtimeObservationCollector } from ${
+            JSON.stringify(
+              new URL('../../src/diagnostics/realtime-observations.ts', import.meta.url).href,
+            )
+          };
+        const backplane = createRealtimeObservationCollector({ kind: 'backplane', alias: 'rt', clock: () => 1000, gauges: () => ({ openConnections: 0, groups: 0 }) });
+        const reason = new Error('unhandled');
+        const events = [];
+        process.on('unhandledRejection', (error) => events.push(error === reason));
         void backplane.observePublish(() => Promise.reject(reason));
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      } finally {
-        globalThis.removeEventListener('unhandledrejection', listener);
-      }
-      expect(unhandled).toEqual([reason]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        console.log(JSON.stringify(events));
+      `,
+        ],
+      });
+      expect(output.code).toBe(0);
+      expect(JSON.parse(new TextDecoder().decode(output.stdout))).toEqual([true]);
     });
 
     it('counts receives, ignores websocket operations, and goes stale then expires', () => {

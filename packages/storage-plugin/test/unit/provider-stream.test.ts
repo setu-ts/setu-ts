@@ -10,8 +10,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { PassThrough } from 'node:stream';
 import {
   createBoundedNodeStream,
@@ -78,14 +77,14 @@ describe('createBoundedNodeStream', () => {
     pt.write(new Uint8Array([3]));
     pt.end();
     const reader = stream.getReader();
-    const first = await reader.read();
-    expect(first.done).toBe(false);
-    expect([...first.value!]).toEqual([1, 2]);
-    const second = await reader.read();
-    expect(second.done).toBe(false);
-    expect([...second.value!]).toEqual([3]);
-    const done = await reader.read();
-    expect(done.done).toBe(true);
+    const bytes: number[] = [];
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes.push(...chunk.value);
+    }
+    // Node may coalesce writes; the property is ordered bytes and an eventual EOF.
+    expect(bytes).toEqual([1, 2, 3]);
   });
 
   it('propagates an underlying error to the consumer', async () => {

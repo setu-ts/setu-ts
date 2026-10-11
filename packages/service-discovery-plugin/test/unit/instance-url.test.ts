@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { instanceUrl } from '../../src/url/instance-url.ts';
 import { instance } from '../fixtures/fakes.ts';

@@ -1,7 +1,6 @@
 /** Tests for the in-memory access-token revocation store. */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 

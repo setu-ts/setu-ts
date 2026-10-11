@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ScopeRef } from '@setu-ts/common';
 import { tenantMismatch, walkScopeChain } from '../../../src/scoped/scope-chain.ts';
 import type { ChainConfig } from '../../../src/scoped/scope-chain.ts';

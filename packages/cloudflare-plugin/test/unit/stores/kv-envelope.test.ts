@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The envelope is what makes a sub-60-second TTL correct on a platform whose
  * own expiry floor is 60 seconds, so its arithmetic and its miss cases are
  * pinned directly rather than only through the stores.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   decodeEnvelope,

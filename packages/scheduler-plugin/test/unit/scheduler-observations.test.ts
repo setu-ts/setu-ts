@@ -5,8 +5,7 @@
  * losers produce no handler records), and the plugin's multi-provider
  * source registration and close ordering through a real kernel application.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IIngressBehavior, IScheduler, ISchedulerDiagnosticsSource } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';

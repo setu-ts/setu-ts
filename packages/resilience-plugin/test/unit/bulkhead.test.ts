@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { Bulkhead } from '../../src/patterns/bulkhead.ts';
 import { BulkheadFullError } from '../../src/errors.ts';
 
@@ -17,6 +16,41 @@ function deferred<T>(): Deferred<T> {
 }
 
 const tick = () => Promise.resolve();
+
+it('ignores an abort callback already queued when the waiter was admitted', async () => {
+  const bulkhead = new Bulkhead({ maxConcurrent: 1, maxQueue: 1 });
+  const first = deferred<string>();
+  const held = bulkhead.run(() => first.promise);
+  const controller = new AbortController();
+  let dispatched: EventListener | undefined;
+  const signal = new Proxy(controller.signal, {
+    get(target, key) {
+      if (key === 'addEventListener') {
+        return (type: string, listener: EventListener, options: AddEventListenerOptions) => {
+          if (type === 'abort') {
+            dispatched = listener;
+          }
+          target.addEventListener(type, listener, options);
+        };
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  let calls = 0;
+  const waiting = bulkhead.run(() => {
+    calls++;
+    return Promise.resolve('admitted');
+  }, signal);
+  first.resolve('finished');
+  await held;
+  expect(await waiting).toBe('admitted');
+  controller.abort(new Error('late cancellation'));
+  dispatched!(new Event('abort'));
+  expect(calls).toBe(1);
+  expect(bulkhead.active).toBe(0);
+  expect(await bulkhead.run(() => Promise.resolve('next'))).toBe('next');
+});
 
 async function expectReject(promise: Promise<unknown>): Promise<unknown> {
   try {

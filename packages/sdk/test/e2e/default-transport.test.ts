@@ -1,3 +1,4 @@
+import { serveHttp } from '../../../../test/node-helpers.ts';
 /**
  * End-to-end test of the SDK's **default** transport (M70e §3.2).
  *
@@ -11,12 +12,11 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createClient } from '../../src/sdk.ts';
 import { HttpClientError } from '../../src/errors.ts';
 
-let server: ReturnType<typeof Deno.serve> | undefined;
+let server: Awaited<ReturnType<typeof serveHttp>> | undefined;
 let baseUrl = '';
 
 /** A JSON API that echoes the method and body, and 500s on `/boom`. */
@@ -43,8 +43,8 @@ describe('default transport (real socket)', () => {
     }
   });
 
-  function startServer(): void {
-    server = Deno.serve({ port: 0, hostname: '127.0.0.1', onListen: () => {} }, handler);
+  async function startServer(): Promise<void> {
+    server = await serveHttp({ port: 0, hostname: '127.0.0.1', onListen: () => {} }, handler);
     baseUrl = `http://127.0.0.1:${server.addr.port}`;
   }
 

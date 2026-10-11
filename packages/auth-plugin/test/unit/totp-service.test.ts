@@ -14,8 +14,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IAuthSessionService, IRequestContext } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { TotpService } from '../../src/mfa/totp-service.ts';

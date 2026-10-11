@@ -3,11 +3,10 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { IApplication } from '@setu-ts/common';
 import { OpenApiService } from '../../src/services/openapi-service.ts';
-import { z } from 'npm:zod@^3.24.0';
+import { z } from 'zod-v3';
 
 /**
  * Minimal Router mock for testing.

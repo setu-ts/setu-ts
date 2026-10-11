@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { compileRealtimeDiagnosticsAlias } from '@setu-ts/common';
 import type { OutboundHttpDiagnosticsSnapshot } from '@setu-ts/common';
 

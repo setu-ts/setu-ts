@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { BaseRepository, type DataSource } from '../../src/repositories/base-repository.ts';
 import {
   applyOrderBy,

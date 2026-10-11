@@ -1,3 +1,4 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Unit tests for the M98i cache operation counters: option validation, the
  * collector's counting, saturation, retention and failure latch, the
@@ -5,8 +6,7 @@
  * rejection identity, synchronous throws), and the plugin's source
  * registration and close ordering through a real kernel application.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type {
   CacheDiagnosticsSnapshot,
@@ -354,30 +354,33 @@ describe('observeCacheCall — transparency', () => {
     // unhandled rejection with diagnostics on: observing settlement must
     // never mark the caller's promise as handled and swallow the error.
     const count = async (enabled: boolean): Promise<number> => {
-      const reason = new Error('fire-and-forget');
-      const { service } = enabled
-        ? observed(scriptedBackend('reject', reason))
-        : { service: new CacheService(scriptedBackend('reject', reason), '') };
-      let unhandled = 0;
-      const onUnhandled = (event: PromiseRejectionEvent): void => {
-        if (event.reason === reason) {
-          unhandled++;
-          event.preventDefault();
-        }
-      };
-      globalThis.addEventListener('unhandledrejection', onUnhandled);
-      try {
+      const output = await runProcess(process.execPath, {
+        args: [
+          '--experimental-transform-types',
+          '--input-type=module',
+          '-e',
+          `
+        import { CacheService, attachCacheCollector } from ${
+            JSON.stringify(new URL('../../src/services/cache-service.ts', import.meta.url).href)
+          };
+        import { CacheObservationCollector } from ${
+            JSON.stringify(
+              new URL('../../src/diagnostics/cache-observations.ts', import.meta.url).href,
+            )
+          };
+        const reason = new Error('fire-and-forget');
+        const service = new CacheService({ get: () => Promise.reject(reason) }, '');
+        if (${enabled}) attachCacheCollector(service, new CacheObservationCollector('primary', () => 1000));
+        let reports = 0;
+        process.on('unhandledRejection', (error) => { if (error === reason) reports++; });
         void service.get('k');
-        // The runtime reports an unhandled rejection on a later turn of the
-        // event loop, and how many turns later depends on load (one turn
-        // flaked on CI), so wait turn by turn up to a bound rather than once.
-        for (let turn = 0; turn < 200 && unhandled === 0; turn++) {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-      } finally {
-        globalThis.removeEventListener('unhandledrejection', onUnhandled);
-      }
-      return unhandled;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        console.log(reports);
+      `,
+        ],
+      });
+      expect(output.code).toBe(0);
+      return Number(new TextDecoder().decode(output.stdout).trim());
     };
     expect(await count(false)).toBe(1);
     expect(await count(true)).toBe(1);

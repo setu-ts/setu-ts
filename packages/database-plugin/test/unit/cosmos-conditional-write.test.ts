@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createCosmosDataSource } from '../../src/adapters/cosmos/cosmos-data-source.ts';
 import { resolveCosmosTarget } from '../../src/adapters/cosmos/cosmos-mapping.ts';
 import { PartitionKeyResolver } from '../../src/adapters/cosmos/cosmos-partition-key.ts';

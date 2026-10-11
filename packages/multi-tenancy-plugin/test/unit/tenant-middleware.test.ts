@@ -1,8 +1,7 @@
 /**
  * Tenant middleware tests — success, short-circuit, cache prefix, resolver throw.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/tenant-middleware.ts';
 import { SubdomainResolver } from '../../src/resolvers/subdomain-resolver.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';

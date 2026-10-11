@@ -1,7 +1,6 @@
 /** Behavior tests for the fetch-based SSE client. */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createSseClient } from '../../src/realtime/sse-client.ts';
 import type { IClientTiming } from '../../src/http/contracts.ts';
 
@@ -309,4 +308,44 @@ describe('createSseClient', () => {
     expect(client.state).toBe('closed');
     expect(states).not.toContain('open');
   });
+});
+
+it('uses the default host fetch and contains failed cancellation after a late response', async () => {
+  const original = globalThis.fetch;
+  let release: ((value: Response) => void) | undefined;
+  let cancellations = 0;
+  const calls: string[] = [];
+  globalThis.fetch = (input) => {
+    calls.push(String(input));
+    return new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+  };
+  try {
+    const client = createSseClient({
+      url: 'https://example.test/events',
+      timing: immediateTiming,
+      reconnect: { maxAttempts: 0 },
+      onEvent: () => {
+        throw new Error('closed client delivered');
+      },
+    });
+    client.close();
+    release!(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          cancel() {
+            cancellations++;
+            return Promise.reject(new Error('already closed'));
+          },
+        }),
+      ),
+    );
+    await flush();
+    expect(calls).toEqual(['https://example.test/events']);
+    expect(cancellations).toBe(1);
+    expect(client.state).toBe('closed');
+  } finally {
+    globalThis.fetch = original;
+  }
 });

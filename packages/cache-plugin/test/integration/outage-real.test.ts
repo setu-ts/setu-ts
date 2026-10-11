@@ -1,3 +1,4 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Real Redis outage for the cache (M101a V8-5), through a real kernel app.
  *
@@ -17,8 +18,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HandlerResult,
@@ -32,11 +32,11 @@ import { HealthPlugin } from '@setu-ts/health-plugin';
 
 import { CachePlugin } from '../../src/index.ts';
 
-const redisUrl = Deno.env.get('REDIS_URL');
+const redisUrl = process.env['REDIS_URL'];
 const BOUND_MS = 1000;
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
@@ -69,7 +69,7 @@ async function waitForCache(
   return last;
 }
 
-describe('REAL Redis cache outage (M101a V8-5)', { ignore: redisUrl === undefined }, () => {
+describe('REAL Redis cache outage (M101a V8-5)', { skip: redisUrl === undefined }, () => {
   it('paused Redis → get rejects within the bound, counted failed, /health down → unpaused → 200', async () => {
     const url = redisUrl!.replace(/localhost/g, '127.0.0.1');
     const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);

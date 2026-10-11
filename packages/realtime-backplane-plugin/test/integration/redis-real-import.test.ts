@@ -9,8 +9,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { loadRedisModule, RedisModuleError } from '../../src/transports/redis-module.ts';
 
 describe('loadRedisModule (guarded real import)', () => {

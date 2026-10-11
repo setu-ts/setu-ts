@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The edge cache middleware on a real route, resolving `waitUntil` from the
  * plugin the way a deployed Worker does.
@@ -9,8 +18,7 @@
  * actually calls, so this exercises the deployed path.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IApplication } from '@setu-ts/common';

@@ -13,8 +13,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IRuntimeServices } from '@setu-ts/common';
 
@@ -31,24 +30,19 @@ import {
 
 /** Whether `npm:` imports are available in this environment. */
 function canImportNpm(): boolean {
-  try {
-    return Deno.permissions.querySync({ name: 'import' }).state === 'granted';
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 describe('DiagnosticSpanProcessor — real locked OTel SDK (guarded)', () => {
-  it({
-    name: 'drives every lifecycle method; the exporter still receives the span',
-    ignore: !canImportNpm(),
+  it('drives every lifecycle method; the exporter still receives the span', {
+    skip: !canImportNpm(),
   }, async () => {
     // Real locked modules, loaded the way loadOtelTracerProvider loads them.
     const sdkMod = await import(
-      'npm:@opentelemetry/sdk-trace-base@^2.9.0'
+      '@opentelemetry/sdk-trace-base'
     ) as unknown as OtelSdkModule;
     const resourcesMod = await import(
-      'npm:@opentelemetry/resources@^2.9.0'
+      '@opentelemetry/resources'
     ) as unknown as OtelResourcesModule;
 
     // A recording exporter: the stand-in proves the exporter processor still
@@ -105,9 +99,8 @@ describe('DiagnosticSpanProcessor — real locked OTel SDK (guarded)', () => {
     expect(collector.read('probe', 0).closed).toBe(true);
   });
 
-  it({
-    name: 'framework kinds and statuses reach the exporter AND the diagnostic record correctly',
-    ignore: !canImportNpm(),
+  it('framework kinds and statuses reach the exporter AND the diagnostic record correctly', {
+    skip: !canImportNpm(),
   }, async () => {
     // Regression: TelemetryService once handed OTel the OTLP WIRE kind numbers
     // (server exported as CLIENT, consumer as an out-of-range 5) and passed
@@ -115,10 +108,10 @@ describe('DiagnosticSpanProcessor — real locked OTel SDK (guarded)', () => {
     // diagnostic processor then dropped every span that set a status — every
     // HTTP server span. Only the real SDK can show either.
     const sdkMod = await import(
-      'npm:@opentelemetry/sdk-trace-base@^2.9.0'
+      '@opentelemetry/sdk-trace-base'
     ) as unknown as OtelSdkModule;
     const resourcesMod = await import(
-      'npm:@opentelemetry/resources@^2.9.0'
+      '@opentelemetry/resources'
     ) as unknown as OtelResourcesModule;
     const exported: Array<{ name: string; kind: number; status: { code?: number } }> = [];
     class RecordingExporter {

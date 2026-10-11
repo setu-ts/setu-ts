@@ -8,8 +8,7 @@
  * This proves the helper delegates to the service's middleware (which uses
  * the formatter resolved at plugin registration time) rather than a fallback.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IPluginContext, IValidationService } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 

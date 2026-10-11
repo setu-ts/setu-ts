@@ -21,8 +21,7 @@
  *
  * @module
  */
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IJwtService, ISseService } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

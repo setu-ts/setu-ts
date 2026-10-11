@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The selection semantics are the ones `InMemoryBroker` documents — fan out to
  * every queue-less subscriber, one member per named group, round-robin — so
@@ -6,8 +15,7 @@
  * every member of a consumer group.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { SubscriptionTable } from '../../../src/messaging/subscription-table.ts';
 

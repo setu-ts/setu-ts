@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
 import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
 import { WORKSPACE_MANIFEST, WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';

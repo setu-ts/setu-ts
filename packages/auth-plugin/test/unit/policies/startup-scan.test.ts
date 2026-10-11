@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { SCOPED_RBAC_POLICY } from '@setu-ts/common';
 import type { MiddlewareFunction, PolicyDefinition, RouteInfo } from '@setu-ts/common';
 

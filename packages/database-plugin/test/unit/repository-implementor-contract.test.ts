@@ -18,8 +18,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { InMemoryRowRepository } from '../fixtures/repository-implementor.ts';
 
 describe('hand-written IRepository implementor (X26-2 tripwire)', () => {

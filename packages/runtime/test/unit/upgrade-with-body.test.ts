@@ -1,3 +1,4 @@
+import { upgradeResponse } from '../../../../test/node-helpers.ts';
 /**
  * upgrade-with-body — an adapter never handshakes on its own initiative.
  *
@@ -15,8 +16,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
 import { UPGRADE_INTENT } from '@setu-ts/common';
 import { DenoHttpAdapter, type DenoServeHost } from '../../src/adapters/deno/deno-http-adapter.ts';
@@ -56,7 +56,7 @@ describe('Adapters never handshake without an upgrade intent (M70a §3.6)', () =
             onclose: null,
             onerror: null,
           },
-          response: new Response(null, { status: 101 }),
+          response: upgradeResponse(null, { status: 101 }),
         };
       },
     };
@@ -93,7 +93,7 @@ describe('Adapters never handshake without an upgrade intent (M70a §3.6)', () =
             onclose: null,
             onerror: null,
           },
-          response: new Response(null, { status: 101 }),
+          response: upgradeResponse(null, { status: 101 }),
         };
       },
     };
@@ -171,7 +171,7 @@ describe('Adapters never handshake without an upgrade intent (M70a §3.6)', () =
           addEventListener: () => {},
         },
       }),
-      createUpgradeResponse: () => new Response(null, { status: 101 }),
+      createUpgradeResponse: () => upgradeResponse(null, { status: 101 }),
     };
 
     const adapter = new CloudflareWorkersHttpAdapter(wsHost);

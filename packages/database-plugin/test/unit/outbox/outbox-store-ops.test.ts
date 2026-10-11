@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntityKey, OutboxRecord } from '@setu-ts/common';
 import { OUTBOX_RECORD_KIND } from '@setu-ts/common';
 import type { IDatabaseService } from '../../../src/interfaces/index.ts';

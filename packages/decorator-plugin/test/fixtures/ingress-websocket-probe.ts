@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /** A network-permitted subprocess probe for decorated WebSocket ingress. */
 import type { IWebSocketConnection } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -8,11 +9,8 @@ import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import { Gateway, OnMessage } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 
-function freePort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function freePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 function opened(socket: WebSocket): Promise<void> {
@@ -78,7 +76,7 @@ const app = createApplication({
     DecoratorPlugin({ ingress: [UpdatesGateway] }),
   ],
 });
-const port = freePort();
+const port = await freePort();
 await app.start({ port });
 const sockets = app.services.get<{ readonly connectionCount: number }>(CAPABILITIES.WEBSOCKET);
 const client = new WebSocket(`ws://127.0.0.1:${port}/ws/updates`);

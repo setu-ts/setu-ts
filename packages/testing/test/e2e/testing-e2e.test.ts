@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createTestApp } from '../../src/test-app.ts';
 import { collectStream, inject } from '../../src/inject.ts';
 import { createTestContext } from '../../src/mock-context.ts';

@@ -26,8 +26,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import {
@@ -54,11 +53,11 @@ import type {
   SubscriptionEntry,
 } from '../../src/index.ts';
 
-const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
-const rabbitUrl = Deno.env.get('RABBITMQ_URL');
-const redisUrl = Deno.env.get('REDIS_URL');
-const pubsubHost = Deno.env.get('PUBSUB_EMULATOR_HOST');
-const pubsubProject = Deno.env.get('PUBSUB_PROJECT_ID') ?? 'he-test';
+const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
+const rabbitUrl = process.env['RABBITMQ_URL'];
+const redisUrl = process.env['REDIS_URL'];
+const pubsubHost = process.env['PUBSUB_EMULATOR_HOST'];
+const pubsubProject = process.env['PUBSUB_PROJECT_ID'] ?? 'he-test';
 
 /** The event every case publishes. */
 interface Hired {
@@ -186,7 +185,7 @@ function publish(app: IKernelApplication, topic: string, envelope: unknown): Pro
 
 for (const transport of transports) {
   describe(`consumer inbox over real PostgreSQL ← ${transport.name}`, {
-    ignore: transport.ignore,
+    skip: transport.ignore,
   }, () => {
     const label = transport.name.replaceAll(' ', '-').toLowerCase();
 
@@ -382,10 +381,10 @@ for (const transport of transports) {
 
 describe(
   'consumer inbox default queue ← Pub/Sub emulator',
-  { ignore: pubsubHost === undefined },
+  { skip: pubsubHost === undefined },
   () => {
     it('a fully-qualified topic still yields a legal default subscription', async () => {
-      const mod = await import('npm:@google-cloud/pubsub@^6');
+      const mod = await import('@google-cloud/pubsub');
       const admin = new mod.PubSub({ projectId: pubsubProject });
       const topicId = `m108-${crypto.randomUUID().slice(0, 8)}.people.v1`;
       await admin.createTopic(topicId);

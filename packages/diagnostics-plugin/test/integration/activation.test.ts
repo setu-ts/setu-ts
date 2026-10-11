@@ -4,8 +4,7 @@
  * runtime refuses before any bind, and an honest composition opens a
  * working signed endpoint.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ILocalDiagnosticsListenerFactory } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';

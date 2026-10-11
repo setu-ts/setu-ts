@@ -19,16 +19,15 @@
  *
  * @module
  */
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { MessagingPlugin, PubSubSubscriptionBoundElsewhereError } from '../../src/index.ts';
 
-const emulatorHost = Deno.env.get('PUBSUB_EMULATOR_HOST');
-const projectId = Deno.env.get('PUBSUB_PROJECT_ID') ?? 'he-test';
+const emulatorHost = process.env['PUBSUB_EMULATOR_HOST'];
+const projectId = process.env['PUBSUB_PROJECT_ID'] ?? 'he-test';
 
 /** Unique per run so repeated runs never share emulator state. */
 const runId = crypto.randomUUID().slice(0, 8);
@@ -69,12 +68,12 @@ async function until(predicate: () => boolean, budgetMs = 15000): Promise<void> 
   }
 }
 
-describe('GcpPubSubBroker — Pub/Sub emulator E2E', { ignore: !emulatorHost }, () => {
+describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, () => {
   // deno-lint-ignore no-explicit-any -- the SDK's PubSub type is not imported here.
   let admin: any;
 
   beforeAll(async () => {
-    const mod = await import('npm:@google-cloud/pubsub@^6');
+    const mod = await import('@google-cloud/pubsub');
     admin = new mod.PubSub({ projectId });
     // Topics must pre-exist — the broker deliberately creates none.
     for (const name of ALL_TOPICS) {

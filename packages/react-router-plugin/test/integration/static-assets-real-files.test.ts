@@ -1,3 +1,6 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFsSync from 'node:fs';
+import * as nodeFs from 'node:fs/promises';
 /**
  * Real-file tests for the static-asset handler — serve real files from disk and
  * assert content-type, caching, missing-file 404, lexical `..` rejection, and
@@ -9,8 +12,7 @@
  *
  * @module
  */
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { IFileSystem, RouteHandler } from '@setu-ts/common';
 import { createStaticAssetHandler } from '../../src/assets/static-assets.ts';
 
@@ -19,18 +21,18 @@ describe('static-assets — real files', () => {
   let assetsDir: string;
 
   beforeEach(async () => {
-    tmpDir = await Deno.makeTempDir({ prefix: 'rr-plugin-static-test-' });
+    tmpDir = await tempDir({ prefix: 'rr-plugin-static-test-' });
     assetsDir = `${tmpDir}/assets`;
-    await Deno.mkdir(assetsDir);
+    await nodeFs.mkdir(assetsDir);
 
     // Write real files.
-    await Deno.writeTextFile(`${assetsDir}/app.js`, 'console.log(1)');
-    await Deno.writeTextFile(`${assetsDir}/style.css`, 'body {}');
+    await nodeFs.writeFile(`${assetsDir}/app.js`, 'console.log(1)');
+    await nodeFs.writeFile(`${assetsDir}/style.css`, 'body {}');
   });
 
   afterEach(() => {
     try {
-      Deno.removeSync(tmpDir, { recursive: true });
+      nodeFsSync.rmSync(tmpDir, { recursive: true });
     } catch {
       // ignore cleanup errors.
     }
@@ -118,8 +120,8 @@ describe('static-assets — real files', () => {
   // Both throw for missing paths, which the handler maps to 404.
   function makeRealFs(): IFileSystem {
     return {
-      readFile: (p: string) => Deno.readFile(p),
-      realPath: (p: string) => Deno.realPath(p),
+      readFile: (p: string) => nodeFs.readFile(p),
+      realPath: (p: string) => nodeFs.realpath(p),
     } as unknown as IFileSystem;
   }
 
@@ -199,7 +201,7 @@ describe('static-assets — real files', () => {
 
   it('serves a file with no extension as application/octet-stream', async () => {
     // Write a file with no dot in its name.
-    await Deno.writeTextFile(`${assetsDir}/Makefile`, 'all: build');
+    await nodeFs.writeFile(`${assetsDir}/Makefile`, 'all: build');
 
     const fs = makeRealFs();
 
@@ -241,9 +243,9 @@ describe('static-assets — real files', () => {
     // A secret file outside the assets root, and a symlink inside it that
     // targets that secret. Lexical `..` checks cannot catch this; realPath can.
     const outsideDir = `${tmpDir}/outside`;
-    await Deno.mkdir(outsideDir);
-    await Deno.writeTextFile(`${outsideDir}/secret.txt`, 'leaked');
-    await Deno.symlink(`${outsideDir}/secret.txt`, `${assetsDir}/leaked.txt`);
+    await nodeFs.mkdir(outsideDir);
+    await nodeFs.writeFile(`${outsideDir}/secret.txt`, 'leaked');
+    await nodeFs.symlink(`${outsideDir}/secret.txt`, `${assetsDir}/leaked.txt`);
 
     const fs = makeRealFs();
     const handler = createStaticAssetHandler({

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { AuthHttpBodyTooLargeError, createDefaultAuthHttp } from '../../src/issuers/auth-http.ts';
 
 function streamOf(chunks: Uint8Array[], endless = false) {
@@ -160,4 +159,22 @@ describe('createDefaultAuthHttp', () => {
       globalThis.fetch = original;
     }
   });
+});
+
+it('keeps the size refusal when transport cancellation also fails', async () => {
+  let cancellations = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(11));
+    },
+    cancel() {
+      cancellations++;
+      return Promise.reject(new Error('already closed'));
+    },
+  });
+  const http = createDefaultAuthHttp(() => Promise.resolve(new Response(stream)));
+  await expect(
+    http.get('https://idp.test/', { signal: new AbortController().signal, maxBytes: 10 }),
+  ).rejects.toBeInstanceOf(AuthHttpBodyTooLargeError);
+  expect(cancellations).toBe(1);
 });

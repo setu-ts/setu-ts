@@ -11,8 +11,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createTestApp } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IRequestContext } from '@setu-ts/common';

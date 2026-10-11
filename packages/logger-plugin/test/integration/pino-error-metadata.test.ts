@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 /**
  * Integration test: a raw `Error` in metadata reaches a REAL Pino sink with its
  * message (plan §3.6, X2-5). This is the guarded `npm:pino` probe (the M4
@@ -12,10 +13,8 @@
  *
  * @module
  */
-// deno-lint-ignore-file no-explicit-any
 import { Writable } from 'node:stream';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { PinoLogger } from '../../src/loggers/pino-logger.ts';
 import type { PinoFactory } from '../../src/loggers/pino-logger.ts';
@@ -39,7 +38,7 @@ describe('PinoLogger — raw Error metadata reaches a real Pino sink (X2-5)', ()
     let pino: (options?: Record<string, unknown>, destination?: unknown) => unknown;
     try {
       // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
-      const mod = await import('npm:pino@10.x');
+      const mod = await import('pino');
       pino = (mod as { default: typeof pino }).default;
     } catch {
       // Pino not available in this environment — skip rather than fail.
@@ -106,7 +105,7 @@ describe('PinoLogger — Error-valued base and child bindings survive (X2-5, fin
     let pino: (options?: Record<string, unknown>, destination?: unknown) => unknown;
     try {
       // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
-      const mod = await import('npm:pino@10.x');
+      const mod = await import('pino');
       pino = (mod as { default: typeof pino }).default;
     } catch {
       return undefined;

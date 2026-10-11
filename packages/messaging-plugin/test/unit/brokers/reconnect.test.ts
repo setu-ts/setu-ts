@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import { fullJitterDelay, ReconnectSupervisor } from '../../../src/brokers/reconnect.ts';
 

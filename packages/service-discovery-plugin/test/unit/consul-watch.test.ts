@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { nextIndex, watchConsulService } from '../../src/providers/consul-watch.ts';
 import type { ServiceInstance } from '@setu-ts/common';

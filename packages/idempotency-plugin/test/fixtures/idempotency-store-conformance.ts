@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   IdempotencyClaimRequest,
   IdempotencyClaimResult,
@@ -58,12 +57,12 @@ export function runIdempotencyStoreConformance(label: string, setup: Conformance
   };
 
   describe(`idempotency store conformance (${label})`, () => {
-    it('claims an absent key without takeover', { ignore }, async () => {
+    it('claims an absent key without takeover', { skip: ignore }, async () => {
       const store = await setup.make();
       expect(await claim(store)).toEqual({ outcome: 'claimed', takeover: false });
     });
 
-    it('answers a completed record to a matching claim', { ignore }, async () => {
+    it('answers a completed record to a matching claim', { skip: ignore }, async () => {
       const store = await setup.make();
       await claim(store);
       expect(await store.complete(hex('a'), 'token-1', 'the-record', 60_000)).toBe('settled');
@@ -71,13 +70,17 @@ export function runIdempotencyStoreConformance(label: string, setup: Conformance
       expect(result).toEqual({ outcome: 'completed', record: 'the-record' });
     });
 
-    it('refuses a concurrent duplicate inside the lease as in-progress', { ignore }, async () => {
-      const store = await setup.make();
-      await claim(store);
-      expect(await claim(store, { token: 'token-2' })).toEqual({ outcome: 'in-progress' });
-    });
+    it(
+      'refuses a concurrent duplicate inside the lease as in-progress',
+      { skip: ignore },
+      async () => {
+        const store = await setup.make();
+        await claim(store);
+        expect(await claim(store, { token: 'token-2' })).toEqual({ outcome: 'in-progress' });
+      },
+    );
 
-    it('takes over a lapsed lease inside the claim', { ignore }, async () => {
+    it('takes over a lapsed lease inside the claim', { skip: ignore }, async () => {
       const store = await setup.make();
       await claim(store, { leaseMs: 100 });
       await setup.advance(150);
@@ -89,7 +92,7 @@ export function runIdempotencyStoreConformance(label: string, setup: Conformance
 
     it(
       'refuses a claim whose fingerprint differs, before the state check',
-      { ignore },
+      { skip: ignore },
       async () => {
         const store = await setup.make();
         await claim(store);
@@ -99,19 +102,19 @@ export function runIdempotencyStoreConformance(label: string, setup: Conformance
       },
     );
 
-    it('loses a complete from a token that does not hold the claim', { ignore }, async () => {
+    it('loses a complete from a token that does not hold the claim', { skip: ignore }, async () => {
       const store = await setup.make();
       await claim(store);
       expect(await store.complete(hex('a'), 'wrong', 'r', 60_000)).toBe('lost');
     });
 
-    it('loses a release from a token that does not hold the claim', { ignore }, async () => {
+    it('loses a release from a token that does not hold the claim', { skip: ignore }, async () => {
       const store = await setup.make();
       await claim(store);
       expect(await store.release(hex('a'), 'wrong')).toBe('lost');
     });
 
-    it('settles a release and lets the next claim proceed', { ignore }, async () => {
+    it('settles a release and lets the next claim proceed', { skip: ignore }, async () => {
       const store = await setup.make();
       await claim(store);
       expect(await store.release(hex('a'), 'token-1')).toBe('settled');
@@ -121,7 +124,7 @@ export function runIdempotencyStoreConformance(label: string, setup: Conformance
       });
     });
 
-    it('restarts retention at ttlMs on complete', { ignore }, async () => {
+    it('restarts retention at ttlMs on complete', { skip: ignore }, async () => {
       const store = await setup.make();
       await claim(store, { leaseMs: 100, ttlMs: 1_000 });
       await setup.advance(500);
@@ -133,16 +136,20 @@ export function runIdempotencyStoreConformance(label: string, setup: Conformance
       });
     });
 
-    it('runs 50 concurrent claims of one key with exactly one claimed', { ignore }, async () => {
-      const store = await setup.make();
-      const results = await Promise.all(
-        Array.from({ length: 50 }, (_unused, index) => claim(store, { token: `token-${index}` })),
-      );
-      expect(results.filter((result) => result.outcome === 'claimed')).toHaveLength(1);
-      expect(results.filter((result) => result.outcome === 'in-progress')).toHaveLength(49);
-    });
+    it(
+      'runs 50 concurrent claims of one key with exactly one claimed',
+      { skip: ignore },
+      async () => {
+        const store = await setup.make();
+        const results = await Promise.all(
+          Array.from({ length: 50 }, (_unused, index) => claim(store, { token: `token-${index}` })),
+        );
+        expect(results.filter((result) => result.outcome === 'claimed')).toHaveLength(1);
+        expect(results.filter((result) => result.outcome === 'in-progress')).toHaveLength(49);
+      },
+    );
 
-    it('round-trips a multi-byte UTF-8 record verbatim', { ignore }, async () => {
+    it('round-trips a multi-byte UTF-8 record verbatim', { skip: ignore }, async () => {
       const store = await setup.make();
       await claim(store);
       const record = 'héllo — 日本語 — 𝄞';
@@ -151,20 +158,24 @@ export function runIdempotencyStoreConformance(label: string, setup: Conformance
     });
 
     if (label === 'memory') {
-      it('refuses at the per-scope cap while another scope still claims', { ignore }, async () => {
-        const store = await setup.make();
-        await claim(store, { key: hex('1'), scope: hex('s') });
-        // The default per-scope cap is 1,000, so a store built with cap 1 refuses
-        // the second entry in one scope and accepts the other scope.
-        expect(await claim(store, { key: hex('2'), scope: hex('s') })).toEqual({
-          outcome: 'capacity-exceeded',
-        });
-        expect((await claim(store, { key: hex('3'), scope: hex('t') })).outcome).toBe('claimed');
-      });
+      it(
+        'refuses at the per-scope cap while another scope still claims',
+        { skip: ignore },
+        async () => {
+          const store = await setup.make();
+          await claim(store, { key: hex('1'), scope: hex('s') });
+          // The default per-scope cap is 1,000, so a store built with cap 1 refuses
+          // the second entry in one scope and accepts the other scope.
+          expect(await claim(store, { key: hex('2'), scope: hex('s') })).toEqual({
+            outcome: 'capacity-exceeded',
+          });
+          expect((await claim(store, { key: hex('3'), scope: hex('t') })).outcome).toBe('claimed');
+        },
+      );
 
       it(
         'throws at the global cap rather than evicting a completed record',
-        { ignore },
+        { skip: ignore },
         async () => {
           // The memory `make` uses `maxEntries: 2`, so the third distinct entry
           // is the one that must be refused rather than evicted.

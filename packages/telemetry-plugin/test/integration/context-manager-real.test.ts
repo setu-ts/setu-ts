@@ -9,8 +9,7 @@
  * `NoopContextManager` whose `with()` propagates NOTHING, not even
  * synchronously, so "the package loaded" is not evidence that activation works.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   loadAsyncLocalStorageContextManager,
   registerContextManager,
@@ -25,9 +24,9 @@ describe('AsyncLocalStorage context manager real import', () => {
   });
 
   it('propagates context across await once registered, which is what activation needs', async () => {
-    let api: typeof import('npm:@opentelemetry/api@^1.9.0');
+    let api: typeof import('@opentelemetry/api');
     try {
-      api = await import('npm:@opentelemetry/api@^1.9.0');
+      api = await import('@opentelemetry/api');
     } catch {
       console.warn('skipped: @opentelemetry/api is not resolvable');
       return;

@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IFileSystem, StatResult } from '@setu-ts/common';
 
 import { readArtifactNames, scanArtifacts } from '../../../src/utils/artifact-scanner.ts';

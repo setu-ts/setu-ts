@@ -3,8 +3,7 @@
  * compile step the plugin factory runs at construction. Every refusal is a
  * fixed, value-free `RangeError`; a supplied value is never echoed.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   COLLECTOR_ERRORS,

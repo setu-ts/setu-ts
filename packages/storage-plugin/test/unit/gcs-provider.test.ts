@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IGcsClient } from '../../src/interfaces/index.ts';
 import {
   adaptGcsModule,
@@ -166,21 +165,21 @@ describe('adaptGcsModule', () => {
     expect(result.store.get('test.bin')).toEqual(new Uint8Array([5, 6, 7]));
   });
 
-  it('download throws ENOENT when absent', () => {
+  it('download throws ENOENT when absent', async () => {
     const result = buildFakeGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
     const bucketHandle = facade.bucket() as unknown as {
       file: (n: string) => { download: () => Promise<{ body: unknown }> };
     };
-    expect(bucketHandle.file('missing').download()).rejects.toThrow('ENOENT');
+    await expect(bucketHandle.file('missing').download()).rejects.toThrow('ENOENT');
   });
 
-  it('getMetadata throws when absent', () => {
+  it('getMetadata throws when absent', async () => {
     const result = buildFakeGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
     // deno-lint-ignore no-explicit-any
     const fileHandle = (facade.bucket() as any).file('nope');
-    expect(fileHandle.getMetadata()).rejects.toThrow('ENOENT');
+    await expect(fileHandle.getMetadata()).rejects.toThrow('ENOENT');
   });
 
   it('delete resolves when present', async () => {
@@ -1068,7 +1067,7 @@ describe('GcsProvider', () => {
         getMetadata: () => Promise<[Record<string, unknown>]>;
       };
     }).file('cb-meta');
-    await expect(fileHandle.getMetadata()).rejects.toThrow('metadata error');
+    await await expect(fileHandle.getMetadata()).rejects.toThrow('metadata error');
   });
 
   // ── isGcsNotFound branch: non-Error input ─

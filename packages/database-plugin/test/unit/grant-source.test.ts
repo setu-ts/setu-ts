@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IServiceRegistry, ScopeRef } from '@setu-ts/common';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';

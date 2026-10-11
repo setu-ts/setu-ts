@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { deriveHash, lengthPrefixed, sha256Hex } from '../../src/core/hash.ts';
 
 describe('hash helpers (M109a §3.11)', () => {

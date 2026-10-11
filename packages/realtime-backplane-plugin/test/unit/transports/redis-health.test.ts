@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRedisBackplaneClient } from '../../../src/interfaces/index.ts';
 import { RedisBackplane } from '../../../src/transports/redis-backplane.ts';
 

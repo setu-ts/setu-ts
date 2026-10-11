@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IOutboxStore } from '@setu-ts/common';
 
 import type { OutboxOptions } from '../../../src/interfaces/index.ts';

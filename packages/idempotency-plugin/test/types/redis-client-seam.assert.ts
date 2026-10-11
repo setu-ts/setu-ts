@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { Redis } from 'npm:ioredis@5.x';
+import type { Redis } from 'ioredis';
 import type { IRedisIdempotencyClient } from '../../src/interfaces/index.ts';
 
 declare const redis: Redis;

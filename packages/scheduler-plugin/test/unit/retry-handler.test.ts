@@ -1,8 +1,7 @@
 /**
  * Tests for computeBackoffMs.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { RetryOptions } from '@setu-ts/common';
 import { computeBackoffMs } from '../../src/retry/retry-handler.ts';
 

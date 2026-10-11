@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /**
  * Guarded real-import test: RedisQueue enqueue→reserve→ack round trip against a live Redis.
  *
@@ -9,29 +8,17 @@
  * This is ROADMAP deliverable 5 — the deepened guarded test that proves the
  * ZRANGEBYSCORE LIMIT fix works against a real Redis server.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 
 describe('REAL RedisQueue round trip (guarded)', () => {
-  it('enqueue → reserve → ack round trip against live Redis', async () => {
-    const url = Deno.env.get('REDIS_URL');
-    if (url === undefined) {
-      console.log('SKIP: REDIS_URL not set');
-      return;
-    }
+  it('enqueue → reserve → ack round trip against live Redis', {
+    skip: process.env['REDIS_URL'] === undefined,
+  }, async () => {
+    const url = process.env['REDIS_URL'];
+    if (url === undefined) throw new Error('Backend guard failed');
 
-    let ioredisPresent = false;
-    try {
-      await import('npm:ioredis@5.x');
-      ioredisPresent = true;
-    } catch {
-      // npm:ioredis not available
-    }
-    if (!ioredisPresent) {
-      console.log('SKIP: npm:ioredis@5.x not available');
-      return;
-    }
+    await import('ioredis');
 
     const queueName = `m53:${crypto.randomUUID()}`;
     const queue = new RedisQueue({ url });

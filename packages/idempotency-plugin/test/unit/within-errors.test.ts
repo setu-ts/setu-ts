@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { httpStatusHintOf } from '@setu-ts/common';
 import { errorKind } from '../../src/core/error-kind.ts';
 import type { IdempotencyWithinErrorReason } from '../../src/errors.ts';

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 describe('static-plugin health indicator', () => {
   it('should report up when root is a directory', async () => {

@@ -13,9 +13,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
+import { describe, expect, it } from 'vitest';
 import { conditionalContract } from '../fixtures/conditional-contract.ts';
-import { expect } from '@std/expect';
 import { MongoClient } from 'mongodb';
 import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
 import type { IMongoDatabase } from '../../src/adapters/mongo/mongo-client-types.ts';
@@ -26,7 +25,7 @@ import { DuplicateKeyError } from '@setu-ts/common';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 
 /** `MONGO_URL` is the §7 gate variable; `MONGODB_URI` is the CI's name. */
-const mongoUrl = Deno.env.get('MONGO_URL') ?? Deno.env.get('MONGODB_URI');
+const mongoUrl = process.env['MONGO_URL'] ?? process.env['MONGODB_URI'];
 /**
  * Whether the real-server cases run. They are declared with the BDD `ignore`
  * option rather than an early `return`, so an unset `MONGODB_URI` is reported
@@ -74,7 +73,7 @@ describe('IMongoDatabase facade static type fixture (M95b §3.5)', () => {
 
 describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   it('M105 conditional writes match, miss and conjoin mapped keys', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const adapter = new MongoAdapter({
       url,
@@ -100,7 +99,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   // A session needs a replica set; CI's `MONGODB_URI` is a standalone server,
   // so this half reports as ignored there rather than failing or passing vacuously.
   it('M105 conditional writes match, miss and conjoin mapped keys inside a session', {
-    ignore: skipTx,
+    skip: skipTx,
   }, async () => {
     const adapter = new MongoAdapter({
       url,
@@ -131,7 +130,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
     }
   });
   it('lazily imports the driver and reads CRUD operations back through IDataSource', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `m78_widgets_${crypto.randomUUID().replaceAll('-', '')}`;
     const adapter = new MongoAdapter({
@@ -171,7 +170,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   });
 
   it('serves a numeric primary key through every IDataSource entry point', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // The default `'auto'` mapping converted through `ObjectId.isValid`, which
     // the real driver answers `true` for on any number while its constructor
@@ -209,7 +208,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   });
 
   it('serves the shapes a fake cannot prove: empty groups, `_id` as the key, pk in update', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `m78_shapes_${crypto.randomUUID().replaceAll('-', '')}`;
     const adapter = new MongoAdapter({
@@ -249,7 +248,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
     }
   });
 
-  it('round-trips a collection whose primary key IS `_id`', { ignore: skipReal }, async () => {
+  it('round-trips a collection whose primary key IS `_id`', { skip: skipReal }, async () => {
     const collection = `m78_native_${crypto.randomUUID().replaceAll('-', '')}`;
     const adapter = new MongoAdapter({
       url,
@@ -273,7 +272,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   });
 
   it('commits and rolls back a real session transaction (replica set only)', {
-    ignore: skipTx,
+    skip: skipTx,
   }, async () => {
     // Transactions were proven by a fake whose session is inert, so neither
     // commit nor rollback was ever observed against a server. A standalone
@@ -311,7 +310,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   // ---------------------------------------------------------------------------
 
   it('round-trips a flat composite key regardless of caller key-object order (P3)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `m79_flat_${suffix}`;
     const adapter = new MongoAdapter({
@@ -348,7 +347,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   });
 
   it('round-trips a compound-`_id` collection and matches a REVERSE-order key (P4/P5)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `m79_compound_${suffix}`;
     // A second, raw client drives the order-sensitivity probe directly against
@@ -402,7 +401,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   });
 
   it('matches a dotted nested-path filter against a real subdocument (P8)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `m79_nested_${suffix}`;
     const adapter = new MongoAdapter({
@@ -445,7 +444,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
     }
   });
 
-  it('filters a Date range over real BSON dates (P9)', { ignore: skipReal }, async () => {
+  it('filters a Date range over real BSON dates (P9)', { skip: skipReal }, async () => {
     const collection = `m79_dates_${suffix}`;
     const adapter = new MongoAdapter({
       url,
@@ -495,7 +494,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   });
 
   it('walks a tied fixture across three pages returning every row exactly once (P10/P11)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `m79_walk_${suffix}`;
     const adapter = new MongoAdapter({
@@ -546,7 +545,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   });
 
   it('walks tied BSON Date values across three pages without losing rows', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `m79_date_walk_${suffix}`;
     const adapter = new MongoAdapter({
@@ -597,7 +596,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   });
 
   it('LOSES rows on the tied fixture when the key tiebreaker is omitted (P11 negative control)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `m79_naive_${suffix}`;
     const adapter = new MongoAdapter({
@@ -685,7 +684,7 @@ describe('MongoAdapter — classified statuses (X38-1/X35-2)', () => {
   });
 
   it('a WriteConflict inside a real transaction reaches the caller as SerializationConflictError', {
-    ignore: skipTx,
+    skip: skipTx,
   }, async () => {
     const collection = `x90f_conflict_${crypto.randomUUID().replaceAll('-', '')}`;
     const adapter = new MongoAdapter({
@@ -727,7 +726,7 @@ describe('MongoAdapter — classified statuses (X38-1/X35-2)', () => {
 
 describe('MongoAdapter against a real server — duplicate key', () => {
   it('a duplicate _id reaches the caller as DuplicateKeyError (code 11000)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const collection = `dupkey_${crypto.randomUUID().replaceAll('-', '')}`;
     const adapter = new MongoAdapter({

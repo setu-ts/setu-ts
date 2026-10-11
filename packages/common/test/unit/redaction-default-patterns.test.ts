@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_SECRET_FIELD_PATTERNS } from '../../src/redaction/classification.ts';
 

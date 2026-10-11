@@ -1,10 +1,11 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * Tests for server-build loader and pure assembleHandler seam.
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
 import {
   assembleHandler,
@@ -186,10 +187,10 @@ describe('server-build', () => {
 
   it('loadRequestHandler throws when the module has no createRequestHandler', async () => {
     // A real build module, so the failure is attributable to the rr module.
-    const tmp = await Deno.makeTempDir({ prefix: 'rr-crh-' });
+    const tmp = await tempDir({ prefix: 'rr-crh-' });
     try {
       const buildPath = `${tmp}/build.mjs`;
-      await Deno.writeTextFile(buildPath, 'export default { routes: {} };');
+      await nodeFs.writeFile(buildPath, 'export default { routes: {} };');
 
       await expect(
         loadRequestHandler(buildPath, 'production', {
@@ -197,7 +198,7 @@ describe('server-build', () => {
         }),
       ).rejects.toThrow("exposes no 'createRequestHandler' export");
     } finally {
-      await Deno.remove(tmp, { recursive: true });
+      await nodeFs.rm(tmp, { recursive: true });
     }
   });
 

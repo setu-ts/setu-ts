@@ -4,8 +4,7 @@
  * however it was spelled (`resolver: 'jwt'`, an array containing one, or a
  * bare instance). Silent for every other resolver.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ILogger, IPluginContext } from '@setu-ts/common';
 

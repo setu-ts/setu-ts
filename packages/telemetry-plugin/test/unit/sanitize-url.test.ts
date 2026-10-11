@@ -1,6 +1,5 @@
 /** Tests for the telemetry URL egress sanitizer. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createMaskRedactor, createRedactionService } from '@setu-ts/common';
 import { sanitizeUrl } from '../../src/attributes/sanitize-url.ts';
 
@@ -49,4 +48,8 @@ describe('sanitizeUrl', () => {
     );
     expect(sanitizeUrl('/search?email=a#x', 'omit', undefined)).toBe('/search');
   });
+});
+
+it('retains a malformed relative URL with no query or fragment delimiters', () => {
+  expect(sanitizeUrl('/relative/path', 'omit', undefined)).toBe('/relative/path');
 });

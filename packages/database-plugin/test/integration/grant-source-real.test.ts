@@ -9,11 +9,10 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { Pool } from 'npm:pg@^8.0.0';
-import { drizzle } from 'npm:drizzle-orm@0.45.2/node-postgres';
-import { pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
+import { describe, expect, it } from 'vitest';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { pgTable, text } from 'drizzle-orm/pg-core';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IServiceRegistry, ScopeRef } from '@setu-ts/common';
 import {
@@ -26,8 +25,8 @@ import {
 import type { IDatabaseService } from '../../src/interfaces/index.ts';
 import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
 
-const postgresUrl = Deno.env.get('OUTBOX_POSTGRES_URL');
-const mongoUrl = Deno.env.get('MONGO_URL') ?? Deno.env.get('MONGODB_URI');
+const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
+const mongoUrl = process.env['MONGO_URL'] ?? process.env['MONGODB_URI'];
 const live = new AbortController().signal;
 const T1: ScopeRef = { type: 'tenant', id: 't1' };
 const T2: ScopeRef = { type: 'tenant', id: 't2' };
@@ -118,7 +117,7 @@ async function contract(service: IDatabaseService): Promise<void> {
 }
 
 describe('scoped RBAC database sources on real backends (guarded)', () => {
-  it('PostgreSQL through Drizzle', { ignore: postgresUrl === undefined }, async () => {
+  it('PostgreSQL through Drizzle', { skip: postgresUrl === undefined }, async () => {
     const run = crypto.randomUUID().replaceAll('-', '');
     const grantTable = `m110b_grants_${run}`;
     const roleTable = `m110b_roles_${run}`;
@@ -160,7 +159,7 @@ describe('scoped RBAC database sources on real backends (guarded)', () => {
     }
   });
 
-  it('MongoDB', { ignore: mongoUrl === undefined }, async () => {
+  it('MongoDB', { skip: mongoUrl === undefined }, async () => {
     const run = crypto.randomUUID().replaceAll('-', '');
     const adapter = new MongoAdapter({
       url: mongoUrl!,

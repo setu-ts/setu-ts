@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { parseArgs, stringFlag, stringFlags } from '../../src/args.ts';
 
 describe('parseArgs', () => {
@@ -122,4 +121,13 @@ describe('stringFlags', () => {
       'billing',
     ]);
   });
+});
+
+it('replaces incomplete repeated dependency flags without retaining a boolean in the list', () => {
+  expect(parseArgs(['--depends-on=a', '--depends-on=b', '--depends-on=c']).flags['depends-on'])
+    .toEqual(['a', 'b', 'c']);
+  expect(parseArgs(['--depends-on=a', '--depends-on=b', '--depends-on']).flags['depends-on']).toBe(
+    true,
+  );
+  expect(parseArgs(['--depends-on', '--depends-on=c']).flags['depends-on']).toBe('c');
 });

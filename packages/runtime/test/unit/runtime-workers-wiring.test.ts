@@ -2,8 +2,7 @@
  * Unit tests asserting each runtime adapter wires (or omits) the
  * `IRuntimeServices.workers` host correctly.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IWorkerHandle, IWorkerHost } from '@setu-ts/common';
 import { createDenoRuntimeServices } from '../../src/adapters/deno/deno-runtime.ts';

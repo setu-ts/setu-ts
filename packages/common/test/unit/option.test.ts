@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { fromNullable, isNone, isSome, none, some } from '../../src/option.ts';
 import type { Option } from '../../src/option.ts';
 

@@ -19,8 +19,7 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { IJob, IQueue } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

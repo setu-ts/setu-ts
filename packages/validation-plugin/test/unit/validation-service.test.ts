@@ -4,8 +4,7 @@
  * Covers validate() success/failure, ZodIssue→ValidationIssue mapping,
  * safeParseSchema() TypeError, middleware() delegation, and real Zod schemas.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { applySchemaPolicy, ValidationService } from '../../src/services/validation-service.ts';
 import { defaultFormatter } from '../../src/formatters/default-formatter.ts';
@@ -140,7 +139,7 @@ describe('ValidationService — real Zod schema', () => {
     // deno-lint-ignore no-explicit-any
     let z: { z: any };
     try {
-      const mod = await import('npm:zod@^3.24.0');
+      const mod = await import('zod-v3');
       z = mod;
     } catch {
       // Skip if npm:zod is unavailable in the test environment.
@@ -171,7 +170,7 @@ describe('ValidationService — real Zod schema', () => {
     // deno-lint-ignore no-explicit-any
     let z: { z: any };
     try {
-      const mod = await import('npm:zod@^3.24.0');
+      const mod = await import('zod-v3');
       z = mod;
     } catch {
       return;
@@ -193,7 +192,7 @@ describe('ValidationService — real Zod schema', () => {
   });
 
   it('validates a real Zod v4 schema through its public safeParse API', async () => {
-    const { z } = await import('npm:zod@^4.4.0');
+    const { z } = await import('zod-v4');
     const service = new ValidationService(defaultFormatter);
     const schema = z.object({ email: z.string().email() });
 

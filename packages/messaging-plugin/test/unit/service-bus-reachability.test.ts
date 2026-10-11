@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IServiceBusTransport } from '../../src/brokers/service-bus-broker.ts';
 import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';

@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { importSource } from '../../../../../test/node-helpers.ts';
+import { describe, expect, it } from 'vitest';
 import {
   DISCOVERY_MODULE,
   DISCOVERY_SPECIFIER,
@@ -89,12 +89,10 @@ describe('renderDiscoveryModule', () => {
     };
     const source = renderDiscoveryModule(ORDERS, [ORDERS, hostile]);
     const body = source.slice(source.indexOf('export const'));
-    const module = await import(
-      `data:application/typescript,${
-        encodeURIComponent(`const Deno = { env: { get: (_: string) => undefined } };\n${body}`)
-      }`
+    const module = await importSource(
+      `const Deno = { env: { get: (_: string) => undefined } };\n${body}`,
     );
-    expect(Object.keys(module[SERVICE_ENDPOINTS_EXPORT])).toEqual([hostile.name]);
+    expect(Object.keys(module[SERVICE_ENDPOINTS_EXPORT] as object)).toEqual([hostile.name]);
     expect(Reflect.get(globalThis, 'PWNED')).toBeUndefined();
   });
 });

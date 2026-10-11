@@ -5,8 +5,7 @@
  */
 
 import { createCloudflareRuntimeServices } from '../../src/adapters/workers/cf-runtime.ts';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // platform

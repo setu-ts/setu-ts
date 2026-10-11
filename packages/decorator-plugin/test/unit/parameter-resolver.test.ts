@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { IPrincipal } from '@setu-ts/common';
 
 import { createFakeRequestContext } from '../fixtures/fake-request-context.ts';

@@ -1,3 +1,4 @@
+import { serveHttp } from '../../../../test/node-helpers.ts';
 /**
  * The `endpoint` option through the PLUGIN path (M99d review fix).
  *
@@ -17,8 +18,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ISecretManager } from '@setu-ts/common';
@@ -30,12 +30,12 @@ import { SecretsPlugin } from '../../src/index.ts';
 const SECRETS = new Map<string, string>([['plugin/secret', 'plugin-value']]);
 
 /** The minimal JSON 1.1 stub the real SDK client talks to. */
-function startStub(): { url: string; close: () => Promise<void> } {
+async function startStub(): Promise<{ url: string; close: () => Promise<void> }> {
   let port = 0;
   // Loopback only: the package's test `net` grant is scoped to `127.0.0.1`
   // (any port, since this stub's is ephemeral), so no test can reach a real
   // cloud endpoint by accident.
-  const server = Deno.serve({
+  const server = await serveHttp({
     hostname: '127.0.0.1',
     port: 0,
     onListen: (l) => {
@@ -80,7 +80,7 @@ function startStub(): { url: string; close: () => Promise<void> } {
 
 describe('SecretsPlugin endpoint option (M99d review fix)', () => {
   it('threads options.endpoint to the real SDK client through createProvider', async () => {
-    const stub = startStub();
+    const stub = await startStub();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),

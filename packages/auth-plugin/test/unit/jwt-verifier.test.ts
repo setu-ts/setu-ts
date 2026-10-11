@@ -7,8 +7,7 @@
  * verified, and `none`/HMAC must be refused before any key is read.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { decodeJsonSegment, JwtVerifier } from '../../src/issuers/jwt-verifier.ts';
 import type { KeySetReader } from '../../src/issuers/jwt-verifier.ts';
 import type { Jwk } from '../../src/issuers/key-selection.ts';

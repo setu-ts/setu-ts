@@ -1,11 +1,11 @@
+import * as nodeFs from 'node:fs/promises';
 /**
  * Tests for `setu add <plugin>` (D3).
  *
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
@@ -460,8 +460,9 @@ describe('runAddCommand', () => {
       "import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';\nexport async function createApp() {}\n";
     let count = 0;
     for (const tier of ['rest', 'microservice', 'full-stack']) {
-      const options = await Deno.readTextFile(
+      const options = await nodeFs.readFile(
         new URL(`../../../../starters/${tier}-starter/src/options.ts`, import.meta.url),
+        'utf8',
       );
       for (const match of options.matchAll(/^\s+(\w+)\?: (\w+)PluginOptions;/gm)) {
         const stem = match[2]!;
@@ -550,8 +551,9 @@ describe('runAddCommand', () => {
     // The fixture is reached by `deno check packages`, so each line it carries
     // compiles against the real option type; this test pins that every printed
     // line IS one of them, verbatim.
-    const fixture = await Deno.readTextFile(
+    const fixture = await nodeFs.readFile(
       new URL('../../fixtures/registration-lines.ts', import.meta.url),
+      'utf8',
     );
     const printed: string[] = [];
     for (

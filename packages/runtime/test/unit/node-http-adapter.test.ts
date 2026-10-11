@@ -12,8 +12,7 @@ import {
   NodeHttpServerHandle,
 } from '../../src/adapters/node/node-http-adapter.ts';
 import { UPGRADE_INTENT } from '@setu-ts/common';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Fake host

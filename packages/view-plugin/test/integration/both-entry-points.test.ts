@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createTestApp, inject } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { Controller, DecoratorPlugin, Get, Render } from '@setu-ts/decorator-plugin';

@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { replaceLocale } from '@setu-ts/common';

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { isWebSocketUpgradeRequest } from '../../src/adapters/shared/upgrade-detection.ts';
 
 function headers(init: Record<string, string>): Headers {

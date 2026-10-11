@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { Buffer } from 'node:buffer';
 import { RabbitMqBroker, validateClient } from '../../src/brokers/rabbitmq-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';

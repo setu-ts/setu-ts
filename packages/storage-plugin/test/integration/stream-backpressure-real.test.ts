@@ -1,3 +1,4 @@
+import { createConnection, createServer, type Socket } from 'node:net';
 /**
  * X45-1 guard: drives a **real** MinIO object through `S3Provider.getStream()`
  * with a deliberately slow consumer and asserts the provider reads only a
@@ -69,17 +70,16 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { S3Provider } from '../../src/providers/s3-provider.ts';
 
 // ── Guard ───────────────────────────────────────────────────────────────────
 
-const endpoint = Deno.env.get('S3_ENDPOINT_URL');
+const endpoint = process.env['S3_ENDPOINT_URL'];
 let sdkPresent = false;
 if (endpoint !== undefined) {
   try {
-    await import('npm:@aws-sdk/client-s3@^3');
+    await import('@aws-sdk/client-s3');
     sdkPresent = true;
   } catch {
     // npm:@aws-sdk/client-s3 not available
@@ -154,82 +154,53 @@ interface CountingProxy {
   close(): Promise<void>;
 }
 
-function startCountingProxy(originHost: string, originPort: number, port: number): CountingProxy {
+async function startCountingProxy(
+  originHost: string,
+  originPort: number,
+  port: number,
+): Promise<CountingProxy> {
   let originBytes = 0;
   let open = 0;
-  const sockets = new Set<Deno.Conn>();
-  const listener = Deno.listen({ hostname: '127.0.0.1', port });
-
-  const pump = async (from: Deno.Conn, to: Deno.Conn, count: boolean): Promise<void> => {
-    const buf = new Uint8Array(64 * 1024);
-    try {
-      for (;;) {
-        const n = await from.read(buf);
-        if (n === null) break;
-        if (count) originBytes += n;
-        // `write()` may forward FEWER bytes than asked; dropping the unwritten
-        // suffix would silently truncate the relayed HTTP stream, and the catch
-        // below would read the resulting failure as a normal close.
-        let offset = 0;
-        while (offset < n) {
-          const written = await to.write(buf.subarray(offset, n));
-          if (written <= 0) throw new Error('TCP relay made no write progress');
-          offset += written;
-        }
-      }
-    } catch {
-      // Either side closing mid-copy is the normal end of a relayed request.
-    }
-    // `closeWrite()` is async, so a peer that has already gone away rejects
-    // rather than throwing — a bare try/catch would not hold it.
-    await to.closeWrite().catch(() => {});
-  };
-
-  const accepting = (async () => {
-    for await (const client of listener) {
-      open++;
-      sockets.add(client);
-      void (async () => {
-        let origin: Deno.TcpConn;
-        try {
-          origin = await Deno.connect({ hostname: originHost, port: originPort });
-        } catch {
-          client.close();
-          sockets.delete(client);
-          open--;
-          return;
-        }
-        sockets.add(origin);
-        await Promise.allSettled([pump(client, origin, false), pump(origin, client, true)]);
-        for (const s of [client, origin]) {
-          try {
-            s.close();
-          } catch {
-            // Already closed by the peer.
-          }
-          sockets.delete(s);
-        }
-        open--;
-      })();
-    }
-  })();
-
+  const sockets = new Set<Socket>();
+  const listener = createServer((client) => {
+    open++;
+    const origin = createConnection({ host: originHost, port: originPort });
+    sockets.add(client);
+    sockets.add(origin);
+    let closed = false;
+    const closePair = () => {
+      if (closed) return;
+      closed = true;
+      open--;
+      client.destroy();
+      origin.destroy();
+      sockets.delete(client);
+      sockets.delete(origin);
+    };
+    client.once('close', closePair);
+    origin.once('close', closePair);
+    client.once('error', closePair);
+    origin.once('error', closePair);
+    // pipe pauses the source when the destination reaches its buffer limit.
+    origin.on('data', (chunk: Buffer) => {
+      originBytes += chunk.length;
+    });
+    client.pipe(origin);
+    origin.pipe(client);
+  });
+  await new Promise<void>((accept, reject) => {
+    listener.once('error', reject);
+    listener.listen(port, '127.0.0.1', accept);
+  });
   return {
     port,
     originBytes: () => originBytes,
     openConnections: () => open,
     close: async () => {
-      listener.close();
-      for (const s of sockets) {
-        try {
-          s.close();
-        } catch {
-          // Already closed.
-        }
-      }
-      sockets.clear();
-      await accepting.catch(() => {});
-      // Let the in-flight relay tasks observe the closed sockets and settle.
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((accept, reject) =>
+        listener.close((error) => error ? reject(error) : accept())
+      );
       await wait(100);
     },
   };
@@ -244,7 +215,7 @@ async function ensureFixture(
   accessKeyId: string,
   secretAccessKey: string,
 ): Promise<void> {
-  const mod = await import('npm:@aws-sdk/client-s3@^3');
+  const mod = await import('@aws-sdk/client-s3');
   const client = new mod.S3Client({
     endpoint: realEndpoint,
     region: 'us-east-1',
@@ -276,17 +247,17 @@ async function ensureFixture(
 
 // ── Suite ───────────────────────────────────────────────────────────────────
 
-describe('REAL MinIO/S3 streaming backpressure (X45-1)', { ignore: skip }, () => {
+describe('REAL MinIO/S3 streaming backpressure (X45-1)', { skip: skip }, () => {
   it('reads a bounded amount ahead of a slow consumer, and stops for a stalled one', async () => {
     const real = new URL(toIpv4(endpoint as string));
-    const bucket = Deno.env.get('S3_BUCKET') ?? 'm70c-verify';
-    const accessKeyId = Deno.env.get('S3_ACCESS_KEY_ID') ?? 'minioadmin';
-    const secretAccessKey = Deno.env.get('S3_SECRET_ACCESS_KEY') ?? 'minioadmin';
+    const bucket = process.env['S3_BUCKET'] ?? 'm70c-verify';
+    const accessKeyId = process.env['S3_ACCESS_KEY_ID'] ?? 'minioadmin';
+    const secretAccessKey = process.env['S3_SECRET_ACCESS_KEY'] ?? 'minioadmin';
     const originPort = real.port === '' ? 9000 : Number(real.port);
 
     await ensureFixture(real.origin, bucket, accessKeyId, secretAccessKey);
 
-    const proxy = startCountingProxy(real.hostname, originPort, PROXY_PORT);
+    const proxy = await startCountingProxy(real.hostname, originPort, PROXY_PORT);
     const provider = new S3Provider({
       bucket,
       endpoint: `http://127.0.0.1:${proxy.port}`,
@@ -397,16 +368,16 @@ describe('REAL MinIO/S3 streaming backpressure (X45-1)', { ignore: skip }, () =>
 
   it('cancelling mid-flow while the origin tears down does not crash the process', async () => {
     const real = new URL(toIpv4(endpoint as string));
-    const bucket = Deno.env.get('S3_BUCKET') ?? 'm70c-verify';
-    const accessKeyId = Deno.env.get('S3_ACCESS_KEY_ID') ?? 'minioadmin';
-    const secretAccessKey = Deno.env.get('S3_SECRET_ACCESS_KEY') ?? 'minioadmin';
+    const bucket = process.env['S3_BUCKET'] ?? 'm70c-verify';
+    const accessKeyId = process.env['S3_ACCESS_KEY_ID'] ?? 'minioadmin';
+    const secretAccessKey = process.env['S3_SECRET_ACCESS_KEY'] ?? 'minioadmin';
     const originPort = real.port === '' ? 9000 : Number(real.port);
 
     await ensureFixture(real.origin, bucket, accessKeyId, secretAccessKey);
 
     // Per-trial proxy: the yank closes its listener for good.
     for (let trial = 0; trial < 5; trial++) {
-      const proxy = startCountingProxy(real.hostname, originPort, PROXY_PORT);
+      const proxy = await startCountingProxy(real.hostname, originPort, PROXY_PORT);
       const provider = new S3Provider({
         bucket,
         endpoint: `http://127.0.0.1:${proxy.port}`,
@@ -448,7 +419,7 @@ describe('REAL MinIO/S3 streaming backpressure (X45-1)', { ignore: skip }, () =>
     }
 
     // The provider still works after the raced cancels.
-    const lastProxy = startCountingProxy(real.hostname, originPort, PROXY_PORT);
+    const lastProxy = await startCountingProxy(real.hostname, originPort, PROXY_PORT);
     const still = new S3Provider({
       bucket,
       endpoint: `http://127.0.0.1:${lastProxy.port}`,

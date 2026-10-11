@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

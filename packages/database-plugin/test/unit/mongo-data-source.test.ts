@@ -10,8 +10,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
 import type { IMongoSession } from '../../src/adapters/mongo/mongo-client-types.ts';
 import type { EntityKey, NormalizedQuery } from '@setu-ts/common';

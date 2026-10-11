@@ -14,8 +14,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { MINIMAL_HOST, MINIMAL_SEAMS } from '../../../src/templates/minimal.ts';
 import { REGISTER_ROUTES_EXPORT } from '../../../src/seams/http.ts';

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IFileSystem } from '@setu-ts/common';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { findExisting, withFileTransaction, writeFiles } from '../../src/utils/file-writer.ts';

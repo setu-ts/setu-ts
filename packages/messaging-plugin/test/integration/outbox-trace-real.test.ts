@@ -25,8 +25,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker, ISpan, ITelemetryService, SpanOptions } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
@@ -59,14 +58,14 @@ interface RealOtel {
 /** The optional OTel modules, loaded once; `null` when not resolvable. */
 async function loadOtel(): Promise<
   {
-    readonly sdk: typeof import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
-    readonly resources: typeof import('npm:@opentelemetry/resources@^2.9.0');
+    readonly sdk: typeof import('@opentelemetry/sdk-trace-base');
+    readonly resources: typeof import('@opentelemetry/resources');
   } | null
 > {
   try {
-    const api = await import('npm:@opentelemetry/api@^1.9.0');
-    const sdk = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
-    const resources = await import('npm:@opentelemetry/resources@^2.9.0');
+    const api = await import('@opentelemetry/api');
+    const sdk = await import('@opentelemetry/sdk-trace-base');
+    const resources = await import('@opentelemetry/resources');
     const manager = await loadAsyncLocalStorageContextManager();
     api.context.setGlobalContextManager(manager as never);
     setOtelApi(api as never);
@@ -144,7 +143,7 @@ function buildApp(otel: RealOtel, background?: (promise: Promise<unknown>) => vo
   });
 }
 
-describe('outbox trace re-parenting (real OpenTelemetry)', { ignore: modules === null }, () => {
+describe('outbox trace re-parenting (real OpenTelemetry)', { skip: modules === null }, () => {
   it('request → relay → publish → receive is ONE trace when the sweep runs from a clean context', async () => {
     const otel = realOtel();
     const app = buildApp(otel);

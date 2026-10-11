@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { parseArgs } from '../../../src/args.ts';
 import { resolveTemplateChoice } from '../../../src/templates/choice.ts';
 import { listTemplates } from '../../../src/templates/registry.ts';

@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { OutboxUnknownTenantError } from '../../../src/outbox/errors.ts';
 import { resolveOutboxOptions } from '../../../src/outbox/options.ts';

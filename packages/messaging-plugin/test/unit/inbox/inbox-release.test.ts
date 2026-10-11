@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { InboxRecord } from '@setu-ts/common';
 import { InboxNotReadyError, InboxRowStateError } from '../../../src/index.ts';
 import { InboxService } from '../../../src/inbox/inbox-service.ts';

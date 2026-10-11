@@ -12,8 +12,7 @@
  * nothing cannot pass. The §3.2 composition is also driven with and without
  * the `devtool` parameter (audit row O13).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IOutboundHttpDiagnosticsSource, IPlugin } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';

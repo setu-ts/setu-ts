@@ -5,8 +5,7 @@
  * mid-transaction read-through, rollback discarding all overlay kinds,
  * not-connected/already-finalized throws, and adversarial probes.
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import { normalizeQuery } from '../../src/query/query-builder.ts';

@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /**
  * Guarded real-import test: RedisStreamsBroker publish→subscribe round trip against a live Redis.
  *
@@ -6,32 +5,20 @@
  * absent, logs SKIP and returns. When present, constructs RedisStreamsBroker
  * with NO injected client so the production loadIoredis path runs for real.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('REAL RedisStreamsBroker round trip (guarded)', () => {
-  it('publish → subscribe round trip against live Redis', async () => {
-    const url = Deno.env.get('REDIS_URL');
-    if (url === undefined) {
-      console.log('SKIP: REDIS_URL not set');
-      return;
-    }
+  it('publish → subscribe round trip against live Redis', {
+    skip: process.env['REDIS_URL'] === undefined,
+  }, async () => {
+    const url = process.env['REDIS_URL'];
+    if (url === undefined) throw new Error('Backend guard failed');
 
-    let ioredisPresent = false;
-    try {
-      await import('npm:ioredis@5.x');
-      ioredisPresent = true;
-    } catch {
-      // npm:ioredis not available
-    }
-    if (!ioredisPresent) {
-      console.log('SKIP: npm:ioredis@5.x not available');
-      return;
-    }
+    await import('ioredis');
 
     const runtime: IRuntimeServices = createFakeRuntime();
     const serializer = new JsonSerializer();

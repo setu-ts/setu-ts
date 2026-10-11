@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { readJsonLines } from '../../src/http/ndjson.ts';
 import { streamOf } from '../fixtures/fakes.ts';
@@ -94,4 +93,23 @@ describe('readJsonLines', () => {
 
     expect(cancelled).toBe(1);
   });
+});
+
+it('preserves a received frame when cancellation rejects', async () => {
+  let cancellations = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"a":1}\n'));
+    },
+    cancel() {
+      cancellations++;
+      return Promise.reject(new Error('transport already closed'));
+    },
+  });
+  for await (const value of readJsonLines(stream)) {
+    expect(value).toEqual({ a: 1 });
+    break;
+  }
+  await Promise.resolve();
+  expect(cancellations).toBe(1);
 });

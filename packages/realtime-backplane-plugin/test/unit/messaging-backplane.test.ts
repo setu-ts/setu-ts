@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker, ISubscription, MessageHandler, RealtimeFrame } from '@setu-ts/common';
 import { isRealtimeFrame, MessagingBackplane } from '../../src/transports/messaging-backplane.ts';
 

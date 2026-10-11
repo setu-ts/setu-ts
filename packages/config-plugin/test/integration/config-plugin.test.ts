@@ -4,8 +4,7 @@
  * Covers plugin metadata, runtime dependency, service registration,
  * async file loading, missing filesystem support, and startup validation failure.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IApplication, IConfig, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 

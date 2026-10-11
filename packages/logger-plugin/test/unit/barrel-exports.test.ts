@@ -7,8 +7,7 @@
  * fully covered merely by being loaded, and no test imports through the barrel
  * (the M56 defect class).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as barrel from '../../src/index.ts';
 
 /** Every value the barrel is expected to publish. */

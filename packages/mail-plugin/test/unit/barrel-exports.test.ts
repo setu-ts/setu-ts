@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { MailComponentTemplate, MailStringTemplate, MailTemplate } from '../../src/index.ts';
 import * as api from '../../src/index.ts';

@@ -1,8 +1,7 @@
 /**
  * @module full-stack-starter barrel export tests
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as fullStackStarter from '../../src/index.ts';
 
 describe('full-stack-starter / barrel exports', () => {

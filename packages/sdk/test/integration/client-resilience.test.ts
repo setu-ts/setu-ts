@@ -5,8 +5,7 @@
  * together against a fake fetch and fake timing.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { HttpClient } from '../../src/http/http-client.ts';
 import { ClientCircuitOpenError, HttpClientError } from '../../src/errors.ts';
 import type { ClientRetryPolicy, IClientTiming } from '../../src/http/contracts.ts';

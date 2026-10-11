@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The Durable Object side of the lock.
  *
@@ -8,8 +17,7 @@
  * so the test rebuilds the core over the same storage.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { DistributedLockObjectCore } from '../../../src/durable-objects/distributed-lock-object.ts';
 import { FakeDurableObjectState } from '../../do-fakes.ts';

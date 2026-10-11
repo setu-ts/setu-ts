@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The read-it-back proof for both deliverables.
  *
@@ -12,8 +21,7 @@
  * is the shape that actually works, rather than an untested illustration.
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { IRuntimeServices, RealtimeFrame } from '@setu-ts/common';
 import type {

@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * `ProcessOptions.concurrency` is a committed option, so the helper honouring
  * it has to actually bound overlap — the failure mode is silent, since a queue
  * that ignores the limit still processes every message.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { runBounded } from '../../../src/queues/bounded-map.ts';
 

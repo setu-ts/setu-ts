@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs/promises';
 /**
  * The inbox on Cloudflare D1 (M108 §3.10, §3.14), at unit level: the shipped
  * `D1Adapter` over a REAL SQLite engine (`cloudflare-plugin`'s `SqliteD1`
@@ -12,8 +13,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IMessageBroker } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createScheduledHandler, D1Adapter, WorkersCron } from '@setu-ts/cloudflare-plugin';
@@ -28,8 +28,9 @@ import type { IInbox } from '../../src/index.ts';
 import { envelope, type Hired, hired } from '../fixtures/inbox.ts';
 
 /** The committed SQLite/D1 DDL — the text the README embeds verbatim. */
-const SQLITE_DDL = await Deno.readTextFile(
+const SQLITE_DDL = await nodeFs.readFile(
   new URL('../../../database-plugin/test/fixtures/inbox-sqlite.sql', import.meta.url),
+  'utf8',
 );
 
 const HOURLY = '0 * * * *';

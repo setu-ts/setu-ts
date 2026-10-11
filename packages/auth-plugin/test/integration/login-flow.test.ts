@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
 import { MAX_PENDING_ENTRIES } from '../../src/sign-in/pending-state.ts';

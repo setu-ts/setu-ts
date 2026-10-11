@@ -5,8 +5,7 @@
  * injected isFailure predicate arms, and concurrent probe rejection.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createCircuitBreaker } from '../../src/circuit-breaker/circuit-breaker.ts';
 import { ClientCircuitOpenError } from '../../src/errors.ts';
 import type { IClientTiming } from '../../src/http/contracts.ts';

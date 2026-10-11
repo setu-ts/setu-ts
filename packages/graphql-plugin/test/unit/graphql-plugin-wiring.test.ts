@@ -8,8 +8,7 @@
  * the onClose cache-clear lifecycle hook.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   ICacheStore,
   IGraphqlService,

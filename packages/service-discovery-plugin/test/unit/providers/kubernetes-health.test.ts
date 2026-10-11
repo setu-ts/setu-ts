@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { KubernetesProvider } from '../../../src/providers/kubernetes-provider.ts';
 import { createFakeHttp, createFakeRuntime } from '../../fixtures/fakes.ts';
 

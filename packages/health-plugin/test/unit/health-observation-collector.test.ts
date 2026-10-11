@@ -6,8 +6,7 @@
  * error text, unrecognized status, or absolute time is ever accepted or
  * projected. Option validation lives in `health-observation-options.test.ts`.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { HealthCheckResult, IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import {

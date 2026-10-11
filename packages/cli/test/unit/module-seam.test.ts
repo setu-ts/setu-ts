@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { getTemplate } from '../../src/templates/registry.ts';
 import { renderModuleBarrel } from '../../src/schematics/module-barrel.ts';

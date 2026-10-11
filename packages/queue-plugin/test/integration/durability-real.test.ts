@@ -1,3 +1,4 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Real-broker proof that queued jobs survive a RabbitMQ restart.
  *
@@ -15,17 +16,16 @@
  * pins the guard. The variable also places this file in the serial phase of
  * `scripts/test-partition.ts`, so the restart cannot race another suite.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IQueue, IRuntimeServices } from '@setu-ts/common';
 import { QueuePlugin } from '../../src/index.ts';
 
-const rabbitUrl = Deno.env.get('RABBITMQ_URL');
+const rabbitUrl = process.env['RABBITMQ_URL'];
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
@@ -63,7 +63,7 @@ function runtimePlugin(): IPlugin {
   };
 }
 
-type Amqp = typeof import('npm:amqplib@0.10.x');
+type Amqp = typeof import('amqplib');
 
 /** Counts the messages waiting in each queue through a fresh connection. */
 async function depths(amqp: Amqp, url: string, queues: string[]): Promise<number[]> {
@@ -121,40 +121,38 @@ async function fillReadyQueue(
 }
 
 describe('REAL RabbitMQ job durability', () => {
-  it({
-    name: 'persistent jobs survive a broker restart; the transient control does not',
-    ignore: rabbitUrl === undefined,
-    fn: async () => {
-      const url = toIpv4(rabbitUrl!);
-      const amqp = await import('npm:amqplib@0.10.x');
-      const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
-      const containerId = await containerIdForPort(port);
+  it('persistent jobs survive a broker restart; the transient control does not', {
+    skip: rabbitUrl === undefined,
+  }, async () => {
+    const url = toIpv4(rabbitUrl!);
+    const amqp = await import('amqplib');
+    const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
+    const containerId = await containerIdForPort(port);
 
-      const run = crypto.randomUUID().slice(0, 8);
-      const persistentPrefix = `durability-persistent-${run}`;
-      const transientPrefix = `durability-transient-${run}`;
-      const readyQueues = [`${persistentPrefix}.reports.ready`, `${transientPrefix}.reports.ready`];
-      await fillReadyQueue(url, true, persistentPrefix, 5);
-      await fillReadyQueue(url, false, transientPrefix, 5);
+    const run = crypto.randomUUID().slice(0, 8);
+    const persistentPrefix = `durability-persistent-${run}`;
+    const transientPrefix = `durability-transient-${run}`;
+    const readyQueues = [`${persistentPrefix}.reports.ready`, `${transientPrefix}.reports.ready`];
+    await fillReadyQueue(url, true, persistentPrefix, 5);
+    await fillReadyQueue(url, false, transientPrefix, 5);
 
-      try {
-        expect(await depths(amqp, url, readyQueues)).toEqual([5, 5]);
+    try {
+      expect(await depths(amqp, url, readyQueues)).toEqual([5, 5]);
 
-        await docker(['restart', containerId]);
-        await waitForBroker(amqp, url);
+      await docker(['restart', containerId]);
+      await waitForBroker(amqp, url);
 
-        // Both queues are durable, so both survive; only persistent jobs do.
-        expect(await depths(amqp, url, readyQueues)).toEqual([5, 0]);
-      } finally {
-        const connection = await amqp.connect(url);
-        const channel = await connection.createChannel();
-        for (const prefix of [persistentPrefix, transientPrefix]) {
-          for (const kind of ['ready', 'delay', 'dead']) {
-            await channel.deleteQueue(`${prefix}.reports.${kind}`);
-          }
+      // Both queues are durable, so both survive; only persistent jobs do.
+      expect(await depths(amqp, url, readyQueues)).toEqual([5, 0]);
+    } finally {
+      const connection = await amqp.connect(url);
+      const channel = await connection.createChannel();
+      for (const prefix of [persistentPrefix, transientPrefix]) {
+        for (const kind of ['ready', 'delay', 'dead']) {
+          await channel.deleteQueue(`${prefix}.reports.${kind}`);
         }
-        await connection.close();
       }
-    },
+      await connection.close();
+    }
   });
 });

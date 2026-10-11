@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { decodeCbor } from '../../src/passkeys/cbor.ts';
 import {
@@ -139,4 +138,24 @@ describe('coseKeyToJwk', () => {
     expect(isOnP256(new Uint8Array(32).fill(0xff), y)).toBe(false);
     expect(isOnP256(x, new Uint8Array(32).fill(0xff))).toBe(false);
   });
+});
+
+it('refuses malformed RSA and Ed25519 map fields', () => {
+  const rsa = new Map<number, number | Uint8Array>([[1, 3], [-1, new Uint8Array(256)], [
+    -2,
+    new Uint8Array([1, 0, 1]),
+  ]]);
+  expect(coseKeyToJwk(rsa, 'RS256')?.kty).toBe('RSA');
+  for (const [field, value] of [[1, 2], [-2, new Uint8Array()]] as const) {
+    const invalid = new Map(rsa);
+    invalid.set(field, value);
+    expect(coseKeyToJwk(invalid, 'RS256')).toBeNull();
+  }
+  const ed = new Map<number, number | Uint8Array>([[1, 1], [-1, 6], [-2, new Uint8Array(32)]]);
+  expect(coseKeyToJwk(ed, 'EdDSA')?.kty).toBe('OKP');
+  for (const [field, value] of [[1, 3], [-1, 1], [-2, new Uint8Array(31)]] as const) {
+    const invalid = new Map(ed);
+    invalid.set(field, value);
+    expect(coseKeyToJwk(invalid, 'EdDSA')).toBeNull();
+  }
 });

@@ -5,8 +5,7 @@
  * every node kind with every optional field and every optional event field,
  * so a contract check cannot pass merely because the field was absent.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { isBatchProjection, isSnapshotProjection } from '../../src/protocol/protocol.ts';
 import { TEST_INSTANCE_ID } from '../fixtures/helpers.ts';

@@ -2,8 +2,7 @@
  * Tests for AuditService — verifies log() stamps id/timestamp, freezes, and
  * delegates to storage.append.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { AuditService } from '../../src/services/audit-service.ts';
 import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';

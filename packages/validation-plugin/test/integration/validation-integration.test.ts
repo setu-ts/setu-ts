@@ -4,8 +4,7 @@
  * Covers the full plugin → service → middleware lifecycle with a fake
  * plugin context and request context.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IPluginContext, IRuntimeServices, IValidationService } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 

@@ -1,3 +1,4 @@
+import * as nodeFsSync from 'node:fs';
 /**
  * The M99c V7-6 collision, and the allocation rule that resolves it.
  *
@@ -21,8 +22,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { generateOpenApiClient } from '../../src/codegen/openapi-codegen.ts';
 import type { SdkOpenApiDocument, SdkOpenApiSchema } from '../../src/codegen/openapi-types.ts';
 import { nameCollisionDocument } from '../fixtures/name-collision-document.ts';
@@ -204,8 +204,9 @@ describe('a hoisted alias yields to a claimed name instead of aborting (M99c V7-
     const generated = generateOpenApiClient(nameCollisionDocument, {
       sdkImport: '../../src/index.ts',
     });
-    const fixture = Deno.readTextFileSync(
+    const fixture = nodeFsSync.readFileSync(
       new URL('../fixtures/name-collision-client.ts', import.meta.url),
+      'utf8',
     );
     expect(generated).toBe(fixture);
   });

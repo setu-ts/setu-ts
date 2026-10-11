@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { PageNormalizationError } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
 import { encodeCursor, sortFingerprint } from '@setu-ts/common';

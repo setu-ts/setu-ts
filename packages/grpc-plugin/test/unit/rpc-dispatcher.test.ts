@@ -4,8 +4,7 @@
  * behavior that keeps ordinary Hono traffic untouched.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_BASE_PATH,
   dispatchRequest,

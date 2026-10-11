@@ -1,3 +1,4 @@
+import { upgradeResponse } from '../../../../test/node-helpers.ts';
 /**
  * deno-upgrade-order — Framework handler invoked before the handshake;
  * a 401 returns with no handshake attempted.
@@ -9,8 +10,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   IRequest,
   IResponse,
@@ -42,7 +42,7 @@ describe('DenoHttpAdapter upgrade order (M70a)', () => {
     const handlerOrder: string[] = [];
     let frameworkHandlerCalls = 0;
     const socket = fakeSocket();
-    const response = new Response(null, { status: 101 });
+    const response = upgradeResponse(null, { status: 101 });
     const upgradeCalls: { request: Request }[] = [];
 
     const host: DenoServeHost = {
@@ -89,7 +89,7 @@ describe('DenoHttpAdapter upgrade order (M70a)', () => {
       serve: () => ({ shutdown: () => Promise.resolve() }),
       upgradeWebSocket: (request: Request) => {
         upgradeCalls.push({ request });
-        return { socket: fakeSocket(), response: new Response(null, { status: 101 }) };
+        return { socket: fakeSocket(), response: upgradeResponse(null, { status: 101 }) };
       },
     };
 
@@ -154,7 +154,7 @@ describe('DenoHttpAdapter upgrade order (M70a)', () => {
       serve: () => ({ shutdown: () => Promise.resolve() }),
       upgradeWebSocket: (request: Request) => {
         upgradeCalls.push({ request });
-        return { socket: fakeSocket(), response: new Response(null, { status: 101 }) };
+        return { socket: fakeSocket(), response: upgradeResponse(null, { status: 101 }) };
       },
     };
 

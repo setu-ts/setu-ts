@@ -1,3 +1,6 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFsSync from 'node:fs';
+import * as nodeFs from 'node:fs/promises';
 /**
  * Real-load tests for `loadRequestHandler` — drives the entire loader chain
  * (import of local ESM module → .default unwrap → react-router import →
@@ -5,8 +8,7 @@
  *
  * @module
  */
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { loadRequestHandler } from '../../src/handler/server-build.ts';
 
@@ -14,12 +16,12 @@ describe('loadRequestHandler — real import path', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await Deno.makeTempDir({ prefix: 'rr-plugin-test-' });
+    tmpDir = await tempDir({ prefix: 'rr-plugin-test-' });
   });
 
   afterEach(() => {
     try {
-      Deno.removeSync(tmpDir, { recursive: true });
+      nodeFsSync.rmSync(tmpDir, { recursive: true });
     } catch {
       // ignore cleanup errors.
     }
@@ -37,7 +39,7 @@ export default {
 };
 `;
     const modulePath = `${tmpDir}/server-build.mjs`;
-    await Deno.writeTextFile(modulePath, moduleContent);
+    await nodeFs.writeFile(modulePath, moduleContent);
 
     const { handler, createLoadContext } = await loadRequestHandler(modulePath, 'production');
 
@@ -59,7 +61,7 @@ export const mode = 'production';
 export const entry = { module: { default: async () => {} } };
 `;
     const modulePath = `${tmpDir}/namespace-build.mjs`;
-    await Deno.writeTextFile(modulePath, moduleContent);
+    await nodeFs.writeFile(modulePath, moduleContent);
 
     const { handler, createLoadContext } = await loadRequestHandler(modulePath, 'production');
 
@@ -89,7 +91,7 @@ export default {
 };
 `;
     const modulePath = `${tmpDir}/server-build.mjs`;
-    await Deno.writeTextFile(modulePath, moduleContent);
+    await nodeFs.writeFile(modulePath, moduleContent);
 
     // Use the optional rrImportHook parameter to simulate a failed react-router import.
     // This covers the catch block (lines 78-83) in server-build.ts where we throw about
@@ -115,7 +117,7 @@ export default {
 };
 `;
     const modulePath = `${tmpDir}/server-build.mjs`;
-    await Deno.writeTextFile(modulePath, moduleContent);
+    await nodeFs.writeFile(modulePath, moduleContent);
 
     // Use rrImportHook to capture what assembleHandler receives.
     let capturedBuild: unknown;
@@ -143,7 +145,7 @@ export default {
   it('throws a version-naming error when the module has no RouterContextProvider', async () => {
     const moduleContent = `export default { routes: {}, entry: { module: {} } };`;
     const modulePath = `${tmpDir}/no-provider-build.mjs`;
-    await Deno.writeTextFile(modulePath, moduleContent);
+    await nodeFs.writeFile(modulePath, moduleContent);
 
     // A pre-8 react-router exports no RouterContextProvider; failing loudly at
     // startup beats a 500 on every SSR request at runtime.

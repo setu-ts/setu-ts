@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 /**
  * Unit tests for the Connect runtime loader: the pure `adaptConnectModule`
  * adapter and the per-specifier failure branches of `loadConnectModule`, driven
@@ -11,13 +12,11 @@
  * literal-argument property is what static analysis can see.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   adaptConnectModule,
   type ConnectImporters,
   type ConnectModuleLike,
-  DEFAULT_IMPORTERS,
   loadConnectModule,
 } from '../../src/transports/connect-loader.ts';
 import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
@@ -242,7 +241,10 @@ describe('loadConnectModule', () => {
     // published artifact lost the dependency (X7-3). The property that
     // survives publish is that the argument is a quoted literal.
     for (const key of Object.keys(SPECIFIER_BY_KEY) as Array<keyof ConnectImporters>) {
-      const source = String(DEFAULT_IMPORTERS[key]);
+      const source = readFileSync(
+        new URL('../../src/transports/connect-loader.ts', import.meta.url),
+        'utf8',
+      );
       expect(source).toContain(`import('${SPECIFIER_BY_KEY[key]}')`);
     }
   });

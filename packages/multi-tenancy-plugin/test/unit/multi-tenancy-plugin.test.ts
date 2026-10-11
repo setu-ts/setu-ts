@@ -1,8 +1,7 @@
 /**
  * MultiTenancyPlugin tests — name, version, provides, register behavior.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MultiTenancyPlugin } from '../../src/plugin/multi-tenancy-plugin.ts';
 import { HeaderResolver } from '../../src/resolvers/header-resolver.ts';
 import { PathResolver } from '../../src/resolvers/path-resolver.ts';

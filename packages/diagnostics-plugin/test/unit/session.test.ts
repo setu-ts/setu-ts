@@ -3,8 +3,7 @@
  * sequence gate, sequence exhaustion, terminal revocation, and instance
  * binding.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { DiagnosticsSessionState } from '../../src/security/session.ts';
 import {

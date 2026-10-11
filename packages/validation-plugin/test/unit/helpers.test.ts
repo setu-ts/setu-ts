@@ -5,8 +5,7 @@
  * validateHeaders, validateCookies) delegates to the service's middleware
  * method via the correct target by using the real ValidationService.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, validatedStateKey } from '@setu-ts/common';
 
 import {

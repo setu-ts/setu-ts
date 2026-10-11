@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, SseConnection, SsePlugin, SseService } from '@setu-ts/sse-plugin';
 import type { ISseConnection, ISseService, SseChannel, SseMessage } from '@setu-ts/sse-plugin';
 import manifest from '../../deno.json' with { type: 'json' };

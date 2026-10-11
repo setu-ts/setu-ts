@@ -1,8 +1,7 @@
 /**
  * Integration test for SchedulerPlugin wiring.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { SchedulerPlugin } from '../../src/plugin/scheduler-plugin.ts';
 import { SchedulerService } from '../../src/services/scheduler-service.ts';
 import { MemoryLock } from '../../src/lock/memory-lock.ts';

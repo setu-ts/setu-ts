@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { parseAuthenticatorData } from '../../src/passkeys/authenticator-data.ts';
 import { buildAuthData } from '../fixtures/virtual-authenticator.ts';
@@ -85,4 +84,23 @@ describe('parseAuthenticatorData', () => {
     patched[54] = 0;
     expect(parseAuthenticatorData(patched)).toBeNull();
   });
+});
+
+it('refuses a truncated attested length and zero credential id', () => {
+  const truncated = new Uint8Array(54);
+  truncated[32] = 0x40;
+  expect(parseAuthenticatorData(truncated)).toBeNull();
+  const emptyId = new Uint8Array(55);
+  emptyId[32] = 0x40;
+  expect(parseAuthenticatorData(emptyId)).toBeNull();
+});
+
+it('refuses missing credential bytes and a missing CBOR key', () => {
+  const missingId = new Uint8Array(55);
+  missingId[32] = 0x40;
+  missingId[54] = 1;
+  expect(parseAuthenticatorData(missingId)).toBeNull();
+  const missingKey = new Uint8Array(56);
+  missingKey.set(missingId);
+  expect(parseAuthenticatorData(missingKey)).toBeNull();
 });

@@ -13,8 +13,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { DynamoAdapter, failedCreateGuard } from '../../src/adapters/dynamo/dynamo-adapter.ts';
 import { DuplicateKeyError } from '@setu-ts/common';
 import type {

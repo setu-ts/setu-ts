@@ -1,6 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
+import { describe, expect, it } from 'vitest';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
-import { expect } from '@std/expect';
 import { resolveHost } from '../../../src/templates/project-files.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';

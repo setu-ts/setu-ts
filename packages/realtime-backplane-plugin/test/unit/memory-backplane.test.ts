@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { RealtimeFrame } from '@setu-ts/common';
 import { MemoryBackplane } from '../../src/transports/memory-backplane.ts';
 
@@ -164,4 +163,18 @@ describe('MemoryBackplane handler isolation', () => {
     await a.close();
     await b.close();
   });
+});
+
+it('can publish and close before connecting without registering a bus', async () => {
+  const unopened = new MemoryBackplane('unopened', 'unopened-bus');
+  await unopened.publish(frame('unopened'));
+  await unopened.close();
+  await unopened.close();
+  const receiver = new MemoryBackplane('receiver', 'unopened-bus');
+  await receiver.connect();
+  const received: RealtimeFrame[] = [];
+  await receiver.subscribe((value) => received.push(value));
+  await unopened.publish(frame('unopened'));
+  expect(received).toEqual([frame('unopened')]);
+  await receiver.close();
 });

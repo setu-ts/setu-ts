@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { ENTITY, idsFor, marker, memoryService, storeOver } from '../fixtures/inbox-store.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';

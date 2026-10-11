@@ -10,9 +10,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { z } from 'npm:zod@^3.24.0';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod-v3';
 import { createApplication } from '@setu-ts/kernel';
 import type { IPlugin } from '@setu-ts/common';
 import { RuntimePlugin } from '@setu-ts/runtime';

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ISubscription, MessageMetadata, SubscribeOptions } from '@setu-ts/common';
 import { RequestReplyCore } from '../../src/brokers/request-reply-core.ts';
 import type { RequestReplyDeps } from '../../src/brokers/request-reply-core.ts';

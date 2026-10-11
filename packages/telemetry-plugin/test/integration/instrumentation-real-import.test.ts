@@ -17,8 +17,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   loadFetchInstrumentation,
   loadHttpInstrumentation,
@@ -31,12 +30,7 @@ import {
 
 // Probe whether npm: imports are available
 function canImportNpm(): boolean {
-  try {
-    const state = Deno.permissions.querySync({ name: 'import' }).state;
-    return state === 'granted';
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 /** The instrumentation export name each loader's module must expose. */
@@ -62,10 +56,8 @@ describe('Auto-instrumentation real-imports', () => {
 
   for (const { kind, load } of loaders) {
     it(
-      {
-        name: `should load ${kind} through the default importer`,
-        ignore: !canImportNpm(),
-      },
+      `should load ${kind} through the default importer`,
+      { skip: !canImportNpm() },
       async () => {
         const { instance } = await load();
         // The instance is a construction of the module's expected export, so a
@@ -82,12 +74,10 @@ describe('Auto-instrumentation real-imports', () => {
   }
 
   it(
-    {
-      name: 'should construct BatchSpanProcessor and SimpleSpanProcessor from sdk-trace-base',
-      ignore: !canImportNpm(),
-    },
+    'should construct BatchSpanProcessor and SimpleSpanProcessor from sdk-trace-base',
+    { skip: !canImportNpm() },
     async () => {
-      const sdkMod = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
+      const sdkMod = await import('@opentelemetry/sdk-trace-base');
       expect(sdkMod.BatchSpanProcessor).toBeDefined();
       expect(sdkMod.SimpleSpanProcessor).toBeDefined();
       expect(typeof sdkMod.BatchSpanProcessor).toBe('function');

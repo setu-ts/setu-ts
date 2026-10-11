@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { OutboxRowStateError } from '../../../src/outbox/errors.ts';
 import { edit, outboxHarness, row, WALL_START } from '../../fixtures/outbox.ts';

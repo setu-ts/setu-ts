@@ -2,8 +2,7 @@
  * Tests for graphql-loader.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { adaptGraphqlModule, loadGraphqlModule } from '../../src/runtime/graphql-loader.ts';
 import { GraphqlRuntimeLoadError } from '../../src/errors/graphql-errors.ts';
 

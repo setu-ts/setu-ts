@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, SESSION_STATE_KEY as COMMON_SESSION_STATE_KEY } from '@setu-ts/common';
 import type { ISessionStore, SessionData } from '@setu-ts/common';
 

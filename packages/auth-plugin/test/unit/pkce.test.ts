@@ -5,8 +5,7 @@
  * is checked against the standard's own numbers rather than against itself.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { challengeForVerifier, createPkcePair } from '../../src/sign-in/pkce.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 

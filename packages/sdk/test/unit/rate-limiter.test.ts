@@ -5,8 +5,7 @@
  * queued waits, and abort behavior.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createRateLimiter } from '../../src/http/rate-limiter.ts';
 import type { IClientTiming } from '../../src/http/contracts.ts';
 
@@ -206,4 +205,28 @@ describe('createRateLimiter', () => {
     timeNow = 100;
     await expect(limiter.acquire(controller.signal)).rejects.toThrow('caller gave up');
   });
+});
+
+it('supplies AbortError for an aborted host signal without a reason', async () => {
+  const limiter = createRateLimiter(1, 10, { now: () => 0, sleep: () => Promise.resolve() });
+  await expect(limiter.acquire({ aborted: true, reason: undefined } as AbortSignal)).rejects
+    .toMatchObject({ name: 'AbortError' });
+});
+
+it('propagates a timing failure and preserves an abort reason while queued', async () => {
+  const fault = new Error('clock failed');
+  const failing = createRateLimiter(1, 10, { now: () => 0, sleep: () => Promise.reject(fault) });
+  await failing.acquire();
+  await expect(failing.acquire()).rejects.toBe(fault);
+  const controller = new AbortController();
+  const abort = new Error('cancel waiting');
+  const cancelled = createRateLimiter(1, 10, {
+    now: () => 0,
+    sleep: () => {
+      controller.abort(abort);
+      return Promise.reject(abort);
+    },
+  });
+  await cancelled.acquire();
+  await expect(cancelled.acquire(controller.signal)).rejects.toBe(abort);
 });

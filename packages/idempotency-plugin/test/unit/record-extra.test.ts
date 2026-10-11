@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRedactionService, ResponseSnapshot } from '@setu-ts/common';
 import type { ResolvedRouteOptions } from '../../src/core/options.ts';
 import {

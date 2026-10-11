@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createInboxHealthIndicator } from '../../../src/inbox/inbox-health.ts';
 import { InboxService } from '../../../src/inbox/inbox-service.ts';
 import { FakeInboxStore, inboxRuntime, never, options } from '../../fixtures/inbox.ts';

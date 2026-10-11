@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { AuthPlugin, AuthPluginConfigurationError } from '../../src/index.ts';
 import type { TrustedIssuer } from '../../src/index.ts';
 import { compileIssuers, isAcceptableUrl } from '../../src/issuers/trusted-issuer.ts';

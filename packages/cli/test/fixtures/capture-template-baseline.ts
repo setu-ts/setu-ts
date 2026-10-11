@@ -1,4 +1,5 @@
 // deno-lint-ignore-file no-console -- a capture script reports what it wrote
+import * as nodeFs from 'node:fs/promises';
 /**
  * Captures the template byte-identity baseline for M99e §3.7.
  *
@@ -87,7 +88,7 @@ async function capture(): Promise<number> {
     baseline[`${hostName}/${runtime}`] = hashes;
   }
   const out = new URL('./template-baseline.json', import.meta.url);
-  await Deno.writeTextFile(out, `${JSON.stringify(baseline, null, 2)}\n`);
+  await nodeFs.writeFile(out, `${JSON.stringify(baseline, null, 2)}\n`);
   return Object.keys(baseline).length;
 }
 

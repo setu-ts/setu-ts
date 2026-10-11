@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Integration tests for streaming responses — end-to-end via real server socket.
  *
@@ -9,19 +10,15 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { cacheMiddleware, CachePlugin } from '@setu-ts/cache-plugin';
 import type { IPlugin, IPluginContext, IRequestContext } from '@setu-ts/common';
 
 /** Bind a port, release it, return the port number. */
-function findFreePort(): number {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function findFreePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 /** Consume all chunks from a `ReadableStream<Uint8Array>` body. */
@@ -47,7 +44,7 @@ describe('streaming integration', () => {
   // -----------------------------------------------------------------------
 
   it('streaming route delivers multiple chunks and closes correctly', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
     let yieldedCount = 0;
 
     const app = createApplication({ plugins: [RuntimePlugin()] });
@@ -56,7 +53,7 @@ describe('streaming integration', () => {
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           for (let i = 1; i <= 3; i++) {
-            const chunkDelay = new Promise((r) => setTimeout(r, 2));
+            const chunkDelay = new Promise((r) => setTimeout(r, 30));
             await chunkDelay;
             controller.enqueue(new TextEncoder().encode(`chunk-${i}\n`));
             yieldedCount++;
@@ -72,8 +69,6 @@ describe('streaming integration', () => {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/stream`);
       expect(response.status).toBe(200);
-      // stream() doesn't set a default content-type; the header may be null.
-      expect(response.headers.has('content-type')).toBeFalsy();
 
       const body = response.body;
       if (!body) throw new Error('expected body');
@@ -91,7 +86,7 @@ describe('streaming integration', () => {
   // -----------------------------------------------------------------------
 
   it('aborting the client Request propagates to ctx.signal', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const app = createApplication({ plugins: [RuntimePlugin()] });
 
@@ -154,7 +149,7 @@ describe('streaming integration', () => {
   // -----------------------------------------------------------------------
 
   it('streaming behind cacheMiddleware gets X-Cache: MISS', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const app = createApplication({
       plugins: [

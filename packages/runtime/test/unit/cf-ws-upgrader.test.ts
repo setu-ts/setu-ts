@@ -1,5 +1,14 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { WorkersResponse } from '../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
+import { upgradeResponse } from '../../../../test/node-helpers.ts';
+import { describe, expect, it } from 'vitest';
 import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
 import { UPGRADE_INTENT } from '@setu-ts/common';
 import {
@@ -165,7 +174,7 @@ describe('CloudflareWorkersHttpAdapter WebSocket upgrade (post-M70a)', () => {
     const host: CloudflareWebSocketHost = {
       createPair: () => ({ client: { id: 'client' }, server: socket }),
       createUpgradeResponse: (_client, protocol) => {
-        const response = new Response(null, {
+        const response = upgradeResponse(null, {
           status: 101,
           ...(protocol !== undefined && { headers: { 'sec-websocket-protocol': protocol } }),
         });
@@ -258,7 +267,7 @@ describe('CloudflareWorkersHttpAdapter WebSocket upgrade (post-M70a)', () => {
       createPair: () => {
         throw new Error('WebSocketPair is not available');
       },
-      createUpgradeResponse: () => new Response(null, { status: 101 }),
+      createUpgradeResponse: () => upgradeResponse(null, { status: 101 }),
     };
     const adapter = new CloudflareWorkersHttpAdapter(failingHost);
     let frameworkCalls = 0;

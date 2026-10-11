@@ -1,6 +1,5 @@
 // deno-lint-ignore-file require-await
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type {
   HandlerResult,

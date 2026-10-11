@@ -7,8 +7,7 @@
  * (reader). These tests pin the exact `` `validation-plugin:validated-${target}` `` shape so the
  * two packages can never drift apart.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ValidationTarget } from '../../src/index.ts';
 import { validatedStateKey } from '../../src/index.ts';
 

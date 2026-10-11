@@ -7,13 +7,12 @@
  * the plugin documents.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IGraphqlService } from '@setu-ts/common';
-import * as graphqlModule from 'npm:graphql@^16';
+import * as graphqlModule from 'graphql';
 import { GraphqlPlugin } from '../../src/plugin/graphql-plugin.ts';
 import type { GraphqlModuleLike } from '../../src/interfaces/graphql-runtime.ts';
 import type { DefaultGraphqlContext, GraphqlPluginOptions } from '../../src/interfaces/options.ts';

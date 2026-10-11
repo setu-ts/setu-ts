@@ -2,8 +2,7 @@
  * Tests for transports/ws/ws-protocol.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   CLOSE_DUPLICATE_SUBSCRIBE,
   CLOSE_FORBIDDEN,

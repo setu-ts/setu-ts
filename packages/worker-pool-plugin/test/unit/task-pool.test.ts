@@ -3,8 +3,7 @@
  * timeout, error/crash semantics, shutdown, and stats — driven with the
  * scriptable FakeHost/FakeHandle and manual timers.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';

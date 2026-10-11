@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ISession, ITenant } from '@setu-ts/common';
 import { SESSION_TENANT_BINDING_KEY as COMMON_TENANT_BINDING_KEY } from '@setu-ts/common';
 

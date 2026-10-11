@@ -11,8 +11,7 @@
  *   C. Teardown idempotency
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import type { IServiceBusTransport } from '../../src/brokers/service-bus-broker.ts';

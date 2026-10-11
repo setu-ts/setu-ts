@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs/promises';
 /** Real backend setup for the tier-C suites; every object belongs to one run. @module */
 import type {
   IDatabaseAdapter,
@@ -26,17 +27,18 @@ export interface BackendHarness {
 }
 
 export async function postgresHarness(url: string) {
-  const { Pool } = await import('npm:pg@^8.0.0');
-  const { drizzle } = await import('npm:drizzle-orm@0.45.2/node-postgres');
-  const { pgTable, text, bigint } = await import('npm:drizzle-orm@0.45.2/pg-core');
+  const { Pool } = await import('pg');
+  const { drizzle } = await import('drizzle-orm/node-postgres');
+  const { pgTable, text, bigint } = await import('drizzle-orm/pg-core');
   const schema = `m109b_${crypto.randomUUID().replaceAll('-', '')}`;
   const admin = new Pool({ connectionString: url, max: 1 });
   await admin.query(`CREATE SCHEMA ${schema}`);
   await admin.end();
   const pool = new Pool({ connectionString: url, max: 6, options: `-c search_path=${schema}` });
   await pool.query(
-    await Deno.readTextFile(
+    await nodeFs.readFile(
       new URL('../../../database-plugin/test/fixtures/idempotency-postgres.sql', import.meta.url),
+      'utf8',
     ),
   );
   await pool.query('CREATE TABLE business (id text PRIMARY KEY, name text NOT NULL)');
@@ -68,7 +70,7 @@ export async function postgresHarness(url: string) {
 }
 
 export async function mongoHarness(uri: string): Promise<BackendHarness> {
-  const { MongoClient } = await import('npm:mongodb@^6.21.0');
+  const { MongoClient } = await import('mongodb');
   const suffix = crypto.randomUUID().replaceAll('-', '');
   const database = `m109b_${suffix}`;
   const claims = `claims_${suffix}`;
@@ -96,7 +98,7 @@ export async function mongoHarness(uri: string): Promise<BackendHarness> {
 
 export async function dynamoHarness(endpoint: string): Promise<BackendHarness> {
   const { DynamoDBClient, CreateTableCommand, DeleteTableCommand } = await import(
-    'npm:@aws-sdk/client-dynamodb@^3'
+    '@aws-sdk/client-dynamodb'
   );
   const suffix = crypto.randomUUID().replaceAll('-', '');
   const options = {

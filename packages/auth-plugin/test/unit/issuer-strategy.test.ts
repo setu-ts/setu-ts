@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IPrincipal } from '@setu-ts/common';
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
 import { generateTestKey, rawToken, signToken } from '../fixtures/issuer-tokens.ts';

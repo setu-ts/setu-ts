@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { securityMetadataOf } from '@setu-ts/common';
 import type { IPrincipal, IRequestContext } from '@setu-ts/common';
 import {

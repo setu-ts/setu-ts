@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 // deno-lint-ignore no-explicit-any
 type Any = any;
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';

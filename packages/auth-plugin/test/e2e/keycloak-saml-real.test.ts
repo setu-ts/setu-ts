@@ -22,8 +22,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 import type { CsrfOptions } from '@setu-ts/http-security-plugin';
 import { createApplication } from '@setu-ts/kernel';
@@ -37,7 +36,7 @@ import { SAML_BINDING_COOKIE } from '../../src/saml/binding-cookie.ts';
 import { MultiCookieJar, postAcs } from '../fixtures/saml-idp.ts';
 import type { SamlHarness } from '../fixtures/saml-idp.ts';
 
-const BASE = Deno.env.get('KEYCLOAK_URL');
+const BASE = process.env['KEYCLOAK_URL'];
 const REALM = `${BASE}/realms/setu`;
 const NAME = 'keycloak-saml';
 const ACS_PATH = `/auth/${NAME}/acs`;
@@ -135,7 +134,7 @@ async function providerLogin(authnRequestUrl: string): Promise<string> {
   return unescapeHtml(value[1]);
 }
 
-describe('Keycloak SAML sign-in (real)', { ignore: BASE === undefined }, () => {
+describe('Keycloak SAML sign-in (real)', { skip: BASE === undefined }, () => {
   it('signs a user in through the real IdP and refuses a replay', async () => {
     const app = await buildApp();
     try {

@@ -7,15 +7,14 @@
  * executes a real document at runtime.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { adaptGraphqlModule } from '../../src/runtime/graphql-loader.ts';
 
 describe('adapted real graphql runtime round-trip', () => {
   it('parses, builds a schema, and executes a real query', async () => {
-    let graphql: typeof import('npm:graphql') | null = null;
+    let graphql: typeof import('graphql') | null = null;
     try {
-      graphql = await import('npm:graphql@^16');
+      graphql = await import('graphql');
     } catch (_e) {
       return; // skip when the npm cache is cold / offline
     }

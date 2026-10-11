@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IScopedRoleSource, ScopedRoleDefinition, ScopeRef } from '@setu-ts/common';
 import type { ScopedRbacOptions, StaticGrant } from '../../../src/interfaces/index.ts';
 import { principal, requestContext, scopedHarness } from '../../fixtures/scoped.ts';

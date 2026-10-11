@@ -19,8 +19,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { createFakeApp } from '../fixtures/fake-app.ts';
 import { runCli } from '../../src/cli.ts';

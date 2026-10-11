@@ -4,8 +4,7 @@
  * Covers extractTarget for all 5 targets, createValidationMiddleware success/
  * failure paths, short-circuit behavior, JSON parse errors, and cookie decoding.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IValidationService, ValidationTarget } from '@setu-ts/common';
 import { validatedStateKey } from '@setu-ts/common';
 

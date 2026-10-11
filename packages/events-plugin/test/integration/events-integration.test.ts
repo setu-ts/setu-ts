@@ -1,8 +1,7 @@
 /**
  * Integration tests for EventsPlugin via kernel app.inject().
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { EventsPlugin } from '../../src/plugin/events-plugin.ts';
 import { subscribeHandler } from '../../src/handlers/event-handler.ts';

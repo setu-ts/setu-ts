@@ -11,8 +11,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IServiceRegistry } from '@setu-ts/common';
 import type { IRequestContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { assembleHandler, createLoadContextFactory } from '../../src/handler/server-build.ts';
@@ -23,7 +22,7 @@ import { servicesContext, userContext } from '../../src/handler/context-keys.ts'
 // is unavailable, rather than reporting a failure for an absent package.
 let rrModule: Record<string, unknown> | null = null;
 try {
-  rrModule = await import('npm:react-router@8') as unknown as Record<string, unknown>;
+  rrModule = await import('react-router') as unknown as Record<string, unknown>;
 } catch {
   rrModule = null;
 }
@@ -151,7 +150,7 @@ function buildCtx(registry: IServiceRegistry): {
   };
 }
 
-describe('real createRequestHandler — loadContext contract', { ignore: rrModule === null }, () => {
+describe('real createRequestHandler — loadContext contract', { skip: rrModule === null }, () => {
   it('renders 200 and exposes servicesContext to a real loader', async () => {
     const rr = rrModule!;
     const registry = { get: () => undefined } as unknown as IServiceRegistry;

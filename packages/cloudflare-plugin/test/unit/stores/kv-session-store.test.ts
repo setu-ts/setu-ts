@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * `KvSessionStore` — the ISessionStore contract takes its TTL in milliseconds,
  * which is where a unit conversion bug would live, so the conversion and the
  * 60-second floor are both pinned here.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { KvSessionStore } from '../../../src/index.ts';
 import { FakeClock, FakeKv } from '../../fakes.ts';

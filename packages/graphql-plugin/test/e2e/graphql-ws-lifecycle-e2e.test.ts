@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Real-socket lifecycle tests for the `graphql-transport-ws` transport.
  *
@@ -15,8 +16,7 @@
  *      connection on an ordinary route that MUST be swept.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import type { IWebSocketService } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';
@@ -57,11 +57,8 @@ const resolvers: ResolverMap = {
 };
 
 /** Reserves a free port by binding one and releasing it. */
-function freePort(): number {
-  const listener = Deno.listen({ port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function freePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 interface Harness {
@@ -84,7 +81,7 @@ async function startApp(options?: {
       }),
     ],
   });
-  const port = freePort();
+  const port = await freePort();
   await app.start({ port });
   return { app, port };
 }

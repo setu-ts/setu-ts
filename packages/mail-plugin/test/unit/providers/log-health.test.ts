@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { LogProvider } from '../../../src/providers/log-provider.ts';
 
 describe('LogProvider health (M70c)', () => {

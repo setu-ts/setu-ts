@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs/promises';
 /**
  * The kernel's published surface (M70g).
  *
@@ -11,8 +12,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import * as barrel from '../../src/index.ts';
 
@@ -24,7 +24,7 @@ describe('@setu-ts/kernel barrel', () => {
   it('does not leak the router internals the tie-break is built from', async () => {
     // `Router`, its `RouteEntry` bookkeeping and the segment counters are
     // implementation: plugins reach routes through the contract's `listRoutes()`.
-    const source = await Deno.readTextFile(new URL('../../src/index.ts', import.meta.url));
+    const source = await nodeFs.readFile(new URL('../../src/index.ts', import.meta.url), 'utf8');
     for (const internal of ['Router', 'wildcardSegmentCount', 'staticSegmentCount', 'RouteEntry']) {
       expect(source).not.toContain(internal);
     }

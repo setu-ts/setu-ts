@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { Constructor, IJwtService, MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -25,7 +24,7 @@ import { metadataStore } from '../../src/metadata/metadata-store.ts';
 // Real Zod, guarded: the 400-ordering arm needs a real schema. That arm is
 // skipped wholesale where the npm specifier cannot load (the
 // decorator-validation precedent) so the rest of the suite still runs.
-const zodModule = await import('npm:zod@^3.24.0').catch(() => undefined);
+const zodModule = await import('zod-v3').catch(() => undefined);
 const z = zodModule?.z;
 
 /**

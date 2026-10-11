@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRedisStreamsClient } from '../../../src/interfaces/index.ts';
 import { RedisStreamsBroker } from '../../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../../src/serializers/json-serializer.ts';

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RedisStreamsBroker, validateClient } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -718,4 +717,41 @@ describe('RedisStreamsBroker request-reply delegation', () => {
     expect(caught).toBeInstanceOf(RequestTimeoutError);
     await broker.disconnect();
   });
+});
+
+it('connects a minimal stream facade and reports no health probe when ping is absent', async () => {
+  const client = new FakeRedisStreamsClient();
+  Object.defineProperty(client, 'ping', { value: undefined });
+  let clock = 0;
+  const runtime = { ...createFakeRuntime(), hrtime: () => clock };
+  const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), { client });
+  expect(await broker.reachability()).toBeUndefined();
+  clock = 6_000;
+  await broker.connect();
+  expect(broker.isReady()).toBe(true);
+  expect(await broker.reachability()).toBeUndefined();
+  await broker.disconnect();
+});
+
+it('accepts an empty stream batch without delivering a fabricated message', async () => {
+  const client = new FakeRedisStreamsClient();
+  let reads = 0;
+  client.xreadgroup = () => {
+    reads++;
+    return Promise.resolve([['empty.stream', []]]);
+  };
+  const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+    client,
+    pollIntervalMs: 1,
+  });
+  let deliveries = 0;
+  await broker.connect();
+  const subscription = await broker.subscribe('empty.stream', () => {
+    deliveries++;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(reads).toBeGreaterThan(0);
+  expect(deliveries).toBe(0);
+  await subscription.unsubscribe();
+  await broker.disconnect();
 });

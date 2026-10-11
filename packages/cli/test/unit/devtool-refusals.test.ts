@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
@@ -895,4 +894,42 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
     expect(h.log.text()).toContain('already enabled');
     expect(h.fs.writes).toEqual([]);
   });
+});
+
+it('refuses absent root tasks, primitive member tasks, and conflicting member imports or checks', async () => {
+  for (
+    const change of [
+      'root-tasks',
+      'member-tasks',
+      'primitive-tasks',
+      'member-import',
+      'member-check',
+    ]
+  ) {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    const file = change === 'root-tasks' ? '/ws/deno.json' : '/ws/apps/orders/deno.json';
+    const value = JSON.parse(seed[file]!);
+    if (change === 'root-tasks' || change === 'member-tasks') value.tasks = null;
+    if (change === 'primitive-tasks') value.tasks = 'custom';
+    if (change === 'member-import') value.imports['@setu-ts/diagnostics-plugin'] = 'wrong';
+    if (change === 'member-check') value.tasks.check = 'owned check';
+    seed[file] = JSON.stringify(value);
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.fs.writes).toEqual([]);
+  }
+});
+
+it('reports malformed workspace versions and a scalar write failure', async () => {
+  const broken = workspaceHarness({
+    [`/ws/${WORKSPACE_MANIFEST}`]: JSON.stringify({ version: 999 }),
+  });
+  expect(await broken.run(['enable', 'orders'])).toBe(1);
+  expect(broken.err.text()).toContain('999');
+  for (const failure of ['disk refused', new Error('disk refused')]) {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    h.fs.writeFile = () => Promise.reject(failure);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('disk refused');
+  }
 });

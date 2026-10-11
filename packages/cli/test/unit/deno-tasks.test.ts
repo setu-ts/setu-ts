@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { devtoolTasks, projectFiles, resolveHost } from '../../src/templates/project-files.ts';

@@ -5,8 +5,7 @@
  * but it is the single implementation both public formatters funnel through, so
  * its branches are unit-tested here directly rather than only through them.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   ABOUT_BLANK,

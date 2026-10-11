@@ -1,8 +1,7 @@
 /**
  * @module microservice-starter integration tests
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createMicroserviceApp } from '../../src/index.ts';
 import type { IRequestContext } from '@setu-ts/common';
 

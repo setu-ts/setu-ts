@@ -15,8 +15,7 @@
  *
  * Guarded: skipped when the optional OTel packages cannot be resolved.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { SpanOptions, TelemetryContext } from '@setu-ts/common';
 import { TelemetryService } from '../../../telemetry-plugin/src/services/telemetry-service.ts';
 import { setOtelApi } from '../../../telemetry-plugin/src/tracing/tracer.ts';
@@ -46,11 +45,11 @@ interface RealOtel {
  * memory. Returns `null` when the optional packages are absent.
  */
 async function realOtel(): Promise<RealOtel | null> {
-  let api: typeof import('npm:@opentelemetry/api@^1.9.0');
-  let sdk: typeof import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
+  let api: typeof import('@opentelemetry/api');
+  let sdk: typeof import('@opentelemetry/sdk-trace-base');
   try {
-    api = await import('npm:@opentelemetry/api@^1.9.0');
-    sdk = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
+    api = await import('@opentelemetry/api');
+    sdk = await import('@opentelemetry/sdk-trace-base');
     const manager = await loadAsyncLocalStorageContextManager();
     api.context.setGlobalContextManager(manager as never);
   } catch {

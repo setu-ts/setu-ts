@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { decodeCellValue, encodeCellValue } from '../../src/adapters/bigtable/bigtable-value.ts';
 
 /** Round-trips one value through the tagged encoding. */

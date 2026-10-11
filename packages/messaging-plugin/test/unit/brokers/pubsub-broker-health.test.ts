@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IPubSubTransport } from '../../../src/brokers/pubsub-broker.ts';
 import { GcpPubSubBroker } from '../../../src/brokers/pubsub-broker.ts';
 import { JsonSerializer } from '../../../src/serializers/json-serializer.ts';

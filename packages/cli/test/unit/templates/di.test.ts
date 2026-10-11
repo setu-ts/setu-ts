@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { DI_WIRING } from '../../../src/templates/di.ts';
 import { CLASS_BASED_PLUGINS } from '../../../src/templates/class-based.ts';

@@ -15,8 +15,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { StoragePlugin } from '../../src/plugin/storage-plugin.ts';
 import type { StoragePluginOptions } from '../../src/interfaces/index.ts';

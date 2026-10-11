@@ -4,8 +4,7 @@
  * being set at all.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, isWebSocketUpgradeRequest } from '@setu-ts/common';
 import type {
   ILogger,
@@ -286,7 +285,7 @@ describe('Pipeline runs for upgrade requests (M70a)', () => {
     });
     // The catch-all did NOT answer. `inject()` performs no handshake, so what
     // this pins is that the SSR handler never ran.
-    expect(upgraded.body).not.toContain('ssr');
+    expect(upgraded.body ?? '').not.toContain('ssr');
 
     // The control: the same catch-all still serves everything else.
     const ordinary = await app.inject({ method: 'GET', url: 'http://localhost/page' });
@@ -312,7 +311,7 @@ describe('Pipeline runs for upgrade requests (M70a)', () => {
       url: 'http://localhost/ws',
       headers: UPGRADE_HEADERS,
     });
-    expect(upgraded.body).not.toContain('http');
+    expect(upgraded.body ?? '').not.toContain('http');
 
     // The control: a plain GET on that same path still reaches the HTTP route,
     // so the upgrade path has not simply swallowed it.

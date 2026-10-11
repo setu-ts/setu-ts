@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { K8S_DIR, workspaceK8sFiles } from '../../../src/workspace/k8s.ts';
 import { WORKSPACE_VERSION, type WorkspaceManifest } from '../../../src/workspace/manifest.ts';
 import { type TransportName, transportSpec } from '../../../src/workspace/transport.ts';

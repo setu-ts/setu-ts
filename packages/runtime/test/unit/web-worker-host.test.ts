@@ -2,8 +2,7 @@
  * Unit tests for the web worker host (Deno/Bun `Worker` normalization),
  * driven through the injectable {@linkcode WebWorkerGlobals} seam.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   createWebWorkerHost,
@@ -176,7 +175,7 @@ describe('readWebWorkerGlobals', () => {
 
   it('should read the real globalThis by default (Deno has both members)', () => {
     const globals = readWebWorkerGlobals();
-    expect(globals.Worker).toBeDefined();
+    expect(globals.Worker).toBe(Reflect.get(globalThis, 'Worker'));
   });
 });
 

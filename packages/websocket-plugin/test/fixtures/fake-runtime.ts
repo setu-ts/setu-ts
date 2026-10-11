@@ -192,14 +192,14 @@ export function requestFailingOnSecondHeaderRead(url: string): Request {
   const request = upgradeRequest(url);
   let reads = 0;
   return new Proxy(request, {
-    get(target, prop, receiver): unknown {
+    get(target, prop): unknown {
       if (prop === 'headers') {
         reads++;
         if (reads > 1) {
           throw new Error('request already closed');
         }
       }
-      const value = Reflect.get(target, prop, receiver) as unknown;
+      const value = Reflect.get(target, prop, target) as unknown;
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });

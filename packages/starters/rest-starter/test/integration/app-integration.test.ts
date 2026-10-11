@@ -1,8 +1,7 @@
 /**
  * @module rest-starter integration tests
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createRestApp } from '../../src/index.ts';
 import type { IContainer, ILogger, IRequestContext } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';

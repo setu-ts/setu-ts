@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { OUTBOX_RECORD_KIND } from '@setu-ts/common';
 import type { OutboxRecord } from '@setu-ts/common';
 import { DatabaseOutboxStore } from '../../../src/outbox/database-outbox-store.ts';

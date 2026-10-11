@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { adaptSqsModule, loadSqsModule } from '../../src/adapters/sqs-queue.ts';
 import type { SqsSdkModule } from '../../src/adapters/sqs-queue.ts';
 

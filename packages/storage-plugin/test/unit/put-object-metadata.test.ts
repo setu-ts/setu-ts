@@ -18,8 +18,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IFileSystem, PutObjectOptions } from '@setu-ts/common';
 import { StorageService } from '../../src/services/storage-service.ts';

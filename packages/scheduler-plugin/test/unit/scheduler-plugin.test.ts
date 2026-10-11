@@ -1,8 +1,7 @@
 /**
  * Tests for SchedulerPlugin factory.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { HealthIndicatorFn, ILogger, IPlugin, IScheduler } from '@setu-ts/common';
 import { SchedulerPlugin } from '../../src/plugin/scheduler-plugin.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';

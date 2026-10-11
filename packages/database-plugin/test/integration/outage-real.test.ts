@@ -1,3 +1,4 @@
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Real MongoDB outage gate (M95b §3.5 / X51-1).
  *
@@ -25,20 +26,19 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { DatabasePlugin } from '../../src/index.ts';
 
-const mongoUrl = Deno.env.get('MONGODB_URL') ?? Deno.env.get('MONGO_URL') ??
-  Deno.env.get('MONGODB_URI');
+const mongoUrl = process.env['MONGODB_URL'] ?? process.env['MONGO_URL'] ??
+  process.env['MONGODB_URI'];
 const skipReal = mongoUrl === undefined;
 const url = mongoUrl ?? '';
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(
       `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
@@ -76,7 +76,7 @@ async function waitUntil(
 }
 
 describe('REAL MongoDB outage (M95b §3.5 / X51-1)', {
-  ignore: skipReal,
+  skip: skipReal,
 }, () => {
   it('ready 200 → (docker stop) ready 503 and the indicator not up → (docker start) ready 200', async () => {
     const parsed = new URL(url.replace(/localhost/, '127.0.0.1'));

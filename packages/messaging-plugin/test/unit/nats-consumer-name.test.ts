@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- the guarded real-import case logs a SKIP.
 /**
  * Unit tests for the JetStream consumer-name encoding (M101b, V8-6).
  *
@@ -6,8 +5,7 @@
  * is handed to the REAL nats client's own validator, so the encoder is checked
  * against what the client refuses rather than against a copy of the rule.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   JETSTREAM_FORBIDDEN_NAME_CHARACTERS,
   toJetStreamConsumerName,
@@ -81,16 +79,7 @@ describe('toJetStreamConsumerName', () => {
   });
 
   it('produces names the REAL nats client accepts (guarded real import)', async () => {
-    let validateDurableName: (name: string) => string;
-    let minValidation: (context: string, name: string) => string;
-    try {
-      const jsutil = await import('npm:nats@2.x/lib/jetstream/jsutil.js');
-      validateDurableName = jsutil.validateDurableName;
-      minValidation = jsutil.minValidation;
-    } catch {
-      console.warn('SKIP: npm:nats is not resolvable');
-      return;
-    }
+    const { validateDurableName, minValidation } = await import('nats/lib/jetstream/jsutil.js');
 
     // The real validators REFUSE the raw corpus (positive control: the probe
     // can fail) and accept every encoded output.

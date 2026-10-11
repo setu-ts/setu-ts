@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { FakeOutboxBroker, flush, outboxClock, outboxHarness } from '../../fixtures/outbox.ts';
 
 describe('four relay sweeps over one outbox', () => {

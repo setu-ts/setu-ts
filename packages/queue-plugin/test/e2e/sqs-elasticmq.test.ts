@@ -16,8 +16,7 @@
  *
  * @module
  */
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 
@@ -41,13 +40,13 @@ function createRuntime(): IRuntimeServices {
   } as unknown as IRuntimeServices;
 }
 
-const endpoint = Deno.env.get('SQS_ENDPOINT_URL');
+const endpoint = process.env['SQS_ENDPOINT_URL'];
 /**
  * The AWS SDK requires a region even against a local emulator, and it reads
  * `AWS_REGION` — not `SQS_REGION`. Passing it explicitly keeps the suite
  * independent of which name the environment happens to set.
  */
-const region = Deno.env.get('SQS_REGION') ?? Deno.env.get('AWS_REGION') ?? 'us-east-1';
+const region = process.env['SQS_REGION'] ?? process.env['AWS_REGION'] ?? 'us-east-1';
 /** ElasticMQ ignores credential values but the SDK refuses to sign without them. */
 const credentials = { accessKeyId: 'test', secretAccessKey: 'test' };
 
@@ -70,7 +69,7 @@ function baseOptions(): { region: string; credentials: unknown; endpoint: string
   return { region, credentials, endpoint: endpoint! };
 }
 
-describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
+describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
   let sqsClient: { send(command: unknown): Promise<unknown>; destroy(): void } | undefined;
   // Command constructors are captured as `unknown`-returning factories: the
   // suite only needs to build and send them, and the SDK's own input types
@@ -80,7 +79,7 @@ describe('SqsQueue — ElasticMQ E2E', { ignore: !endpoint }, () => {
   let receiveFromDlq: (url: string) => unknown;
 
   beforeAll(async () => {
-    const mod = await import('npm:@aws-sdk/client-sqs@^3');
+    const mod = await import('@aws-sdk/client-sqs');
     createQueue = (name: string) => new mod.CreateQueueCommand({ QueueName: name });
     deleteQueue = (url: string) => new mod.DeleteQueueCommand({ QueueUrl: url });
     receiveFromDlq = (url: string) =>

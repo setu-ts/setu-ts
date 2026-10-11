@@ -15,8 +15,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IEventBus, IEventDiagnosticsSource, IPlugin } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';

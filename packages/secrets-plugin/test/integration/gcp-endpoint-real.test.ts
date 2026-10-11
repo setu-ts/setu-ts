@@ -18,8 +18,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   adaptGcpModule,
@@ -55,18 +54,18 @@ function resolvedAddress(mod: GcpSdkModule, endpoint?: string): string {
 }
 
 describe('GcpSecretManagerProvider endpoint against the real SDK (M99d)', () => {
-  it('defaults to the production service on 443', { ignore: sdk === undefined }, () => {
+  it('defaults to the production service on 443', { skip: sdk === undefined }, () => {
     expect(resolvedAddress(sdk!)).toBe('secretmanager.googleapis.com:443');
   });
 
-  it('addresses a bare host on 443', { ignore: sdk === undefined }, () => {
+  it('addresses a bare host on 443', { skip: sdk === undefined }, () => {
     expect(resolvedAddress(sdk!, 'secretmanager.private.example')).toBe(
       'secretmanager.private.example:443',
     );
   });
 
   it('addresses `host:port` at that port, not `host:port:443`', {
-    ignore: sdk === undefined,
+    skip: sdk === undefined,
   }, () => {
     expect(resolvedAddress(sdk!, 'localhost:8085')).toBe('localhost:8085');
   });

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { runWithTimeout } from '../../src/patterns/timeout.ts';
 import { TimeoutError } from '../../src/errors.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';

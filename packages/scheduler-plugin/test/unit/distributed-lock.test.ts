@@ -1,8 +1,7 @@
 /**
  * Tests for resolveLock factory.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IDistributedLock } from '../../src/interfaces/index.ts';
 import { resolveLock, resolveLockTimeouts } from '../../src/lock/distributed-lock.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';

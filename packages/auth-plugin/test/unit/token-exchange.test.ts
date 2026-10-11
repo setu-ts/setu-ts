@@ -6,8 +6,7 @@
  * and a credential in the wrong place is either a broken login or a leak.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   authorizationUrl,
   exchangeCode,

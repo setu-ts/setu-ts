@@ -1,5 +1,5 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { denoBinary, run as runProcess } from '../../../../test/node-helpers.ts';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   ICommandBus,
@@ -225,7 +225,7 @@ describe('decorated non-HTTP ingress through real plugins', () => {
   });
 
   it('round-trips a real WebSocket frame through a decorated gateway', async () => {
-    const result = await new Deno.Command(Deno.execPath(), {
+    const result = await runProcess(denoBinary(), {
       args: [
         'run',
         '--allow-net',
@@ -236,7 +236,7 @@ describe('decorated non-HTTP ingress through real plugins', () => {
         '--allow-write',
         'packages/decorator-plugin/test/fixtures/ingress-websocket-probe.ts',
       ],
-    }).output();
+    });
     expect(result.code, new TextDecoder().decode(result.stderr)).toBe(0);
   });
 });

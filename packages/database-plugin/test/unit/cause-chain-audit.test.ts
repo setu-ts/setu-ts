@@ -1,6 +1,6 @@
+import * as nodeFs from 'node:fs/promises';
 /** Guards database error wrappers from silently discarding a caught cause. @module */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 const ADAPTERS_DIRECTORY = new URL('../../src/adapters/', import.meta.url);
 const DROPS_CAUSE_MARKER = 'drops-cause:';
@@ -9,7 +9,7 @@ describe('database adapter error causes', () => {
   it('requires a replacement error thrown from catch to forward its cause', async () => {
     const violations: string[] = [];
     for await (const file of sourceFiles(ADAPTERS_DIRECTORY)) {
-      const source = await Deno.readTextFile(file.url);
+      const source = await nodeFs.readFile(file.url, 'utf8');
       for (const block of catchBlocks(source)) {
         if (block.body.includes(DROPS_CAUSE_MARKER)) {
           continue;
@@ -40,11 +40,11 @@ describe('database adapter error causes', () => {
 });
 
 async function* sourceFiles(directory: URL): AsyncGenerator<{ name: string; url: URL }> {
-  for await (const entry of Deno.readDir(directory)) {
-    const url = new URL(`${entry.name}${entry.isDirectory ? '/' : ''}`, directory);
-    if (entry.isDirectory) {
+  for await (const entry of await nodeFs.opendir(directory)) {
+    const url = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, directory);
+    if (entry.isDirectory()) {
       yield* sourceFiles(url);
-    } else if (entry.isFile && entry.name.endsWith('.ts')) {
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
       yield { name: entry.name, url };
     }
   }

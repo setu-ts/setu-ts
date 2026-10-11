@@ -1,3 +1,5 @@
+import { run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * A Workers scaffold's npm devDependencies resolve against the live registry.
  *
@@ -31,26 +33,25 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
 
 /** Whether `npm` can be spawned on this machine. */
 async function npmAvailable(): Promise<boolean> {
   try {
-    const { success } = await new Deno.Command('npm', {
+    const { success } = await runProcess('npm', {
       args: ['--version'],
       stdout: 'null',
       stderr: 'null',
-    }).output();
+    });
     return success;
   } catch {
     return false;
   }
 }
 
-const onCi = Deno.env.get('CI') === 'true';
+const onCi = process.env['CI'] === 'true';
 const hasNpm = await npmAvailable();
 
 /** The generated `package.json` of a Workers project, minus `@setu-ts/*`. */
@@ -68,36 +69,31 @@ function workersManifest(template: string): Record<string, unknown> {
   return manifest;
 }
 
-describe('a Workers scaffold resolves its npm dependencies', {
-  // The registry answers slowly at times, and this test is about whether npm
-  // CAN resolve, not how fast.
-  sanitizeOps: false,
-  sanitizeResources: false,
-}, () => {
+describe('a Workers scaffold resolves its npm dependencies', () => {
   // Every template that can target Workers, because each contributes its own
   // npm packages (the full-stack one adds Vite and React Router) and a peer
   // range can break on any of them.
   for (const template of ['rest', 'microservice', 'class-based', 'full-stack']) {
     it(`npm install resolves for --template ${template}`, {
-      ignore: !hasNpm && !onCi,
+      skip: !hasNpm && !onCi,
     }, async () => {
-      const dir = await Deno.makeTempDir({ prefix: 'setu-workers-install-' });
+      const dir = await tempDir({ prefix: 'setu-workers-install-' });
       try {
         const manifest = workersManifest(template);
-        await Deno.writeTextFile(`${dir}/package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
-        const { code, stdout, stderr } = await new Deno.Command('npm', {
+        await nodeFs.writeFile(`${dir}/package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+        const { code, stdout, stderr } = await runProcess('npm', {
           args: ['install', '--dry-run', '--ignore-scripts', '--no-audit', '--no-fund'],
           cwd: dir,
           stdout: 'piped',
           stderr: 'piped',
-        }).output();
+        });
         const output = new TextDecoder().decode(stdout) + new TextDecoder().decode(stderr);
 
         // The output is in the assertion so a failure names the peer that broke.
         expect({ code, eresolve: output.includes('ERESOLVE') ? output : '' })
           .toEqual({ code: 0, eresolve: '' });
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        await nodeFs.rm(dir, { recursive: true });
       }
     });
   }

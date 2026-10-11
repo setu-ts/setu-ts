@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import * as nodeFs from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { denoProcess, type MainProcess, runMain } from '../../src/main.ts';
 
@@ -19,7 +19,7 @@ describe('the process boundary of packages/cli/src', () => {
     for await (const entry of walk(SRC_DIR)) {
       const relative = `src/${entry.slice(SRC_DIR.length + 1)}`;
       if ((ALLOWLIST as readonly string[]).includes(relative)) continue;
-      const source = stripComments(await Deno.readTextFile(entry));
+      const source = stripComments(await nodeFs.readFile(entry, 'utf8'));
       for (const pattern of PATTERNS) {
         if (pattern.test(source)) offenders.push(`${relative}: ${pattern}`);
       }
@@ -36,7 +36,7 @@ describe('the process boundary of packages/cli/src', () => {
   });
 
   it('registers SIGINT through runtime services, not Deno directly', async () => {
-    const source = await Deno.readTextFile(new URL('../../src/main.ts', import.meta.url));
+    const source = await nodeFs.readFile(new URL('../../src/main.ts', import.meta.url), 'utf8');
     expect(source).toContain("runtime.onSignal?.('SIGINT'");
     expect(source).not.toContain('Deno.addSignalListener');
   });
@@ -87,37 +87,40 @@ describe('the process boundary of packages/cli/src', () => {
     expect(output.lines).not.toEqual([]);
   });
 
-  it('builds a Deno adapter whose port probe reports bind success and refusal', async () => {
-    const originalPrompt = globalThis.prompt;
-    const originalLog = console.log;
-    const originalError = console.error;
-    const messages: string[] = [];
-    globalThis.prompt = () => 'answer';
-    console.log = (message) => messages.push(String(message));
-    console.error = (message) => messages.push(String(message));
-    try {
-      const process = denoProcess();
-      expect(process.args).toEqual(Deno.args);
-      expect(process.cwd()).toBe(Deno.cwd());
-      expect(typeof process.isTerminal()).toBe('boolean');
-      expect(process.prompt('question')).toBe('answer');
-      process.log('out');
-      process.error('err');
-      expect(messages).toEqual(['out', 'err']);
-      expect(await process.portAvailable(0)).toBe(true);
-      expect(await process.portAvailable(-1)).toBe(false);
-    } finally {
-      globalThis.prompt = originalPrompt;
-      console.log = originalLog;
-      console.error = originalError;
-    }
-  });
+  it.skipIf(!('Deno' in globalThis))(
+    'builds a Deno adapter whose port probe reports bind success and refusal',
+    async () => {
+      const originalPrompt = globalThis.prompt;
+      const originalLog = console.log;
+      const originalError = console.error;
+      const messages: string[] = [];
+      globalThis.prompt = () => 'answer';
+      console.log = (message) => messages.push(String(message));
+      console.error = (message) => messages.push(String(message));
+      try {
+        const process = denoProcess();
+        expect(process.args).toEqual(Deno.args);
+        expect(process.cwd()).toBe(Deno.cwd());
+        expect(typeof process.isTerminal()).toBe('boolean');
+        expect(process.prompt('question')).toBe('answer');
+        process.log('out');
+        process.error('err');
+        expect(messages).toEqual(['out', 'err']);
+        expect(await process.portAvailable(0)).toBe(true);
+        expect(await process.portAvailable(-1)).toBe(false);
+      } finally {
+        globalThis.prompt = originalPrompt;
+        console.log = originalLog;
+        console.error = originalError;
+      }
+    },
+  );
 });
 
 async function* walk(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
+  for await (const entry of await nodeFs.opendir(dir)) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       yield* walk(path);
     } else if (entry.name.endsWith('.ts')) {
       yield path;

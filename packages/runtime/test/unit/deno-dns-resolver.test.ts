@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createDenoDnsResolver } from '../../src/adapters/deno/deno-dns-resolver.ts';
 import type { DenoDnsHost, DenoSrvRecord } from '../../src/adapters/deno/deno-dns-resolver.ts';

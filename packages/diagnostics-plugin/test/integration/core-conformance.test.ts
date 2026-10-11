@@ -8,8 +8,7 @@
  * kernel's own reader output through the validators, in-process and through
  * the real connector and signed client.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IPlugin } from '@setu-ts/common';
 

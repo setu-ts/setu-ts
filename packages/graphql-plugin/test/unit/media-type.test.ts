@@ -2,8 +2,7 @@
  * Tests for media-type.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   CONTENT_TYPE_GRAPHQL,
   CONTENT_TYPE_JSON,

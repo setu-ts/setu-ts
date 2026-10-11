@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   ClassProvider,
@@ -408,20 +407,21 @@ describe('DecoratorPlugin registration (integration)', () => {
     expect(decoratorDef.schema?.body).toBe(programmaticDef.schema?.body);
   });
 
-  it({
-    name: 'consumes autoDiscover + controllersPath (real import path)',
-    ignore: !realImportAvailable,
-  }, async () => {
-    const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
-      /\/$/,
-      '',
-    );
-    const fs = createFakeFileSystem({ [`${sampleDir}/user-controller.ts`]: '' });
-    const runtime = createFakeRuntime({ fs });
-    const { ctx, routes } = createFakeContext({ runtime });
-    await DecoratorPlugin({ autoDiscover: true, controllersPath: sampleDir }).register(ctx);
-    expect(routes.some((r) => r.method === 'GET' && r.path === '/discovered')).toBe(true);
-  });
+  it(
+    'consumes autoDiscover + controllersPath (real import path)',
+    { skip: !realImportAvailable },
+    async () => {
+      const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
+        /\/$/,
+        '',
+      );
+      const fs = createFakeFileSystem({ [`${sampleDir}/user-controller.ts`]: '' });
+      const runtime = createFakeRuntime({ fs });
+      const { ctx, routes } = createFakeContext({ runtime });
+      await DecoratorPlugin({ autoDiscover: true, controllersPath: sampleDir }).register(ctx);
+      expect(routes.some((r) => r.method === 'GET' && r.path === '/discovered')).toBe(true);
+    },
+  );
 
   it('skips a non-controller class passed in the controllers list', async () => {
     class NotAController {

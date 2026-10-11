@@ -4,8 +4,7 @@
  *
  * Skipped when npm:ioredis@5.x cannot be loaded.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 describe('RedisLock real import', () => {
   it(
@@ -15,7 +14,7 @@ describe('RedisLock real import', () => {
       // failure cannot masquerade as an absent dependency.
       let mod: { Redis: unknown };
       try {
-        mod = await import('npm:ioredis@5.x');
+        mod = await import('ioredis');
       } catch {
         console.log('Skipping: npm:ioredis@5.x not available');
         return;

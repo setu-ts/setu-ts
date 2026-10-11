@@ -2,8 +2,7 @@
  * Tests for ApiKeyStrategy.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { ApiKeyStrategy } from '../../src/strategies/api-key-strategy.ts';
 import type { IPrincipal, IRequest } from '@setu-ts/common';
 

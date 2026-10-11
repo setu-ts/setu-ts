@@ -1,8 +1,7 @@
 /**
  * HeaderResolver tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { assertSome } from '../fixtures/option.ts';
 import { HeaderResolver, normalizeHeaderTenant } from '../../src/resolvers/header-resolver.ts';
 import { createFakeRequest } from '../fixtures/fake-request.ts';

@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { StaticProvider } from '../../src/providers/static-provider.ts';
 import type { DiscoveryProvider } from '../../src/interfaces/index.ts';

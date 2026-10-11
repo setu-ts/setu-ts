@@ -13,8 +13,7 @@
  * Every case here fails without the guard in `WorkerPoolCollector` and the
  * settle-before-observe ordering in `TaskPool`.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ICounter, IGauge, IMetric, IMetricsService, MetricOptions } from '@setu-ts/common';
 

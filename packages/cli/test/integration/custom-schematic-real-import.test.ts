@@ -1,3 +1,5 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * Drives the DEFAULT custom-schematic loader — a real dynamic `import()` — so
  * the production path is exercised, not only the injected test seam.
@@ -5,8 +7,7 @@
  * @module
  */
 
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   CUSTOM_SCHEMATIC_DIR,
   importModule,
@@ -33,15 +34,15 @@ describe('custom schematic — real import()', () => {
   let root: string;
 
   beforeAll(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-custom-' });
-    await Deno.mkdir(`${root}/${CUSTOM_SCHEMATIC_DIR}`, { recursive: true });
-    await Deno.writeTextFile(`${root}/${CUSTOM_SCHEMATIC_DIR}/real.ts`, MODULE_SOURCE);
-    await Deno.writeTextFile(`${root}/${CUSTOM_SCHEMATIC_DIR}/defaulted.ts`, DEFAULT_EXPORT_SOURCE);
-    await Deno.writeTextFile(`${root}/${CUSTOM_SCHEMATIC_DIR}/empty.ts`, NO_EXPORT_SOURCE);
+    root = await tempDir({ prefix: 'setu-custom-' });
+    await nodeFs.mkdir(`${root}/${CUSTOM_SCHEMATIC_DIR}`, { recursive: true });
+    await nodeFs.writeFile(`${root}/${CUSTOM_SCHEMATIC_DIR}/real.ts`, MODULE_SOURCE);
+    await nodeFs.writeFile(`${root}/${CUSTOM_SCHEMATIC_DIR}/defaulted.ts`, DEFAULT_EXPORT_SOURCE);
+    await nodeFs.writeFile(`${root}/${CUSTOM_SCHEMATIC_DIR}/empty.ts`, NO_EXPORT_SOURCE);
   });
 
   afterAll(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   it('imports a real module from disk through the default loader', async () => {

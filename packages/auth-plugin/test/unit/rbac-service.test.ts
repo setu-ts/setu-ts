@@ -2,8 +2,7 @@
  * Tests for RbacService.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RbacService } from '../../src/services/rbac-service.ts';
 import type { IPrincipal, RbacConfig } from '@setu-ts/common';
 

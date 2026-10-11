@@ -4,14 +4,13 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
-import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
-import { primaryKey, sqliteTable, text as sqliteText } from 'npm:drizzle-orm@0.45.2/sqlite-core';
+import { drizzle as sqliteDrizzle } from 'drizzle-orm/sqlite-proxy';
+import { primaryKey, sqliteTable, text as sqliteText } from 'drizzle-orm/sqlite-core';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 import { createDrizzleDatabase } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';

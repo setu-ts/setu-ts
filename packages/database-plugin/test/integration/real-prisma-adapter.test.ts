@@ -27,9 +27,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
+import { describe, expect, it } from 'vitest';
 import { conditionalContract } from '../fixtures/conditional-contract.ts';
-import { expect } from '@std/expect';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { PrismaRepository } from '../../src/adapters/prisma/prisma-repository.ts';
@@ -39,7 +38,7 @@ import { DatabaseService } from '../../src/services/database-service.ts';
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { PrismaAdapterOptions } from '../../src/interfaces/index.ts';
 
-const postgresUrl = Deno.env.get('POSTGRES_URL');
+const postgresUrl = process.env['POSTGRES_URL'];
 /**
  * Whether the live cases run. Declared with the BDD `ignore` option rather
  * than an early `return`, so an unset `POSTGRES_URL` is reported as
@@ -100,7 +99,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
  */
 async function connectPrisma(queries?: string[]): Promise<GeneratedPrismaClient> {
   const [{ PrismaPg }, generated] = await Promise.all([
-    import('npm:@prisma/adapter-pg@^7.10.0'),
+    import('@prisma/adapter-pg'),
     import(GENERATED_CLIENT_URL.href) as Promise<GeneratedClientModule>,
   ]);
   const client = new generated.PrismaClient({
@@ -117,7 +116,7 @@ async function connectPrisma(queries?: string[]): Promise<GeneratedPrismaClient>
 describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   it(
     'M105 emits one conjoined UPDATE or DELETE and carries conditionals into interactive transactions',
-    { ignore: skipReal },
+    { skip: skipReal },
     async () => {
       const queries: string[] = [];
       const client = await connectPrisma(queries);
@@ -187,7 +186,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   it(
     'round-trips a composite key through the repository surface on the unnamed-@@id model (P1/P6)',
     {
-      ignore: skipReal,
+      skip: skipReal,
     },
     async () => {
       const client = await connectPrisma();
@@ -238,7 +237,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   );
 
   it('refuses the named-@@id model without compositeKeyName and succeeds with it (P2)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const client = await connectPrisma();
 
@@ -289,7 +288,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
 
   it(
     'matches a nested-path filter against real JSONB rows (P7)',
-    { ignore: skipReal },
+    { skip: skipReal },
     async () => {
       const client = await connectPrisma();
       const adapter = new PrismaAdapter({ prismaClient: client });
@@ -331,7 +330,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
     },
   );
 
-  it('filters a Date range over real timestamptz rows (P9)', { ignore: skipReal }, async () => {
+  it('filters a Date range over real timestamptz rows (P9)', { skip: skipReal }, async () => {
     const client = await connectPrisma();
     const adapter = new PrismaAdapter({ prismaClient: client });
     await adapter.connect();
@@ -383,7 +382,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   });
 
   it('walks a tied fixture across three pages returning every row exactly once (P10/P11)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const client = await connectPrisma();
     const adapter = new PrismaAdapter({ prismaClient: client });
@@ -442,7 +441,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   });
 
   it('LOSES rows on the tied fixture when the key tiebreaker is omitted (P11 negative control)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const client = await connectPrisma();
     const adapter = new PrismaAdapter({ prismaClient: client });
@@ -538,7 +537,7 @@ interface TransactionalPrismaClient {
 describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)', () => {
   it(
     'a real SERIALIZABLE write conflict classifies as conflict',
-    { ignore: skipReal },
+    { skip: skipReal },
     async () => {
       const client = await connectPrisma();
       const transactional = client as unknown as GeneratedPrismaClient & TransactionalPrismaClient;
@@ -583,7 +582,7 @@ describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)'
 
 describe('PrismaAdapter against live PostgreSQL — duplicate key', () => {
   it('a duplicate primary key reaches the caller as DuplicateKeyError (P2002)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const client = await connectPrisma();
     const adapter = new PrismaAdapter({ prismaClient: client });

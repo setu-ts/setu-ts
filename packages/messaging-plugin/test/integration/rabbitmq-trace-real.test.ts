@@ -1,7 +1,5 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /** Real RabbitMQ trace-header round trip, guarded by `RABBITMQ_URL`. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { MessageMetadata } from '@setu-ts/common';
 import { RabbitMqBroker } from '../../src/brokers/rabbitmq-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -24,12 +22,11 @@ async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<voi
 }
 
 describe('REAL RabbitMqBroker trace headers (guarded)', () => {
-  it('round-trips traceparent through AMQP properties.headers', async () => {
-    const url = Deno.env.get('RABBITMQ_URL');
-    if (url === undefined) {
-      console.log('SKIP: RABBITMQ_URL not set');
-      return;
-    }
+  it('round-trips traceparent through AMQP properties.headers', {
+    skip: process.env['RABBITMQ_URL'] === undefined,
+  }, async () => {
+    const url = process.env['RABBITMQ_URL'];
+    if (url === undefined) throw new Error('Backend guard failed');
 
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
       url,

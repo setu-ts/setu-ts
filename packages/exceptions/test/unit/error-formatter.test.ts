@@ -5,8 +5,7 @@
  * formatter passthrough, and the one-implementation-two-entry-points rule
  * (driving both built-in formatters under a non-default configuration).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { defaultFormatter, selectFormatter } from '../../src/formatters/error-formatter.ts';
 import type { ErrorHandlerFormatter } from '../../src/formatters/error-formatter.ts';

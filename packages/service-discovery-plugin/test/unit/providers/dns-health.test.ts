@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { DnsProvider } from '../../../src/providers/dns-provider.ts';
 import type { DiscoveryProvider } from '../../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../../fixtures/fakes.ts';

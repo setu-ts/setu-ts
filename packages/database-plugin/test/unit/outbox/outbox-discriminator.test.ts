@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { IDatabaseService } from '../../../src/interfaces/index.ts';
 import { DatabaseOutboxStore } from '../../../src/outbox/database-outbox-store.ts';
 import { allRows, ENTITY, memoryService, record, seed } from '../../fixtures/outbox-store.ts';

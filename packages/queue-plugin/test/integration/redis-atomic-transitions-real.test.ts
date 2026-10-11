@@ -6,12 +6,11 @@
  * Guarded on `REDIS_URL` through `ignore`, so an absent backend reports the
  * suite ignored rather than passed.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 import type { IRedisQueueClient, StoredJob } from '../../src/interfaces/index.ts';
 
-const url = Deno.env.get('REDIS_URL');
+const url = process.env['REDIS_URL'];
 
 const job = (name: string, id: string): StoredJob<{ n: number }> => ({
   id,
@@ -22,11 +21,11 @@ const job = (name: string, id: string): StoredJob<{ n: number }> => ({
   availableAtMs: 100,
 });
 
-describe('RedisQueue Lua transitions against live Redis', { ignore: url === undefined }, () => {
+describe('RedisQueue Lua transitions against live Redis', { skip: url === undefined }, () => {
   it('requeues and dead-letters with retention through real scripts', async () => {
     const name = `m101a:${crypto.randomUUID()}`;
     const queue = new RedisQueue({ url: url!, deadLetterTtlMs: 60_000 });
-    const { Redis } = await import('npm:ioredis@5.x');
+    const { Redis } = await import('ioredis');
     const inspect = new Redis(url!);
     try {
       await queue.connect();
@@ -59,7 +58,7 @@ describe('RedisQueue Lua transitions against live Redis', { ignore: url === unde
 
   it('a reserve script applied after a local timeout leaves the job in processing', async () => {
     const name = `m101a:${crypto.randomUUID()}`;
-    const { Redis } = await import('npm:ioredis@5.x');
+    const { Redis } = await import('ioredis');
     const real = new Redis(url!, { lazyConnect: true });
     let armed = false;
     // The server runs the script; the client then reports a timeout, as

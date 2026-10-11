@@ -15,8 +15,7 @@
  * file for coverage of the published artifact.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
 import type { GrpcServiceDefinition } from '@setu-ts/common';
@@ -33,7 +32,7 @@ async function connectAvailable(): Promise<boolean> {
 
 const available = await connectAvailable();
 
-describe('Connect real import', { ignore: !available }, () => {
+describe('Connect real import', { skip: !available }, () => {
   it('resolves all four specifiers and satisfies the ConnectRuntime port', async () => {
     const runtime = await loadConnectModule();
     expect(typeof runtime.createConnectRouter).toBe('function');

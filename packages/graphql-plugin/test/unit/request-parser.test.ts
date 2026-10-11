@@ -2,8 +2,7 @@
  * Tests for request-parser.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { parseGetQuery, parsePostBody } from '../../src/http/request-parser.ts';
 
 describe('request-parser', () => {

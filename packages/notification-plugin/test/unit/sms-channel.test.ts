@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { NotificationMessage } from '@setu-ts/common';
 import type { SmsTransport } from '../../src/interfaces/index.ts';
 import { SmsChannel } from '../../src/channels/sms-channel.ts';

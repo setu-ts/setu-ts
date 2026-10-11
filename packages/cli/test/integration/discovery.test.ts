@@ -1,3 +1,5 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The guard C1 exists for: a scaffolded project's factory must survive the
  * REAL discovery path.
@@ -14,19 +16,18 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadApp } from '../../src/app-loader.ts';
 
 let root = '';
 
 beforeEach(async () => {
-  root = await Deno.makeTempDir({ prefix: 'setu-discovery-' });
+  root = await tempDir({ prefix: 'setu-discovery-' });
 });
 
 afterEach(async () => {
-  await Deno.remove(root, { recursive: true }).catch(() => {});
+  await nodeFs.rm(root, { recursive: true }).catch(() => {});
 });
 
 /** A minimal application-shaped object, sufficient for the loader's checks. */
@@ -37,7 +38,7 @@ describe('the discovery loader against the emitted factory shapes', () => {
     // The exact signature the CLI emits (a structural stand-in for the
     // framework composition, which needs no kernel dependency to prove the
     // ARGUMENT POSITIONING this test exists for).
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${root}/setu.config.ts`,
       `export function createApp(
   _env?: Readonly<Record<string, unknown>>,
@@ -57,7 +58,7 @@ describe('the discovery loader against the emitted factory shapes', () => {
     // Reproduced, not reasoned: the discovery proxy answers every string key
     // with a truthy inert binding, `extra?.plugins` is therefore a truthy
     // non-iterable, and the spread throws.
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${root}/setu.config.ts`,
       `export function createApp(extra?: { plugins?: readonly string[] }): unknown {
   const app = (() => {
@@ -74,7 +75,7 @@ describe('the discovery loader against the emitted factory shapes', () => {
   it('survives the emitted shape with the devtool composition supplied', async () => {
     // `main.dev.ts` passes the composition as the SECOND argument, and the
     // same call works for discovery, which passes only the first.
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${root}/setu.config.ts`,
       `export function createApp(
   _env?: Readonly<Record<string, unknown>>,

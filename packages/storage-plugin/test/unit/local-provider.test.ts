@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { LocalStorageProvider } from '../../src/providers/local-provider.ts';
 
 describe('LocalStorageProvider', () => {
@@ -342,5 +341,24 @@ describe('LocalStorageProvider', () => {
     await provider.put('normal.bin', new Uint8Array([99]));
     const data = await provider.get('normal.bin');
     expect(data).toEqual(new Uint8Array([99]));
+  });
+  it('reports scalar write refusals and refuses reads without a filesystem', async () => {
+    const { fs } = makeFakeFs();
+    fs.writeFile = () => Promise.reject('read only');
+    await expect(new LocalStorageProvider(fs, { rootDir: '/root' }).connect()).rejects.toThrow(
+      'read only',
+    );
+    await expect(new LocalStorageProvider(undefined, {}).get('file.bin')).rejects.toThrow(
+      'not connected',
+    );
+  });
+  it('accepts lexical containment when realPath is absent and writes at the filesystem root', async () => {
+    const { fs, store } = makeFakeFs();
+    const { realPath: _realPath, ...lexicalFs } = fs;
+    const provider = new LocalStorageProvider(lexicalFs, { rootDir: '' });
+    await provider.connect();
+    await provider.put('file.bin', new Uint8Array([7]));
+    expect(await provider.get('file.bin')).toEqual(new Uint8Array([7]));
+    expect([...store.keys()]).toEqual(['/file.bin']);
   });
 });

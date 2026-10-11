@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { BigtableAdapter } from '../../../src/adapters/bigtable/bigtable-adapter.ts';
 import { CosmosAdapter } from '../../../src/adapters/cosmos/cosmos-adapter.ts';
 import type { IDatabaseService } from '../../../src/interfaces/index.ts';

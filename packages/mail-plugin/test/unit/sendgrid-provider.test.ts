@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { SendGridProvider, toSendGridBody } from '../../src/providers/sendgrid-provider.ts';
 import type { IMailHttp, OutgoingMail } from '../../src/interfaces/index.ts';

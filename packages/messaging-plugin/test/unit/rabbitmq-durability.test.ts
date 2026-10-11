@@ -8,8 +8,7 @@
  * These tests pin the wire properties and the confirm semantics; the restart
  * itself is proven against a real broker in `durability-real.test.ts`.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, IPlugin } from '@setu-ts/common';

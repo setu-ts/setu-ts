@@ -1,6 +1,5 @@
 /** Tests for the broker string-sink diagnostic renderer. @module */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { describeError, describeLogText } from '../../src/brokers/describe-error.ts';
 

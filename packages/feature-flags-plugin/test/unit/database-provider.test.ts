@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ILogger } from '@setu-ts/common';
 import { DatabaseProvider } from '../../src/providers/database-provider.ts';
 import type { FlagDefinition, IFlagStore } from '../../src/interfaces/index.ts';

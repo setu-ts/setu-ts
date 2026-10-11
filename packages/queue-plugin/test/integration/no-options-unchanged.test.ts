@@ -14,8 +14,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IJob, IQueue } from '@setu-ts/common';
 import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
 import { runJob, withIngressBehaviors } from '../../src/processors/job-processor.ts';

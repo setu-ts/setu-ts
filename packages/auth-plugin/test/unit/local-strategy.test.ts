@@ -2,8 +2,7 @@
  * Tests for LocalStrategy.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { LocalStrategy } from '../../src/services/auth-service.ts';
 import type { IPrincipal } from '@setu-ts/common';
 

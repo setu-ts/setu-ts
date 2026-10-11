@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
 
@@ -2052,4 +2051,56 @@ describe('unsatisfied consumed-capability startup diagnostic', () => {
     expect((caught as Error).message).toContain('No HTTP adapter registered');
     await app.stop();
   });
+});
+
+it('exposes only registered lazy context capabilities during enumeration', async () => {
+  const fake = createFakeRuntime();
+  const seen: string[] = [];
+  const app = createApplication({
+    diagnostics: {},
+    plugins: [{
+      name: 'contexts',
+      version: '1.0.0',
+      provides: [CAPABILITIES.RUNTIME, CAPABILITIES.METADATA_STORE, CAPABILITIES.DI_CONTAINER],
+      register(ctx) {
+        expect('metadata' in ctx).toBe(false);
+        expect(Object.getOwnPropertyDescriptor(ctx, 'metadata')).toBeUndefined();
+        expect('environment' in ctx).toBe(true);
+        ctx.services.registerFactory(CAPABILITIES.RUNTIME, () => fake.runtime);
+        const metadata = {};
+        const container = {};
+        ctx.services.register(CAPABILITIES.METADATA_STORE, metadata);
+        ctx.services.register(CAPABILITIES.DI_CONTAINER, container);
+        expect(ctx.metadata).toBe(metadata);
+        expect(ctx.container).toBe(container);
+        expect(Object.getOwnPropertyDescriptor(ctx, 'runtime')?.value).toBe(fake.runtime);
+        expect(Object.getOwnPropertyDescriptor(ctx, 'missing')).toBeUndefined();
+        seen.push(...Object.keys(ctx));
+      },
+    }],
+  });
+  await app.start();
+  expect(seen).toContain('metadata');
+  expect(seen).toContain('container');
+  expect(app.diagnostics!.snapshot().state).toBe('running');
+  await app.stop();
+});
+
+it('validates true and false environment flags and refuses another boolean spelling', async () => {
+  for (const value of ['true', 'false', 'yes']) {
+    const app = createApplication({
+      plugins: [runtimePlugin({ FLAG: value }), {
+        name: 'flags',
+        version: '1.0.0',
+        register(ctx) {
+          ctx.environment.validate({ FLAG: { type: 'boolean' } });
+        },
+      }],
+    });
+    if (value === 'yes') await expect(app.start()).rejects.toThrow('expected boolean');
+    else {
+      await app.start();
+      await app.stop();
+    }
+  }
 });

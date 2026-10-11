@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs/promises';
 /**
  * Recurrence gate: the default Node serve host must NOT opt out of
  * node-server's global objects (M87).
@@ -19,11 +20,11 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
-const SOURCE = await Deno.readTextFile(
+const SOURCE = await nodeFs.readFile(
   new URL('../../src/adapters/node/node-http-adapter.ts', import.meta.url),
+  'utf8',
 );
 
 describe('default Node serve host (M87)', () => {

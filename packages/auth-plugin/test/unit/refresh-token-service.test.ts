@@ -6,8 +6,7 @@
  * invalid/expired/tampered-token null paths.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RefreshTokenService } from '../../src/services/refresh-token-service.ts';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
 import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';
@@ -430,4 +429,14 @@ describe('RefreshTokenService', () => {
       expect(await service.revoke(forged)).toBe(false);
     });
   });
+});
+
+it('refuses refresh when the store loses the record during atomic rotation', async () => {
+  const { service, store } = makeService({
+    withAccessTokenRevocationStore: true,
+    accessToken: { expiresIn: '1h' },
+  });
+  const pair = await service.issue({ id: 'user' });
+  store.rotate = () => Promise.resolve({ rotated: false, record: null });
+  expect(await service.refresh(pair.refreshToken)).toBeNull();
 });

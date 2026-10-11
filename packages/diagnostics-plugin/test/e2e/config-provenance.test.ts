@@ -14,8 +14,7 @@
  * canary is absent at all three layers. This proves the seam minimizes, not
  * merely that a field is missing by luck.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

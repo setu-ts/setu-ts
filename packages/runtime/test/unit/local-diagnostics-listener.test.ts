@@ -4,8 +4,7 @@
  * adapter/handle escape, body refusal, unsupported-platform refusal, close
  * idempotence, and provider ordering with the RuntimePlugin.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IRequest, IResponse } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
