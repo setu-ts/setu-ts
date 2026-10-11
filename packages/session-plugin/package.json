@@ -28,6 +28,6 @@
     "@setu-ts/multi-tenancy-plugin": "workspace:^",
     "@setu-ts/grpc-plugin": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

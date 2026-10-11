@@ -1,0 +1,504 @@
+/**
+ * Unit tests for the Node-manifest generator (M111a plan §3.1, §3.4, §3.6).
+ *
+ * The pure core is driven with in-memory members, so every classification
+ * rule and every refusal is asserted without the live tree; the I/O seam is
+ * driven once against a throwaway workspace on disk, which is what proves
+ * `--check` reports drift rather than only agreement.
+ *
+ * @module
+ */
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+import {
+  basePackageName,
+  checkDecoratorSideEffects,
+  classifyMember,
+  externalAliases,
+  findSrcCycle,
+  generateWorkspace,
+  type MemberInput,
+  normalizeExports,
+  renderDenoJson,
+  renderPnpmWorkspace,
+  renderRootPackageJson,
+  runNodeManifests,
+} from '../../scripts/node-manifests.ts';
+
+/** Builds one member from a map of member-relative paths to source text. */
+function member(
+  dir: string,
+  name: string,
+  files: Record<string, string> = {},
+  extra: Partial<MemberInput> = {},
+): MemberInput {
+  return {
+    dir,
+    name,
+    version: '0.8.0',
+    exports: [{ subpath: '.', source: './src/index.ts' }],
+    denoJson: `{\n  "name": "${name}",\n  "version": "0.8.0"\n}\n`,
+    files: new Map(Object.entries(files).map(([path, text]) => [`${dir}/${path}`, text])),
+    ...extra,
+  };
+}
+
+/** The runtime member as the overrides require it: it imports both overridden packages. */
+const RUNTIME = member('packages/runtime', '@setu-ts/runtime', {
+  'src/index.ts': [
+    "import type { X } from '@setu-ts/common';",
+    "const server = await import('@hono/node-server');",
+    "const ws = await import('ws');",
+  ].join('\n'),
+});
+const COMMON = member('packages/common', '@setu-ts/common', { 'src/index.ts': 'export {};' });
+
+const nameToDir = new Map([
+  ['@setu-ts/common', 'packages/common'],
+  ['@setu-ts/kernel', 'packages/kernel'],
+  ['@setu-ts/runtime', 'packages/runtime'],
+]);
+
+describe('classifyMember — the §3.1 classification table', () => {
+  const kernel = member('packages/kernel', '@setu-ts/kernel', {
+    'src/index.ts': [
+      "import { CAPABILITIES } from '@setu-ts/common';",
+      "import { Hono } from 'hono';",
+      "import type { Span } from '@opentelemetry/api';",
+      "const s3 = await import('@aws-sdk/client-s3');",
+      "import { worker } from '@setu-ts/runtime/worker';",
+    ].join('\n'),
+    'test/app.test.ts': [
+      "import { Hono } from 'hono';",
+      "import { DefaultAzureCredential } from '@azure/identity';",
+      "import { kernel } from '@setu-ts/kernel';",
+    ].join('\n'),
+  });
+  const { classified, refusals } = classifyMember(kernel, nameToDir);
+
+  it('refuses nothing for a well-formed member', () => {
+    expect(refusals).toEqual([]);
+  });
+
+  it('makes a src workspace import a workspace:^ dependency plus a reference', () => {
+    expect(classified.dependencies.get('@setu-ts/common')).toBe('workspace:^');
+    expect(classified.references).toContain('packages/common');
+  });
+
+  it('keys a subpath workspace import by its base package', () => {
+    expect(classified.dependencies.get('@setu-ts/runtime')).toBe('workspace:^');
+    expect([...classified.dependencies.keys()].some((k) => k.endsWith('/worker'))).toBe(false);
+  });
+
+  it('makes a static external value import a regular dependency', () => {
+    expect(classified.dependencies.get('hono')).toBe('^4.12.30');
+  });
+
+  it('makes a type-only or dynamic external import an optional peer plus a dev mirror', () => {
+    for (const name of ['@opentelemetry/api', '@aws-sdk/client-s3']) {
+      expect(classified.peerDependencies.has(name)).toBe(true);
+      expect(classified.devDependencies.get(name)).toBe(classified.peerDependencies.get(name));
+      expect(classified.dependencies.has(name)).toBe(false);
+    }
+  });
+
+  it('makes a test-only external a dev dependency, and skips one src already declares', () => {
+    expect(classified.devDependencies.get('@azure/identity')).toBe('^4');
+    expect(classified.devDependencies.has('hono')).toBe(false);
+  });
+
+  it('never references or dev-depends on itself, even when its own tests import it', () => {
+    expect(classified.references).not.toContain('packages/kernel');
+    expect(classified.devDependencies.has('@setu-ts/kernel')).toBe(false);
+  });
+
+  it('adds the pinned build tools to every member', () => {
+    expect(classified.devDependencies.get('typescript')).toBe('6.0.3');
+    expect(classified.devDependencies.has('@types/node')).toBe(true);
+    expect(classified.devDependencies.has('@types/deno')).toBe(false);
+  });
+
+  it('lets a value import win over a type import of the same package', () => {
+    const both = member('packages/kernel', '@setu-ts/kernel', {
+      'src/a.ts': "import type { Span } from '@opentelemetry/api';",
+      'src/b.ts': "import { trace } from '@opentelemetry/api';",
+    });
+    const result = classifyMember(both, nameToDir).classified;
+    expect(result.dependencies.has('@opentelemetry/api')).toBe(true);
+    expect(result.peerDependencies.has('@opentelemetry/api')).toBe(false);
+  });
+
+  it('adds a test-only workspace import as a workspace:^ dev dependency', () => {
+    const withTestEdge = member('packages/kernel', '@setu-ts/kernel', {
+      'src/index.ts': 'export {};',
+      'test/x.test.ts': "import { RuntimePlugin } from '@setu-ts/runtime';",
+    });
+    const result = classifyMember(withTestEdge, nameToDir).classified;
+    expect(result.devDependencies.get('@setu-ts/runtime')).toBe('workspace:^');
+    expect(result.references).not.toContain('packages/runtime');
+  });
+});
+
+describe('classifyMember — the committed overrides', () => {
+  const { classified, refusals } = classifyMember(RUNTIME, nameToDir);
+
+  it('refuses nothing when every override finds its package', () => {
+    expect(refusals).toEqual([]);
+  });
+
+  it('makes @hono/node-server a regular dependency of runtime, not a peer', () => {
+    expect(classified.dependencies.get('@hono/node-server')).toBe('^2.0.0');
+    expect(classified.peerDependencies.has('@hono/node-server')).toBe(false);
+    expect(classified.devDependencies.has('@hono/node-server')).toBe(false);
+  });
+
+  it('adds @types/ws beside the ws peer, and Deno types for runtime', () => {
+    expect(classified.peerDependencies.has('ws')).toBe(true);
+    expect(classified.devDependencies.get('@types/ws')).toBe('^8.18.2');
+    expect(classified.devDependencies.get('@types/deno')).toBe('2.7.0');
+  });
+
+  it('refuses an override whose package the member no longer imports', () => {
+    const bare = member('packages/runtime', '@setu-ts/runtime', { 'src/index.ts': 'export {};' });
+    const messages = classifyMember(bare, nameToDir).refusals.join('\n');
+    expect(messages).toContain('override packages/runtime → @hono/node-server matches nothing');
+    expect(messages).toContain('override packages/runtime → @types/ws: its typed package');
+  });
+});
+
+describe('classifyMember — refusals name the file and the specifier', () => {
+  const refusalsFor = (source: string, file = 'src/index.ts'): string[] =>
+    classifyMember(member('packages/kernel', '@setu-ts/kernel', { [file]: source }), nameToDir)
+      .refusals;
+
+  it('refuses an npm:/jsr:-prefixed specifier in src', () => {
+    expect(refusalsFor("await import('npm:pino@10.x');")[0]).toContain(
+      'packages/kernel/src/index.ts: "npm:pino@10.x" is a prefixed specifier in src',
+    );
+    expect(refusalsFor("import { x } from 'jsr:@scope/pkg';")[0]).toContain(
+      'is a prefixed specifier in src',
+    );
+  });
+
+  it('refuses a Deno @std alias in src but tolerates it in tests until 111b', () => {
+    expect(refusalsFor("import { parse } from '@std/jsonc';")[0]).toContain('Deno-only std alias');
+    expect(refusalsFor("import { expect } from '@std/expect';", 'test/x.test.ts')).toEqual([]);
+  });
+
+  it('refuses a workspace import naming no member', () => {
+    expect(refusalsFor("import { x } from '@setu-ts/nonexistent';")[0]).toContain(
+      'which is not a workspace member',
+    );
+  });
+
+  it('refuses an external with no committed range, in src and in tests', () => {
+    expect(refusalsFor("import x from 'left-pad';")[0]).toContain(
+      'external "left-pad" has no range',
+    );
+    expect(refusalsFor("import x from 'left-pad';", 'test/x.test.ts')[0]).toContain(
+      'external "left-pad" has no range',
+    );
+  });
+
+  it('ignores relative paths, node: builtins and masked text', () => {
+    const source = [
+      "import { a } from './a.ts';",
+      "import { b } from '../b.ts';",
+      "import { readFile } from 'node:fs/promises';",
+      "/** @example import { x } from 'left-pad'; */",
+      "const text = `import { y } from 'left-pad';`;",
+    ].join('\n');
+    expect(refusalsFor(source)).toEqual([]);
+  });
+});
+
+describe('findSrcCycle', () => {
+  it('reports a src-level cycle as a readable path', () => {
+    const a = { ...classifyMember(COMMON, nameToDir).classified, references: ['packages/b'] };
+    const b = { ...a, references: ['packages/a'] };
+    expect(findSrcCycle([a, b], ['packages/a', 'packages/b'])).toBe(
+      'packages/a → packages/b → packages/a',
+    );
+  });
+
+  it('returns null for an acyclic graph and ignores an unknown reference', () => {
+    const base = classifyMember(COMMON, nameToDir).classified;
+    const a = { ...base, references: ['packages/b', 'packages/elsewhere'] };
+    const b = { ...base, references: [] };
+    expect(findSrcCycle([a, b], ['packages/a', 'packages/b'])).toBeNull();
+  });
+});
+
+describe('the decorator-plugin sideEffects guard (§3.4 safeguard 2)', () => {
+  const dir = 'packages/decorator-plugin';
+
+  it('accepts a manifest that declares no sideEffects', () => {
+    expect(checkDecoratorSideEffects(dir, '{"name":"x"}')).toBeNull();
+  });
+
+  it('accepts a list that keeps the Symbol.metadata module', () => {
+    const json = JSON.stringify({ sideEffects: ['./dist/metadata/symbol-metadata.js'] });
+    expect(checkDecoratorSideEffects(dir, json)).toBeNull();
+  });
+
+  it('refuses sideEffects: false and a list that omits the module', () => {
+    expect(checkDecoratorSideEffects(dir, '{"sideEffects":false}')).toContain(
+      'declares "sideEffects": false',
+    );
+    expect(checkDecoratorSideEffects(dir, '{"sideEffects":["./dist/other.js"]}')).toContain(
+      'omitting ./dist/metadata/symbol-metadata.js',
+    );
+  });
+
+  it('refuses a manifest that is not JSON', () => {
+    expect(checkDecoratorSideEffects(dir, '{')).toBe(`${dir}/package.json is not valid JSON`);
+  });
+
+  it('is enforced by generateWorkspace for the decorator-plugin member only', () => {
+    const decorated = member(dir, '@setu-ts/decorator-plugin', { 'src/index.ts': 'export {};' }, {
+      currentPackageJson: '{"sideEffects":false}',
+    });
+    const other = member('packages/other', '@setu-ts/other', { 'src/index.ts': 'export {};' }, {
+      currentPackageJson: '{"sideEffects":false}',
+    });
+    const refusals = generateWorkspace([decorated, other]).refusals;
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain(dir);
+  });
+});
+
+describe('externalAliases — the member import map (§10, correction 10)', () => {
+  it('maps every bare external, subpaths included, from the range table', () => {
+    const kernel = member('packages/kernel', '@setu-ts/kernel', {
+      'src/router.ts': [
+        "import { Hono } from 'hono';",
+        "import { LinearRouter } from 'hono/router/linear-router';",
+        "const s3 = await import('@aws-sdk/client-s3');",
+      ].join('\n'),
+      'test/x.test.ts': "import { DefaultAzureCredential } from '@azure/identity';",
+    });
+    expect([...externalAliases(kernel)].sort()).toEqual([
+      ['@aws-sdk/client-s3', 'npm:@aws-sdk/client-s3@^3'],
+      ['@azure/identity', 'npm:@azure/identity@^4'],
+      ['hono', 'npm:hono@^4.12.30'],
+      ['hono/router/linear-router', 'npm:hono@^4.12.30/router/linear-router'],
+    ]);
+  });
+
+  it('skips relative, builtin, workspace, prefixed, std and unranged specifiers', () => {
+    const quiet = member('packages/kernel', '@setu-ts/kernel', {
+      'src/a.ts': [
+        "import { a } from './a.ts';",
+        "import { f } from 'node:fs';",
+        "import { c } from '@setu-ts/common';",
+        "await import('npm:pino@10.x');",
+        "import { parse } from '@std/jsonc';",
+        "import x from 'left-pad';",
+      ].join('\n'),
+    });
+    expect(externalAliases(quiet).size).toBe(0);
+  });
+});
+
+describe('renderDenoJson — splices only the imports block', () => {
+  const aliases = new Map([['hono', 'npm:hono@^4.12.30']]);
+
+  it('inserts a block, leaving every other byte as fmt wrote it', () => {
+    const raw =
+      '{\n  "name": "@setu-ts/x",\n  "test": { "permissions": { "sys": ["hostname"] } }\n}\n';
+    expect(renderDenoJson(raw, aliases)).toBe(
+      '{\n  "name": "@setu-ts/x",\n  "test": { "permissions": { "sys": ["hostname"] } },\n' +
+        '  "imports": {\n    "hono": "npm:hono@^4.12.30"\n  }\n}\n',
+    );
+  });
+
+  it('replaces a stale bare alias and keeps a prefixed pin, sorted', () => {
+    const raw = '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "stale": "npm:stale@1",\n' +
+      '    "npm:zod@^3.24.0": "npm:zod@^3.24.0"\n  }\n}\n';
+    expect(renderDenoJson(raw, aliases)).toBe(
+      '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "hono": "npm:hono@^4.12.30",\n' +
+        '    "npm:zod@^3.24.0": "npm:zod@^3.24.0"\n  }\n}\n',
+    );
+  });
+
+  it('removes the block, with its comma, when nothing remains', () => {
+    const raw = '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "stale": "npm:stale@1"\n  }\n}\n';
+    expect(renderDenoJson(raw, new Map())).toBe('{\n  "name": "@setu-ts/x"\n}\n');
+  });
+
+  it('leaves a manifest with no block and no aliases untouched', () => {
+    const raw = '{\n  "name": "@setu-ts/x"\n}\n';
+    expect(renderDenoJson(raw, new Map())).toBe(raw);
+  });
+
+  it('is idempotent', () => {
+    const once = renderDenoJson('{\n  "name": "@setu-ts/x"\n}\n', aliases);
+    expect(renderDenoJson(once, aliases)).toBe(once);
+  });
+});
+
+describe('generateWorkspace — rendered files', () => {
+  const kernel = member('packages/kernel', '@setu-ts/kernel', {
+    'src/index.ts': "import { x } from '@setu-ts/common';",
+  }, {
+    exports: [
+      { subpath: '.', source: './src/index.ts' },
+      { subpath: './worker', source: './src/worker/index.ts' },
+    ],
+  });
+  const starter = member('packages/starters/rest-starter', '@setu-ts/rest-starter', {
+    'src/index.ts': "import { k } from '@setu-ts/kernel';",
+  });
+  const { files, refusals } = generateWorkspace([COMMON, kernel, RUNTIME, starter]);
+
+  it('generates with no refusals', () => {
+    expect(refusals).toEqual([]);
+  });
+
+  it('maps every export subpath to its dist .js and .d.ts twins', () => {
+    const pkg = JSON.parse(files.get('packages/kernel/package.json')!);
+    expect(pkg.exports).toEqual({
+      '.': { types: './dist/index.d.ts', default: './dist/index.js' },
+      './worker': { types: './dist/worker/index.d.ts', default: './dist/worker/index.js' },
+    });
+    expect(pkg.type).toBe('module');
+    expect(pkg.engines).toEqual({ node: '>=22' });
+    expect(pkg.files).toEqual(['dist', 'README.md']);
+  });
+
+  it('marks every peer optional', () => {
+    const pkg = JSON.parse(files.get('packages/runtime/package.json')!);
+    expect(pkg.peerDependenciesMeta).toEqual({ ws: { optional: true } });
+  });
+
+  it('omits empty dependency fields', () => {
+    const pkg = JSON.parse(files.get('packages/common/package.json')!);
+    expect('dependencies' in pkg).toBe(false);
+    expect('peerDependencies' in pkg).toBe(false);
+  });
+
+  it('resolves extends and references from a nested starter', () => {
+    const config = JSON.parse(files.get('packages/starters/rest-starter/tsconfig.json')!);
+    expect(config.extends).toBe('../../../tsconfig.base.json');
+    expect(config.references).toEqual([{ path: '../../kernel' }]);
+  });
+
+  it('gives runtime the deno types and every member the base strictness', () => {
+    const runtime = JSON.parse(files.get('packages/runtime/tsconfig.json')!);
+    expect(runtime.compilerOptions.types).toEqual(['node', 'deno']);
+    const base = JSON.parse(files.get('tsconfig.base.json')!).compilerOptions;
+    for (const option of ['strict', 'exactOptionalPropertyTypes', 'isolatedDeclarations']) {
+      expect(base[option]).toBe(true);
+    }
+  });
+
+  it('lists the same members in pnpm-workspace.yaml, the root workspaces and the solution', () => {
+    const dirs = [
+      'packages/common',
+      'packages/kernel',
+      'packages/runtime',
+      'packages/starters/rest-starter',
+    ];
+    expect(JSON.parse(files.get('package.json')!).workspaces).toEqual(dirs);
+    expect(JSON.parse(files.get('tsconfig.json')!).references).toEqual(
+      dirs.map((dir) => ({ path: `./${dir}` })),
+    );
+    for (const dir of dirs) expect(files.get('pnpm-workspace.yaml')).toContain(`  - ${dir}\n`);
+  });
+
+  it('denies the two install scripts pnpm 12 refuses to leave undecided', () => {
+    const yaml = renderPnpmWorkspace(['packages/a']);
+    expect(yaml).toContain('allowBuilds:\n  protobufjs: false\n  sse4_crc32: false\n');
+    expect(yaml).toContain('ignoreWorkspaceCycles: true\n');
+  });
+
+  it('pins the package manager and the build tools at the root', () => {
+    const root = JSON.parse(renderRootPackageJson(['packages/a']));
+    expect(root.private).toBe(true);
+    expect(root.packageManager).toBe('pnpm@12.11.2');
+    expect(root.devDependencies.typescript).toBe('6.0.3');
+  });
+
+  it('writes nothing when any member is refused, and refuses a duplicate name', () => {
+    const result = generateWorkspace([COMMON, { ...COMMON, dir: 'packages/twin' }]);
+    expect(result.refusals).toContain('duplicate workspace member name: @setu-ts/common');
+    expect(result.files.size).toBe(0);
+  });
+
+  it('refuses a src-level cycle across members', () => {
+    const a = member('packages/a', '@setu-ts/a', { 'src/index.ts': "import '@setu-ts/b';" });
+    const b = member('packages/b', '@setu-ts/b', { 'src/index.ts': "import '@setu-ts/a';" });
+    const { refusals: cycle } = generateWorkspace([a, b]);
+    expect(cycle.join('\n')).toContain('src-level workspace dependency cycle');
+  });
+});
+
+describe('small helpers', () => {
+  it('normalizes the string and object export forms', () => {
+    expect(normalizeExports('./src/index.ts')).toEqual([{
+      subpath: '.',
+      source: './src/index.ts',
+    }]);
+    expect(normalizeExports({ '.': './a.ts', './x': './x.ts' })).toEqual([
+      { subpath: '.', source: './a.ts' },
+      { subpath: './x', source: './x.ts' },
+    ]);
+    expect(normalizeExports(undefined)).toEqual([]);
+  });
+
+  it('reduces a subpath to its base package, scoped or not', () => {
+    expect(basePackageName('hono/jsx')).toBe('hono');
+    expect(basePackageName('@aws-sdk/client-s3/dist')).toBe('@aws-sdk/client-s3');
+  });
+});
+
+describe('runNodeManifests — the I/O seam, against a throwaway workspace', () => {
+  async function workspace(): Promise<string> {
+    const root = await Deno.makeTempDir({ prefix: 'setu-node-manifests-' });
+    await Deno.writeTextFile(`${root}/deno.json`, '{"workspace":["./packages/a"]}');
+    await Deno.mkdir(`${root}/packages/a/src`, { recursive: true });
+    await Deno.writeTextFile(
+      `${root}/packages/a/deno.json`,
+      '{"name":"@setu-ts/a","version":"0.8.0","exports":"./src/index.ts"}',
+    );
+    await Deno.writeTextFile(`${root}/packages/a/src/index.ts`, "import { Hono } from 'hono';");
+    return root;
+  }
+
+  it('refuses an unknown mode with exit 2', async () => {
+    expect(await runNodeManifests([], '.')).toBe(2);
+  });
+
+  it('reports missing files, writes them, then agrees, then reports an edit as drift', async () => {
+    const root = await workspace();
+    try {
+      expect(await runNodeManifests(['--check'], root)).toBe(1);
+      expect(await runNodeManifests(['--write'], root)).toBe(0);
+      expect(await runNodeManifests(['--check'], root)).toBe(0);
+      const path = `${root}/packages/a/package.json`;
+      const pkg = JSON.parse(await Deno.readTextFile(path));
+      expect(pkg.dependencies).toEqual({ hono: '^4.12.30' });
+      const deno = JSON.parse(await Deno.readTextFile(`${root}/packages/a/deno.json`));
+      expect(deno.imports).toEqual({ hono: 'npm:hono@^4.12.30' });
+      await Deno.writeTextFile(path, JSON.stringify({ ...pkg, version: '9.9.9' }));
+      expect(await runNodeManifests(['--check'], root)).toBe(1);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it('exits 1 on a refusal before writing anything', async () => {
+    const root = await workspace();
+    try {
+      await Deno.writeTextFile(`${root}/packages/a/src/index.ts`, "import x from 'left-pad';");
+      expect(await runNodeManifests(['--write'], root)).toBe(1);
+      await expect(Deno.stat(`${root}/packages/a/package.json`)).rejects.toThrow();
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it('agrees with the committed tree', async () => {
+    expect(await runNodeManifests(['--check'])).toBe(0);
+  });
+});

@@ -21,5 +21,11 @@
         "osRelease"
       ]
     }
+  },
+  "imports": {
+    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3",
+    "@aws-sdk/s3-request-presigner": "npm:@aws-sdk/s3-request-presigner@^3",
+    "@azure/storage-blob": "npm:@azure/storage-blob@^12",
+    "@google-cloud/storage": "npm:@google-cloud/storage@^7"
   }
 }

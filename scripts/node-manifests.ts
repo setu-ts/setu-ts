@@ -40,25 +40,15 @@
  * @module
  */
 
-import { maskNonCode, readStringLiteral } from './npm-specifier-audit.ts';
+import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
 import {
   EXTERNAL_RANGES,
+  type Override,
   OVERRIDES,
   WORKSPACE_SCOPE,
-  type Override,
 } from './node-dependency-ranges.ts';
 
 // ── Pure core ─────────────────────────────────────────────────────────────────
-
-/** One import edge found in one scanned file. */
-export interface ImportEdge {
-  /** The specifier exactly as written (bare, `npm:`/`jsr:`-prefixed, relative, or `node:`). */
-  readonly specifier: string;
-  /** How the file reaches the specifier. */
-  readonly mode: 'value' | 'type' | 'dynamic';
-  /** The scanned file's repository-relative path, for failure messages. */
-  readonly file: string;
-}
 
 /** A member's `deno.json` exports entry, normalised to subpath → source path. */
 export interface ExportEntry {
@@ -73,8 +63,11 @@ export interface MemberInput {
   readonly name: string;
   readonly version: string;
   readonly exports: readonly ExportEntry[];
-  /** The member `deno.json`'s `imports` keys, checked for bare aliases. */
-  readonly denoImports: readonly string[];
+  /**
+   * The member's `deno.json` as committed. The generator rewrites only its
+   * `imports` block ({@linkcode renderDenoJson}); every other byte is kept.
+   */
+  readonly denoJson: string;
   /** Every scanned source file: repository-relative path → source text. */
   readonly files: ReadonlyMap<string, string>;
   /** Current content of the member's committed `package.json`, when one exists (for the sideEffects guard). */
@@ -101,7 +94,7 @@ export interface GenerationResult {
 /** The build tools every member carries, pinned identically (plan §3.6). */
 const BUILD_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
   'typescript': '6.0.3',
-  '@types/node': '^26.6.5',
+  '@types/node': '^24',
 };
 
 /** The members whose `src` references the `Deno` global get its ambient types (plan §3.6). */
@@ -110,109 +103,6 @@ const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli
 /** The package whose manifest the §3.4 safeguard-2 guard applies to. */
 const DECORATOR_PLUGIN_DIR = 'packages/decorator-plugin';
 const SYMBOL_METADATA_EXPORT = './dist/metadata/symbol-metadata.js';
-
-/**
- * Scans one source file and returns every import edge it expresses.
- *
- * Comments and template bodies are masked first (delimiters preserved, so
- * literal values are read from the original source at the masked offsets);
- * an `import`/`from` inside a JSDoc `@example`, a line comment, or an emitted
- * template string is therefore invisible to this scan.
- *
- * Classification walks BACKWARD from each string-literal delimiter over the
- * masked code, so only a literal whose preceding token is `from`, a
- * side-effect `import`, or an `import(` is an edge — a plain string constant
- * (`const X = 'pkg'`, preceded by `=`) or an object value (`{ key: 'pkg' }`,
- * preceded by `:`) is not, and a function call argument (`err('pkg')`,
- * preceded by `(` whose word is the callee's name) is not either. This is what
- * keeps the CLI's emitted-Deno-project strings (`PROTO_TASK_COMMAND`,
- * `PROTO_IMPORTS`) out of the dependency graph: they are string constants, and
- * 111d owns them.
- */
-export function scanImportEdges(source: string, file: string): readonly ImportEdge[] {
-  const { code } = maskNonCode(source);
-  const edges: ImportEdge[] = [];
-
-  for (let i = 0; i < code.length; i += 1) {
-    const c = code[i];
-    if (c !== "'" && c !== '"' && c !== '`') continue;
-    const literal = readStringLiteral(source, i);
-    if (!literal.clean || literal.end < 0) continue; // interpolated/computed — no edge
-    const specifier = source.slice(i + 1, literal.end - 1);
-    const edge = classifyLiteral(code, i, specifier, file);
-    if (edge !== null) edges.push(edge);
-    i = literal.end - 1; // resume past this literal
-  }
-  return edges;
-}
-
-/**
- * Classifies one string literal by the token that precedes it in the masked
- * code. Returns `null` when the literal is not an import specifier.
- */
-function classifyLiteral(
-  code: string,
-  quoteOffset: number,
-  specifier: string,
-  file: string,
-): ImportEdge | null {
-  // A legal module specifier carries only name/path characters. Anything else
-  // (`(`, `\`, a quote, whitespace) is a MISREAD — the masking pass does not
-  // model regex literals, so a `/from "(@setu-ts\/…)/"` test regex presents its
-  // quotes as a string literal preceded by `from`. Refusing impossible
-  // specifiers keeps those out of the graph rather than inventing dependencies
-  // (and, via the cycle check, false cycles) from test regexes.
-  if (!/^[A-Za-z0-9@/._:-]+$/.test(specifier)) return null;
-  let p = quoteOffset - 1;
-  while (p >= 0 && /\s/.test(code[p])) p -= 1;
-  if (p < 0) return null;
-
-  if (code[p] === '(') {
-    // `import('x')` — or a call whose name happens to precede the paren.
-    const word = wordBefore(code, p);
-    if (word === null || word.text !== 'import') return null;
-    if (word.start > 0 && code[word.start - 1] === '.') return null; // obj.import( — a method call
-    return { specifier, mode: 'dynamic', file };
-  }
-
-  if (!/[A-Za-z0-9_$]/.test(code[p])) return null; // `: 'x'`, `= 'x'`, `, 'x'` — a value, not an import
-  const word = wordBefore(code, p + 1);
-  if (word === null) return null;
-  if (word.text === 'import') return { specifier, mode: 'value', file }; // side-effect import
-  if (word.text !== 'from') return null;
-
-  // `… from 'x'` — static. Type-only when the keyword introducing the clause
-  // (`import`/`export`) is immediately followed by `type`. The clause between
-  // keyword and `from` is real code in the masked view (string bodies are
-  // spaces), so a bounded window suffices for even the widest import list.
-  // The LAST keyword in the window is this statement's — an earlier import in
-  // the same window must not decide this literal's mode.
-  const window = code.slice(Math.max(0, quoteOffset - 2000), quoteOffset);
-  let keywordEnd = -1;
-  for (const match of window.matchAll(/\b(?:import|export)\b/g)) {
-    keywordEnd = (match.index ?? 0) + match[0].length;
-  }
-  if (keywordEnd < 0) return { specifier, mode: 'value', file };
-  const afterKeyword = window.slice(keywordEnd);
-  return {
-    specifier,
-    mode: /^\s*type\b/.test(afterKeyword) ? 'type' : 'value',
-    file,
-  };
-}
-
-/** The identifier ending just before `from`, as `{ text, start }`, or null. */
-function wordBefore(
-  code: string,
-  from: number,
-): { text: string; start: number } | null {
-  let end = from;
-  while (end > 0 && /\s/.test(code[end - 1])) end -= 1;
-  let start = end;
-  while (start > 0 && /[A-Za-z0-9_$]/.test(code[start - 1])) start -= 1;
-  if (start === end) return null;
-  return { text: code.slice(start, end), start };
-}
 
 /** Normalises a `deno.json` `exports` value (string or object form) to entries. */
 export function normalizeExports(exports: unknown): readonly ExportEntry[] {
@@ -318,14 +208,18 @@ export function classifyMember(
   for (const edge of srcEdges) {
     if (isRelativeOrBuiltin(edge.specifier)) continue;
     if (isWorkspaceSpecifier(edge.specifier)) {
-      const depDir = nameToDir.get(workspaceName(edge.specifier));
+      // A subpath import (`@setu-ts/runtime/worker`) keys its dependency by the
+      // BASE package — a dependency name cannot carry a path segment — and the
+      // subpath resolves through that package's own exports map.
+      const depName = basePackageName(workspaceName(edge.specifier));
+      const depDir = nameToDir.get(depName);
       if (depDir === undefined) {
         refusals.push(
           `${edge.file}: imports "${edge.specifier}", which is not a workspace member`,
         );
         continue;
       }
-      dependencies.set(workspaceName(edge.specifier), 'workspace:^');
+      dependencies.set(depName, 'workspace:^');
       noteRef(depDir);
       continue;
     }
@@ -349,19 +243,26 @@ export function classifyMember(
     if (edge.mode === 'value') {
       dependencies.set(packageName, range);
     } else if (!dependencies.has(packageName)) {
-      // A value import wins over a type/dynamic one for the same package: the
-      // peer+dev mirror exists so an OPTIONAL load still type-checks and Deno
-      // still resolves it, which is moot once the package is a real dependency.
       peerDependencies.set(packageName, range);
       devDependencies.set(packageName, range);
     }
+  }
+
+  // A value import anywhere in src wins over a type/dynamic one elsewhere in
+  // src, whichever file was scanned first: the peer+dev mirror exists so an
+  // OPTIONAL load still resolves, which is moot once the package is required.
+  for (const name of dependencies.keys()) {
+    if (peerDependencies.delete(name)) devDependencies.delete(name);
   }
 
   // test-only edges (workspace or external; `jsr:`/`@std/` stay Deno-resolved until 111b).
   for (const edge of testEdges) {
     if (isRelativeOrBuiltin(edge.specifier)) continue;
     if (isWorkspaceSpecifier(edge.specifier)) {
-      const name = workspaceName(edge.specifier);
+      const name = basePackageName(workspaceName(edge.specifier));
+      // A member's tests import it by its own name; a package that dev-depends
+      // on itself is noise in every published manifest.
+      if (name === member.name) continue;
       if (!dependencies.has(name) && !peerDependencies.has(name)) {
         devDependencies.set(name, 'workspace:^');
       }
@@ -551,69 +452,101 @@ export function renderTsconfig(member: MemberInput, classified: ClassifiedMember
 
 /** Renders the root solution `tsconfig.json` referencing every member. */
 export function renderSolutionTsconfig(dirs: readonly string[]): string {
-  return `${JSON.stringify(
-    { files: [], references: dirs.map((dir) => ({ path: `./${dir}` })) },
-    null,
-    2,
-  )
-}\n`;
+  return `${
+    JSON.stringify(
+      { files: [], references: dirs.map((dir) => ({ path: `./${dir}` })) },
+      null,
+      2,
+    )
+  }\n`;
 }
 
-/** Renders `pnpm-workspace.yaml`, listing every member explicitly. */
+/**
+ * Renders `pnpm-workspace.yaml`, listing every member explicitly.
+ *
+ * `ignoreWorkspaceCycles` is load-bearing, not a workaround: the TEST-only
+ * workspace edges are cyclic by design (kernel's tests import runtime and
+ * testing; runtime's tests import kernel — the plan's §1 probe recorded that
+ * 40 of 51 members' tests import packages their src does not), pnpm's
+ * resolver allows them, and `pnpm -r` refuses only the topological ORDERING.
+ * Each member's build is `tsc -b`, which orders its own project references,
+ * so an arbitrary member order is correct.
+ *
+ * `allowBuilds` DENIES the two dependencies that ship install scripts
+ * (`protobufjs`, `sse4_crc32`, both reached only through the Google Cloud
+ * SDKs). pnpm 12 fails `install --frozen-lockfile` with ERR_PNPM_IGNORED_BUILDS
+ * while a script is undecided, and approving one would run third-party code on
+ * every install for a dependency no test exercises for real.
+ */
 export function renderPnpmWorkspace(dirs: readonly string[]): string {
   const lines = dirs.map((dir) => `  - ${dir}`);
-  return `packages:\n${lines.join('\n')}\n`;
+  return (
+    `packages:\n${lines.join('\n')}\n` +
+    '\n' +
+    '# Dev-only workspace edges are cyclic (test-only imports, plan §3.1); each\n' +
+    "# member's build is `tsc -b`, which orders its own references.\n" +
+    'ignoreWorkspaceCycles: true\n' +
+    '\n' +
+    '# Install scripts are denied, never approved: both are transitive deps of\n' +
+    '# the Google Cloud SDKs the tests reach only through fakes and guarded\n' +
+    '# suites. pnpm 12 refuses a frozen install while either is undecided.\n' +
+    'allowBuilds:\n' +
+    '  protobufjs: false\n' +
+    '  sse4_crc32: false\n'
+  );
 }
 
 /** Renders the root `package.json` (private workspace root, §3.2/§3.6). */
 export function renderRootPackageJson(dirs: readonly string[]): string {
-  return `${JSON.stringify(
-    {
-      name: 'setu-ts',
-      private: true,
-      packageManager: 'pnpm@12.11.2',
-      engines: { node: '>=22' },
-      workspaces: dirs,
-      devDependencies: { ...BUILD_DEV_DEPENDENCIES },
-    },
-    null,
-    2,
-  )
-}\n`;
+  return `${
+    JSON.stringify(
+      {
+        name: 'setu-ts',
+        private: true,
+        packageManager: 'pnpm@12.11.2',
+        engines: { node: '>=22' },
+        workspaces: dirs,
+        devDependencies: { ...BUILD_DEV_DEPENDENCIES },
+      },
+      null,
+      2,
+    )
+  }\n`;
 }
 
 /** Renders `tsconfig.base.json` — the eight strictness options verbatim plus the Node-build options (§3.6). */
 export function renderTsconfigBase(): string {
-  return `${JSON.stringify(
-    {
-      compilerOptions: {
-        target: 'es2024',
-        lib: ['es2024', 'esnext.decorators', 'dom', 'dom.iterable'],
-        module: 'nodenext',
-        moduleResolution: 'nodenext',
-        strict: true,
-        noUnusedLocals: true,
-        noUnusedParameters: true,
-        noImplicitReturns: true,
-        noFallthroughCasesInSwitch: true,
-        noImplicitOverride: true,
-        exactOptionalPropertyTypes: true,
-        useUnknownInCatchVariables: true,
-        rewriteRelativeImportExtensions: true,
-        declaration: true,
-        declarationMap: true,
-        sourceMap: true,
-        isolatedDeclarations: true,
-        composite: true,
-        verbatimModuleSyntax: true,
-        skipLibCheck: true,
-        types: ['node'],
+  return `${
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'es2024',
+          lib: ['es2024', 'esnext.decorators', 'dom', 'dom.iterable'],
+          module: 'nodenext',
+          moduleResolution: 'nodenext',
+          strict: true,
+          noUnusedLocals: true,
+          noUnusedParameters: true,
+          noImplicitReturns: true,
+          noFallthroughCasesInSwitch: true,
+          noImplicitOverride: true,
+          exactOptionalPropertyTypes: true,
+          useUnknownInCatchVariables: true,
+          rewriteRelativeImportExtensions: true,
+          declaration: true,
+          declarationMap: true,
+          sourceMap: true,
+          isolatedDeclarations: true,
+          composite: true,
+          verbatimModuleSyntax: true,
+          skipLibCheck: true,
+          types: ['node'],
+        },
       },
-    },
-    null,
-    2,
-  )
-}\n`;
+      null,
+      2,
+    )
+  }\n`;
 }
 
 /**
@@ -646,19 +579,74 @@ export function checkDecoratorSideEffects(dir: string, content: string): string 
   return null;
 }
 
-/** §3.2: a member `deno.json` may not keep a bare-keyed alias (both toolchains read `package.json`). */
-export function checkDenoAliases(
-  dir: string,
-  keys: readonly string[],
-  isRoot: boolean,
-): readonly string[] {
-  const bad: string[] = [];
-  for (const key of keys) {
-    if (key.startsWith('npm:') || key.startsWith('jsr:')) continue; // pinned two versions of one package — 111b's
-    if (isRoot && key.startsWith('@std/')) continue; // root test-only aliases stay until 111b
-    bad.push(`${dir}/deno.json: import alias "${key}" is bare — dependencies come from package.json (plan §3.2)`);
+/**
+ * Every bare external specifier `member` imports (src and tests), mapped to
+ * `npm:<package>@<range><subpath>` from the committed range table.
+ *
+ * Why the member's `deno.json` carries these: Deno honours a workspace
+ * member's `package.json` only for a program rooted INSIDE the workspace, while
+ * an example application and a CLI e2e project type-check framework SOURCE
+ * from outside it, where only the member's import map applies. Generating the
+ * map from the same table as `package.json` keeps one source for both
+ * toolchains (plan §10, correction 10). An external with no range is skipped
+ * here — {@linkcode classifyMember} already refuses it by name.
+ *
+ * @param member - The member whose files are scanned
+ * @returns Specifier → `npm:` target, unordered
+ */
+export function externalAliases(member: MemberInput): ReadonlyMap<string, string> {
+  const aliases = new Map<string, string>();
+  for (const [file, source] of member.files) {
+    for (const edge of scanImportEdges(source, file)) {
+      const spec = edge.specifier;
+      if (isRelativeOrBuiltin(spec) || isWorkspaceSpecifier(spec)) continue;
+      if (/^(npm|jsr):|^@std\//.test(spec)) continue;
+      const base = basePackageName(spec);
+      const range = EXTERNAL_RANGES[base];
+      if (range === undefined) continue;
+      aliases.set(spec, `npm:${base}@${range}${spec.slice(base.length)}`);
+    }
   }
-  return bad;
+  return aliases;
+}
+
+/**
+ * The member `deno.json` with its `imports` block regenerated: the bare
+ * aliases from {@linkcode externalAliases} plus any `npm:`/`jsr:`-keyed pin
+ * already present (openapi-plugin's two zod majors, kept until 111b), sorted.
+ *
+ * Only the `imports` block is spliced; every other byte stays as `deno fmt`
+ * wrote it, because re-serializing the whole file would unfold the short
+ * arrays fmt keeps on one line. An empty result removes the block.
+ *
+ * @param raw - The committed `deno.json` text
+ * @param aliases - The generated bare aliases
+ * @returns The `deno.json` text to commit
+ */
+export function renderDenoJson(raw: string, aliases: ReadonlyMap<string, string>): string {
+  const current = (JSON.parse(raw) as { imports?: Record<string, string> }).imports ?? {};
+  const merged: Record<string, string> = {};
+  const entries = [
+    ...Object.entries(current).filter(([key]) => /^(npm|jsr):/.test(key)),
+    ...aliases,
+  ].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [key, value] of entries) merged[key] = value;
+
+  const block = Object.keys(merged).length === 0
+    ? ''
+    : `"imports": ${JSON.stringify(merged, null, 2).replaceAll('\n', '\n  ')}`;
+  const start = raw.search(/"imports"\s*:\s*\{/);
+  if (start === -1) {
+    if (block === '') return raw;
+    const close = raw.lastIndexOf('}');
+    const before = raw.slice(0, close).replace(/\s*$/, '');
+    return `${before},\n  ${block}\n${raw.slice(close)}`;
+  }
+  const end = raw.indexOf('}', raw.indexOf('{', start)) + 1;
+  if (block !== '') return `${raw.slice(0, start)}${block}${raw.slice(end)}`;
+  // Removing the block takes its leading comma and indentation with it.
+  const head = raw.slice(0, start).replace(/,\s*$/, '');
+  return `${head}${raw.slice(end)}`;
 }
 
 /** Generates every committed file from the pure inputs. */
@@ -678,7 +666,6 @@ export function generateWorkspace(members: readonly MemberInput[]): GenerationRe
   const classified: ClassifiedMember[] = [];
   const dirs: string[] = [];
   for (const member of members) {
-    refusals.push(...checkDenoAliases(member.dir, member.denoImports, false));
     if (member.dir === DECORATOR_PLUGIN_DIR && member.currentPackageJson !== undefined) {
       const violation = checkDecoratorSideEffects(member.dir, member.currentPackageJson);
       if (violation !== null) refusals.push(violation);
@@ -704,6 +691,7 @@ export function generateWorkspace(members: readonly MemberInput[]): GenerationRe
     const cls = classified[i] as ClassifiedMember;
     files.set(`${member.dir}/package.json`, renderPackageJson(member, cls));
     files.set(`${member.dir}/tsconfig.json`, renderTsconfig(member, cls));
+    files.set(`${member.dir}/deno.json`, renderDenoJson(member.denoJson, externalAliases(member)));
   }
   files.set('tsconfig.base.json', renderTsconfigBase());
   files.set('tsconfig.json', renderSolutionTsconfig(dirs));
@@ -724,74 +712,76 @@ async function readJson(path: string): Promise<unknown | null> {
 }
 
 /** Every `.ts`/`.tsx` file under `dir`, repository-relative. */
-async function* walkSources(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
+async function* walkSources(root: string, dir: string): AsyncGenerator<string> {
+  for await (const entry of Deno.readDir(`${root}/${dir}`)) {
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory) {
       if (entry.name === 'node_modules' || entry.name === 'dist') continue;
-      yield* walkSources(path);
+      yield* walkSources(root, path);
     } else if (entry.isFile && /\.(ts|tsx|mts)$/.test(entry.name)) {
       yield path;
     }
   }
 }
 
-/** Reads one member's inputs from the working tree. */
-async function readMember(dir: string): Promise<MemberInput> {
-  const config = (await readJson(`${dir}/deno.json`)) as {
-    name?: string;
-    version?: string;
-    exports?: unknown;
-    imports?: Record<string, string>;
-  } | null;
+/** Reads one member's inputs from the tree under `root`. */
+async function readMember(root: string, dir: string): Promise<MemberInput> {
+  const denoJson = await Deno.readTextFile(`${root}/${dir}/deno.json`).catch(() => '');
+  let config: { name?: string; version?: string; exports?: unknown } | null;
+  try {
+    config = JSON.parse(denoJson);
+  } catch {
+    config = null;
+  }
   if (config === null || config.name === undefined || config.version === undefined) {
     throw new Error(`${dir}: no parsable deno.json with name+version`);
   }
   const files = new Map<string, string>();
   for (const sub of ['src', 'test']) {
     try {
-      for await (const file of walkSources(`${dir}/${sub}`)) {
-        files.set(file, await Deno.readTextFile(file));
+      for await (const file of walkSources(root, `${dir}/${sub}`)) {
+        files.set(file, await Deno.readTextFile(`${root}/${file}`));
       }
     } catch {
       // No such directory: the member declares none.
     }
   }
-  let currentPackageJson: string | undefined;
-  try {
-    currentPackageJson = await Deno.readTextFile(`${dir}/package.json`);
-  } catch {
-    currentPackageJson = undefined;
-  }
+  const currentPackageJson = await Deno.readTextFile(`${root}/${dir}/package.json`).catch(() =>
+    null
+  );
   return {
     dir,
     name: config.name,
     version: config.version,
     exports: normalizeExports(config.exports),
-    denoImports: Object.keys(config.imports ?? {}),
+    denoJson,
     files,
-    currentPackageJson,
+    // Omitted, never `undefined`, when absent (exactOptionalPropertyTypes).
+    ...(currentPackageJson === null ? {} : { currentPackageJson }),
   };
 }
 
-/** Reads the workspace layout from the root `deno.json`. */
-async function readMembers(): Promise<MemberInput[]> {
-  const root = (await readJson('deno.json')) as { workspace?: readonly string[] } | null;
-  if (root?.workspace === undefined) throw new Error('deno.json: no workspace list');
+/** Reads the workspace layout from the `deno.json` under `root`. */
+async function readMembers(root: string): Promise<MemberInput[]> {
+  const config = (await readJson(`${root}/deno.json`)) as { workspace?: readonly string[] } | null;
+  if (config?.workspace === undefined) throw new Error('deno.json: no workspace list');
   const members: MemberInput[] = [];
-  for (const entry of root.workspace) {
-    members.push(await readMember(entry.replace(/^\.\//, '')));
+  for (const entry of config.workspace) {
+    members.push(await readMember(root, entry.replace(/^\.\//, '')));
   }
   return members;
 }
 
-/** The `--check` comparison: every generated file must match the working tree byte for byte. */
-async function checkAgainstTree(generated: ReadonlyMap<string, string>): Promise<string[]> {
+/** The `--check` comparison: every generated file must match the tree byte for byte. */
+async function checkAgainstTree(
+  root: string,
+  generated: ReadonlyMap<string, string>,
+): Promise<string[]> {
   const differences: string[] = [];
   for (const [path, content] of generated) {
     let current: string;
     try {
-      current = await Deno.readTextFile(path);
+      current = await Deno.readTextFile(`${root}/${path}`);
     } catch {
       differences.push(`${path}: missing (run node-manifests --write)`);
       continue;
@@ -804,14 +794,18 @@ async function checkAgainstTree(generated: ReadonlyMap<string, string>): Promise
   return differences;
 }
 
-/** Entry point. Returns the exit code rather than calling `Deno.exit` (testable). */
-export async function runNodeManifests(args: readonly string[]): Promise<number> {
+/**
+ * Entry point. Returns the exit code rather than calling `Deno.exit` (testable).
+ *
+ * @param root - The workspace root; every generated path is relative to it
+ */
+export async function runNodeManifests(args: readonly string[], root = '.'): Promise<number> {
   const mode = args.includes('--write') ? 'write' : args.includes('--check') ? 'check' : null;
   if (mode === null) {
     console.error('usage: node-manifests.ts --check | --write');
     return 2;
   }
-  const members = await readMembers();
+  const members = await readMembers(root);
   const { files, refusals } = generateWorkspace(members);
   if (refusals.length > 0) {
     for (const refusal of refusals) console.error(`✗ ${refusal}`);
@@ -820,16 +814,18 @@ export async function runNodeManifests(args: readonly string[]): Promise<number>
   }
   if (mode === 'write') {
     for (const [path, content] of files) {
-      const current = await Deno.readTextFile(path).catch(() => null);
-      if (current !== content) await Deno.writeTextFile(path, content);
+      const current = await Deno.readTextFile(`${root}/${path}`).catch(() => null);
+      if (current !== content) await Deno.writeTextFile(`${root}/${path}`, content);
     }
     console.log(`Wrote ${files.size} generated file(s).`);
     return 0;
   }
-  const differences = await checkAgainstTree(files);
+  const differences = await checkAgainstTree(root, files);
   if (differences.length > 0) {
     for (const difference of differences) console.error(`✗ ${difference}`);
-    console.error(`${differences.length} drift(s) — run node-manifests --write after editing imports.`);
+    console.error(
+      `${differences.length} drift(s) — run node-manifests --write after editing imports.`,
+    );
     return 1;
   }
   console.log(`node-manifests --check: ${files.size} generated file(s) agree with the tree.`);

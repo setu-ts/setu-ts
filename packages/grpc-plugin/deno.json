@@ -8,5 +8,11 @@
       "net": true,
       "env": true
     }
+  },
+  "imports": {
+    "@bufbuild/protobuf": "npm:@bufbuild/protobuf@^2.7.0",
+    "@bufbuild/protobuf/wkt": "npm:@bufbuild/protobuf@^2.7.0/wkt",
+    "@connectrpc/connect": "npm:@connectrpc/connect@^2.1.2",
+    "@connectrpc/connect/protocol": "npm:@connectrpc/connect@^2.1.2/protocol"
   }
 }

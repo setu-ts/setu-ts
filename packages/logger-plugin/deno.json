@@ -7,5 +7,8 @@
     "permissions": {
       "net": true
     }
+  },
+  "imports": {
+    "pino": "npm:pino@10.x"
   }
 }

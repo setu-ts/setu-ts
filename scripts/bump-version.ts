@@ -282,26 +282,52 @@ export function planBump(
   };
   const current = (path: string): string | undefined => edits.get(path)?.content ?? files.get(path);
 
-  // 1. Every workspace member's own `"version"`.
+  // 1. Every workspace member's own `"version"` — and, since M111a, the two
+  //    sites that must move WITH it: the member's `src/version.ts` literal
+  //    (the npm-buildable replacement for the `deno.json` JSON import) and its
+  //    generated `package.json`. One version, three files; the per-file
+  //    refusal names the site so a half-migrated tree cannot bump silently.
   for (const member of members) {
-    const path = `${member.replace(/^\.\//, '')}/deno.json`;
-    const source = current(path);
-    if (source === undefined) {
-      refusals.push(`workspace member ${path} is not a tracked file.`);
-      continue;
+    const dir = member.replace(/^\.\//, '');
+    // `optional`: only the members that READ their version carry
+    // `src/version.ts` (plan §3.5 — the other seven would be dead surface), so
+    // its absence is correct; `verify-release` applies the same rule.
+    const sites: readonly { path: string; pattern: RegExp; why: string; optional: boolean }[] = [
+      {
+        path: `${dir}/deno.json`,
+        pattern: new RegExp(String.raw`("version":\s*")${escapeRegExp(from)}(")`),
+        why: 'the manifest',
+        optional: false,
+      },
+      {
+        path: `${dir}/src/version.ts`,
+        pattern: new RegExp(String.raw`(export const VERSION: string = ')${escapeRegExp(from)}(')`),
+        why: 'the version constant',
+        optional: true,
+      },
+      {
+        path: `${dir}/package.json`,
+        pattern: new RegExp(String.raw`("version": ")${escapeRegExp(from)}(")`),
+        why: 'the generated npm manifest',
+        optional: false,
+      },
+    ];
+    for (const site of sites) {
+      const source = current(site.path);
+      if (source === undefined) {
+        if (!site.optional) refusals.push(`workspace member ${site.path} is not a tracked file.`);
+        continue;
+      }
+      const next = replaceOnce(source, site.pattern, `$1${to}$2`);
+      if (next === null) {
+        refusals.push(
+          `${site.path} does not carry ${from} where expected (${site.why}) — the tree is ` +
+            `not all on ${from}.`,
+        );
+        continue;
+      }
+      stage(site.path, next, 1);
     }
-    const next = replaceOnce(
-      source,
-      new RegExp(String.raw`("version":\s*")${escapeRegExp(from)}(")`),
-      `$1${to}$2`,
-    );
-    if (next === null) {
-      refusals.push(
-        `${path} does not carry "version": "${from}" — the tree is not all on ${from}.`,
-      );
-      continue;
-    }
-    stage(path, next, 1);
   }
 
   // 2. Every `@setu-ts/<pkg>@<from>` reference, by package name — outside test
@@ -466,6 +492,14 @@ export interface MainDeps {
   readonly today: () => string;
   readonly log: (line: string) => void;
   readonly error: (line: string) => void;
+  /**
+   * Re-runs the Node-manifest generator after the writes (M111a plan §3.5), so
+   * `package.json` follows `deno.json` even if a future generated field stops
+   * being staged directly. Optional so existing test doubles need no member;
+   * the production default spawns the script, which writes only files whose
+   * generated content differs — after this bump's own staging, none.
+   */
+  readonly syncManifests?: () => Promise<void>;
 }
 
 /** The real filesystem, git and console. */
@@ -476,6 +510,21 @@ export const productionDeps: MainDeps = {
   today: () => new Date().toISOString().slice(0, 10),
   log: console.log,
   error: console.error,
+  syncManifests: async () => {
+    const child = new Deno.Command(Deno.execPath(), {
+      args: [
+        'run',
+        '--allow-read',
+        '--allow-write',
+        'scripts/node-manifests.ts',
+        '--write',
+      ],
+      stdout: 'inherit',
+      stderr: 'inherit',
+    }).spawn();
+    const status = await child.status;
+    if (status.code !== 0) throw new Error(`node-manifests --write exited ${status.code}`);
+  },
 };
 
 /** Files read as text: anything tracked whose bytes carry no NUL. */
@@ -559,6 +608,7 @@ export async function main(
     if (!dryRun) await deps.write(edit.path, edit.content);
   }
   deps.log(`\n${plan.edits.length} file(s), ${total} replacement(s), ${from} → ${to}.`);
+  if (!dryRun) await deps.syncManifests?.();
 
   // The same reader `check:versions` uses, over the planned contents: a
   // residual reference to `from` fails the bump rather than the next gate.

@@ -8,5 +8,8 @@
       "net": true,
       "write": true
     }
+  },
+  "imports": {
+    "react-router": "npm:react-router@^8"
   }
 }

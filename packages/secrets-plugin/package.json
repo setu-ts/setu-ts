@@ -52,6 +52,6 @@
     "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

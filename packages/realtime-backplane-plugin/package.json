@@ -37,6 +37,6 @@
     "@setu-ts/websocket-plugin": "workspace:^",
     "@setu-ts/diagnostics-plugin": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

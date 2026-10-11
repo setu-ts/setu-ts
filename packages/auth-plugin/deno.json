@@ -18,5 +18,9 @@
         "docker"
       ]
     }
+  },
+  "imports": {
+    "@node-saml/node-saml": "npm:@node-saml/node-saml@^5",
+    "ioredis": "npm:ioredis@5.x"
   }
 }

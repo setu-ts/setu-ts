@@ -24,5 +24,10 @@
   "tasks": {
     "test": "deno test --trace-leaks",
     "test:coverage": "deno test --coverage=coverage"
+  },
+  "imports": {
+    "hono/html": "npm:hono@^4.12.30/html",
+    "hono/jsx": "npm:hono@^4.12.30/jsx",
+    "hono/utils/html": "npm:hono@^4.12.30/utils/html"
   }
 }

@@ -25,5 +25,12 @@
         "127.0.0.1:1"
       ]
     }
+  },
+  "imports": {
+    "@aws-sdk/client-dynamodb": "npm:@aws-sdk/client-dynamodb@^3",
+    "@azure/cosmos": "npm:@azure/cosmos@^4",
+    "@google-cloud/bigtable": "npm:@google-cloud/bigtable@^6",
+    "drizzle-orm": "npm:drizzle-orm@0.45.2",
+    "mongodb": "npm:mongodb@^6.21.0"
   }
 }

@@ -19,5 +19,11 @@
         "hostname"
       ]
     }
+  },
+  "imports": {
+    "@aws-sdk/client-sesv2": "npm:@aws-sdk/client-sesv2@^3",
+    "hono/html": "npm:hono@^4.12.30/html",
+    "hono/jsx": "npm:hono@^4.12.30/jsx",
+    "nodemailer": "npm:nodemailer@^10"
   }
 }

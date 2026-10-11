@@ -181,9 +181,12 @@ describe('version sweep — sweepTrackedFiles', () => {
   // REAL source file, whose specifiers the next release bump rewrites, so a
   // hard-coded expectation would fail at exactly the moment the gate is most
   // needed and for a reason that has nothing to do with the gate.
+  // An app lockfile, not a src file: since M111a no package source carries a
+  // versioned `@setu-ts` specifier (sdk's inline `jsr:` pins became bare
+  // imports), so the lockfiles are the real files left that the sweep reads.
   it('reads the real tree and reports both vacuity guards', async () => {
     const result = await sweepTrackedFiles(await workspaceVersion(), [
-      'packages/sdk/src/http/contracts.ts',
+      'apps/minimal/deno.lock',
       'packages/sdk/deno.json', // filtered out by isSweptPath
     ]);
     expect(result.filesScanned).toBe(1);
@@ -215,11 +218,9 @@ describe('version sweep — sweepTrackedFiles', () => {
   });
 
   it('reports a stale reference found in a real file', async () => {
-    const result = await sweepTrackedFiles('9.9.9', [
-      'packages/sdk/src/http/contracts.ts',
-    ]);
+    const result = await sweepTrackedFiles('9.9.9', ['apps/minimal/deno.lock']);
     expect(result.findings.length).toBeGreaterThan(0);
-    expect(result.findings[0]?.pkg).toBe('common');
+    expect(result.findings.map((f) => f.pkg)).toContain('common');
   });
 });
 

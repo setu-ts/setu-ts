@@ -36,6 +36,6 @@
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

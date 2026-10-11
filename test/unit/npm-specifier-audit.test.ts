@@ -9,7 +9,12 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { auditPackageSources, findComputedImports } from '../../scripts/npm-specifier-audit.ts';
+import {
+  auditPackageSources,
+  findComputedImports,
+  findPrefixedSpecifiers,
+  scanImportEdges,
+} from '../../scripts/npm-specifier-audit.ts';
 
 describe('findComputedImports — literal arguments are accepted', () => {
   it('accepts a single-quoted literal', () => {
@@ -218,5 +223,113 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
     expect(result.srcRootsVisited).toEqual([]);
     expect(result.filesVisited).toBe(0);
     expect(result.findings).toEqual([]);
+  });
+});
+
+describe('findPrefixedSpecifiers — npm:/jsr: import specifiers are refused (M111a §3.8)', () => {
+  it('refuses an npm: literal in a dynamic import()', () => {
+    expect(findPrefixedSpecifiers("const m = await import('npm:pino@10.x');")).toEqual([
+      { file: '', line: 1, specifier: 'npm:pino@10.x' },
+    ]);
+  });
+
+  it('refuses a jsr: specifier in a static from-clause, on its own line', () => {
+    const source = "// header\nimport type { X } from 'jsr:@setu-ts/common@^0.8.0';\n";
+    expect(findPrefixedSpecifiers(source)).toEqual([
+      { file: '', line: 2, specifier: 'jsr:@setu-ts/common@^0.8.0' },
+    ]);
+  });
+
+  it('refuses every semver range form, not only a bare version', () => {
+    const source = [
+      "await import('npm:zod@^3.24.0');",
+      "await import('npm:ws@~8.18.0');",
+      "await import('npm:pino@>=10 <11');",
+      "await import('npm:x@*');",
+    ].join('\n');
+    // The last-but-one carries a space, which no specifier the repo writes
+    // does; it stays out rather than widening the class to whitespace.
+    expect(findPrefixedSpecifiers(source).map((h) => h.specifier)).toEqual([
+      'npm:zod@^3.24.0',
+      'npm:ws@~8.18.0',
+      'npm:x@*',
+    ]);
+  });
+
+  it('refuses a side-effect import', () => {
+    expect(findPrefixedSpecifiers("import 'npm:reflect-metadata';")).toHaveLength(1);
+  });
+
+  it('accepts the bare form every rewritten site now uses', () => {
+    expect(findPrefixedSpecifiers("const m = await import('pino');\nimport { Hono } from 'hono';"))
+      .toEqual([]);
+  });
+
+  it('exempts template text emitted into a generated project', () => {
+    const source = "export const MAIN = `import { x } from 'npm:pino@10.x';`;";
+    expect(findPrefixedSpecifiers(source)).toEqual([]);
+  });
+
+  it('exempts a JSDoc @example and a line comment', () => {
+    const source = [
+      '/**',
+      " * @example import { x } from 'jsr:@setu-ts/kernel';",
+      ' */',
+      "// await import('npm:pino@10.x')",
+    ].join('\n');
+    expect(findPrefixedSpecifiers(source)).toEqual([]);
+  });
+
+  it('exempts a string constant that is not in an import position', () => {
+    expect(findPrefixedSpecifiers("export const SPECIFIER = 'npm:pino@10.x';")).toEqual([]);
+  });
+});
+
+describe('scanImportEdges — import positions and modes', () => {
+  it('classifies value, type-only and dynamic imports', () => {
+    const source = [
+      "import { a } from 'value-pkg';",
+      "import type { B } from 'type-pkg';",
+      "export type { C } from 'type-reexport';",
+      "export { d } from 'value-reexport';",
+      "const m = await import('dynamic-pkg');",
+    ].join('\n');
+    expect(scanImportEdges(source, 'f.ts').map((e) => [e.specifier, e.mode, e.line])).toEqual([
+      ['value-pkg', 'value', 1],
+      ['type-pkg', 'type', 2],
+      ['type-reexport', 'type', 3],
+      ['value-reexport', 'value', 4],
+      ['dynamic-pkg', 'dynamic', 5],
+    ]);
+  });
+
+  it('ignores a method named import and a call argument', () => {
+    const source = "loader.import('not-an-edge');\nrequire('also-not');\nerr('nope');";
+    expect(scanImportEdges(source, 'f.ts')).toEqual([]);
+  });
+
+  it('decides each statement by its own keyword, not an earlier type import', () => {
+    const source = "import type { A } from 'a';\nimport { b } from 'b';";
+    expect(scanImportEdges(source, 'f.ts').map((e) => e.mode)).toEqual(['type', 'value']);
+  });
+
+  it('rejects a literal no module specifier could be (a misread regex)', () => {
+    // The masker does not model regex literals; a regex body containing
+    // `from "(…)"` presents as a string after `from` and must not become an edge.
+    const source = 'const re = /from "(@setu-ts\\/[a-z]+)"/;';
+    expect(scanImportEdges(source, 'f.ts')).toEqual([]);
+  });
+
+  it('reads past a closing template delimiter without swallowing later imports', () => {
+    // The shape that made service-bus-broker.ts lose its import(): a template
+    // literal followed by a real import must still yield that import.
+    const source = "const t = `x`;\nconst m = await import('@azure/service-bus');";
+    expect(scanImportEdges(source, 'f.ts').map((e) => e.specifier)).toEqual([
+      '@azure/service-bus',
+    ]);
+  });
+
+  it('yields no edge for an interpolated template specifier', () => {
+    expect(scanImportEdges('const m = await import(`${base}/x`);', 'f.ts')).toEqual([]);
   });
 });

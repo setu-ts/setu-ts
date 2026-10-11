@@ -28,7 +28,6 @@
     "@setu-ts/websocket-plugin": "workspace:^",
     "@setu-ts/validation-plugin": "workspace:^",
     "@setu-ts/di-plugin": "workspace:^",
-    "@setu-ts/decorator-plugin": "workspace:^",
     "@setu-ts/cqrs-plugin": "workspace:^",
     "@setu-ts/events-plugin": "workspace:^",
     "@setu-ts/messaging-plugin": "workspace:^",
@@ -42,6 +41,6 @@
     "@setu-ts/multi-tenancy-plugin": "workspace:^",
     "@setu-ts/logger-plugin": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

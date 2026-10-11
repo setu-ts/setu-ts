@@ -17,5 +17,9 @@
       "read": true,
       "write": true
     }
+  },
+  "imports": {
+    "@hono/node-server": "npm:@hono/node-server@^2.0.0",
+    "ws": "npm:ws@^8.18.0"
   }
 }

@@ -31,6 +31,6 @@
     "@setu-ts/decorator-plugin": "workspace:^",
     "@setu-ts/auth-plugin": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

@@ -32,10 +32,10 @@
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/testing": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
-    "hono": "^4.13.13",
+    "hono": "^4.12.30",
     "@setu-ts/view-plugin": "workspace:^",
     "@setu-ts/multi-tenancy-plugin": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

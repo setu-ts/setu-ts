@@ -11,9 +11,9 @@
  *
  * Ranges are the ones the `npm:` specifiers carried before M111a rewrote them
  * to bare specifiers, so the rewrite moved syntax, not versions. `hono` carries
- * the range `@hono/hono` resolved from JSR (`jsr:@hono/hono@^4.12.30` → the
- * npm `hono` line its `^4.13.13` release), because M111a moves Deno onto the
- * same npm artifact production loads.
+ * the range `@hono/hono` declared on JSR (`^4.12.30`): M111a moves Deno onto the
+ * same npm artifact production loads without narrowing the range consumers
+ * were promised, and without moving the version the lockfile already holds.
  *
  * `OVERRIDES` is the committed classification exceptions, each with the reason
  * the plan gave (§3.1). The generator refuses an override without a reason
@@ -24,7 +24,7 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
-  'hono': '^4.13.13',
+  'hono': '^4.12.30',
   '@hono/node-server': '^2.0.0',
   '@opentelemetry/api': '^1.9.0',
   '@opentelemetry/context-async-hooks': '^2.0.0',
@@ -57,6 +57,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@launchdarkly/node-server-sdk': '^9',
   '@node-saml/node-saml': '^5',
   '@types/ws': '^8.18.2',
+  '@types/amqplib': '^0.10.8',
   '@prisma/client': '^7.10.0',
   'amqplib': '0.10.x',
   'drizzle-orm': '0.45.2',
@@ -90,23 +91,34 @@ export const OVERRIDES: readonly Override[] = [
     package: 'packages/runtime',
     dependency: '@hono/node-server',
     kind: 'regular-dependency',
-    reason:
-      'the Node HTTP adapter\'s ONLY serve path loads it (node-http-adapter.ts), ' +
+    reason: "the Node HTTP adapter's ONLY serve path loads it (node-http-adapter.ts), " +
       'so a bare `npm install @setu-ts/runtime` must serve on Node',
   },
   {
     package: 'packages/runtime',
     dependency: '@types/ws',
     kind: 'dev-dependency-types',
-    reason:
-      '`ws` is the one optional peer whose types the tsc build needs: its ' +
+    reason: '`ws` is the one optional peer whose types the tsc build needs: its ' +
       'untyped import is TS7016 (node-ws-upgrader.ts) while amqplib/nodemailer ' +
       'type-check without @types',
+  },
+  {
+    package: 'packages/messaging-plugin',
+    dependency: '@types/amqplib',
+    kind: 'dev-dependency-types',
+    reason: 'amqplib ships no types and its untyped import is TS7016 once it is ' +
+      'INSTALLED (rabbitmq-broker.ts) — the plan §1 probe saw only `ws` fail ' +
+      'because its tree had amqplib unresolved, not installed; the same ' +
+      'correction applies to queue-plugin',
+  },
+  {
+    package: 'packages/queue-plugin',
+    dependency: '@types/amqplib',
+    kind: 'dev-dependency-types',
+    reason: 'amqplib ships no types and its untyped import is TS7016 once it is ' +
+      'INSTALLED (rabbitmq-queue.ts); same correction as messaging-plugin',
   },
 ];
 
 /** The workspace-internal specifier prefix every cross-package import uses. */
 export const WORKSPACE_SCOPE = '@setu-ts/';
-
-/** Node builtins are never dependencies; the generator skips them. */
-export const BUILTIN_PREFIXES: readonly string[] = ['node:', 'npm:', 'jsr:', './', '../', '/'];

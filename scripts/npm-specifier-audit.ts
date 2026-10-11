@@ -62,6 +62,8 @@ export interface AuditResult {
    * roots themselves is what makes a missed subtree visible.
    */
   readonly srcRootsVisited: readonly string[];
+  /** `npm:`/`jsr:` import specifiers in `src` — the gate fails when non-empty (M111a §3.8). */
+  readonly prefixed: readonly PrefixedSpecifier[];
 }
 
 /** The internal per-import record before the `file` is known. */
@@ -133,6 +135,7 @@ export function findComputedImports(source: string): readonly ComputedImport[] {
  */
 export async function auditPackageSources(root: string): Promise<AuditResult> {
   const findings: ComputedImport[] = [];
+  const prefixed: PrefixedSpecifier[] = [];
   let filesVisited = 0;
   let markedSites = 0;
 
@@ -148,10 +151,11 @@ export async function auditPackageSources(root: string): Promise<AuditResult> {
           findings.push({ file, line: hit.line, snippet: hit.snippet });
         }
       }
+      for (const hit of findPrefixedSpecifiers(source)) prefixed.push({ ...hit, file });
     }
   }
 
-  return { findings, filesVisited, markedSites, srcRootsVisited };
+  return { findings, filesVisited, markedSites, srcRootsVisited, prefixed };
 }
 
 /**
@@ -193,6 +197,24 @@ type CodeFrame = { kind: 'code'; interpolation: boolean; depth: number };
 type TemplateFrame = { kind: 'template' };
 type Frame = CodeFrame | TemplateFrame;
 
+/** The masked view {@linkcode maskNonCode} returns. */
+export interface MaskResult {
+  code: string;
+  blockComments: readonly CommentSpan[];
+  offsetToLine: Int32Array;
+  /**
+   * Offsets of every string/template delimiter that OPENED in code state —
+   * the only quotes that begin a literal. A closing delimiter preserved by
+   * the mask is NOT here, so a consumer that classifies literals (the
+   * node-manifests import scan) must iterate these rather than hunting quotes
+   * itself: from a closing backtick, `readStringLiteral` would read forward to
+   * the NEXT template's opening delimiter and swallow every real import
+   * between the two (measured: `service-bus-broker.ts`'s
+   * `import('@azure/service-bus')` vanished exactly this way).
+   */
+  literalStarts: readonly number[];
+}
+
 /**
  * Builds a same-length "code only" view of `source` in which every comment,
  * string body, and template body is replaced by spaces (delimiters and
@@ -209,14 +231,11 @@ type Frame = CodeFrame | TemplateFrame;
  * generated-project template text cannot invent dependency edges
  * (AI_GUIDELINES §11.1 — one masking implementation, not two).
  */
-export function maskNonCode(source: string): {
-  code: string;
-  blockComments: readonly CommentSpan[];
-  offsetToLine: Int32Array;
-} {
+export function maskNonCode(source: string): MaskResult {
   const n = source.length;
   const out: string[] = new Array<string>(n);
   const blockComments: CommentSpan[] = [];
+  const literalStarts: number[] = [];
   const stack: Frame[] = [{ kind: 'code', interpolation: false, depth: 0 }];
 
   let i = 0;
@@ -259,6 +278,7 @@ export function maskNonCode(source: string): {
       }
       if (c === "'" || c === '"') {
         // String literal: keep the delimiters, mask the body.
+        literalStarts.push(i);
         out[i] = c;
         i++;
         while (i < n) {
@@ -283,6 +303,7 @@ export function maskNonCode(source: string): {
       }
       if (c === '`') {
         // Template literal: keep the opening backtick, enter template state.
+        literalStarts.push(i);
         out[i] = c;
         i++;
         stack.push({ kind: 'template' });
@@ -347,7 +368,7 @@ export function maskNonCode(source: string): {
     if (source[j] === '\n') line++;
   }
 
-  return { code: out.join(''), blockComments, offsetToLine };
+  return { code: out.join(''), blockComments, offsetToLine, literalStarts };
 }
 
 /** The first offset at or after `from` whose char is not whitespace. */
@@ -481,4 +502,151 @@ async function* walkTsFiles(dir: string): AsyncGenerator<string> {
       yield path;
     }
   }
+}
+
+// ── Import edges (shared with scripts/node-manifests.ts, M111a) ──────────────
+
+/** One import edge found in one scanned file. */
+export interface ImportEdge {
+  /** The specifier exactly as written (bare, `npm:`/`jsr:`-prefixed, relative, or `node:`). */
+  readonly specifier: string;
+  /** How the file reaches the specifier. */
+  readonly mode: 'value' | 'type' | 'dynamic';
+  /** The scanned file's repository-relative path, for failure messages. */
+  readonly file: string;
+  /** The 1-based line of the specifier's opening quote. */
+  readonly line: number;
+}
+
+/**
+ * Scans one source file and returns every import edge it expresses.
+ *
+ * Comments and template bodies are masked first (delimiters preserved, so
+ * literal values are read from the original source at the masked offsets);
+ * an `import`/`from` inside a JSDoc `@example`, a line comment, or an emitted
+ * template string is therefore invisible to this scan.
+ *
+ * Classification walks BACKWARD from each string-literal delimiter over the
+ * masked code, so only a literal whose preceding token is `from`, a
+ * side-effect `import`, or an `import(` is an edge — a plain string constant
+ * (`const X = 'pkg'`, preceded by `=`) or an object value (`{ key: 'pkg' }`,
+ * preceded by `:`) is not, and a function call argument (`err('pkg')`,
+ * preceded by `(` whose word is the callee's name) is not either. This is what
+ * keeps the CLI's emitted-Deno-project strings (`PROTO_TASK_COMMAND`,
+ * `PROTO_IMPORTS`) out of the dependency graph: they are string constants, and
+ * 111d owns them.
+ */
+export function scanImportEdges(source: string, file: string): readonly ImportEdge[] {
+  const { code, literalStarts, offsetToLine } = maskNonCode(source);
+  const edges: ImportEdge[] = [];
+
+  // Iterate the masker's literal-OPENING offsets, never a quote hunt: a
+  // closing delimiter preserved by the mask would read forward to the next
+  // literal's opening delimiter and swallow the imports in between.
+  for (const start of literalStarts) {
+    const literal = readStringLiteral(source, start);
+    if (!literal.clean || literal.end < 0) continue; // interpolated/computed — no edge
+    const specifier = source.slice(start + 1, literal.end - 1);
+    const edge = classifyLiteral(code, start, specifier, file, offsetToLine[start] ?? 0);
+    if (edge !== null) edges.push(edge);
+  }
+  return edges;
+}
+
+/**
+ * Classifies one string literal by the token that precedes it in the masked
+ * code. Returns `null` when the literal is not an import specifier.
+ */
+function classifyLiteral(
+  code: string,
+  quoteOffset: number,
+  specifier: string,
+  file: string,
+  line: number,
+): ImportEdge | null {
+  // A legal module specifier carries only name/path/range characters. Anything else
+  // (`(`, `\`, a quote, whitespace) is a MISREAD — the masking pass does not
+  // model regex literals, so a `/from "(@setu-ts\/…)/"` test regex presents its
+  // quotes as a string literal preceded by `from`. Refusing impossible
+  // specifiers keeps those out of the graph rather than inventing dependencies
+  // (and, via the cycle check, false cycles) from test regexes.
+  // Semver range characters (`^`, `~`, `*`, `+`, `<`, `>`, `=`) are legal in
+  // an `npm:`/`jsr:` specifier and must stay in: `npm:zod@^3.24.0` is exactly
+  // the shape §3.8 refuses, and a narrower class let it through as a "misread".
+  if (!/^[A-Za-z0-9@/._:^~*+<>=-]+$/.test(specifier)) return null;
+  let p = quoteOffset - 1;
+  while (p >= 0 && /\s/.test(code[p])) p -= 1;
+  if (p < 0) return null;
+
+  if (code[p] === '(') {
+    // `import('x')` — or a call whose name happens to precede the paren.
+    const word = wordBefore(code, p);
+    if (word === null || word.text !== 'import') return null;
+    if (word.start > 0 && code[word.start - 1] === '.') return null; // obj.import( — a method call
+    return { specifier, mode: 'dynamic', file, line };
+  }
+
+  if (!/[A-Za-z0-9_$]/.test(code[p])) return null; // `: 'x'`, `= 'x'`, `, 'x'` — a value, not an import
+  const word = wordBefore(code, p + 1);
+  if (word === null) return null;
+  if (word.text === 'import') return { specifier, mode: 'value', file, line }; // side-effect import
+  if (word.text !== 'from') return null;
+
+  // `… from 'x'` — static. Type-only when the keyword introducing the clause
+  // (`import`/`export`) is immediately followed by `type`. The clause between
+  // keyword and `from` is real code in the masked view (string bodies are
+  // spaces), so a bounded window suffices for even the widest import list.
+  // The LAST keyword in the window is this statement's — an earlier import in
+  // the same window must not decide this literal's mode.
+  const window = code.slice(Math.max(0, quoteOffset - 2000), quoteOffset);
+  let keywordEnd = -1;
+  for (const match of window.matchAll(/\b(?:import|export)\b/g)) {
+    keywordEnd = (match.index ?? 0) + match[0].length;
+  }
+  if (keywordEnd < 0) return { specifier, mode: 'value', file, line };
+  const afterKeyword = window.slice(keywordEnd);
+  return {
+    specifier,
+    mode: /^\s*type\b/.test(afterKeyword) ? 'type' : 'value',
+    file,
+    line,
+  };
+}
+
+/** The identifier ending just before `from`, as `{ text, start }`, or null. */
+function wordBefore(
+  code: string,
+  from: number,
+): { text: string; start: number } | null {
+  let end = from;
+  while (end > 0 && /\s/.test(code[end - 1])) end -= 1;
+  let start = end;
+  while (start > 0 && /[A-Za-z0-9_$]/.test(code[start - 1])) start -= 1;
+  if (start === end) return null;
+  return { text: code.slice(start, end), start };
+}
+
+/** A `npm:`/`jsr:`-prefixed import specifier the gate refuses (M111a §3.8). */
+export interface PrefixedSpecifier {
+  /** The file the specifier was found in; empty from {@linkcode findPrefixedSpecifiers}. */
+  readonly file: string;
+  /** The 1-based line of the specifier. */
+  readonly line: number;
+  /** The specifier exactly as written. */
+  readonly specifier: string;
+}
+
+/**
+ * Finds every import specifier in `source` that carries an `npm:` or `jsr:`
+ * prefix — the Deno-only forms Node cannot resolve (M111a §3.8).
+ *
+ * Only a real import position counts (`import()`, `from`, a side-effect
+ * `import`), read through {@linkcode scanImportEdges}, so the masked
+ * comment and template text the CLI emits into generated Deno projects is
+ * exempt by construction rather than by an allow-list.
+ */
+export function findPrefixedSpecifiers(source: string): readonly PrefixedSpecifier[] {
+  return scanImportEdges(source, '')
+    .filter((edge) => edge.specifier.startsWith('npm:') || edge.specifier.startsWith('jsr:'))
+    .map((edge) => ({ file: '', line: edge.line, specifier: edge.specifier }));
 }

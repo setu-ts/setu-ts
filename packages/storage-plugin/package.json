@@ -23,11 +23,15 @@
     "@setu-ts/common": "workspace:^"
   },
   "peerDependencies": {
+    "@azure/storage-blob": "^12",
     "@google-cloud/storage": "^7",
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/s3-request-presigner": "^3"
   },
   "peerDependenciesMeta": {
+    "@azure/storage-blob": {
+      "optional": true
+    },
     "@google-cloud/storage": {
       "optional": true
     },
@@ -39,6 +43,7 @@
     }
   },
   "devDependencies": {
+    "@azure/storage-blob": "^12",
     "@google-cloud/storage": "^7",
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
@@ -48,6 +53,6 @@
     "@setu-ts/testing": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

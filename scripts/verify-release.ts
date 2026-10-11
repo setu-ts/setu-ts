@@ -89,6 +89,15 @@ async function readConfig(dir: string): Promise<PackageConfig | null> {
   }
 }
 
+/** Reads and parses a JSON file, or null when absent/unparseable. */
+async function readJsonFile(path: string): Promise<unknown | null> {
+  try {
+    return JSON.parse(await Deno.readTextFile(path));
+  } catch {
+    return null;
+  }
+}
+
 // ── 1 & 2: versions and cross-package specifiers ────────────────────────────
 
 // Matches `jsr:@setu-ts/<pkg>@<range>` anywhere in an import value.
@@ -103,6 +112,30 @@ for (const dir of PUBLISHED_PACKAGES) {
 
   if (config.version !== expected) {
     problems.push(`${dir}: version is ${config.version ?? '(missing)'}, expected ${expected}`);
+  }
+
+  // M111a §3.5: the version lives at THREE sites per member — deno.json, the
+  // generated package.json, and the src/version.ts literal the npm build
+  // ships. A bump that misses either new site publishes a package whose
+  // npm manifest or runtime VERSION disagrees with the tag.
+  const npmManifest = await readJsonFile(`${dir}/package.json`) as { version?: string } | null;
+  if (npmManifest === null) {
+    problems.push(`${dir}: no readable package.json (the Node build's manifest)`);
+  } else if (npmManifest.version !== expected) {
+    problems.push(
+      `${dir}: package.json version is ${npmManifest.version ?? '(missing)'}, expected ${expected}`,
+    );
+  }
+  // A member that reads no version ships no constant (plan §3.5) — its absence
+  // is correct; only a PRESENT constant can disagree with the tag.
+  const versionSource = await Deno.readTextFile(`${dir}/src/version.ts`).catch(() => null);
+  if (versionSource !== null) {
+    const match = /export const VERSION: string = '([^']*)'/.exec(versionSource);
+    if (match === null) {
+      problems.push(`${dir}: src/version.ts carries no recognizable VERSION literal`);
+    } else if (match[1] !== expected) {
+      problems.push(`${dir}: src/version.ts VERSION is ${match[1]}, expected ${expected}`);
+    }
   }
 
   for (const [alias, specifier] of Object.entries(config.imports ?? {})) {
@@ -242,6 +275,14 @@ for (const finding of audit.findings) {
       `\`computed-specifier\` marker — JSR's static npm-compatibility rewrite ` +
       `cannot see a non-literal specifier, so any npm: string would ship ` +
       `verbatim and fail to load on Node or Bun. ${finding.snippet}`,
+  );
+}
+// M111a §3.8: Node resolves neither prefix, so a published package carrying
+// one cannot load there at all.
+for (const hit of audit.prefixed) {
+  problems.push(
+    `${hit.file}:${hit.line}: "${hit.specifier}" is an npm:/jsr:-prefixed import — ` +
+      `Node resolves neither; write the bare package name.`,
   );
 }
 

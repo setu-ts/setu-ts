@@ -19,10 +19,12 @@ import {
   type MainDeps,
   minorLine,
   planBump,
+  productionDeps,
   readTrackedText,
   rewriteReferences,
   workingTreeIsClean,
 } from '../../scripts/bump-version.ts';
+import { runNodeManifests } from '../../scripts/node-manifests.ts';
 
 const OPTIONS: BumpOptions = {
   from: '0.8.0',
@@ -36,6 +38,12 @@ function tree(overrides: Record<string, string | undefined> = {}): Map<string, s
   const files = new Map<string, string>([
     ['deno.json', '{"workspace": ["./packages/common", "./packages/sdk"]}'],
     ['packages/common/deno.json', '{\n  "name": "@setu-ts/common",\n  "version": "0.8.0"\n}\n'],
+    // M111a §3.5: the generated npm manifest moves with deno.json; the version
+    // constant exists only for a member that reads its version (common here,
+    // not sdk), so its absence must not refuse the bump.
+    ['packages/common/package.json', '{\n  "name": "@setu-ts/common",\n  "version": "0.8.0"\n}\n'],
+    ['packages/common/src/version.ts', "export const VERSION: string = '0.8.0';\n"],
+    ['packages/sdk/package.json', '{\n  "name": "@setu-ts/sdk",\n  "version": "0.8.0"\n}\n'],
     [
       'packages/sdk/deno.json',
       '{\n  "version": "0.8.0",\n  "imports": {\n    "jsr:@setu-ts/common@^0.8.0": "jsr:@setu-ts/common@0.8.0"\n  }\n}\n',
@@ -215,13 +223,22 @@ describe('planBump', () => {
       'k8s/chart/Chart.yaml',
       'k8s/manifests/deployment.yaml',
       'packages/common/deno.json',
+      'packages/common/package.json',
+      'packages/common/src/version.ts',
       'packages/sdk/deno.json',
+      'packages/sdk/package.json',
       'packages/sdk/src/http/observed-fetch.ts',
       'scripts/check-docs.ts',
     ]);
 
     // Manifests: the member version AND both sides of the SDK's pinned mapping.
     expect(content('packages/common/deno.json')).toContain('"version": "0.9.0"');
+    // M111a: the npm manifest and the version constant move with it.
+    expect(content('packages/common/package.json')).toContain('"version": "0.9.0"');
+    expect(content('packages/sdk/package.json')).toContain('"version": "0.9.0"');
+    expect(content('packages/common/src/version.ts')).toBe(
+      "export const VERSION: string = '0.9.0';\n",
+    );
     expect(content('packages/sdk/deno.json')).toBe(
       '{\n  "version": "0.9.0",\n  "imports": {\n    "jsr:@setu-ts/common@^0.9.0": "jsr:@setu-ts/common@0.9.0"\n  }\n}\n',
     );
@@ -300,8 +317,29 @@ describe('planBump', () => {
     const { refusals } = planBump(files, OPTIONS);
     expect(refusals).toEqual([
       'workspace member packages/common/deno.json is not a tracked file.',
-      'packages/sdk/deno.json does not carry "version": "0.8.0" — the tree is not all on 0.8.0.',
+      'packages/sdk/deno.json does not carry 0.8.0 where expected (the manifest) — the tree is ' +
+      'not all on 0.8.0.',
     ]);
+  });
+
+  it('refuses a member whose npm manifest or version constant disagrees (M111a §3.5)', () => {
+    const files = tree({
+      'packages/common/package.json': '{ "version": "0.7.0" }',
+      'packages/common/src/version.ts': "export const VERSION: string = '0.7.0';\n",
+      'packages/sdk/package.json': undefined,
+    });
+    expect(planBump(files, OPTIONS).refusals).toEqual([
+      'packages/common/src/version.ts does not carry 0.8.0 where expected (the version ' +
+      'constant) — the tree is not all on 0.8.0.',
+      'packages/common/package.json does not carry 0.8.0 where expected (the generated npm ' +
+      'manifest) — the tree is not all on 0.8.0.',
+      'workspace member packages/sdk/package.json is not a tracked file.',
+    ]);
+  });
+
+  it('does not require a version constant for a member that reads no version', () => {
+    const { plan } = edited(tree({ 'packages/common/src/version.ts': undefined }));
+    expect(plan.edits.some((edit) => edit.path.endsWith('/src/version.ts'))).toBe(false);
   });
 
   it('refuses when a named site is absent or does not carry the old version', () => {
@@ -391,6 +429,7 @@ describe('main (the command path, over injected I/O)', () => {
       '{"workspace": ["./packages/common", "./packages/sdk", "./packages/kernel"]}',
     );
     files.set('packages/kernel/deno.json', '{\n  "version": "0.8.0"\n}\n');
+    files.set('packages/kernel/package.json', '{\n  "version": "0.8.0"\n}\n');
     return files;
   }
 
@@ -437,6 +476,24 @@ describe('main (the command path, over injected I/O)', () => {
     expect(real.out.some((line) => line.startsWith('rewrote packages/sdk/deno.json'))).toBe(true);
   });
 
+  it('re-runs the manifest generator after a real bump, never on a dry run (M111a §3.5)', async () => {
+    let real = 0;
+    const r = harness(realShape());
+    expect(await main(['0.9.0'], { ...r.deps, syncManifests: () => Promise.resolve(void real++) }))
+      .toBe(true);
+    expect(real).toBe(1);
+
+    let dry = 0;
+    const d = harness(realShape());
+    expect(
+      await main(['0.9.0', '--dry-run'], {
+        ...d.deps,
+        syncManifests: () => Promise.resolve(void dry++),
+      }),
+    ).toBe(true);
+    expect(dry).toBe(0);
+  });
+
   it('fails on a residual reference the rewrite could not reach, naming it', async () => {
     // A history-marked specifier in a swept path is exempt from the rewrite but
     // is still a reference to the old version, which the re-sweep reports —
@@ -470,6 +527,15 @@ describe('main (the command path, over injected I/O)', () => {
 });
 
 describe('the real seams', () => {
+  // The generator's `--write` rewrites only a file whose generated content
+  // differs, so on a tree that already agrees the real spawn writes nothing —
+  // and the `--check` after it proves that rather than assuming it.
+  it('re-runs the real manifest generator, leaving an agreeing tree unchanged', async () => {
+    expect(await runNodeManifests(['--check'])).toBe(0);
+    await productionDeps.syncManifests?.();
+    expect(await runNodeManifests(['--check'])).toBe(0);
+  });
+
   it('reads tracked text files and skips binaries', async () => {
     const files = await readTrackedText();
     expect(files.has('deno.json')).toBe(true);

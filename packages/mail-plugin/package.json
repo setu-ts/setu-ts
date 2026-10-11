@@ -39,9 +39,9 @@
     "nodemailer": "^10",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
-    "hono": "^4.13.13",
+    "hono": "^4.12.30",
     "@setu-ts/view-plugin": "workspace:^",
     "typescript": "6.0.3",
-    "@types/node": "^26.6.5"
+    "@types/node": "^24"
   }
 }

@@ -13,5 +13,8 @@
         "docker"
       ]
     }
+  },
+  "imports": {
+    "ioredis": "npm:ioredis@5.x"
   }
 }
