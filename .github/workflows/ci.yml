@@ -609,27 +609,11 @@ jobs:
       - name: Sweep for residual version references
         run: deno task check:versions
 
-  # These two jobs consume the packages through JSR's npm compatibility layer
-  # and run `compat/compat.test.mjs` (AI_GUIDELINES.md §4.5). They cannot run
-  # against the working tree: cross-package specifiers are
-  # `jsr:@setu-ts/*` and optional heavy deps are `npm:*`, neither of
-  # which Node or Bun resolves. JSR rewrites both at publish time, so the
-  # published artifact is the unit under test.
-  #
-  # `compat/package.json` therefore depends on `latest` rather than on the
-  # workspace's own version: during a release the workspace is bumped BEFORE
-  # the publish, so pinning to it would deadlock the release PR against the
-  # publish that would fix it (the M34b drift-gate lesson). The consequence is
-  # deliberate and worth stating — these jobs gate the last release, not HEAD.
-  # `node-compat` and `bun-compat` live in `.github/workflows/compat.yml`. They
-  # install the PUBLISHED packages from JSR's npm mirror, so nothing a pull
-  # request changes can affect them until it has been released — running them
-  # here cost two installs and two suites per push while proving nothing about
-  # the diff. They now run weekly, on demand, and on a change to `compat/`.
-
-  # Node and Bun consume JSR's npm-compatible artifacts. This job separately
-  # proves that a fresh Deno consumer can resolve and import the JSR package
-  # added to the compatibility suite, including its transitive `jsr:` graph.
+  # Node/Bun compat lives in compat.yml and consumes all 51 published npm
+  # packages at latest, testing the last release independently of HEAD. It
+  # probes the unpublished scope and arms itself on the first npm release.
+  # This separate Deno job keeps proving resolution of the historical JSR
+  # view-plugin release and its transitive JSR graph.
   deno-view-plugin-resolution:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Deno view-plugin resolution

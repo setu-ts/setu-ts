@@ -39,11 +39,13 @@ try {
     failure = `/json answered ${JSON.stringify(plain)}`;
   } else if (decorated.status !== 200 || decorated.body.decorated !== true) {
     failure = `/decorated answered ${JSON.stringify(decorated)}`;
-  } else {console.log(
+  } else {
+    console.log(
       `BOOT-OK ${
         JSON.stringify({ imported: packages.length, json: plain.body, decorated: decorated.body })
       }`,
-    );}
+    );
+  }
 } catch (error) {
   failure = String(error?.stack ?? error);
 } finally {

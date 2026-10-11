@@ -190,7 +190,7 @@ for (const hit of audit.prefixed) {
 // ── 7: the changelog must carry this version's release notes ───────────────
 
 // Checked here rather than in the workflow's release step, which runs after the
-// publish: JSR versions are immutable, so a problem discovered there cannot be
+// publish: npm versions cannot be reused, so a problem discovered there cannot be
 // fixed by re-running the job. The runbook writes the entry in step 1 and runs
 // this in step 2, so the ordering already matches.
 const changelog = await Deno.readTextFile('CHANGELOG.md').catch(() => null);

@@ -588,8 +588,8 @@ export function renderTsconfigBase(): string {
 
 /**
  * §3.4 safeguard 2: `decorator-plugin`'s manifest may not carry a `sideEffects`
- * that lets a bundler drop `Symbol.metadata` installation. In 111a no manifest
- * declares `sideEffects`; the guard is for 111c.
+ * that lets a bundler drop `Symbol.metadata` installation. M111c emits an
+ * explicit retention list; this guard remains the independent backstop.
  */
 export function checkDecoratorSideEffects(dir: string, content: string): string | null {
   let parsed: Record<string, unknown>;

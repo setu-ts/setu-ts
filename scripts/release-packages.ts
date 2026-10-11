@@ -82,7 +82,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
 export const UNPUBLISHED_PACKAGES: readonly string[] = [];
 
 /**
- * One package that must not reach JSR yet, and why.
+ * One package that must not reach npm yet, and why.
  */
 export interface PublicationHold {
   /** The workspace path, as it appears in {@linkcode PUBLISHED_PACKAGES}. */

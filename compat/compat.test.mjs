@@ -212,18 +212,15 @@ check('stop() releases the listening port', rebound === null, rebound ?? undefin
 //    carries the latter, not the former, so the first shape alone would pass
 //    against the exact broken build).
 //
-//    Guarded by version: while the installed packages are at or below
-//    0.1.0-alpha.8 (the last release that shipped the defect) the check reports
-//    pending rather than failing — a hard check would turn this PR red for the
-//    very defect it fixes. Once a newer version is installed the guard lifts
-//    and a surviving `npm:` inside import( fails the suite.
+//    npm never received those historical broken builds, so there is no
+//    version guard. Scan every installed member's dist, including jsr: imports.
 /**
  * Returns `source` with every comment blanked to spaces — same length, so
  * offsets are preserved. String-aware: a `//` or `/*` inside a string literal
  * is not a comment (the audited artifacts carry `npm:` strings and `deno add`
  * install-command text that contain `//`).
  *
- * Why: JSR's npm-compat build keeps JSDoc comments in the published `.js`,
+ * Why: emitted JavaScript retains JSDoc comments,
  * and this repo's loader JSDoc literally spells the indirection shape
  * (`(spec) => import(spec)`) to document why it must not recur. A detector
  * that scans comments would flag the FIXED artifact for its own explanation.
@@ -359,13 +356,13 @@ for (
     if (parameterizedImporterOccurrences(source).length > 0) indirection.push(rel);
   }
   const details = [
-    npmInImport.length > 0 ? `npm: inside import(): ${npmInImport.join(', ')}` : '',
+    npmInImport.length > 0 ? `npm:/jsr: inside import(): ${npmInImport.join(', ')}` : '',
     indirection.length > 0 ? `parameterized importer: ${indirection.join(', ')}` : '',
   ]
     .filter(Boolean)
     .join('; ');
   check(
-    `${name} @ ${version} ships no non-literal npm: path into import()`,
+    `${name} @ ${version} ships no npm:/jsr: or parameterized path into import()`,
     npmInImport.length === 0 && indirection.length === 0,
     details,
   );

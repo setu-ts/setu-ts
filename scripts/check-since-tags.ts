@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-console -- a gate must print actionable findings.
 /**
  * The `@since` gate: every tag is checked against the version that SHIPPED the
- * symbol it sits on — at symbol level, fetched from the jsr.io registry.
+ * symbol it sits on — from JSR through 0.8.x, and npm tarball sources thereafter.
  *
  * The class this closes is X50-2 and PR #286's cause, named there as
  * systematic: a release branch bumps each package manifest to the shipping
