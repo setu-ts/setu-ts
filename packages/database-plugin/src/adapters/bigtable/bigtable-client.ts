@@ -3,7 +3,7 @@
  * adaptation of that SDK to the structural facade the adapter drives.
  *
  * An injected {@linkcode IBigtableClient} never imports the SDK. The lazy arm
- * imports the literal `npm:@google-cloud/bigtable@^6` specifier only when its
+ * imports the literal `@google-cloud/bigtable` specifier only when its
  * loader is used — literal because a computed specifier is unreachable by JSR's
  * static npm-compat rewrite, and `scripts/npm-specifier-audit.ts` refuses one.
  *
@@ -131,7 +131,7 @@ export function createLazyBigtableLoader(
   return {
     owned: true,
     load: async (): Promise<IBigtableClient> => {
-      const module = await import('npm:@google-cloud/bigtable@^6') as unknown as BigtableSdkModule;
+      const module = await import('@google-cloud/bigtable') as unknown as BigtableSdkModule;
       return adaptBigtableSdkModule(module, configuration);
     },
   };

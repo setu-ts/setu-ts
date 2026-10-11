@@ -1,0 +1,47 @@
+{
+  "name": "@setu-ts/mail-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-sesv2": "^3",
+    "nodemailer": "^10"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-sesv2": {
+      "optional": true
+    },
+    "nodemailer": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-sesv2": "^3",
+    "nodemailer": "^10",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "hono": "^4.13.13",
+    "@setu-ts/view-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

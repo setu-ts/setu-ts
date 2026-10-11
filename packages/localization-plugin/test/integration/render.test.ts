@@ -9,7 +9,7 @@ import { afterEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import type { IKernelApplication } from '@setu-ts/kernel';
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { createTestApp } from '@setu-ts/testing';
 import { renderView, ViewPlugin } from '@setu-ts/view-plugin';

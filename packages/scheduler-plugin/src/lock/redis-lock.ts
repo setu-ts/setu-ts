@@ -85,10 +85,10 @@ export function createRedisLockClient(
  * Lazily load ioredis at runtime. Pin to 5.x for stability.
  *
  * @returns The ioredis constructor
- * @throws {Error} If the npm:ioredis package cannot be resolved
+ * @throws {Error} If the ioredis package cannot be resolved
  */
-async function loadIoredis(): Promise<typeof import('npm:ioredis@5.x').Redis> {
-  const mod = await import('npm:ioredis@5.x');
+async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
+  const mod = await import('ioredis');
   return mod.Redis;
 }
 

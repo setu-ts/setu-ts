@@ -25,11 +25,11 @@ export type RedisCtor = new (
 /**
  * Loads ioredis lazily.
  *
- * @returns The `Redis` constructor from `npm:ioredis@5.x`
+ * @returns The `Redis` constructor from `ioredis`
  * @since 0.9.0
  */
 export async function loadIoredis(): Promise<RedisCtor> {
-  const module = await import('npm:ioredis@5.x');
+  const module = await import('ioredis');
   // Interop boundary: the module namespace is narrowed once, here, so no `any`
   // escapes into the store (AI_GUIDELINES §5.2 external-interop exception).
   return module.Redis as unknown as RedisCtor;

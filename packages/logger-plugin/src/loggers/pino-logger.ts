@@ -1,6 +1,6 @@
 /**
  * Pino-backed structured logger. Pino is an optional dependency — it is
- * loaded via a real `import('npm:pino@10.x')` when the async factory
+ * loaded via a real `import('pino')` when the async factory
  * {@linkcode PinoLogger.create} is used, or can be injected through the
  * `pinoFactory` option for tests and pre-loaded clients.
  *
@@ -78,7 +78,7 @@ export interface PinoLoggerOptions {
   /** Bindings merged into every entry produced by this logger. */
   readonly bindings?: LogMetadata;
   /**
-   * Inject a pre-loaded Pino factory, bypassing the `import('npm:pino@10.x')`
+   * Inject a pre-loaded Pino factory, bypassing the `import('pino')`
    * path. Useful for tests and environments where the module is already
    * available in-memory.
    *
@@ -90,7 +90,7 @@ export interface PinoLoggerOptions {
 /**
  * Structured logger backed by [Pino](https://github.com/pinojs/pino).
  *
- * Because the `npm:pino` import is async, use {@linkcode PinoLogger.create}
+ * Because the `pino` import is async, use {@linkcode PinoLogger.create}
  * (async factory) rather than `new`. An injected `pinoFactory` option
  * allows synchronous construction for tests.
  *
@@ -132,11 +132,11 @@ export class PinoLogger implements ILogger {
    *
    * When `pinoFactory` is provided in options, the factory is called
    * synchronously and no import is performed. Otherwise, Pino is loaded
-   * via `await import('npm:pino@10.x')`.
+   * via `await import('pino')`.
    *
    * @param options - Configuration
    * @returns A new PinoLogger instance
-   * @throws {Error} If Pino cannot be loaded from `npm:pino` and no
+   * @throws {Error} If Pino cannot be loaded from `pino` and no
    *   `pinoFactory` was injected.
    */
   static async create(options: PinoLoggerOptions = {}): Promise<PinoLogger> {
@@ -223,7 +223,7 @@ export class PinoLogger implements ILogger {
   }
 
   /**
-   * Loads the real Pino module lazily via `import('npm:pino@10.x')`. Wraps import
+   * Loads the real Pino module lazily via `import('pino')`. Wraps import
    * failures in a clear error message.
    *
    * @returns The Pino factory function
@@ -232,7 +232,7 @@ export class PinoLogger implements ILogger {
   static async #loadPino(): Promise<PinoFactory> {
     try {
       // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
-      const mod = await import('npm:pino@10.x');
+      const mod = await import('pino');
       return normalizePinoFactory(mod);
     } catch {
       throw new Error(

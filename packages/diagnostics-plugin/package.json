@@ -1,0 +1,44 @@
+{
+  "name": "@setu-ts/diagnostics-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/cache-plugin": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/queue-plugin": "workspace:^",
+    "@setu-ts/telemetry-plugin": "workspace:^",
+    "@setu-ts/events-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/sdk": "workspace:^",
+    "@setu-ts/websocket-plugin": "workspace:^",
+    "@setu-ts/sse-plugin": "workspace:^",
+    "@setu-ts/realtime-backplane-plugin": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/storage-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

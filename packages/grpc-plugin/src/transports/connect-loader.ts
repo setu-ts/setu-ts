@@ -31,10 +31,10 @@ import type {
 
 /** The four specifiers the runtime is assembled from, in load order. */
 const SPECIFIERS = {
-  connect: 'npm:@connectrpc/connect@^2.1.2',
-  protocol: 'npm:@connectrpc/connect@^2.1.2/protocol',
-  protobuf: 'npm:@bufbuild/protobuf@^2.7.0',
-  wkt: 'npm:@bufbuild/protobuf@^2.7.0/wkt',
+  connect: '@connectrpc/connect',
+  protocol: '@connectrpc/connect/protocol',
+  protobuf: '@bufbuild/protobuf',
+  wkt: '@bufbuild/protobuf/wkt',
 } as const;
 
 /**
@@ -179,10 +179,10 @@ export interface ConnectImporters {
  * assertion pinned and the published artifact lost.
  */
 export const DEFAULT_IMPORTERS: ConnectImporters = {
-  connect: () => import('npm:@connectrpc/connect@^2.1.2'),
-  protocol: () => import('npm:@connectrpc/connect@^2.1.2/protocol'),
-  protobuf: () => import('npm:@bufbuild/protobuf@^2.7.0'),
-  wkt: () => import('npm:@bufbuild/protobuf@^2.7.0/wkt'),
+  connect: () => import('@connectrpc/connect'),
+  protocol: () => import('@connectrpc/connect/protocol'),
+  protobuf: () => import('@bufbuild/protobuf'),
+  wkt: () => import('@bufbuild/protobuf/wkt'),
 };
 
 /**

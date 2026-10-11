@@ -121,7 +121,7 @@ export interface ReactRouterPluginOptions {
 
   /**
    * Injectable seam for lazy loading the RR runtime. When omitted, the default
-   * performs `await import(serverBuildPath)` + `await import('npm:react-router@8')`.
+   * performs `await import(serverBuildPath)` + `await import('react-router')`.
    *
    * Also the supported hook for a development server: return a handler built
    * over a build thunk (`createRequestHandler(() => vite.ssrLoadModule(...))`)

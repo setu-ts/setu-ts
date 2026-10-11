@@ -13,7 +13,7 @@ import type { IViewEngine } from '@setu-ts/common';
  * Selects the view engine the plugin registers under `CAPABILITIES.VIEW`.
  *
  * - `'hono-jsx'` (default): components are JSX functions authored with
- *   `@hono/hono/jsx`; the application's manifest declares the `jsx` /
+ *   `hono/jsx`; the application's manifest declares the `jsx` /
  *   `jsxImportSource` compiler options.
  * - `'hono-html'`: components are functions returning an `html` tagged
  *   template result; needs no `jsxImportSource`, so it works in a plain
@@ -35,7 +35,7 @@ import type { IViewEngine } from '@setu-ts/common';
 export type ViewPluginOptions =
   | {
     /**
-     * Components are JSX functions (`@hono/hono/jsx`). The default.
+     * Components are JSX functions (`hono/jsx`). The default.
      *
      * This names the AUTHORING mode, not a rendering strategy: every mode
      * funnels through one engine, because escaping belongs to the rendering
@@ -47,7 +47,7 @@ export type ViewPluginOptions =
   }
   | {
     /**
-     * Components are `html` tagged templates (`@hono/hono/html`), which need
+     * Components are `html` tagged templates (`hono/html`), which need
      * no `jsxImportSource` and so work in a plain `.ts` file. Renders
      * identically to `'hono-jsx'` — see that member for why the mode is
      * declared at all.

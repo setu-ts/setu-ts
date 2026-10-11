@@ -203,8 +203,13 @@ type Frame = CodeFrame | TemplateFrame;
  * becomes spaces and is never seen by the scanner, while a real dynamic
  * `import()` in code (including one inside a template `${ }` interpolation)
  * survives.
+ *
+ * Shared with `scripts/node-manifests.ts` (M111a), which scans import
+ * specifiers over the same masked view so JSDoc `@example` imports and
+ * generated-project template text cannot invent dependency edges
+ * (AI_GUIDELINES §11.1 — one masking implementation, not two).
  */
-function maskNonCode(source: string): {
+export function maskNonCode(source: string): {
   code: string;
   blockComments: readonly CommentSpan[];
   offsetToLine: Int32Array;
@@ -403,7 +408,7 @@ function firstArgumentEnd(code: string, parenOffset: number): number {
  * interpolation (an interpolated template is computed). `end` is `-1` when
  * the literal is unterminated or interpolated.
  */
-function readStringLiteral(
+export function readStringLiteral(
   source: string,
   offset: number,
 ): { end: number; clean: boolean } {

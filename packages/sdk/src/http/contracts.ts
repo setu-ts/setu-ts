@@ -13,7 +13,7 @@ import type {
   BackoffStrategy,
   CircuitBreakerPolicy,
   RetryPolicy,
-} from 'jsr:@setu-ts/common@^0.8.0';
+} from '@setu-ts/common';
 import type { ClientIdempotencyOptions } from './idempotency-key.ts';
 
 export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy };

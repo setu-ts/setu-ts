@@ -1,6 +1,6 @@
 /**
- * S3Provider — AWS S3 object storage via lazy `npm:@aws-sdk/client-s3` +
- * `npm:@aws-sdk/s3-request-presigner`.
+ * S3Provider — AWS S3 object storage via lazy `@aws-sdk/client-s3` +
+ * `@aws-sdk/s3-request-presigner`.
  *
  * Follows the M25 inject-or-lazy pattern with one caveat worth stating
  * plainly: the injectable {@linkcode IS3Backend} is the surface
@@ -245,8 +245,8 @@ export function adaptAwsS3Module(
  */
 export async function loadAwsS3Module(): Promise<AwsStorageSdkModule> {
   const [s3Mod, presignerMod] = await Promise.all([
-    import('npm:@aws-sdk/client-s3@^3') as unknown as Promise<AwsSdkModule>,
-    import('npm:@aws-sdk/s3-request-presigner@^3') as Promise<PresignerSdkModule>,
+    import('@aws-sdk/client-s3') as unknown as Promise<AwsSdkModule>,
+    import('@aws-sdk/s3-request-presigner') as Promise<PresignerSdkModule>,
   ]);
   return { s3: s3Mod, presigner: presignerMod };
 }

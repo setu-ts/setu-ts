@@ -10,7 +10,7 @@
 import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 
 interface PageProps {
   readonly title: string;

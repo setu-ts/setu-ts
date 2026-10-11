@@ -13,7 +13,7 @@
  */
 
 /** The `npm:` specifier the ioredis loader resolves. */
-const IOREDIS_SPECIFIER = 'npm:@opentelemetry/instrumentation-ioredis@^0.68.0';
+const IOREDIS_SPECIFIER = '@opentelemetry/instrumentation-ioredis';
 
 /**
  * Constructs an ioredis instrumentation instance from a loaded module.
@@ -41,7 +41,7 @@ export function createIORedisInstrumentation(
 export async function loadIORedisInstrumentation(
   configArg: unknown | undefined,
   importFn: () => Promise<Record<string, unknown>> = () =>
-    import('npm:@opentelemetry/instrumentation-ioredis@^0.68.0'),
+    import('@opentelemetry/instrumentation-ioredis'),
 ): Promise<{ instance: unknown; specifier: string }> {
   const mod = await importFn();
   const instance = createIORedisInstrumentation(mod, configArg);

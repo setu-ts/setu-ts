@@ -1,0 +1,50 @@
+{
+  "name": "@setu-ts/rest-starter",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@setu-ts/http-security-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/openapi-plugin": "workspace:^",
+    "@setu-ts/decorator-plugin": "workspace:^",
+    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/di-plugin": "workspace:^",
+    "@setu-ts/websocket-plugin": "workspace:^",
+    "@setu-ts/sse-plugin": "workspace:^",
+    "@setu-ts/realtime-backplane-plugin": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
+    "@setu-ts/graphql-plugin": "workspace:^",
+    "@setu-ts/service-discovery-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/cache-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

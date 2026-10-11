@@ -65,7 +65,7 @@ export interface LoggerPluginOptions {
   readonly excludePaths?: readonly string[];
   /**
    * Inject a pre-loaded Pino factory for the pino transport, bypassing
-   * the `import('npm:pino')` path. Useful for tests.
+   * the `import('pino')` path. Useful for tests.
    *
    * @since 0.1.0
    */

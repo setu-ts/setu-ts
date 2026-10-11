@@ -1,0 +1,86 @@
+{
+  "name": "@setu-ts/telemetry-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@opentelemetry/sdk-trace-base": "^2.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/instrumentation-ioredis": "^0.68.0",
+    "@opentelemetry/instrumentation-http": "^0.220.0",
+    "@opentelemetry/instrumentation-undici": "^0.30.0",
+    "@opentelemetry/instrumentation-amqplib": "^0.67.0",
+    "@opentelemetry/instrumentation-kafkajs": "^0.29.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/sdk-trace-base": {
+      "optional": true
+    },
+    "@opentelemetry/exporter-trace-otlp-http": {
+      "optional": true
+    },
+    "@opentelemetry/instrumentation-ioredis": {
+      "optional": true
+    },
+    "@opentelemetry/instrumentation-http": {
+      "optional": true
+    },
+    "@opentelemetry/instrumentation-undici": {
+      "optional": true
+    },
+    "@opentelemetry/instrumentation-amqplib": {
+      "optional": true
+    },
+    "@opentelemetry/instrumentation-kafkajs": {
+      "optional": true
+    },
+    "@opentelemetry/resources": {
+      "optional": true
+    },
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "@opentelemetry/context-async-hooks": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opentelemetry/sdk-trace-base": "^2.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/instrumentation-ioredis": "^0.68.0",
+    "@opentelemetry/instrumentation-http": "^0.220.0",
+    "@opentelemetry/instrumentation-undici": "^0.30.0",
+    "@opentelemetry/instrumentation-amqplib": "^0.67.0",
+    "@opentelemetry/instrumentation-kafkajs": "^0.29.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "^2.0.0",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

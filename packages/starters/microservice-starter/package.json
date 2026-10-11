@@ -1,0 +1,36 @@
+{
+  "name": "@setu-ts/microservice-starter",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/rest-starter": "workspace:^",
+    "@setu-ts/messaging-plugin": "workspace:^",
+    "@setu-ts/queue-plugin": "workspace:^",
+    "@setu-ts/resilience-plugin": "workspace:^",
+    "@setu-ts/telemetry-plugin": "workspace:^"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

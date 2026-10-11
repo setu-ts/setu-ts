@@ -135,7 +135,7 @@ export class LaunchDarklyModuleError extends Error {
  * with a fake module and never needs the real package installed.
  *
  * @param module - The module to adapt, typically the result of
- * `import('npm:@launchdarkly/node-server-sdk')`
+ * `import('@launchdarkly/node-server-sdk')`
  * @returns The adapted module facade
  * @throws {LaunchDarklyModuleError} When `module` is not an object, or exposes
  * no callable `init`
@@ -177,7 +177,7 @@ export function toLoadFailure(error: unknown): LaunchDarklyModuleError {
     return error;
   }
   return new LaunchDarklyModuleError(
-    'Failed to load npm:@launchdarkly/node-server-sdk@^9. Install it to use the ' +
+    'Failed to load @launchdarkly/node-server-sdk Install it to use the ' +
       "'launchdarkly' feature-flags provider, or inject a client through " +
       `options.client. Cause: ${error instanceof Error ? error.message : String(error)}`,
   );
@@ -186,7 +186,7 @@ export function toLoadFailure(error: unknown): LaunchDarklyModuleError {
 /**
  * Lazily imports the LaunchDarkly Node server SDK.
  *
- * This performs a real `import('npm:@launchdarkly/node-server-sdk@^9')` — the
+ * This performs a real `import('@launchdarkly/node-server-sdk')` — the
  * package is resolved by the runtime at call time and is not part of this
  * package's dependency graph. The SDK is Node-oriented (it uses `node:events`
  * and Node HTTP), so it works on Node, Deno, and Bun but not on Cloudflare
@@ -199,7 +199,7 @@ export function toLoadFailure(error: unknown): LaunchDarklyModuleError {
  */
 export async function loadLaunchDarklyModule(): Promise<ILaunchDarklyModule> {
   try {
-    const module = await import('npm:@launchdarkly/node-server-sdk@^9');
+    const module = await import('@launchdarkly/node-server-sdk');
     return adaptLaunchDarklyModule(module);
   } catch (error) {
     throw toLoadFailure(error);

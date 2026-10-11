@@ -18,7 +18,7 @@
  * The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * {@linkcode DynamoAdapterOptions.client} (preferred — the application
  * constructs and configures it) or a lazy literal
- * `import('npm:@aws-sdk/client-dynamodb@^3')` at {@linkcode connect} time.
+ * `import('@aws-sdk/client-dynamodb')` at {@linkcode connect} time.
  * AWS SDK v3 performs no I/O while constructing a client, so `connect()`
  * resolves the loader and marks the adapter ready; the first command is the
  * first thing that can fail on the wire.

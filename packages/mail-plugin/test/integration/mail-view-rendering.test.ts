@@ -13,8 +13,8 @@ import { expect } from '@std/expect';
 import type { Component, IMailer } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { createElement as h, Suspense } from '@hono/hono/jsx';
-import { html } from '@hono/hono/html';
+import { createElement as h, Suspense } from 'hono/jsx';
+import { html } from 'hono/html';
 import { UnresolvedSuspenseError, ViewPlugin, ViewRenderError } from '@setu-ts/view-plugin';
 
 import { MailPlugin } from '../../src/index.ts';

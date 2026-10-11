@@ -110,7 +110,7 @@ export interface SqsQueueOptions {
  * Lazy-load the AWS SQS SDK v3.
  */
 export async function loadSqsModule(): Promise<SqsSdkModule> {
-  const mod = await import('npm:@aws-sdk/client-sqs@^3');
+  const mod = await import('@aws-sdk/client-sqs');
   return mod as unknown as SqsSdkModule;
 }
 
@@ -270,7 +270,7 @@ export class SqsQueue implements QueueAdapter {
     if (this.#ready) return;
 
     if (this.#runtime.platform() === 'cloudflare-workers') {
-      throw new QueueBackendUnavailableError('SQS', 'npm:@aws-sdk/client-sqs@^3');
+      throw new QueueBackendUnavailableError('SQS', '@aws-sdk/client-sqs');
     }
 
     if (this.#injectedClient !== undefined) {

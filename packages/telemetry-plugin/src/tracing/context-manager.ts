@@ -30,7 +30,7 @@ export type ContextManagerOutcome =
   | { readonly activated: false; readonly reason: string };
 
 /** The `npm:` specifier the context-manager loader resolves. */
-const CONTEXT_MANAGER_SPECIFIER = 'npm:@opentelemetry/context-async-hooks@^2.0.0';
+const CONTEXT_MANAGER_SPECIFIER = '@opentelemetry/context-async-hooks';
 
 /**
  * Lazily loads OTel's async-local-storage manager.
@@ -44,7 +44,7 @@ const CONTEXT_MANAGER_SPECIFIER = 'npm:@opentelemetry/context-async-hooks@^2.0.0
  * @internal
  */
 export async function loadAsyncLocalStorageContextManager(): Promise<ContextManager> {
-  const module = await import('npm:@opentelemetry/context-async-hooks@^2.0.0');
+  const module = await import('@opentelemetry/context-async-hooks');
   return new module.AsyncLocalStorageContextManager();
 }
 

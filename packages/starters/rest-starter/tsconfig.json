@@ -1,0 +1,75 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../auth-plugin"
+    },
+    {
+      "path": "../../common"
+    },
+    {
+      "path": "../../config-plugin"
+    },
+    {
+      "path": "../../database-plugin"
+    },
+    {
+      "path": "../../decorator-plugin"
+    },
+    {
+      "path": "../../di-plugin"
+    },
+    {
+      "path": "../../exceptions"
+    },
+    {
+      "path": "../../graphql-plugin"
+    },
+    {
+      "path": "../../health-plugin"
+    },
+    {
+      "path": "../../http-security-plugin"
+    },
+    {
+      "path": "../../kernel"
+    },
+    {
+      "path": "../../logger-plugin"
+    },
+    {
+      "path": "../../metrics-plugin"
+    },
+    {
+      "path": "../../openapi-plugin"
+    },
+    {
+      "path": "../../realtime-backplane-plugin"
+    },
+    {
+      "path": "../../runtime"
+    },
+    {
+      "path": "../../service-discovery-plugin"
+    },
+    {
+      "path": "../../session-plugin"
+    },
+    {
+      "path": "../../sse-plugin"
+    },
+    {
+      "path": "../../validation-plugin"
+    },
+    {
+      "path": "../../websocket-plugin"
+    }
+  ]
+}

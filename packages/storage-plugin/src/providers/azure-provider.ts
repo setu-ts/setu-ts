@@ -1,5 +1,5 @@
 /**
- * AzureBlobProvider — Azure Blob Storage via lazy `npm:@azure/storage-blob@^12`.
+ * AzureBlobProvider — Azure Blob Storage via lazy `@azure/storage-blob`.
  *
  * Follows the M25 inject-or-lazy pattern. Key-based auth — single package,
  * no `@azure/identity` needed for core operations.
@@ -297,7 +297,7 @@ export function adaptAzureModule(
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadAzureModule(): Promise<AzureSdkModule> {
-  return await import('npm:@azure/storage-blob@^12') as unknown as AzureSdkModule;
+  return await import('@azure/storage-blob') as unknown as AzureSdkModule;
 }
 
 /**

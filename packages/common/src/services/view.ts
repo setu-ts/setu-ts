@@ -16,7 +16,7 @@
 
 /**
  * A view component: a pure function from a props bag to something the engine
- * can render to a string — a JSX node (`@hono/hono/jsx`), an
+ * can render to a string — a JSX node (`hono/jsx`), an
  * `HtmlEscapedString` (the `html` tagged template), or a plain string
  * (a by-name template adapted per §3.6 of the M92 plan).
  *

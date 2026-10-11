@@ -51,10 +51,10 @@ const REPLY_GROUP_PREFIX = 'rr-inbox-';
  * Lazily load kafkajs at runtime.
  *
  * @returns The kafkajs module
- * @throws {Error} If the npm:kafkajs package cannot be resolved
+ * @throws {Error} If the kafkajs package cannot be resolved
  */
-async function loadKafkajs(): Promise<typeof import('npm:kafkajs@2.x')> {
-  const mod = await import('npm:kafkajs@2.x');
+async function loadKafkajs(): Promise<typeof import('kafkajs')> {
+  const mod = await import('kafkajs');
   return mod;
 }
 

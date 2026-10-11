@@ -99,10 +99,10 @@ export function adaptAwsModule(
  * Lazily imports the AWS Secrets Manager SDK. Only exercised on the lazy path.
  *
  * @returns The SDK module
- * @throws {Error} If `npm:@aws-sdk/client-secrets-manager` cannot be resolved
+ * @throws {Error} If `@aws-sdk/client-secrets-manager` cannot be resolved
  */
 export async function loadAwsModule(): Promise<AwsSdkModule> {
-  return await import('npm:@aws-sdk/client-secrets-manager@^3') as unknown as AwsSdkModule;
+  return await import('@aws-sdk/client-secrets-manager') as unknown as AwsSdkModule;
 }
 
 /**

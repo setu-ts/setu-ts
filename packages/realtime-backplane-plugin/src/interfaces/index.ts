@@ -198,7 +198,7 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
   /** The dedicated subscriber client. */
   readonly subscriber?: IRedisBackplaneClient;
   /**
-   * Connection URL used to build both clients on the lazy `npm:ioredis` path.
+   * Connection URL used to build both clients on the lazy `ioredis` path.
    * Read only when no clients are injected.
    */
   readonly url?: string;
@@ -218,7 +218,7 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
    * backoff), which is below the default, so a short partition is still
    * buffered and delivered late.
    *
-   * Read only on the lazy `npm:ioredis` path: an injected `client` /
+   * Read only on the lazy `ioredis` path: an injected `client` /
    * `subscriber` pair keeps whatever timeout it was constructed with.
    *
    * @throws {RangeError} At construction, when not a number from `0` to
@@ -234,7 +234,7 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
    * `RealtimeBackplanePlugin`, to one backed by the application's logger;
    * supply your own to route them elsewhere.
    *
-   * Read only on the lazy `npm:ioredis` path: an injected `client` /
+   * Read only on the lazy `ioredis` path: an injected `client` /
    * `subscriber` pair belongs to the caller and gets no listener, since one
    * would silence the caller's own `'error'` handling.
    *

@@ -2,7 +2,7 @@
  * Inject-or-lazy loading for the optional DynamoDB AWS SDK.
  *
  * An injected {@linkcode IDynamoClient} never imports the SDK. The lazy arm
- * imports the real `npm:@aws-sdk/client-dynamodb@^3` specifier only when its
+ * imports the real `@aws-sdk/client-dynamodb` specifier only when its
  * loader is used, then adapts SDK commands to the structural facade the data
  * source drives.
  *
@@ -189,7 +189,7 @@ export function createLazyDynamoLoader(
   assertTransportSecurity(configuration);
   return {
     load: async (): Promise<IDynamoClient> => {
-      const module = await import('npm:@aws-sdk/client-dynamodb@^3') as unknown as DynamoSdkModule;
+      const module = await import('@aws-sdk/client-dynamodb') as unknown as DynamoSdkModule;
       return adaptDynamoSdkModule(module, configuration);
     },
   };

@@ -253,7 +253,7 @@ export interface PubSubOptions {
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadPubSubModule(): Promise<PubSubSdkModule> {
-  const mod = await import('npm:@google-cloud/pubsub@^6');
+  const mod = await import('@google-cloud/pubsub');
   return mod as unknown as PubSubSdkModule;
 }
 
@@ -547,7 +547,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     assertNotCloudflareWorkers(
       this.#runtime,
       'GCP Pub/Sub',
-      'npm:@google-cloud/pubsub@^6',
+      '@google-cloud/pubsub',
     );
 
     if (this.#injectedClient !== undefined) {

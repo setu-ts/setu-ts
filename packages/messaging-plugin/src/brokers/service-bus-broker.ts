@@ -50,7 +50,7 @@ const PROBE_TIMEOUT_MS = 2000;
 
 /**
  * Structural type matching the real SDK's ProcessErrorArgs callback argument
- * (npm:@azure/service-bus@^7).
+ * (@azure/service-bus).
  */
 export interface IServiceBusProcessErrorArgs {
   /** The underlying error. */
@@ -67,7 +67,7 @@ export interface IServiceBusProcessErrorArgs {
 
 /**
  * Structural receive-options matching the real SDK's SubscribeOptions
- * (npm:@azure/service-bus@^7). The property is autoCompleteMessages, not autoComplete.
+ * (@azure/service-bus). The property is autoCompleteMessages, not autoComplete.
  */
 export interface IServiceBusSubscribeOptions {
   autoCompleteMessages?: boolean;
@@ -411,7 +411,7 @@ async function closeReceiver(entry: OpenReceiver): Promise<void> {
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadServiceBusModule(): Promise<ServiceBusSdkModule> {
-  const mod = await import('npm:@azure/service-bus@^7');
+  const mod = await import('@azure/service-bus');
   return mod as unknown as ServiceBusSdkModule;
 }
 
@@ -761,7 +761,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     assertNotCloudflareWorkers(
       this.#runtime,
       'Azure Service Bus',
-      'npm:@azure/service-bus@^7',
+      '@azure/service-bus',
     );
 
     if (this.#injectedClient !== undefined) {

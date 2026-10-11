@@ -1,0 +1,46 @@
+{
+  "name": "@setu-ts/grpc-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@connectrpc/connect": "^2.1.2",
+    "@bufbuild/protobuf": "^2.7.0"
+  },
+  "peerDependenciesMeta": {
+    "@connectrpc/connect": {
+      "optional": true
+    },
+    "@bufbuild/protobuf": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@connectrpc/connect": "^2.1.2",
+    "@bufbuild/protobuf": "^2.7.0",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

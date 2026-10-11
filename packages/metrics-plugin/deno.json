@@ -3,15 +3,14 @@
   "version": "0.8.0",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0"
-  },
   "test": {
     "permissions": {
       "read": true,
       "import": true,
       "env": true,
-      "sys": ["hostname"]
+      "sys": [
+        "hostname"
+      ]
     }
   }
 }

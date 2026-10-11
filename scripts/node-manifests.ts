@@ -1,0 +1,841 @@
+// deno-lint-ignore-file no-console -- a gate prints what it found (AI_GUIDELINES §11.5/§11.6)
+/**
+ * The Node-manifest generator and drift gate (M111a plan §3.1).
+ *
+ * Writes every workspace member's `package.json` and `tsconfig.json`, the root
+ * solution `tsconfig.json`, `pnpm-workspace.yaml`, and the root `package.json`
+ * `workspaces` field, from four inputs: each member's `deno.json`
+ * (`name`/`version`/`exports`), a scan of every TypeScript file under its
+ * `src` and `test` trees, the committed external-range table
+ * (`scripts/node-dependency-ranges.ts`), and that table's classification
+ * overrides. `--check` regenerates in memory and fails on any difference;
+ * `--write` writes the files.
+ *
+ * The scan masks comments and template bodies (the same masking as
+ * `scripts/npm-specifier-audit.ts`, AI_GUIDELINES §11.1) before reading import
+ * specifiers, because JSDoc `@example` blocks and generated-project template
+ * text would otherwise invent dependency edges, and a scanner that invents an
+ * edge can close a reference cycle.
+ *
+ * Classification (plan §3.1):
+ *   - `src` imports `@setu-ts/<x>`            → `dependencies: workspace:^` + a project reference
+ *   - `src` statically imports an external as a value → `dependencies`
+ *   - `src` reaches an external only by dynamic `import()` or `import type`
+ *     → optional `peerDependencies` (+ `peerDependenciesMeta`) AND an
+ *     identical-range `devDependencies` mirror — required, not cosmetic: Deno
+ *     ignores `peerDependencies` and types an unresolved optional peer as `any`
+ *   - imported by tests only                  → `devDependencies` (`workspace:^` or the table's range)
+ *   - a `src`-level workspace cycle           → refused by name (tsc references must be acyclic)
+ *
+ * It also enforces the two manifest-side invariants the plan names: no bare-keyed
+ * alias survives in a member `deno.json` (§3.2 — both toolchains read
+ * dependencies from `package.json`), and `decorator-plugin`'s manifest may not
+ * declare `sideEffects: false` or a list omitting the `Symbol.metadata` module
+ * (§3.4 safeguard 2).
+ *
+ * Usage:
+ *   deno run --allow-read --allow-write scripts/node-manifests.ts --write
+ *   deno run --allow-read scripts/node-manifests.ts --check
+ *
+ * @module
+ */
+
+import { maskNonCode, readStringLiteral } from './npm-specifier-audit.ts';
+import {
+  EXTERNAL_RANGES,
+  OVERRIDES,
+  WORKSPACE_SCOPE,
+  type Override,
+} from './node-dependency-ranges.ts';
+
+// ── Pure core ─────────────────────────────────────────────────────────────────
+
+/** One import edge found in one scanned file. */
+export interface ImportEdge {
+  /** The specifier exactly as written (bare, `npm:`/`jsr:`-prefixed, relative, or `node:`). */
+  readonly specifier: string;
+  /** How the file reaches the specifier. */
+  readonly mode: 'value' | 'type' | 'dynamic';
+  /** The scanned file's repository-relative path, for failure messages. */
+  readonly file: string;
+}
+
+/** A member's `deno.json` exports entry, normalised to subpath → source path. */
+export interface ExportEntry {
+  readonly subpath: string;
+  readonly source: string;
+}
+
+/** One workspace member as the generator sees it (pure input). */
+export interface MemberInput {
+  /** Repository-relative directory, e.g. `packages/kernel` or `packages/starters/rest-starter`. */
+  readonly dir: string;
+  readonly name: string;
+  readonly version: string;
+  readonly exports: readonly ExportEntry[];
+  /** The member `deno.json`'s `imports` keys, checked for bare aliases. */
+  readonly denoImports: readonly string[];
+  /** Every scanned source file: repository-relative path → source text. */
+  readonly files: ReadonlyMap<string, string>;
+  /** Current content of the member's committed `package.json`, when one exists (for the sideEffects guard). */
+  readonly currentPackageJson?: string;
+}
+
+/** A fully classified dependency set for one member. */
+export interface ClassifiedMember {
+  readonly dependencies: ReadonlyMap<string, string>;
+  readonly peerDependencies: ReadonlyMap<string, string>;
+  readonly devDependencies: ReadonlyMap<string, string>;
+  /** Workspace member dirs this member references from `src` (acyclic by refusal). */
+  readonly references: readonly string[];
+}
+
+/** The outcome of generating the whole workspace. */
+export interface GenerationResult {
+  /** Repository-relative file path → exact committed content. */
+  readonly files: ReadonlyMap<string, string>;
+  /** Hard refusals (a cycle, an unresolvable specifier, a bare alias, a sideEffects violation). */
+  readonly refusals: readonly string[];
+}
+
+/** The build tools every member carries, pinned identically (plan §3.6). */
+const BUILD_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
+  'typescript': '6.0.3',
+  '@types/node': '^26.6.5',
+};
+
+/** The members whose `src` references the `Deno` global get its ambient types (plan §3.6). */
+const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli'];
+
+/** The package whose manifest the §3.4 safeguard-2 guard applies to. */
+const DECORATOR_PLUGIN_DIR = 'packages/decorator-plugin';
+const SYMBOL_METADATA_EXPORT = './dist/metadata/symbol-metadata.js';
+
+/**
+ * Scans one source file and returns every import edge it expresses.
+ *
+ * Comments and template bodies are masked first (delimiters preserved, so
+ * literal values are read from the original source at the masked offsets);
+ * an `import`/`from` inside a JSDoc `@example`, a line comment, or an emitted
+ * template string is therefore invisible to this scan.
+ *
+ * Classification walks BACKWARD from each string-literal delimiter over the
+ * masked code, so only a literal whose preceding token is `from`, a
+ * side-effect `import`, or an `import(` is an edge — a plain string constant
+ * (`const X = 'pkg'`, preceded by `=`) or an object value (`{ key: 'pkg' }`,
+ * preceded by `:`) is not, and a function call argument (`err('pkg')`,
+ * preceded by `(` whose word is the callee's name) is not either. This is what
+ * keeps the CLI's emitted-Deno-project strings (`PROTO_TASK_COMMAND`,
+ * `PROTO_IMPORTS`) out of the dependency graph: they are string constants, and
+ * 111d owns them.
+ */
+export function scanImportEdges(source: string, file: string): readonly ImportEdge[] {
+  const { code } = maskNonCode(source);
+  const edges: ImportEdge[] = [];
+
+  for (let i = 0; i < code.length; i += 1) {
+    const c = code[i];
+    if (c !== "'" && c !== '"' && c !== '`') continue;
+    const literal = readStringLiteral(source, i);
+    if (!literal.clean || literal.end < 0) continue; // interpolated/computed — no edge
+    const specifier = source.slice(i + 1, literal.end - 1);
+    const edge = classifyLiteral(code, i, specifier, file);
+    if (edge !== null) edges.push(edge);
+    i = literal.end - 1; // resume past this literal
+  }
+  return edges;
+}
+
+/**
+ * Classifies one string literal by the token that precedes it in the masked
+ * code. Returns `null` when the literal is not an import specifier.
+ */
+function classifyLiteral(
+  code: string,
+  quoteOffset: number,
+  specifier: string,
+  file: string,
+): ImportEdge | null {
+  // A legal module specifier carries only name/path characters. Anything else
+  // (`(`, `\`, a quote, whitespace) is a MISREAD — the masking pass does not
+  // model regex literals, so a `/from "(@setu-ts\/…)/"` test regex presents its
+  // quotes as a string literal preceded by `from`. Refusing impossible
+  // specifiers keeps those out of the graph rather than inventing dependencies
+  // (and, via the cycle check, false cycles) from test regexes.
+  if (!/^[A-Za-z0-9@/._:-]+$/.test(specifier)) return null;
+  let p = quoteOffset - 1;
+  while (p >= 0 && /\s/.test(code[p])) p -= 1;
+  if (p < 0) return null;
+
+  if (code[p] === '(') {
+    // `import('x')` — or a call whose name happens to precede the paren.
+    const word = wordBefore(code, p);
+    if (word === null || word.text !== 'import') return null;
+    if (word.start > 0 && code[word.start - 1] === '.') return null; // obj.import( — a method call
+    return { specifier, mode: 'dynamic', file };
+  }
+
+  if (!/[A-Za-z0-9_$]/.test(code[p])) return null; // `: 'x'`, `= 'x'`, `, 'x'` — a value, not an import
+  const word = wordBefore(code, p + 1);
+  if (word === null) return null;
+  if (word.text === 'import') return { specifier, mode: 'value', file }; // side-effect import
+  if (word.text !== 'from') return null;
+
+  // `… from 'x'` — static. Type-only when the keyword introducing the clause
+  // (`import`/`export`) is immediately followed by `type`. The clause between
+  // keyword and `from` is real code in the masked view (string bodies are
+  // spaces), so a bounded window suffices for even the widest import list.
+  // The LAST keyword in the window is this statement's — an earlier import in
+  // the same window must not decide this literal's mode.
+  const window = code.slice(Math.max(0, quoteOffset - 2000), quoteOffset);
+  let keywordEnd = -1;
+  for (const match of window.matchAll(/\b(?:import|export)\b/g)) {
+    keywordEnd = (match.index ?? 0) + match[0].length;
+  }
+  if (keywordEnd < 0) return { specifier, mode: 'value', file };
+  const afterKeyword = window.slice(keywordEnd);
+  return {
+    specifier,
+    mode: /^\s*type\b/.test(afterKeyword) ? 'type' : 'value',
+    file,
+  };
+}
+
+/** The identifier ending just before `from`, as `{ text, start }`, or null. */
+function wordBefore(
+  code: string,
+  from: number,
+): { text: string; start: number } | null {
+  let end = from;
+  while (end > 0 && /\s/.test(code[end - 1])) end -= 1;
+  let start = end;
+  while (start > 0 && /[A-Za-z0-9_$]/.test(code[start - 1])) start -= 1;
+  if (start === end) return null;
+  return { text: code.slice(start, end), start };
+}
+
+/** Normalises a `deno.json` `exports` value (string or object form) to entries. */
+export function normalizeExports(exports: unknown): readonly ExportEntry[] {
+  if (typeof exports === 'string') return [{ subpath: '.', source: exports }];
+  if (typeof exports === 'object' && exports !== null) {
+    return Object.entries(exports as Record<string, string>).map(([subpath, source]) => ({
+      subpath: subpath === '.' ? '.' : subpath,
+      source,
+    }));
+  }
+  return [];
+}
+
+/** Strips a `./src/`-rooted source path to its `dist/` twin for one extension. */
+function distPath(source: string, extension: '.js' | '.d.ts'): string {
+  const withoutLeading = source.replace(/^\.\//, '');
+  const fromSrc = withoutLeading.replace(/^src\//, 'dist/');
+  return `./${fromSrc.replace(/\.tsx?$/, extension)}`;
+}
+
+/** True when a specifier is workspace-internal (`@setu-ts/...` or a `jsr:` twin of one). */
+function isWorkspaceSpecifier(specifier: string): boolean {
+  return specifier.startsWith(WORKSPACE_SCOPE) || specifier.startsWith(`jsr:${WORKSPACE_SCOPE}`);
+}
+
+/** The bare package name behind a workspace specifier. */
+function workspaceName(specifier: string): string {
+  return specifier.startsWith('jsr:') ? specifier.slice(4) : specifier;
+}
+
+/** True when a specifier is a relative path or a runtime builtin — never a dependency. */
+function isRelativeOrBuiltin(specifier: string): boolean {
+  return (
+    specifier.startsWith('./') ||
+    specifier.startsWith('../') ||
+    specifier.startsWith('/') ||
+    specifier.startsWith('node:')
+  );
+}
+
+/**
+ * The base package name behind a possibly-subpath specifier: `hono/jsx` →
+ * `hono`, `@aws-sdk/client-s3/…` → `@aws-sdk/client-s3`. A `package.json`
+ * dependency is keyed by the package, never by a subpath of it.
+ */
+export function basePackageName(specifier: string): string {
+  const segments = specifier.split('/');
+  return specifier.startsWith('@') ? segments.slice(0, 2).join('/') : (segments[0] ?? specifier);
+}
+
+/** The `EXTERNAL_RANGES` lookup, refusing an external the committed table does not carry. */
+export function lookupRange(
+  name: string,
+  file: string,
+  refusals: string[],
+): string | null {
+  const range = EXTERNAL_RANGES[name];
+  if (range === undefined) {
+    refusals.push(
+      `${file}: external "${name}" has no range in scripts/node-dependency-ranges.ts — ` +
+        `add it (one range table for both toolchains, plan §3.1/§3.2)`,
+    );
+    return null;
+  }
+  return range;
+}
+
+/** The overrides that apply to one member. */
+function overridesFor(dir: string): readonly Override[] {
+  return OVERRIDES.filter((o) => o.package === dir);
+}
+
+/**
+ * Classifies one member's edges into the three dependency fields plus its
+ * project references (plan §3.1). Pure; every refusal it can produce names the
+ * offending file and specifier.
+ */
+export function classifyMember(
+  member: MemberInput,
+  nameToDir: ReadonlyMap<string, string>,
+): { classified: ClassifiedMember; refusals: string[] } {
+  const refusals: string[] = [];
+  const dependencies = new Map<string, string>();
+  const peerDependencies = new Map<string, string>();
+  const devDependencies = new Map<string, string>();
+  const references = new Set<string>();
+
+  const srcEdges: ImportEdge[] = [];
+  const testEdges: ImportEdge[] = [];
+  for (const [file, source] of member.files) {
+    const edges = scanImportEdges(source, file);
+    for (const edge of edges) {
+      if (file.startsWith(`${member.dir}/src/`)) srcEdges.push(edge);
+      else testEdges.push(edge);
+    }
+  }
+
+  const noteRef = (depDir: string): void => {
+    if (depDir !== member.dir) references.add(depDir);
+  };
+
+  // src edges.
+  for (const edge of srcEdges) {
+    if (isRelativeOrBuiltin(edge.specifier)) continue;
+    if (isWorkspaceSpecifier(edge.specifier)) {
+      const depDir = nameToDir.get(workspaceName(edge.specifier));
+      if (depDir === undefined) {
+        refusals.push(
+          `${edge.file}: imports "${edge.specifier}", which is not a workspace member`,
+        );
+        continue;
+      }
+      dependencies.set(workspaceName(edge.specifier), 'workspace:^');
+      noteRef(depDir);
+      continue;
+    }
+    if (edge.specifier.startsWith('jsr:') || edge.specifier.startsWith('npm:')) {
+      refusals.push(
+        `${edge.file}: "${edge.specifier}" is a prefixed specifier in src — Node resolves ` +
+          `neither npm: nor jsr: (plan §3.3). Rewrite it to a bare specifier.`,
+      );
+      continue;
+    }
+    if (edge.specifier.startsWith('@std/')) {
+      refusals.push(
+        `${edge.file}: "${edge.specifier}" is a Deno-only std alias in src (plan C1: nothing ` +
+          `in src imports @std; the string belongs in generated-project text)`,
+      );
+      continue;
+    }
+    const packageName = basePackageName(edge.specifier);
+    const range = lookupRange(packageName, edge.file, refusals);
+    if (range === null) continue;
+    if (edge.mode === 'value') {
+      dependencies.set(packageName, range);
+    } else if (!dependencies.has(packageName)) {
+      // A value import wins over a type/dynamic one for the same package: the
+      // peer+dev mirror exists so an OPTIONAL load still type-checks and Deno
+      // still resolves it, which is moot once the package is a real dependency.
+      peerDependencies.set(packageName, range);
+      devDependencies.set(packageName, range);
+    }
+  }
+
+  // test-only edges (workspace or external; `jsr:`/`@std/` stay Deno-resolved until 111b).
+  for (const edge of testEdges) {
+    if (isRelativeOrBuiltin(edge.specifier)) continue;
+    if (isWorkspaceSpecifier(edge.specifier)) {
+      const name = workspaceName(edge.specifier);
+      if (!dependencies.has(name) && !peerDependencies.has(name)) {
+        devDependencies.set(name, 'workspace:^');
+      }
+      continue;
+    }
+    if (edge.specifier.startsWith('jsr:') || edge.specifier.startsWith('npm:')) continue;
+    if (edge.specifier.startsWith('@std/')) continue;
+    const packageName = basePackageName(edge.specifier);
+    if (dependencies.has(packageName) || peerDependencies.has(packageName)) continue;
+    const range = lookupRange(packageName, edge.file, refusals);
+    if (range === null) continue;
+    devDependencies.set(packageName, range);
+  }
+
+  // Classification overrides, each applied only when the scan actually found the dependency;
+  // an override whose target is absent is itself a refusal (the table cannot drift ahead of the code).
+  for (const override of overridesFor(member.dir)) {
+    const scanned = dependencies.get(override.dependency) ??
+      peerDependencies.get(override.dependency) ??
+      devDependencies.get(override.dependency);
+    if (scanned === undefined && override.kind === 'dev-dependency-types') {
+      // A types companion is not itself imported; it must accompany its typed package.
+      const typed = peerDependencies.get(override.dependency.replace(/^@types\//, ''));
+      if (typed === undefined) {
+        refusals.push(
+          `override ${member.dir} → ${override.dependency}: its typed package is not a ` +
+            `dependency of this member (${override.reason})`,
+        );
+        continue;
+      }
+      const typesRange = lookupRange(override.dependency, member.dir, refusals);
+      if (typesRange !== null) devDependencies.set(override.dependency, typesRange);
+      continue;
+    }
+    if (scanned === undefined) {
+      refusals.push(
+        `override ${member.dir} → ${override.dependency} matches nothing this member imports ` +
+          `(${override.reason}) — remove the override or restore the import`,
+      );
+      continue;
+    }
+    if (override.kind === 'regular-dependency') {
+      peerDependencies.delete(override.dependency);
+      devDependencies.delete(override.dependency);
+      dependencies.set(override.dependency, scanned);
+    } else if (override.kind === 'dev-dependency-types') {
+      devDependencies.set(override.dependency, scanned);
+    }
+  }
+
+  // Build tools every member needs to compile (pnpm's strict layout does not put
+  // the root's .bin on a member script's PATH; the version is pinned exactly).
+  for (const [tool, version] of Object.entries(BUILD_DEV_DEPENDENCIES)) {
+    if (!devDependencies.has(tool) && !dependencies.has(tool)) {
+      devDependencies.set(tool, version);
+    }
+  }
+  if (DENO_TYPES_MEMBERS.includes(member.dir)) {
+    devDependencies.set('@types/deno', '2.7.0');
+  }
+
+  return {
+    classified: { dependencies, peerDependencies, devDependencies, references: [...references] },
+    refusals,
+  };
+}
+
+/**
+ * Finds a `src`-level workspace dependency cycle across classified members
+ * (dev-only edges are excluded: pnpm allows them and tsc gets no reference for
+ * them). Returns the cycle as a readable path, or null when the graph is acyclic.
+ */
+export function findSrcCycle(
+  members: readonly ClassifiedMember[],
+  dirs: readonly string[],
+): string | null {
+  const index = new Map(dirs.map((d, i) => [d, i]));
+  const color = new Uint8Array(dirs.length); // 0 unvisited, 1 on stack, 2 done
+  const parent = new Int32Array(dirs.length).fill(-1);
+
+  const dfs = (node: number): string | null => {
+    color[node] = 1;
+    for (const ref of members[node].references) {
+      const next = index.get(ref);
+      if (next === undefined) continue;
+      if (color[next] === 1) {
+        const cycle: string[] = [dirs[next], dirs[node]];
+        let walk = node;
+        while (walk !== next) {
+          walk = parent[walk];
+          if (walk === -1) break;
+          cycle.push(dirs[walk]);
+        }
+        return cycle.reverse().join(' → ');
+      }
+      if (color[next] === 0) {
+        parent[next] = node;
+        const found = dfs(next);
+        if (found !== null) return found;
+      }
+    }
+    color[node] = 2;
+    return null;
+  };
+
+  for (let i = 0; i < dirs.length; i += 1) {
+    if (color[i] === 0) {
+      const found = dfs(i);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+/** Renders one member's `package.json` content (two-space JSON, trailing newline). */
+export function renderPackageJson(member: MemberInput, classified: ClassifiedMember): string {
+  const exports: Record<string, { types: string; default: string }> = {};
+  for (const entry of member.exports) {
+    exports[entry.subpath] = {
+      types: distPath(entry.source, '.d.ts'),
+      default: distPath(entry.source, '.js'),
+    };
+  }
+  const pkg: Record<string, unknown> = {
+    name: member.name,
+    version: member.version,
+    type: 'module',
+    license: 'MIT',
+    engines: { node: '>=22' },
+    files: ['dist', 'README.md'],
+    exports,
+    scripts: { build: 'tsc -b' },
+  };
+  if (classified.dependencies.size > 0) {
+    pkg.dependencies = Object.fromEntries(classified.dependencies);
+  }
+  if (classified.peerDependencies.size > 0) {
+    pkg.peerDependencies = Object.fromEntries(classified.peerDependencies);
+    pkg.peerDependenciesMeta = Object.fromEntries(
+      [...classified.peerDependencies.keys()].map((name) => [name, { optional: true }]),
+    );
+  }
+  if (classified.devDependencies.size > 0) {
+    pkg.devDependencies = Object.fromEntries(classified.devDependencies);
+  }
+  return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+
+/** The `extends` path from a member dir to the root `tsconfig.base.json`. */
+function baseExtends(dir: string): string {
+  const depth = dir.split('/').length;
+  return `${'../'.repeat(depth)}tsconfig.base.json`;
+}
+
+/** The `references` path from one member dir to another. */
+function relativeRef(from: string, to: string): string {
+  const fromParts = from.split('/');
+  const toParts = to.split('/');
+  let common = 0;
+  while (common < fromParts.length && fromParts[common] === toParts[common]) common += 1;
+  const up = '../'.repeat(fromParts.length - common);
+  return `${up}${toParts.slice(common).join('/')}`;
+}
+
+/** Renders one member's `tsconfig.json` content. */
+export function renderTsconfig(member: MemberInput, classified: ClassifiedMember): string {
+  const compilerOptions: Record<string, unknown> = {
+    rootDir: 'src',
+    outDir: 'dist',
+  };
+  if (DENO_TYPES_MEMBERS.includes(member.dir)) {
+    compilerOptions.types = ['node', 'deno'];
+  }
+  const config: Record<string, unknown> = {
+    extends: baseExtends(member.dir),
+    compilerOptions,
+    include: ['src'],
+  };
+  if (classified.references.length > 0) {
+    config.references = classified.references
+      .slice()
+      .sort()
+      .map((ref) => ({ path: relativeRef(member.dir, ref) }));
+  }
+  return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+/** Renders the root solution `tsconfig.json` referencing every member. */
+export function renderSolutionTsconfig(dirs: readonly string[]): string {
+  return `${JSON.stringify(
+    { files: [], references: dirs.map((dir) => ({ path: `./${dir}` })) },
+    null,
+    2,
+  )
+}\n`;
+}
+
+/** Renders `pnpm-workspace.yaml`, listing every member explicitly. */
+export function renderPnpmWorkspace(dirs: readonly string[]): string {
+  const lines = dirs.map((dir) => `  - ${dir}`);
+  return `packages:\n${lines.join('\n')}\n`;
+}
+
+/** Renders the root `package.json` (private workspace root, §3.2/§3.6). */
+export function renderRootPackageJson(dirs: readonly string[]): string {
+  return `${JSON.stringify(
+    {
+      name: 'setu-ts',
+      private: true,
+      packageManager: 'pnpm@12.11.2',
+      engines: { node: '>=22' },
+      workspaces: dirs,
+      devDependencies: { ...BUILD_DEV_DEPENDENCIES },
+    },
+    null,
+    2,
+  )
+}\n`;
+}
+
+/** Renders `tsconfig.base.json` — the eight strictness options verbatim plus the Node-build options (§3.6). */
+export function renderTsconfigBase(): string {
+  return `${JSON.stringify(
+    {
+      compilerOptions: {
+        target: 'es2024',
+        lib: ['es2024', 'esnext.decorators', 'dom', 'dom.iterable'],
+        module: 'nodenext',
+        moduleResolution: 'nodenext',
+        strict: true,
+        noUnusedLocals: true,
+        noUnusedParameters: true,
+        noImplicitReturns: true,
+        noFallthroughCasesInSwitch: true,
+        noImplicitOverride: true,
+        exactOptionalPropertyTypes: true,
+        useUnknownInCatchVariables: true,
+        rewriteRelativeImportExtensions: true,
+        declaration: true,
+        declarationMap: true,
+        sourceMap: true,
+        isolatedDeclarations: true,
+        composite: true,
+        verbatimModuleSyntax: true,
+        skipLibCheck: true,
+        types: ['node'],
+      },
+    },
+    null,
+    2,
+  )
+}\n`;
+}
+
+/**
+ * §3.4 safeguard 2: `decorator-plugin`'s manifest may not carry a `sideEffects`
+ * that lets a bundler drop `Symbol.metadata` installation. In 111a no manifest
+ * declares `sideEffects`; the guard is for 111c.
+ */
+export function checkDecoratorSideEffects(dir: string, content: string): string | null {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    return `${dir}/package.json is not valid JSON`;
+  }
+  const sideEffects = parsed.sideEffects;
+  if (sideEffects === undefined) return null;
+  if (sideEffects === false) {
+    return (
+      `${dir}/package.json declares "sideEffects": false — a bundler may drop ` +
+      `${SYMBOL_METADATA_EXPORT}, and every decorated class then crashes at definition ` +
+      `on Node and Bun (plan §3.4 safeguard 2)`
+    );
+  }
+  if (Array.isArray(sideEffects) && !sideEffects.includes(SYMBOL_METADATA_EXPORT)) {
+    return (
+      `${dir}/package.json declares a sideEffects list omitting ${SYMBOL_METADATA_EXPORT} ` +
+      `(plan §3.4 safeguard 2)`
+    );
+  }
+  return null;
+}
+
+/** §3.2: a member `deno.json` may not keep a bare-keyed alias (both toolchains read `package.json`). */
+export function checkDenoAliases(
+  dir: string,
+  keys: readonly string[],
+  isRoot: boolean,
+): readonly string[] {
+  const bad: string[] = [];
+  for (const key of keys) {
+    if (key.startsWith('npm:') || key.startsWith('jsr:')) continue; // pinned two versions of one package — 111b's
+    if (isRoot && key.startsWith('@std/')) continue; // root test-only aliases stay until 111b
+    bad.push(`${dir}/deno.json: import alias "${key}" is bare — dependencies come from package.json (plan §3.2)`);
+  }
+  return bad;
+}
+
+/** Generates every committed file from the pure inputs. */
+export function generateWorkspace(members: readonly MemberInput[]): GenerationResult {
+  const files = new Map<string, string>();
+  const refusals: string[] = [];
+
+  const nameToDir = new Map<string, string>();
+  for (const member of members) {
+    if (nameToDir.has(member.name)) {
+      refusals.push(`duplicate workspace member name: ${member.name}`);
+      continue;
+    }
+    nameToDir.set(member.name, member.dir);
+  }
+
+  const classified: ClassifiedMember[] = [];
+  const dirs: string[] = [];
+  for (const member of members) {
+    refusals.push(...checkDenoAliases(member.dir, member.denoImports, false));
+    if (member.dir === DECORATOR_PLUGIN_DIR && member.currentPackageJson !== undefined) {
+      const violation = checkDecoratorSideEffects(member.dir, member.currentPackageJson);
+      if (violation !== null) refusals.push(violation);
+    }
+    const result = classifyMember(member, nameToDir);
+    refusals.push(...result.refusals);
+    classified.push(result.classified);
+    dirs.push(member.dir);
+  }
+
+  const cycle = findSrcCycle(classified, dirs);
+  if (cycle !== null) {
+    refusals.push(
+      `src-level workspace dependency cycle: ${cycle} — tsc project references must be ` +
+        `acyclic (AI_GUIDELINES §11.3/§12.3)`,
+    );
+  }
+
+  if (refusals.length > 0) return { files, refusals };
+
+  for (let i = 0; i < members.length; i += 1) {
+    const member = members[i] as MemberInput;
+    const cls = classified[i] as ClassifiedMember;
+    files.set(`${member.dir}/package.json`, renderPackageJson(member, cls));
+    files.set(`${member.dir}/tsconfig.json`, renderTsconfig(member, cls));
+  }
+  files.set('tsconfig.base.json', renderTsconfigBase());
+  files.set('tsconfig.json', renderSolutionTsconfig(dirs));
+  files.set('pnpm-workspace.yaml', renderPnpmWorkspace(dirs));
+  files.set('package.json', renderRootPackageJson(dirs));
+  return { files, refusals };
+}
+
+// ── I/O seam ──────────────────────────────────────────────────────────────────
+
+/** Reads a JSON file, or null when absent/unparseable. */
+async function readJson(path: string): Promise<unknown | null> {
+  try {
+    return JSON.parse(await Deno.readTextFile(path));
+  } catch {
+    return null;
+  }
+}
+
+/** Every `.ts`/`.tsx` file under `dir`, repository-relative. */
+async function* walkSources(dir: string): AsyncGenerator<string> {
+  for await (const entry of Deno.readDir(dir)) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory) {
+      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+      yield* walkSources(path);
+    } else if (entry.isFile && /\.(ts|tsx|mts)$/.test(entry.name)) {
+      yield path;
+    }
+  }
+}
+
+/** Reads one member's inputs from the working tree. */
+async function readMember(dir: string): Promise<MemberInput> {
+  const config = (await readJson(`${dir}/deno.json`)) as {
+    name?: string;
+    version?: string;
+    exports?: unknown;
+    imports?: Record<string, string>;
+  } | null;
+  if (config === null || config.name === undefined || config.version === undefined) {
+    throw new Error(`${dir}: no parsable deno.json with name+version`);
+  }
+  const files = new Map<string, string>();
+  for (const sub of ['src', 'test']) {
+    try {
+      for await (const file of walkSources(`${dir}/${sub}`)) {
+        files.set(file, await Deno.readTextFile(file));
+      }
+    } catch {
+      // No such directory: the member declares none.
+    }
+  }
+  let currentPackageJson: string | undefined;
+  try {
+    currentPackageJson = await Deno.readTextFile(`${dir}/package.json`);
+  } catch {
+    currentPackageJson = undefined;
+  }
+  return {
+    dir,
+    name: config.name,
+    version: config.version,
+    exports: normalizeExports(config.exports),
+    denoImports: Object.keys(config.imports ?? {}),
+    files,
+    currentPackageJson,
+  };
+}
+
+/** Reads the workspace layout from the root `deno.json`. */
+async function readMembers(): Promise<MemberInput[]> {
+  const root = (await readJson('deno.json')) as { workspace?: readonly string[] } | null;
+  if (root?.workspace === undefined) throw new Error('deno.json: no workspace list');
+  const members: MemberInput[] = [];
+  for (const entry of root.workspace) {
+    members.push(await readMember(entry.replace(/^\.\//, '')));
+  }
+  return members;
+}
+
+/** The `--check` comparison: every generated file must match the working tree byte for byte. */
+async function checkAgainstTree(generated: ReadonlyMap<string, string>): Promise<string[]> {
+  const differences: string[] = [];
+  for (const [path, content] of generated) {
+    let current: string;
+    try {
+      current = await Deno.readTextFile(path);
+    } catch {
+      differences.push(`${path}: missing (run node-manifests --write)`);
+      continue;
+    }
+    if (current !== content) differences.push(`${path}: differs from the generated manifest`);
+  }
+  // Extra generated roots must not be absent from the tree in the other direction:
+  // a member package.json that the generator would DELETE (member removed from the
+  // workspace) is caught by the workspace-list check above, not here.
+  return differences;
+}
+
+/** Entry point. Returns the exit code rather than calling `Deno.exit` (testable). */
+export async function runNodeManifests(args: readonly string[]): Promise<number> {
+  const mode = args.includes('--write') ? 'write' : args.includes('--check') ? 'check' : null;
+  if (mode === null) {
+    console.error('usage: node-manifests.ts --check | --write');
+    return 2;
+  }
+  const members = await readMembers();
+  const { files, refusals } = generateWorkspace(members);
+  if (refusals.length > 0) {
+    for (const refusal of refusals) console.error(`✗ ${refusal}`);
+    console.error(`${refusals.length} refusal(s).`);
+    return 1;
+  }
+  if (mode === 'write') {
+    for (const [path, content] of files) {
+      const current = await Deno.readTextFile(path).catch(() => null);
+      if (current !== content) await Deno.writeTextFile(path, content);
+    }
+    console.log(`Wrote ${files.size} generated file(s).`);
+    return 0;
+  }
+  const differences = await checkAgainstTree(files);
+  if (differences.length > 0) {
+    for (const difference of differences) console.error(`✗ ${difference}`);
+    console.error(`${differences.length} drift(s) — run node-manifests --write after editing imports.`);
+    return 1;
+  }
+  console.log(`node-manifests --check: ${files.size} generated file(s) agree with the tree.`);
+  return 0;
+}
+
+if (import.meta.main) {
+  Deno.exit(await runNodeManifests(Deno.args));
+}

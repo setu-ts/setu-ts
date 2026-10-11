@@ -83,7 +83,7 @@ export interface NodeServer {
 const defaultNodeServeHost: NodeServeHost = {
   serve: async (options) => {
     // Lazy import — only loads when listen() is actually called
-    const mod = await import('npm:@hono/node-server@^2.0.0');
+    const mod = await import('@hono/node-server');
     // node-server's own `Request`/`Response` are installed as globals, which
     // is its default and what every Hono-on-Node deployment already runs.
     //
@@ -342,7 +342,7 @@ export function isNodeHttpServerHandle(handle: ServerHandle): handle is NodeHttp
  * Node HTTP adapter implementation.
  *
  * @param host - Injected Node serve host (defaults to lazy @hono/node-server)
- * @param wsModule - Injected `ws` module (defaults to a lazy `npm:ws` import)
+ * @param wsModule - Injected `ws` module (defaults to a lazy `ws` import)
  * @param options - Adapter options; `maxBodyBytes` bounds the body read
  */
 export class NodeHttpAdapter implements IHttpAdapter {

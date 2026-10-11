@@ -281,7 +281,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     this._supportsIsolation = configured.supportsIsolation;
 
     try {
-      const orm = await import('npm:drizzle-orm@0.45.2');
+      const orm = await import('drizzle-orm');
       const ns = orm as Record<string, unknown>;
       // The explicit option wins; otherwise the instance's own dialect object
       // names it. Drizzle publishes no dialect discriminant, so the class name

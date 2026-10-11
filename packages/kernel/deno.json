@@ -2,9 +2,5 @@
   "name": "@setu-ts/kernel",
   "version": "0.8.0",
   "license": "MIT",
-  "exports": "./src/index.ts",
-  "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0",
-    "@hono/hono": "jsr:@hono/hono@^4.12.30"
-  }
+  "exports": "./src/index.ts"
 }

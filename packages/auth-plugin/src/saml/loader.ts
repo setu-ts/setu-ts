@@ -16,11 +16,11 @@ import type { SamlModule } from '../interfaces/index.ts';
 import type { SamlConstructor } from './engine.ts';
 
 /** The specifier the lazy import loads; named in every load failure. */
-export const SAML_SPECIFIER = 'npm:@node-saml/node-saml@^5';
+export const SAML_SPECIFIER = '@node-saml/node-saml';
 
 /** Imports the real library. A literal specifier, so JSR's npm rewrite reaches it. */
 export function importSamlModule(): Promise<unknown> {
-  return import('npm:@node-saml/node-saml@^5');
+  return import('@node-saml/node-saml');
 }
 
 /**

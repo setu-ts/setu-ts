@@ -1,0 +1,33 @@
+{
+  "name": "@setu-ts/testing",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/kernel": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/di-plugin": "workspace:^",
+    "@setu-ts/decorator-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

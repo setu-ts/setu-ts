@@ -52,6 +52,7 @@
     "./packages/diagnostics-plugin",
     "./packages/idempotency-plugin"
   ],
+  "nodeModulesDir": "none",
   "tasks": {
     "check": "deno check packages",
     "check:apps": "deno run --allow-read --allow-run --allow-env=ALLOW_SKIP scripts/check-apps.ts",

@@ -29,10 +29,10 @@ import { Buffer } from 'node:buffer';
  * Lazily load amqplib at runtime.
  *
  * @returns The amqplib module
- * @throws {Error} If the npm:amqplib package cannot be resolved
+ * @throws {Error} If the amqplib package cannot be resolved
  */
-async function loadAmqplib(): Promise<typeof import('npm:amqplib@0.10.x')> {
-  const mod = await import('npm:amqplib@0.10.x');
+async function loadAmqplib(): Promise<typeof import('amqplib')> {
+  const mod = await import('amqplib');
   return mod;
 }
 

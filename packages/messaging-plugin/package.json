@@ -1,0 +1,66 @@
+{
+  "name": "@setu-ts/messaging-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@google-cloud/pubsub": "^6",
+    "kafkajs": "2.x",
+    "nats": "2.x",
+    "amqplib": "0.10.x",
+    "ioredis": "5.x"
+  },
+  "peerDependenciesMeta": {
+    "@google-cloud/pubsub": {
+      "optional": true
+    },
+    "kafkajs": {
+      "optional": true
+    },
+    "nats": {
+      "optional": true
+    },
+    "amqplib": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@google-cloud/pubsub": "^6",
+    "kafkajs": "2.x",
+    "nats": "2.x",
+    "amqplib": "0.10.x",
+    "ioredis": "5.x",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/cloudflare-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

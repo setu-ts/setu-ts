@@ -110,7 +110,7 @@ export function assertSsrRuntime(value: unknown): SsrRuntime {
  * Extracted so it can be unit-tested without any I/O or network imports.
  *
  * @param build - The RR `ServerBuild` (default export of the app's server build)
- * @param createRequestHandler - The factory from `npm:react-router`
+ * @param createRequestHandler - The factory from `react-router`
  * @param mode - `'production'` or `'development'`
  * @returns A callable `SsrRequestHandler`
  * @since 0.1.0
@@ -127,7 +127,7 @@ export function assembleHandler(
  * Default implementation of `loadRequestHandler`.
  *
  * Lazily imports the app-provided server build (`import(serverBuildPath)`) and
- * the core `react-router` package (`import('npm:react-router@8')`), unwraps
+ * the core `react-router` package (`import(react-router)`), unwraps
  * the `ServerBuild` (default export), then returns a callable request handler.
  *
  * Both the handler and the context-provider factory come from the SAME module
@@ -167,10 +167,10 @@ export async function loadRequestHandler(
 
   let rr: Record<string, unknown>;
   try {
-    rr = options?.rrImportHook ? await options.rrImportHook() : await import('npm:react-router@8');
+    rr = options?.rrImportHook ? await options.rrImportHook() : await import('react-router');
   } catch (err) {
     throw new Error(
-      `Failed to import 'npm:react-router@8'. Ensure it is available in the ` +
+      `Failed to import react-router. Ensure it is available in the ` +
         `runtime/module resolution. Cause: ${err instanceof Error ? err.message : String(err)}`,
     );
   }

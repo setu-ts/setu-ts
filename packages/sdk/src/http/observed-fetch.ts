@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext } from 'jsr:@setu-ts/common@^0.8.0';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 import type { IClientTiming } from './contracts.ts';
 import { createDefaultFetch, type FetchTransport } from './default-fetch.ts';

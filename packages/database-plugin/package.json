@@ -1,0 +1,64 @@
+{
+  "name": "@setu-ts/database-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@google-cloud/bigtable": "^6",
+    "@azure/cosmos": "^4",
+    "drizzle-orm": "0.45.2",
+    "@aws-sdk/client-dynamodb": "^3",
+    "mongodb": "^6.21.0"
+  },
+  "peerDependenciesMeta": {
+    "@google-cloud/bigtable": {
+      "optional": true
+    },
+    "@azure/cosmos": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "@aws-sdk/client-dynamodb": {
+      "optional": true
+    },
+    "mongodb": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@google-cloud/bigtable": "^6",
+    "@azure/cosmos": "^4",
+    "drizzle-orm": "0.45.2",
+    "@aws-sdk/client-dynamodb": "^3",
+    "mongodb": "^6.21.0",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/idempotency-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

@@ -62,10 +62,10 @@ function isConsumerExistsError(err: unknown): boolean {
  * Lazily load nats at runtime.
  *
  * @returns The nats module
- * @throws {Error} If the npm:nats package cannot be resolved
+ * @throws {Error} If the nats package cannot be resolved
  */
-async function loadNats(): Promise<typeof import('npm:nats@2.x')> {
-  const mod = await import('npm:nats@2.x');
+async function loadNats(): Promise<typeof import('nats')> {
+  const mod = await import('nats');
   return mod;
 }
 

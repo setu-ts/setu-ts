@@ -1,0 +1,58 @@
+{
+  "name": "@setu-ts/queue-plugin",
+  "version": "0.8.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-sqs": "^3",
+    "amqplib": "0.10.x",
+    "ioredis": "5.x",
+    "@aws-sdk/client-sns": "^3"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-sqs": {
+      "optional": true
+    },
+    "amqplib": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "@aws-sdk/client-sns": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-sqs": "^3",
+    "amqplib": "0.10.x",
+    "ioredis": "5.x",
+    "@aws-sdk/client-sns": "^3",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "typescript": "6.0.3",
+    "@types/node": "^26.6.5"
+  }
+}

@@ -7,7 +7,7 @@
  * @module
  */
 
-import type { SpanContext } from 'jsr:@setu-ts/common@^0.8.0';
+import type { SpanContext } from '@setu-ts/common';
 
 import type { ClientRequestInterceptor } from '../http/contracts.ts';
 

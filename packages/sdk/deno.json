@@ -3,9 +3,6 @@
   "version": "0.8.0",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "imports": {
-    "jsr:@setu-ts/common@^0.8.0": "jsr:@setu-ts/common@0.8.0"
-  },
   "test": {
     "permissions": {
       "net": true
