@@ -4,10 +4,10 @@ Verifies the published npm packages on Node.js and Bun. The workflow probes the 
 installing: HTTP 404 reports an unpublished scope and skips; HTTP 200 runs the suite; other statuses
 fail. It installs all 51 `@setu-ts/*` packages at `latest` from the ordinary npm registry.
 
-```fish
+```bash
 cd compat
-npm install; and npm run test:node
-bun install; and bun run test:bun
+npm install && npm run test:node
+bun install && bun run test:bun
 ```
 
 ## What it tests, and why it cannot test the working tree

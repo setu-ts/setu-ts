@@ -29,4 +29,12 @@ describe('README-only placeholders', () => {
       expect(files.get(`${leaf}/README.md`)).toContain('0.9.0');
     }
   });
+
+  it('names a member that has no metadata entry instead of failing on an undefined read', () => {
+    expect(() => placeholderFiles(['packages/no-such-member'], {})).toThrow(
+      'No package metadata for @setu-ts/no-such-member',
+    );
+    // An inherited key is not an entry.
+    expect(() => placeholderFiles(['packages/constructor'], {})).toThrow('@setu-ts/constructor');
+  });
 });

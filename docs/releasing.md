@@ -92,31 +92,16 @@ manifests carry `workspace:^` internal dependencies. pnpm rewrites them to the c
 only during pack, and the publisher checks the packed result before upload. New members need their
 own placeholder and trust configuration before their first real release.
 
-- **`packages/sdk/deno.json` maps the specifier to a PINNED version, and a `^`-only sed misses the
-  value.** Its `imports` entry reads `"jsr:@setu-ts/common@^X": "jsr:@setu-ts/common@X"`; a sweep
-  that rewrites `@^<old>` moves the key and leaves the value on the previous release, so
-  `deno task check` then fails with `has no exported member` against
-  `jsr.io/@setu-ts/common/<old>/…`. Cutting `v0.8.0` hit exactly that. `check:versions` does not see
-  it, because it ignores a pin written without the caret.
-- **Bump the SDK's `SDK_VERSION` literal** in `packages/sdk/src/http/observed-fetch.ts` (M98n). It
-  is the version the observed-fetch registration plugin reports, written as a literal because the
-  browser-portable SDK does not import its own manifest; `observed-fetch-plugin.test.ts` pins it to
-  `packages/sdk/deno.json`, so a missed bump fails the suite rather than shipping.
-- **Grep the source, not only the manifests.** `packages/sdk` writes its `jsr:` specifier inline in
-  six `src/**` files rather than through an import-map alias, and its manifest maps that exact
-  specifier string to a pinned version — so the range in the source and both sides of the mapping
-  must move together. A missed source specifier resolves against the previous release instead of the
-  one being cut. Grep for the SPECIFIER, not the bare version:
-
-  ```fish
-  grep -rn 'jsr:@setu-ts/[a-z0-9-]*@\^\?<old-version>' packages/*/src
-  ```
-
-  A bare `grep -rn '<old-version>' packages/*/src` is the wrong check and always has been: `@since`
-  tags legitimately name every release the framework has shipped (measured while cutting `v0.5.0`:
-  1001 at `0.1.0`, 734 at `0.2.0`, 107 at `0.3.0`), so it reports hundreds of correct lines and
-  teaches you to skim past the one that matters. **Never bump an `@since` tag** — it records when a
-  symbol appeared, so moving it makes it a lie.
+- **`release:bump` moves the SDK's `SDK_VERSION` literal** in
+  `packages/sdk/src/http/observed-fetch.ts` (M98n). It is the version the observed-fetch
+  registration plugin reports, written as a literal because the browser-portable SDK does not import
+  its own manifest; `observed-fetch-plugin.test.ts` pins it to `packages/sdk/deno.json`, so a missed
+  bump fails the suite rather than shipping.
+- **Package sources carry no registry specifier.** Before M111a, `packages/sdk` wrote
+  `jsr:@setu-ts/common` inline in its sources and pinned it in its manifest, so a release had to
+  move both. Sources now import bare package names, and `scripts/npm-specifier-audit.ts` refuses any
+  `npm:` or `jsr:` specifier under `packages/*/src`, so there is nothing to grep for. **Never bump
+  an `@since` tag**: it records when a symbol appeared, so moving it makes it a lie.
 - **Move the version in the 15 tracked `apps/*/deno.lock` files, and do it with `sed`, not by
   regenerating.** Each records its workspace members under `workspace.links` — a site no gate sees,
   because every example maps `@setu-ts/*` at `../../packages/<name>/src` and nothing installs from
@@ -148,12 +133,12 @@ own placeholder and trust configuration before their first real release.
 - **Widening `SHIPPED_VERSION_LINES` surfaces doc references the specifier sweep cannot see.**
   `check:versions` matches `@setu-ts` SPECIFIERS; the document gates match version CLAIMS, and they
   only match lines the alternation names. So the widening in the step above is what first reports
-  every `deno add jsr:@setu-ts/…@^<previous>` in the guides — 44 of them when `v0.7.0` was cut. Bump
-  those, then read the diff rather than trusting it: two of the 44 were HISTORICAL (a claim about
-  what a past release turned on, and an upgrading-guide heading naming the docs a broken example was
-  copied from), and bumping them made them false. Those get a `version:history` marker instead. A
-  comment that genuinely tracks the current release — the Dockerfile's quoted resolution error, the
-  chart's `appVersion` note — is bumped, which is what `VERSIONED_ARTIFACTS` in
+  every install line pinning the previous version in the guides — 44 of them when `v0.7.0` was cut.
+  Bump those, then read the diff rather than trusting it: two of the 44 were HISTORICAL (a claim
+  about what a past release turned on, and an upgrading-guide heading naming the docs a broken
+  example was copied from), and bumping them made them false. Those get a `version:history` marker
+  instead. A comment that genuinely tracks the current release — the Dockerfile's quoted resolution
+  error, the chart's `appVersion` note — is bumped, which is what `VERSIONED_ARTIFACTS` in
   `scripts/check-docs.ts` documents.
 
 - **A version bump must not rewrite both ends of a RANGE.** README's Versioning section explains the

@@ -978,6 +978,7 @@ describe('M111c npm workflow boundaries', () => {
       for (
         const fragment of [
           'id: scope',
+          '--retry 3',
           'registry.npmjs.org/@setu-ts%2fcommon',
           "404) echo 'published=false'",
           "200) echo 'published=true'",

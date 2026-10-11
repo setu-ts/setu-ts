@@ -48,7 +48,7 @@ jobs:
         id: scope
         working-directory: .
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://registry.npmjs.org/@setu-ts%2fcommon)
+          status=$(curl --silent --show-error --retry 3 --output /dev/null --write-out '%{http_code}' https://registry.npmjs.org/@setu-ts%2fcommon)
           case "$status" in
             404) echo 'published=false' >> "$GITHUB_OUTPUT"; echo '::notice::npm scope is unpublished; compatibility suite skipped' ;;
             200) echo 'published=true' >> "$GITHUB_OUTPUT" ;;
@@ -91,7 +91,7 @@ jobs:
         id: scope
         working-directory: .
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://registry.npmjs.org/@setu-ts%2fcommon)
+          status=$(curl --silent --show-error --retry 3 --output /dev/null --write-out '%{http_code}' https://registry.npmjs.org/@setu-ts%2fcommon)
           case "$status" in
             404) echo 'published=false' >> "$GITHUB_OUTPUT"; echo '::notice::npm scope is unpublished; compatibility suite skipped' ;;
             200) echo 'published=true' >> "$GITHUB_OUTPUT" ;;
