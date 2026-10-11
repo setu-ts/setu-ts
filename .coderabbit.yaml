@@ -20,3 +20,16 @@ reviews:
     # Irrelevant while `enabled` is false; kept explicit so re-enabling does not silently turn on
     # re-review of every push. A re-review is requested with another `@coderabbitai review`.
     auto_incremental_review: false
+  # Generated files, excluded so a whole-workspace change stays under CodeRabbit's per-PR file
+  # limit (M111a touched 425 files; 300 is the cap). Each is checked by machine instead:
+  # `node-manifests --check` (CI) refuses a package.json/tsconfig.json that differs from what the
+  # generator renders, the lockfiles are resolver output, and each `src/version.ts` is a one-line
+  # VERSION constant that `test/version-constant.test.ts` and `release:verify` pin to deno.json. A
+  # member `deno.json` is NOT excluded — only its `imports` block is generated; the rest is
+  # hand-written.
+  path_filters:
+    - '!**/package.json'
+    - '!**/tsconfig.json'
+    - '!**/deno.lock'
+    - '!pnpm-lock.yaml'
+    - '!**/src/version.ts'
