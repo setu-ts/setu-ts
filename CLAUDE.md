@@ -6114,8 +6114,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   untyped-body change leaving such bodies MIME-sniffable undocumented — both fixed afterwards and
   NOT re-audited, at the maintainer's direction. Not run locally: Keycloak, Postgres-backed Drizzle
   and Prisma, Pub/Sub, Service Bus, Cosmos, LocalStack, Vault — complete (PR #447)
-- **Next milestone** — M111c, the first npm publish; M104 — the `v0.9.0` client-brief run — follows
-  the `v0.9.0` cut; see ROADMAP.md.
+- **Milestone 111c** (every member + `scripts/` + CI — npm publishing machinery, proven by dry runs;
+  the `v0.9.0` cut follows M111d): each generated manifest gains publish metadata (`description`,
+  `repository`, `homepage`, `bugs`, `publishConfig.access: public`) and an audited `sideEffects`
+  (`false` everywhere except `decorator-plugin`, which retains `symbol-metadata.js`), and every
+  tarball ships `dist/`, `src/` (the source maps point at it), README and a generated LICENSE copy.
+  `release:publish` packs each member with `pnpm pack`, checks the packed manifest, looks the
+  version up on npm even in a dry run (the `v0.1.0-alpha.2` trap), and publishes the tarball with
+  `npm publish`, scripts disabled throughout. `release.yml` is split into gates, publish and
+  release; only the publish job holds `id-token: write`, runs in environment `npm`, and reads no npm
+  token. `release:verify`, the `@since` gate (npm tarball sources for versions after 0.8.x), CI's
+  dry run, compat and the release-notes install line move to npm; `publish:check` is retired.
+  Implemented by Codex, whose three stops each corrected the plan: `npm trust` needs npm 11.15.0; a
+  trusted publisher expires unless a publish through it succeeds within 2 days, so the bootstrap
+  became README-only placeholders published locally, then trust, then 0.9.0 as the first OIDC
+  publish (no npm token anywhere); and three M98 static blocks are module-local seams, not side
+  effects. A fourth measurement showed the bundle cannot distinguish the retention list from
+  `false`, because every decorator imports `symbol-metadata.ts` as a value, so the bundle's negative
+  control now removes the install from a scratch tarball. Verification (31 behavioural checks
+  against real packing, the real registry and a real third-party tarball) found three historical
+  `CLAUDE.md` entries rewritten and the M51 lesson deleted, both restored. The `events-plugin`
+  wall-clock ordering flake was folded in at the maintainer's direction. Committed-tree security
+  audit pending — complete (PR pending)
+- **Next milestone** — M111d, the CLI goes Node-first; the `v0.9.0` cut (placeholders, trust, OIDC
+  publish) follows it, then M104, the `v0.9.0` client-brief run; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
