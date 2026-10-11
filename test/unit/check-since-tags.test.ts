@@ -332,6 +332,10 @@ function options(
         ...Object.fromEntries(
           Object.entries(REGISTRY).map(([url, body]) => [url, { status: 200, body }]),
         ),
+        'https://registry.npmjs.org/@setu-ts%2fmock': {
+          status: 200,
+          body: JSON.stringify({ versions: { '0.9.0': {} } }),
+        },
         'https://jsr.io/@setu-ts/mock/meta.json': {
           status: 200,
           body: JSON.stringify({ versions: { '0.5.0': {}, '0.6.0': {} } }),
@@ -542,6 +546,7 @@ describe('run', () => {
   it('fails the run when a fetch rejects, as a skip the operator can see', async () => {
     const result = await run(options({
       'https://jsr.io/@setu-ts/mock/meta.json': 'throw',
+      'https://registry.npmjs.org/@setu-ts%2fmock': 'throw',
     }));
     expect(result.findings).toEqual([]);
     expect(result.verified).toBe(0);
@@ -686,4 +691,133 @@ describe('the script itself — the literal exit code inside check:docs', () => 
       expect(new TextDecoder().decode(output.stderr)).toContain('skipped');
     },
   );
+});
+
+describe('npm source tarballs after the JSR line', () => {
+  async function drive(
+    sources: Record<string, string>,
+    entries: Uint8Array[],
+    versions = ['0.9.0'],
+    failure?: '404' | '500' | 'missing-url' | 'missing-body' | 'corrupt',
+  ) {
+    const { archive } = await import('../fixtures/tar-fixture.ts');
+    const bytes = archive(...entries);
+    const gzip = await new Response(
+      new Blob([new Uint8Array(bytes)]).stream().pipeThrough(new CompressionStream('gzip')),
+    ).arrayBuffer();
+    const calls: string[] = [];
+    const fetchImpl: FetchLike = (url) =>
+      Promise.resolve().then(() => {
+        calls.push(url);
+        if (url === 'https://registry.npmjs.org/@setu-ts%2fmock') {
+          return new Response(
+            JSON.stringify({
+              versions: Object.fromEntries(
+                versions.map((version) => [
+                  version,
+                  failure === 'missing-url'
+                    ? {}
+                    : { dist: { tarball: 'https://registry.npmjs.org/mock.tgz' } },
+                ]),
+              ),
+            }),
+          );
+        }
+        if (url === 'https://registry.npmjs.org/mock.tgz') {
+          if (failure === '404' || failure === '500') {
+            return new Response('', { status: Number(failure) });
+          }
+          if (failure === 'missing-body') {
+            return {
+              ok: true,
+              status: 200,
+              text: () => Promise.resolve(''),
+            };
+          }
+          return new Response(failure === 'corrupt' ? new Uint8Array([0]) : gzip);
+        }
+        return new Response('', { status: 404 });
+      });
+    const result = await run({
+      manifest: { workspace: ['packages/mock'] },
+      listSourceFiles: () => Promise.resolve(Object.keys(sources)),
+      readFile: (path) => Promise.resolve(sources[path]),
+      fetchImpl,
+    });
+    return { result, calls };
+  }
+
+  it('reads present, absent, non-exported and pax long-path source declarations, caching the tarball', async () => {
+    const { tarEntry, paxRecord } = await import('../fixtures/tar-fixture.ts');
+    const long = `src/${'nested/'.repeat(25)}private.ts`;
+    const sources = {
+      'packages/mock/src/present.ts': '/** @since 0.9.0 */\nexport const Present = 1;',
+      'packages/mock/src/absent.ts': '/** @since 0.9.0 */\nexport const Absent = 1;',
+      'packages/mock/src/private.ts': '/** @since 0.9.0 */\ntype Private = string;',
+      [`packages/mock/${long}`]: '/** @since 0.9.0 */\ninterface LongPrivate {}',
+    };
+    const { result, calls } = await drive(sources, [
+      tarEntry('package/src/present.ts', 'export const Present = 1;'),
+      tarEntry('package/src/absent.ts', 'export const Other = 1;'),
+      tarEntry('package/src/private.ts', 'type Private = string;'),
+      tarEntry('pax', paxRecord('path', `package/${long}`), 'x'),
+      tarEntry('short', 'interface LongPrivate {}'),
+    ]);
+    expect(result.verified).toBe(3);
+    expect(result.skipped).toEqual([]);
+    expect(result.findings.map((f) => f.kind)).toEqual(['symbol-absent']);
+    expect(calls).toEqual([
+      'https://registry.npmjs.org/@setu-ts%2fmock',
+      'https://registry.npmjs.org/mock.tgz',
+    ]);
+  });
+
+  it('keeps 0.8.x on JSR while 1.0.0 goes to npm', async () => {
+    const { tarEntry } = await import('../fixtures/tar-fixture.ts');
+    const { result, calls } = await drive(
+      {
+        'packages/mock/src/old.ts': '/** @since 0.8.9 */\nexport const Old = 1;',
+        'packages/mock/src/new.ts': '/** @since 1.0.0 */\nexport const New = 1;',
+      },
+      [tarEntry('package/src/new.ts', 'export const New = 1;')],
+      ['1.0.0'],
+    );
+    expect(result.verified).toBe(1);
+    expect(calls[0]).toBe('https://jsr.io/@setu-ts/mock/meta.json');
+    expect(calls[1]).toBe('https://registry.npmjs.org/@setu-ts%2fmock');
+  });
+
+  it('reports an older never-published version and skips an ahead version', async () => {
+    const { result } = await drive(
+      {
+        'packages/mock/src/old.ts': '/** @since 0.9.0 */\nexport const Old = 1;',
+        'packages/mock/src/ahead.ts': '/** @since 0.11.0 */\nexport const Ahead = 1;',
+      },
+      [],
+      ['0.10.0'],
+    );
+    expect(result.findings.map((f) => f.kind)).toEqual(['version-absent']);
+    expect(result.skipped).toHaveLength(1);
+  });
+
+  for (const failure of ['404', '500', 'missing-url', 'missing-body', 'corrupt'] as const) {
+    it(`handles a ${failure} tarball without claiming a verified symbol`, async () => {
+      const { result } = await drive(
+        { 'packages/mock/src/a.ts': '/** @since 0.9.0 */\nexport const A = 1;' },
+        [],
+        ['0.9.0'],
+        failure,
+      );
+      expect(result.verified).toBe(0);
+      if (failure === '404') expect(result.findings[0].kind).toBe('file-absent');
+      else expect(result.skipped).toHaveLength(1);
+    });
+  }
+
+  it('reports an absent source file in an otherwise valid archive', async () => {
+    const { result } = await drive({
+      'packages/mock/src/a.ts': '/** @since 0.9.0 */\nexport const A = 1;',
+    }, []);
+    expect(result.findings[0].kind).toBe('file-absent');
+  });
 });

@@ -1,12 +1,11 @@
 name: Release
 
-# Publishes the implemented workspace packages to JSR.
+# Publishes the implemented workspace packages to npm.
 #
 # Triggered by pushing a `v*` tag (e.g. `v0.1.0-alpha.1`), or manually via
 # workflow_dispatch with `dry_run: true` to rehearse without uploading.
 #
-# JSR versions are IMMUTABLE: a published version can be yanked but never
-# deleted or replaced. The gates below run before anything is uploaded.
+# npm versions cannot be reused. The gates below run before anything is uploaded.
 on:
   push:
     tags: ['v*']
@@ -17,17 +16,13 @@ on:
         type: boolean
         default: true
 
-permissions:
-  # `write` for the "Create GitHub Release" step below, which is the only thing
-  # here that writes to the repository. There is one job, so scoping it at the
-  # job level would grant exactly the same token to the same steps.
-  contents: write
-  # Required for JSR's OIDC authentication and for provenance attestation.
-  id-token: write
+permissions: {}
 
 jobs:
-  release:
-    name: Publish to JSR
+  gates:
+    name: Release gates
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # The same backend environment as the `deno` job in ci.yml, because the
     # gates below re-run that job's suite and it is not the same suite without
@@ -412,48 +407,57 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: deno task release:resolved-set "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/resolved-set.json"
 
-      # ── Publish ──────────────────────────────────────────────────────────
-      # Published one package at a time from an explicit list, NOT with a
-      # workspace-wide `deno publish`: the workspace also contains the three
-      # starter stubs, which export nothing and must not reach JSR.
-      #
-      # The list is ordered so a dependency is always published before its
-      # dependents (common → kernel/runtime → everything else). JSR rejects a
-      # package whose dependency version does not yet exist.
-      #
-      # PREREQUISITE: every package must already EXIST on JSR. Creating the
-      # scope is not enough, and `deno publish` cannot create packages without
-      # a terminal — it fails with "Following packages don't exist" and a
-      # creation link each. Run `deno task release:create-packages` once (see
-      # docs/releasing.md); after that this job is self-sufficient.
-      #
-      # No JSR_TOKEN here: the runner's OIDC identity authenticates, which is
-      # why `id-token: write` is requested above.
-      # Invoked through the deno task, NOT as an inlined `deno run`. The task
-      # already carries the right permission set; the workflow used to duplicate
-      # it and the duplicate drifted, omitting --allow-env and --allow-net, so
-      # this step failed for three consecutive releases. One definition, one
-      # place to keep correct.
+      - name: Upload resolved-set artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-set
+          path: ${{ runner.temp }}/resolved-set.json
+          if-no-files-found: error
+
+  publish:
+    needs: gates
+    environment: npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: pnpm/action-setup@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
+      - name: Install build dependencies without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Publish
         run: |
           deno task release:publish \
             ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
 
-      # ── Release object ───────────────────────────────────────────────────
-      # LAST, and deliberately so: a failure here must not cost the publish.
-      # If this step goes red the packages are already live on JSR — do NOT
-      # re-run the job, because JSR versions are immutable and the publish
-      # would fail on every package. Create the object by hand instead:
-      #   deno run --allow-read scripts/release-notes.ts <version> > notes.md
-      #   gh release create v<version> --notes-file notes.md --prerelease
-      #
-      # Tags before v0.1.0-alpha.8 carry no Release object by decision and are
-      # not backfilled; alpha.8's was created by hand, and this step is what
-      # makes alpha.9 onward automatic.
-      #
-      # The notes come from a tested script, not from inlined shell — see that
-      # file's header, and the Publish step's comment above for what a drifting
-      # workflow copy has already cost this project once.
+  release:
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
+      - uses: actions/download-artifact@v4
+        with:
+          name: resolved-set
+          path: ${{ runner.temp }}
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
         env:

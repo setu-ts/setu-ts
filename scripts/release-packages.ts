@@ -1,21 +1,8 @@
 /**
- * The ordered list of workspace packages that are published to JSR.
- *
- * This is an EXPLICIT allow-list rather than a scan of the `workspace` array in
- * the root `deno.json` for two reasons. First, ORDER: a scan yields no ordering,
- * and publish order is load-bearing (below). Second, CONTROL: JSR versions are
- * immutable and cannot be withdrawn — only yanked — so a workspace-wide
- * `deno publish` would push anything newly added to the workspace the moment it
- * appeared, including a package not yet meant to ship. Until M36 the list also
- * excluded the three starter stubs, which exported nothing; they are now real
- * composition libraries in Tier 6 and `UNPUBLISHED_PACKAGES` is empty.
- *
- * ORDER IS LOAD-BEARING. JSR rejects a package whose declared dependency
- * version does not yet exist, so a dependency must be published before its
- * dependents. `common` has no in-repo dependency; `kernel` depends on `common`;
- * `runtime`, `testing`, `sdk`, and `exceptions` depend on `common` (only `sdk`
- * is type-level); every plugin depends on `common` (and `openapi-plugin`
- * additionally on `kernel`).
+ * The explicit dependency-ordered allow-list of packages published to npm.
+ * Ordering puts dependencies before dependents so a partial release remains
+ * installable. Explicit membership prevents a newly added workspace member
+ * from shipping without review; release:verify accounts for every member.
  */
 export const PUBLISHED_PACKAGES: readonly string[] = [
   // Tier 1 — no in-repo dependencies.
@@ -107,7 +94,7 @@ export interface PublicationHold {
 /**
  * Packages that block EVERY release while they are listed here.
  *
- * A hold is enforced at publish time only. `scripts/publish-packages.ts`
+ * A hold is enforced at publish time only. `scripts/npm-publish.ts`
  * refuses before publishing anything, `--dry-run` included, so a release
  * rehearsal warns early. `scripts/verify-release.ts` only reports a hold,
  * because CI runs it on every pull request and a failure there would turn
