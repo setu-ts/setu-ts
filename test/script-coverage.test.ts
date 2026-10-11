@@ -67,12 +67,13 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
 }
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly sixteen canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(16);
+  it('has exactly seventeen canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(17);
     // M111a: the manifest generator whole, and the boot gate's core but not
     // its spawning runner.
     expect(SCRIPT_TARGETS).toContain('scripts/node-manifests.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/node-build-gate.ts');
+    expect(SCRIPT_TARGETS).toContain('scripts/version-sites.ts');
     expect(SCRIPT_TARGETS).not.toContain('scripts/check-node-build.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/release-shape.ts');
     // The release bump and the changelog PR check: each has a thin I/O seam

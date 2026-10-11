@@ -99,6 +99,10 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // `rewriteReferences` are the decidable core, and a wrong edit here is a
   // published package depending on the previous release.
   'scripts/bump-version.ts',
+  // `release:verify` check 1's Node half (M111a §3.5): a package.json or
+  // src/version.ts that disagrees with the tag. Its failure mode is a SILENT
+  // PASS — an npm package whose manifest or runtime VERSION names the wrong release.
+  'scripts/version-sites.ts',
   // Check 10's pure core: the bump kind against the section's BREAKING count.
   // Its failure mode is a patch that breaks a caret pin's reader.
   'scripts/release-shape.ts',

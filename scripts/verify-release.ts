@@ -56,6 +56,7 @@
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
 import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
+import { versionSiteProblems } from './version-sites.ts';
 import { extractReleaseNotes } from './release-notes.ts';
 import {
   checkChangelogPrs,
@@ -89,15 +90,6 @@ async function readConfig(dir: string): Promise<PackageConfig | null> {
   }
 }
 
-/** Reads and parses a JSON file, or null when absent/unparseable. */
-async function readJsonFile(path: string): Promise<unknown | null> {
-  try {
-    return JSON.parse(await Deno.readTextFile(path));
-  } catch {
-    return null;
-  }
-}
-
 // ── 1 & 2: versions and cross-package specifiers ────────────────────────────
 
 // Matches `jsr:@setu-ts/<pkg>@<range>` anywhere in an import value.
@@ -118,25 +110,14 @@ for (const dir of PUBLISHED_PACKAGES) {
   // generated package.json, and the src/version.ts literal the npm build
   // ships. A bump that misses either new site publishes a package whose
   // npm manifest or runtime VERSION disagrees with the tag.
-  const npmManifest = await readJsonFile(`${dir}/package.json`) as { version?: string } | null;
-  if (npmManifest === null) {
-    problems.push(`${dir}: no readable package.json (the Node build's manifest)`);
-  } else if (npmManifest.version !== expected) {
-    problems.push(
-      `${dir}: package.json version is ${npmManifest.version ?? '(missing)'}, expected ${expected}`,
-    );
-  }
-  // A member that reads no version ships no constant (plan §3.5) — its absence
-  // is correct; only a PRESENT constant can disagree with the tag.
-  const versionSource = await Deno.readTextFile(`${dir}/src/version.ts`).catch(() => null);
-  if (versionSource !== null) {
-    const match = /export const VERSION: string = '([^']*)'/.exec(versionSource);
-    if (match === null) {
-      problems.push(`${dir}: src/version.ts carries no recognizable VERSION literal`);
-    } else if (match[1] !== expected) {
-      problems.push(`${dir}: src/version.ts VERSION is ${match[1]}, expected ${expected}`);
-    }
-  }
+  problems.push(
+    ...versionSiteProblems(
+      dir,
+      expected,
+      await Deno.readTextFile(`${dir}/package.json`).catch(() => null),
+      await Deno.readTextFile(`${dir}/src/version.ts`).catch(() => null),
+    ),
+  );
 
   for (const [alias, specifier] of Object.entries(config.imports ?? {})) {
     // Only in-repo packages are checked; a third-party specifier is not ours.
