@@ -50,7 +50,7 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
 | Whole-suite coverage in one Vitest process | probe                                                                            | OOM. The main process ran out of a 4 GB heap, then of an 8 GB heap (`FATAL ERROR: Reached heap limit`), and four quarter-shards (`--shard`) each ran out of a 6 GB heap.                                                                                                                                                                                       |
 | Per-package coverage                       | probe, one Vitest run per workspace member, `coverage.include = <member>/src/**` | Every member completes; all 51 together take about 110 s locally with coverage on. 18,071 tests collected across 1,549 files; 17,602 pass, 423 fail, 46 skipped before any hand conversion.                                                                                                                                                                    |
 | Vitest skips the report on failure         | probe                                                                            | Without `coverage.reportOnFailure`, a member with any failing test writes NO coverage summary — a per-file gate reading it would silently miss that member.                                                                                                                                                                                                    |
-| Coverage counting drift, Node vs Deno      | probe vs the Deno per-file table from M111a's last full run                      | In the 16 members whose tests ALL pass on Node, 17 of 141 files score more than 2 points lower under Vitest's V8 provider than under `deno coverage`, and 5 fall below 90% (e.g. `logger-plugin.ts` branch 87.8 vs 98.0; `abort.ts` function 85.7 vs 100). The cause is counting, not lost tests.                                                              |
+| Coverage counting drift, Node vs Deno      | probe vs the Deno per-file table from M111a's last full run                      | In the 16 members whose tests ALL pass on Node, 17 of 141 files score more than 2 points lower under Vitest's V8 provider than under `deno coverage`, and 5 fall below 90% (e.g. `logger-plugin.ts` branch 87.8 vs 98.0; `abort.ts` function 85.7 vs 100). Attributed to counting rather than lost tests; §3.7 proves it per file.                             |
 | Deno per-file leaf counts                  | M111a's last `deno task test:coverage` log, pretty reporter                      | Each leaf prints as `./<file> => <suite> ... <test> ... ok`; parsing leaves (lines with no deeper child) gives 17,127 leaf tests in 1,361 files. A file whose whole suite is ignored prints no `=>` line, which is why the file count is below 1,549.                                                                                                          |
 | Shared-resource isolation rule             | `scripts/test-partition-rules.ts:61` (`isolationReason`)                         | Pure function over `(path, source)`; `ROOTS = ['packages', 'test']` (`:21`). Importable by a TypeScript Vitest config.                                                                                                                                                                                                                                         |
 | CI test steps                              | `.github/workflows/ci.yml:443`, `release.yml:373`, `drift.yml:453`               | All three run `deno task test` / `test:coverage` over `packages` AND `test`. `website.yml:74` runs `deno task test` inside the website's own directory and is unaffected.                                                                                                                                                                                      |
@@ -74,11 +74,16 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
 - **Decision:** package tests (`packages/**/test`) run in the **Node lane** under Vitest. A named
   subset of the same converted files also runs in the **Deno lane** (§3.8). The root `test/`
   directory (49 files; 30 of them import `scripts/*.ts`, which use `Deno.*`) is not converted and
-  keeps running under `deno test` with `@std/testing` until 111e.
+  keeps running under `deno test` with `@std/testing` until 111e — with one carve-out: the new
+  directory `test/node/` holds the tests of NEW Node-side tooling and runs in the **tooling target**
+  (§3.6), never under `deno test`. The root `deno.json` `test` task excludes `test/node/`.
 - **Why:** converting the root suite now means first porting the scripts it tests, which is 111e's
-  whole scope; leaving it on Deno keeps every gate green at every commit, which M111 requires.
-- **Test home:** CI runs all three (§3.12); `test/vitest-config.test.ts` asserts the Node lane's
-  include globs never match a root `test/` file.
+  whole scope; leaving it on Deno keeps every gate green at every commit, which M111 requires. The
+  carve-out exists because a file that tests the Vitest config or a Node helper proves nothing about
+  Node when Deno runs it.
+- **Test home:** CI runs all three (§3.12); `test/node/vitest-config.test.ts` asserts the Node
+  lane's include globs never match a root `test/` file, and `test/test-lanes.test.ts` asserts the
+  root `deno.json` `test` task excludes `test/node/`.
 
 ### 3.2 The codemod, committed and extended
 
@@ -99,9 +104,11 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
   `vitest`, which the Deno toolchain does not resolve here); 111d's ESLint covers it.
 - **Why:** the ROADMAP requires the change to be reproducible; the measured load errors (§1) show
   the prepared scope missed helpers and test-side specifiers.
-- **Test home:** `scripts/codemods/std-to-vitest.test.ts` (Vitest, Node lane) — fixture inputs for
-  each rewrite, the scope-aware `it` binding, the zod alias mapping, and `--check` exiting 1 on an
-  unawaited `rejects`.
+- **Test home:** `scripts/codemods/std-to-vitest.test.ts` (Vitest, the tooling target of §3.6 — not
+  a package member, so the per-member runs would never pick it up) — fixture inputs for each
+  rewrite, the scope-aware `it` binding, the zod alias mapping, and `--check` exiting 1 on an
+  unawaited `rejects`. `scripts/script-coverage.ts` (Deno) excludes `scripts/codemods/`, so each
+  file is measured by exactly one runner.
 
 ### 3.3 TC39 decorators: an esbuild pre-transform
 
@@ -115,7 +122,7 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
   under `Symbol.for('Symbol.metadata')`, the key the M111a carrier installs, so decorator metadata
   is read identically under the test transform and the published `tsc` output.
 - **Test home:** the decorator-plugin suite itself (it fails to load without the plugin), plus
-  `test/vitest-config.test.ts` asserting the plugin is present and ordered `pre`.
+  `test/node/vitest-config.test.ts` asserting the plugin is present and ordered `pre`.
 
 ### 3.4 `@setu-ts/*` resolves to source
 
@@ -125,22 +132,25 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
 - **Why:** package `exports` point at `dist/`, so without it every cross-package import would need a
   prior `tsc -b` and coverage would attribute to built `.js` rather than `src`. A published
   `"source"` export condition was rejected: it would ship in every tarball for a test-only need.
-- **Test home:** `test/vitest-config.test.ts` resolves `@setu-ts/common`, a subpath export
+- **Test home:** `test/node/vitest-config.test.ts` resolves `@setu-ts/common`, a subpath export
   (`@setu-ts/runtime/worker`) and a starter, and asserts each lands under `src/`.
 
 ### 3.5 Shared-resource suites run alone
 
-- **Decision:** each package's Vitest run has two projects: `isolated` (`fileParallelism: false`)
-  holding every file for which `isolationReason(path, source)`
-  (`scripts/test-partition-rules.ts:61`) is non-null, and `parallel` holding the rest, ordered with
-  `sequence.groupOrder` so the isolated project finishes first. The config imports the existing rule
-  rather than restating it.
+- **Decision:** each package's Vitest run starts from `packages/<member>/test/**/*.test.{ts,tsx}`
+  minus `NODE_EXCLUDED_TESTS` (§3.8, imported from `scripts/test-lanes.ts`), then splits what is
+  left into two projects: `isolated` (`fileParallelism: false`) holding every file for which
+  `isolationReason(path, source)` (`scripts/test-partition-rules.ts:61`) is non-null, and `parallel`
+  holding the rest, ordered with `sequence.groupOrder` so the isolated project finishes first. The
+  config imports both lists rather than restating them.
 - **Why:** the suite partition (AI_GUIDELINES §6.9) exists because real-backend, socket and
   subprocess suites fail intermittently when run concurrently; Vitest runs files in parallel by
   default, so dropping the rule would reintroduce exactly that. One rule, read by both runners,
   cannot drift.
-- **Test home:** `test/vitest-config.test.ts` — a file carrying `REDIS_URL` lands in `isolated`, a
-  pure unit test in `parallel`, and the two include lists are disjoint and cover every test file.
+- **Test home:** `test/node/vitest-config.test.ts` — a file carrying `REDIS_URL` lands in
+  `isolated`, a pure unit test in `parallel`, the two include lists are disjoint, together they
+  cover every package test file except `NODE_EXCLUDED_TESTS`, and no `NODE_EXCLUDED_TESTS` file
+  appears in neither project.
 
 ### 3.6 Coverage: per package, per file, enforced by the runner
 
@@ -151,28 +161,61 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
   (`scripts/test-node.ts`, Deno until 111e) iterates the members, fails if any run fails, and prints
   one combined per-file table. The bar is applied to Vitest's numbers; a file that drops below it
   because V8-under-Vitest counts differently (§1) gets tests in this milestone, never a lowered bar.
+  - **The tooling target.** After the members, the runner makes one more Vitest run over the Node
+    tooling this milestone adds: tests `scripts/codemods/**/*.test.ts` and `test/node/**/*.test.ts`,
+    coverage over `scripts/codemods/*.ts`, `vitest.config.ts` and `test/node-helpers.ts`, same
+    thresholds. Without it those tests are collected by nothing (they are not under any member).
+  - **Permissions.** The task is
+    `deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts`:
+    `pnpm exec vitest` is the only process spawned, the per-member reports land under
+    `coverage-node/`, and the child inherits the environment without the runner reading it.
+    `NODE_OPTIONS=--max-old-space-size=…` is set on the child, which needs no `--allow-env`.
+  - **Node version.** The lane gates on Node 24, the version CI's `setup-node` already pins for
+    M111a. Node 22 is not run against the suite: the published artifact's Node 22 behaviour is
+    already proven by M111a's `check:node-build` boot, and a second 18,000-test run doubles the job
+    for little; whether 1.0 gates on a Node 22 suite run is M40's call. Bun stays a recorded smoke
+    (§3.12), because the suite's subprocess and socket tests assume Node's `child_process`/`net`.
 - **Why:** a single Vitest process exhausts an 8 GB heap on the whole suite and 6 GB per quarter
   shard (§1), while per-member runs complete in about 110 s. Per-member scope is also stricter than
   today: a file can no longer pass only because another package's tests happened to execute it,
   which retires CLAUDE.md's "a targeted FAIL is not authoritative" caveat (C4). `reportOnFailure` is
   mandatory, since without it a member with one failing test writes no summary and escapes the gate.
-- **Test home:** `test/vitest-config.test.ts` asserts the threshold object and `reportOnFailure`;
-  the before/after table comparison (§3.7) proves the swap dropped no file unnoticed.
+- **Test home:** `test/node/vitest-config.test.ts` asserts the threshold object and
+  `reportOnFailure`; `test/unit/test-node.test.ts` asserts the tooling target is run, and pins the
+  task's grants exactly (a widened grant fails it); the before/after table comparison (§3.7) proves
+  the swap dropped no file unnoticed.
 
 ### 3.7 The swap is proven by counts and tables, not by a green run
 
-- **Decision:** `scripts/codemods/swap-report.ts`, run once and attached to the PR, compares:
-  - per-file LEAF test counts: Deno's pretty-reporter `./<file> => … ... ok|ignored` lines (leaves
-    are lines with no deeper child) against Vitest's JSON `assertionResults`. A file whose suite is
-    wholly ignored on Deno prints no `=>` line, so its count is taken from the source's `it(` calls
-    instead. Any file with fewer Vitest tests than Deno leaves fails the report;
-  - per-file coverage, Deno's table against Vitest's, listing every file that moved down.
+- **Decision:** `scripts/codemods/swap-report.ts` compares, per file:
+  - LEAF test counts: Deno's pretty-reporter `./<file> => … ... ok|ignored` lines (leaves are lines
+    with no deeper child) against Vitest's JSON `assertionResults`. A file whose suite is wholly
+    ignored on Deno prints no `=>` line, so its count is taken from the source's `it(` calls
+    instead. A file with FEWER Vitest tests fails the report. A file with MORE is listed too, and
+    each one must carry a classified cause in the report: `deno-uncounted` (the Deno log printed no
+    leaf for it — wholly-ignored suite, or a leaf the parser could not see), or `registration`.
+    `registration` fails the report: it means one test name collected twice, a `describe` callback
+    run twice or a loop registering more cases than on Deno, and is a defect in the conversion. The
+    probe's +944 (18,071 vs 17,127) must be fully attributed before merge; an unclassified gain
+    fails the report;
+  - coverage, Deno's table against Vitest's, listing every file that moved down — and, for each, its
+    leaf counts on both sides. A file that moved down with EQUAL counts is counting drift (§1) and
+    gets tests; one with fewer Vitest tests is a lost test and is restored.
+- **When it runs, and what protects parity afterwards.** The comparison needs a Deno run of the
+  PACKAGE tests, which exists only before the swap. It is therefore a one-time proof: the report is
+  generated from the pre-swap Deno log and the converted run, committed as
+  `plans/evidence/m111b-swap-report.md`, and the PR does not merge unless it shows zero failures.
+  After merge there is no Deno side to compare against, so parity is not re-checked. The lasting
+  guard against a test that silently stops collecting is the per-file coverage bar (§3.6): a file
+  whose tests collect nothing covers nothing and fails it.
 - **Why:** the ROADMAP's exit criterion is that the converted suite collects as many tests as the
-  Deno run; a green run that silently collects fewer is the failure being guarded against. The probe
-  already shows Deno 17,127 leaves vs Vitest 18,071 tests, and only a per-file comparison says which
-  side a difference is on.
-- **Test home:** `scripts/codemods/swap-report.test.ts` — the leaf parser on recorded pretty output
-  (nested suites, an ignored suite), and the comparison flagging a file that lost a test.
+  Deno run; a green run that silently collects fewer is the failure being guarded against, and a run
+  that collects MORE can hide duplicate registration. Only a per-file comparison says which side a
+  difference is on.
+- **Test home:** `scripts/codemods/swap-report.test.ts` (tooling target) — the leaf parser on
+  recorded pretty output (nested suites, an ignored suite), a file that lost a test failing, a
+  duplicate registration failing, an unclassified gain failing, and a coverage drop listed with its
+  counts.
 
 ### 3.8 The Deno lane: one shim, the same files
 
@@ -187,15 +230,19 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
   - `DENO_LANE_TESTS`: the runtime Deno-adapter and Deno-real tests (`deno-*.test.ts`,
     `integration/deno-http-adapter.test.ts`, the Deno leg of `read-stream-real` and `signal-real`)
     and the diagnostics-plugin e2e/integration suites that drive the Deno-only listener.
-  - A file in the Deno lane must still pass in the Node lane unless it is also in `DENO_LANE_TESTS`'
-    `nodeExcluded` subset (the listener suites, and `deno-*` files whose subject is a Deno global).
+  - `NODE_EXCLUDED_TESTS` (a third exported list, a subset of `DENO_LANE_TESTS`): the listener
+    suites, and `deno-*` files whose subject is a Deno global. Every other Deno-lane file must also
+    pass in the Node lane. The Node lane's include is computed from this list (§3.5), so excluding a
+    file is one edit in one place.
+  - The shim exports no `vi`. A Deno-lane file therefore may not import `vi` from `vitest`; none
+    does today, and the lane test refuses one that does, so the gap cannot open silently.
 - **Why:** Deno stays a supported runtime, so the proofs that its adapter and its only listener work
   must keep running on Deno; a shim keeps ONE source per test instead of a forked copy. Splitting
   the coverage gate by an explicit source list keeps each file measured by exactly one runner.
 - **Test home:** `test/deno-lane/vitest-shim.test.ts` (Deno) — each translated call form registers
-  the right `@std/testing` test (including `skip`); `test/test-lanes.test.ts` (Deno) — the two lists
-  exist on disk, `DENO_ONLY_SOURCES` is disjoint from the Node lane's measured set, and every
-  `nodeExcluded` file is in `DENO_LANE_TESTS`.
+  the right `@std/testing` test (including `skip`); `test/test-lanes.test.ts` (Deno) — the three
+  lists exist on disk, `DENO_ONLY_SOURCES` is disjoint from the Node lane's measured set,
+  `NODE_EXCLUDED_TESTS` ⊆ `DENO_LANE_TESTS`, and no `DENO_LANE_TESTS` file imports `vi`.
 
 ### 3.9 Deno-API conversions in the Node lane
 
@@ -207,10 +254,21 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
   the forbidden-header probes need a raw socket; `fetch` strips `Upgrade`/`Connection`);
   `globalThis.addEventListener('unhandledrejection')` → `process.on('unhandledRejection')`;
   `data:application/typescript` module imports → a temp `.ts` file. A shared helper module outside
-  any package, `test/node-helpers.ts`, holds `unusedPort`, `tempDir` and `run` so the 191 files do
-  not each restate them.
+  any package, `test/node-helpers.ts`, holds `unusedPort`, `tempDir`, `run` and `denoBinary` so the
+  191 files do not each restate them.
+  - **Tests that spawn `deno` itself.** 18 package test files run the Deno binary through
+    `Deno.execPath()`: `cli` (13 — the scaffold, drift and e2e gates run `deno check`/`fmt`/`lint`
+    on generated projects), `sdk` (2), `decorator-plugin`, `localization-plugin` and
+    `storage-plugin` (1 each). On Node `process.execPath` is `node`, so they call `denoBinary()`,
+    which resolves `deno` from `PATH`. The Node lane therefore REQUIRES Deno on `PATH` for as long
+    as these tests exist — generated projects can still target Deno, so that is not a 111e/111f
+    change. CI installs Deno in every test job already. A missing binary FAILS with an error naming
+    `deno` and `PATH`; it is not a skip, because a skipped scaffold gate is exactly the silent hole
+    the exit-77 convention exists to prevent.
 - **Why:** one mapping per API keeps the hand conversion mechanical and reviewable.
-- **Test home:** the converted suites themselves, plus `test/node-helpers.test.ts`.
+- **Test home:** the converted suites themselves, plus `test/node/node-helpers.test.ts` (tooling
+  target, so it runs on Node) — a free port binds, a temp dir is removed, `run` returns code and
+  output, `denoBinary` finds `deno` on `PATH` and throws the named error on an empty `PATH`.
 
 ### 3.10 Permission-scoped proofs
 
@@ -238,14 +296,18 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
 
 - **Decision:** root `package.json` gains `test` and `test:coverage`, both invoking
   `scripts/test-node.ts` (run by Deno until 111e; `test` without coverage); `deno.json` `test` and
-  `test:coverage` narrow to the root `test/` directory plus `script-coverage`, and gain
-  `test:deno-lane`. `ci.yml`'s test job runs, in order: `pnpm test:coverage`,
-  `deno task test:deno-lane`, `deno task test:coverage`; the same three replace `release.yml:373`
-  and `drift.yml:453`. `test/apps-gate.test.ts`'s guard pins change from `ignore:` to `skip:` in the
-  codemod's commit. One Bun run of the Node lane is recorded in the PR as a smoke, not a gate.
-- **Why:** all three lanes are gates; dropping any one would make a converted file, a Deno-only
-  proof, or a script test unverified.
-- **Test home:** `test/apps-gate.test.ts` (the workflow pins), `test/vitest-config.test.ts`.
+  `test:coverage` narrow to the root `test/` directory (excluding `test/node/`) plus
+  `script-coverage`, and gain `test:deno-lane`. `ci.yml`'s test job runs, in order:
+  `node scripts/codemods/std-to-vitest.ts --check`, `pnpm test:coverage` (members plus the tooling
+  target), `deno task test:deno-lane`, `deno task test:coverage`; the same four replace
+  `release.yml:373` and `drift.yml:453`. `test/apps-gate.test.ts`'s guard pins change from `ignore:`
+  to `skip:` in the codemod's commit. One Bun run of the Node lane is recorded in the PR as a smoke,
+  not a gate (§3.6).
+- **Why:** all four steps are gates; dropping any one would make an unawaited async assertion, a
+  converted file, a Deno-only proof, or a script test unverified.
+- **Test home:** `test/apps-gate.test.ts` pins the four steps as `run:` lines inside each workflow's
+  test job, in order (the v0.2.0 lesson: a workflow-wide substring passes with the step commented
+  out); `test/node/vitest-config.test.ts`.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -260,7 +322,7 @@ tests, tooling and documentation only.
 
 | Option              | Consumer                                            | Behavior (per implementation)                                    |
 | ------------------- | --------------------------------------------------- | ---------------------------------------------------------------- |
-| `--check` (codemod) | CI test job                                         | Exit 1 listing each unawaited async assertion; exit 0 otherwise. |
+| `--check` (codemod) | the first step of the CI test job (§3.12)           | Exit 1 listing each unawaited async assertion; exit 0 otherwise. |
 | `--write` (codemod) | the one conversion commit, and anyone re-running it | Rewrite files in place; without it, report only.                 |
 
 ## 5. Implementation files
@@ -270,14 +332,16 @@ tests, tooling and documentation only.
 | `vitest.config.ts`                           | shared config: decorator transform, `@setu-ts` resolution, projects, thresholds |
 | `scripts/codemods/std-to-vitest.ts`          | the committed, extended codemod (§3.2)                                          |
 | `scripts/codemods/swap-report.ts`            | per-file count and coverage comparison (§3.7)                                   |
-| `scripts/test-node.ts`                       | per-member Vitest runner and combined per-file table (§3.6)                     |
-| `scripts/test-lanes.ts`                      | `DENO_LANE_TESTS`, `DENO_ONLY_SOURCES` (§3.8)                                   |
+| `scripts/test-node.ts`                       | per-member + tooling-target Vitest runner, combined per-file table (§3.6)       |
+| `scripts/test-lanes.ts`                      | `DENO_LANE_TESTS`, `NODE_EXCLUDED_TESTS`, `DENO_ONLY_SOURCES` (§3.8)            |
 | `test/deno-lane/vitest-shim.ts`, `deno.json` | the Deno lane's `vitest` shim and import map (§3.8)                             |
-| `test/node-helpers.ts`                       | `unusedPort`, `tempDir`, `run` for converted tests (§3.9)                       |
+| `test/node-helpers.ts`                       | `unusedPort`, `tempDir`, `run`, `denoBinary` for converted tests (§3.9)         |
+| `plans/evidence/m111b-swap-report.md`        | the one-time parity proof (§3.7)                                                |
 | `packages/**/test/**`                        | converted (codemod + hand conversion)                                           |
 | `package.json`, `pnpm-workspace.yaml`        | `vitest`, `@vitest/coverage-v8`, `esbuild`, `zod-v3`, `zod-v4`; `allowBuilds`   |
 | `deno.json`                                  | narrowed `test` tasks, `test:deno-lane`, `scripts/codemods/` excluded           |
-| `.github/workflows/{ci,release,drift}.yml`   | the three test lanes (§3.12)                                                    |
+| `.github/workflows/{ci,release,drift}.yml`   | the four test steps (§3.12)                                                     |
+| `CONTRIBUTING.md`                            | the Node lane needs Node 24, pnpm and Deno on `PATH` (§3.6, §3.9)               |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -285,15 +349,16 @@ No package `src/` file changes. The per-file bar is newly enforced by the runner
 `src` file (Node lane) and over `DENO_ONLY_SOURCES` (Deno lane); files that fall below it after the
 swap get tests here (§3.6). The new tooling files are tested as follows.
 
-| Test file                                | src covered                         | Key assertions                                                                                  |
-| ---------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `scripts/codemods/std-to-vitest.test.ts` | `scripts/codemods/std-to-vitest.ts` | each rewrite; scope-aware `it`; zod aliases; helpers in scope; `--check` exits 1 when it should |
-| `scripts/codemods/swap-report.test.ts`   | `scripts/codemods/swap-report.ts`   | leaf parsing of nested and ignored suites; a lost test fails; a coverage drop is listed         |
-| `test/vitest-config.test.ts`             | `vitest.config.ts`                  | decorator plugin `pre`; resolution to `src`; projects disjoint and complete; thresholds         |
-| `test/test-lanes.test.ts`                | `scripts/test-lanes.ts`             | lists exist; sources disjoint from the Node lane; `nodeExcluded` ⊆ lane tests                   |
-| `test/deno-lane/vitest-shim.test.ts`     | `test/deno-lane/vitest-shim.ts`     | every call form translates, `skip` included                                                     |
-| `test/node-helpers.test.ts`              | `test/node-helpers.ts`              | a free port binds; a temp dir is removed; `run` returns code and output                         |
-| `test/unit/test-node.test.ts`            | `scripts/test-node.ts`              | a failing member fails the run; the combined table lists every member's files                   |
+| Test file (runner)                                 | src covered                         | Key assertions                                                                                                                             |
+| -------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `scripts/codemods/std-to-vitest.test.ts` (tooling) | `scripts/codemods/std-to-vitest.ts` | each rewrite; scope-aware `it`; zod aliases; helpers in scope; `--check` exits 1 when it should                                            |
+| `scripts/codemods/swap-report.test.ts` (tooling)   | `scripts/codemods/swap-report.ts`   | nested and ignored suites parsed; lost test fails; duplicate registration fails; unclassified gain fails; drop listed                      |
+| `test/node/vitest-config.test.ts` (tooling)        | `vitest.config.ts`                  | decorator plugin `pre`; resolution to `src`; projects disjoint and complete; `NODE_EXCLUDED_TESTS` absent; thresholds                      |
+| `test/node/node-helpers.test.ts` (tooling)         | `test/node-helpers.ts`              | a free port binds; a temp dir is removed; `run` returns code and output; `denoBinary` found / named error on empty PATH                    |
+| `test/test-lanes.test.ts` (Deno)                   | `scripts/test-lanes.ts`             | lists exist; sources disjoint from the Node lane; excluded ⊆ lane tests; no lane file imports `vi`; `test/node/` excluded from `deno test` |
+| `test/deno-lane/vitest-shim.test.ts` (Deno lane)   | `test/deno-lane/vitest-shim.ts`     | every call form translates, `skip` included                                                                                                |
+| `test/unit/test-node.test.ts` (Deno)               | `scripts/test-node.ts`              | a failing member fails the run; the tooling target runs; the table lists every file; the task's grants pinned exactly                      |
+| `test/apps-gate.test.ts` (Deno, existing)          | the three workflows                 | the four test steps present as `run:` lines inside each test job, in order; `skip:` guard pins                                             |
 
 ## 7. Verification gates
 
@@ -303,15 +368,16 @@ deno task check:plan
 deno task fmt:check
 deno task lint
 deno task check
-pnpm test:coverage                 # Node lane: exits non-zero on any file under 90%
 deno task test:deno-lane           # Deno lane: same bar over DENO_ONLY_SOURCES
 deno task test:coverage            # root test/ + script coverage
 node scripts/codemods/std-to-vitest.ts --check
+pnpm test:coverage                 # Node lane + tooling target: non-zero on any file under 90%
 deno task publish:check
 deno task release:verify 0.8.0
 ```
 
-Plus the one-shot evidence attached to the PR: the swap report (§3.7) and the Bun smoke run.
+Plus the one-time evidence: the committed swap report `plans/evidence/m111b-swap-report.md` (§3.7),
+which must show zero failures and every gain classified, and the Bun smoke run recorded in the PR.
 
 ## 8. Risks & mitigations
 
@@ -324,7 +390,14 @@ Plus the one-shot evidence attached to the PR: the swap report (§3.7) and the B
 - **The Deno-lane shim diverges from Vitest semantics** for a call form the lane uses → the shim's
   own test enumerates every form the lane's files use, and the lane runs in CI on every PR.
 - **A converted test passes vacuously** (a `skip` evaluated wrongly, a describe that collects
-  nothing) → the per-file count comparison fails any file that collects fewer tests than Deno did.
+  nothing) → at the swap, the per-file count comparison fails any file that collects fewer tests
+  than Deno did; after merge, a file that collects nothing covers nothing and fails the per-file bar
+  (§3.7).
+- **A converted test registers twice** (more Vitest tests than Deno leaves) → the swap report
+  requires a classified cause for every gain and fails `registration`.
+- **The Node lane is run without Deno installed** (a contributor's Node-only machine) → the 18 files
+  that spawn `deno` fail with an error naming `deno` and `PATH`, never skip (§3.9);
+  `CONTRIBUTING.md` states the requirement.
 - **Memory on the 16 GB CI runner** → per-member runs peaked well under the local 6 GB heap; the
   runner sets `--max-old-space-size` explicitly so a regression fails loudly rather than by
   OOM-kill.
