@@ -177,7 +177,7 @@ export function toLoadFailure(error: unknown): LaunchDarklyModuleError {
     return error;
   }
   return new LaunchDarklyModuleError(
-    'Failed to load @launchdarkly/node-server-sdk Install it to use the ' +
+    'Failed to load @launchdarkly/node-server-sdk. Install it to use the ' +
       "'launchdarkly' feature-flags provider, or inject a client through " +
       `options.client. Cause: ${error instanceof Error ? error.message : String(error)}`,
   );

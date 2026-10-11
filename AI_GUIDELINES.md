@@ -883,8 +883,9 @@ A public API is any export from a package's `src/index.ts` file.
 
 - Each package must be as small as possible.
 - Heavy dependencies (database drivers, broker clients, cloud SDKs) are never bundled or eagerly
-  imported — adapters load them via dynamic `import()` of `npm:` specifiers, or accept a client
-  instance injected through plugin options.
+  imported — adapters load them via a dynamic `import()` of the LITERAL bare package name (§12.2;
+  `npm:`/`jsr:` specifiers in `src` are refused by the M111a audit), or accept a client instance
+  injected through plugin options.
 - Use feature detection to avoid bundling unused code.
 - Bundle size is monitored in CI.
 

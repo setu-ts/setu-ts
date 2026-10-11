@@ -74,7 +74,7 @@ export function toRedisLoadFailure(error: unknown): RedisModuleError {
     return error;
   }
   return new RedisModuleError(
-    "Failed to load ioredis Install it to use the 'redis' realtime " +
+    "Failed to load ioredis. Install it to use the 'redis' realtime " +
       'backplane transport, or inject client and subscriber through options. ' +
       `Cause: ${error instanceof Error ? error.message : String(error)}`,
   );
