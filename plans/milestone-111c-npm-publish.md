@@ -18,57 +18,59 @@ configuration, exit proof) → 111e/111f.
   `homepage`, `bugs`, `publishConfig`, `sideEffects`) and a generated per-member `LICENSE`; the
   `sideEffects` audit; an npm publisher that packs with `pnpm pack`, checks each packed manifest,
   skips an already-published version and publishes the tarball with `npm publish`; a split
-  `release.yml` whose publishing job alone holds `id-token: write`, with a one-time token path for
-  the bootstrap; `release:verify` and the `@since` gate re-pointed at npm, and the JSR-only checks
-  retired with reasons; `compat/` switched to `@setu-ts/*` from npm; the CI dry run switched from
-  `deno publish --dry-run` to packing and `npm publish --dry-run` for all 51; the pack-and-boot gate
-  extended to install and import all 51 tarballs and to prove the `sideEffects` declaration under a
-  real bundler; the release runbook's publish sections rewritten for npm.
-- **NOT this milestone:** bumping to `0.9.0` and publishing it, the bootstrap token, trusted-
-  publisher configuration and the exit proof (the cut, after 111d); the CLI `bin` and Node-default
-  projects (111d); porting scripts to Node, Prettier/ESLint, removing `deno.json`/`deno.lock`, and
-  moving `resolved-set.json` from `deno.lock` to `pnpm-lock.yaml` (111e); install lines in docs and
-  READMEs, `docs/upgrading.md`, the JSR README/description sunset, and the dormant JSR admin scripts
-  (`create-jsr-packages`, `link-jsr-repos`, `verify-jsr-repos`, `set-jsr-metadata`,
-  `archive-old-scope`), which 111f uses once more to point each JSR page at npm (111f).
+  `release.yml` whose publishing job alone holds `id-token: write`, authenticated by OIDC alone,
+  plus a placeholder generator for the one-time name bootstrap; `release:verify` and the `@since`
+  gate re-pointed at npm, and the JSR-only checks retired with reasons; `compat/` switched to
+  `@setu-ts/*` from npm; the CI dry run switched from `deno publish --dry-run` to packing and
+  `npm publish --dry-run` for all 51; the pack-and-boot gate extended to install and import all 51
+  tarballs and to prove the `sideEffects` declaration under a real bundler; the release runbook's
+  publish sections rewritten for npm.
+- **NOT this milestone:** bumping to `0.9.0` and publishing it, publishing the placeholders,
+  trusted- publisher configuration and the exit proof (the cut, after 111d); the CLI `bin` and
+  Node-default projects (111d); porting scripts to Node, Prettier/ESLint, removing
+  `deno.json`/`deno.lock`, and moving `resolved-set.json` from `deno.lock` to `pnpm-lock.yaml`
+  (111e); install lines in docs and READMEs, `docs/upgrading.md`, the JSR README/description sunset,
+  and the dormant JSR admin scripts (`create-jsr-packages`, `link-jsr-repos`, `verify-jsr-repos`,
+  `set-jsr-metadata`, `archive-old-scope`), which 111f uses once more to point each JSR page at npm
+  (111f).
 
 ## 1. Contracts verified from SOURCE (not names)
 
 Read on 2026-10-12 against `develop` at `9353835a` (npm 11.16.0, Node 24.18.0). External facts are
 from the npm documentation pages named in the row.
 
-| Reference                    | Source (file:line)                                                       | Verified surface / fact                                                                                                                                                                                                                                                                                                       |
-| ---------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release allow-list           | `scripts/release-packages.ts:20-87`                                      | 51 entries in dependency order (common → kernel → tier 3 → plugins → cli → starters); `UNPUBLISHED_PACKAGES` empty; `PUBLICATION_HOLDS` empty and enforced by the publisher, reported by `release:verify`.                                                                                                                    |
-| JSR publisher                | `scripts/publish-packages.ts`                                            | Spawns `deno publish --config <dir>/deno.json` per package; skips a version already in `jsr.io/@setu-ts/<pkg>/meta.json`; stops at the first failure.                                                                                                                                                                         |
-| Release workflow             | `.github/workflows/release.yml:24-26,437,457`                            | ONE job holding both `contents: write` and `id-token: write`; it installs and runs the whole Node and Deno suite (third-party install scripts included: `esbuild` is an allowed build) before `deno task release:publish`. The M111b audit recorded this as an observation.                                                   |
-| Generated manifest           | `scripts/node-manifests.ts:393-440`                                      | Emits `name`, `version`, `type`, `license`, `engines`, `files: ['dist','README.md']`, `exports`, `scripts`, deps. No `description`, `repository`, `homepage`, `bugs`, `publishConfig` or `sideEffects`.                                                                                                                       |
-| `sideEffects` guard          | `scripts/node-manifests.ts:112,579-600`                                  | Refuses a `decorator-plugin` manifest declaring `false` or a list omitting `./dist/metadata/symbol-metadata.js`; today no manifest declares `sideEffects`, so the guard is inert.                                                                                                                                             |
-| Side-effect imports in `src` | `grep -rn "^import '\." packages/*/src`                                  | Nine `decorator-plugin/src/decorators/*.ts` files import `../metadata/symbol-metadata.ts` for effect. One hit in `cli/src/templates/full-stack-app-files.ts:54` is inside a template string (generated code), so an audit must mask strings.                                                                                  |
-| Source masker                | `scripts/npm-specifier-audit.ts:234`                                     | `maskNonCode(source)` blanks comments and string/template contents, length-preserving; reused rather than re-implemented.                                                                                                                                                                                                     |
-| Package descriptions         | `scripts/jsr-metadata.ts:83`                                             | `PACKAGE_METADATA` holds a reviewed one-line description for all 51 packages (idempotency and localization included).                                                                                                                                                                                                         |
-| Packed-manifest check        | `scripts/node-build-gate.ts:35`                                          | `workspaceProtocolSpecifiers(manifest)` reports any `workspace:` left in shipped dependency fields; reused by the publisher.                                                                                                                                                                                                  |
-| Pack-and-boot gate           | `scripts/check-node-build.ts`                                            | Packs all 51 with `pnpm pack`, refuses `workspace:`, but installs only the kernel/runtime/decorator closure and boots one fixture on Node 24, Node 22 and Bun.                                                                                                                                                                |
-| `release:verify`             | `scripts/verify-release.ts:93-156,181-243`                               | Check 2 reads `jsr:@setu-ts/*` entries in member `deno.json` `imports`; since M111a member import maps carry no `@setu-ts` alias (e.g. `packages/kernel/deno.json`), so check 2 is vacuous. Check 5 enforces `@module`-first for jsr.io README rendering. Checks 1, 3, 4, 6, 7, 8, 9, 10 are registry-independent.            |
-| Version sites                | `scripts/version-sites.ts`                                               | `deno.json`, `package.json` and `src/version.ts` must agree with the tag; unchanged here.                                                                                                                                                                                                                                     |
-| `@since` gate                | `scripts/check-since-tags.ts:50,143,273,461,526`                         | Fetches `jsr.io/@setu-ts/<pkg>/meta.json` and the SOURCE file at the claimed version; `symbolPresent` matches a declaration regex that already accepts `declare` (`.d.ts`-compatible). A version newer than every published one is skipped, so after JSR stops every new tag would be skipped forever.                        |
-| Compat suite                 | `compat/package.json`, `compat/.npmrc`, `compat/compat.test.mjs:228,375` | 49 `@jsr/setu-ts__*` deps at `latest` through `npm.jsr.io`; `idempotency-plugin` and `localization-plugin` are missing and `PENDING_FIRST_PUBLISH` is empty, so check 1 fails — the weekly run has failed since 2026-10-05 (`gh run list --workflow compat.yml`). Check 9 scans only grpc/telemetry for `npm:` in `import()`. |
-| CI dry run                   | `.github/workflows/ci.yml:587-637`                                       | `publish-dry-run` runs `deno task publish:check` (`deno publish --dry-run`), `release:verify` and `check:versions`.                                                                                                                                                                                                           |
-| npm trusted publishing       | docs.npmjs.com/trusted-publishers                                        | npm CLI ≥ 11.5.1, Node ≥ 22.14.0; provenance generated automatically from a public repository with no `--provenance` flag; `repository.url` "must exactly match your GitHub repository"; configuration names owner, repo, workflow filename, optional environment. The repository is public (`gh repo view`).                 |
-| `npm trust`                  | docs.npmjs.com/cli/v11/commands/npm-trust                                | npm ≥ 11.10.0: `npm trust github <pkg> --file release.yml --repo setu-ts/setu-ts --env <name> --allow-publish --yes`; the package must already exist; account 2FA required, with a 5-minute skip window that covers a scripted loop over all 51.                                                                              |
-| Granular tokens              | docs.npmjs.com/about-access-tokens                                       | Classic tokens are gone (November 2025); granular tokens have an optional bypass-2FA setting; organization access "does not give the token the right to publish packages managed by the organization". Whether a package-scoped write token can CREATE a new scoped package is not documented.                                |
-| Registry state               | `npm view @setu-ts/kernel`                                               | `E404`: nothing is published under `@setu-ts`; the organization exists (claimed 2026-10-10, owner `dkpaul91`).                                                                                                                                                                                                                |
+| Reference                    | Source (file:line)                                                           | Verified surface / fact                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Release allow-list           | `scripts/release-packages.ts:20-87`                                          | 51 entries in dependency order (common → kernel → tier 3 → plugins → cli → starters); `UNPUBLISHED_PACKAGES` empty; `PUBLICATION_HOLDS` empty and enforced by the publisher, reported by `release:verify`.                                                                                                                                 |
+| JSR publisher                | `scripts/publish-packages.ts`                                                | Spawns `deno publish --config <dir>/deno.json` per package; skips a version already in `jsr.io/@setu-ts/<pkg>/meta.json`; stops at the first failure.                                                                                                                                                                                      |
+| Release workflow             | `.github/workflows/release.yml:24-26,437,457`                                | ONE job holding both `contents: write` and `id-token: write`; it installs and runs the whole Node and Deno suite (third-party install scripts included: `esbuild` is an allowed build) before `deno task release:publish`. The M111b audit recorded this as an observation.                                                                |
+| Generated manifest           | `scripts/node-manifests.ts:393-440`                                          | Emits `name`, `version`, `type`, `license`, `engines`, `files: ['dist','README.md']`, `exports`, `scripts`, deps. No `description`, `repository`, `homepage`, `bugs`, `publishConfig` or `sideEffects`.                                                                                                                                    |
+| `sideEffects` guard          | `scripts/node-manifests.ts:112,579-600`                                      | Refuses a `decorator-plugin` manifest declaring `false` or a list omitting `./dist/metadata/symbol-metadata.js`; today no manifest declares `sideEffects`, so the guard is inert.                                                                                                                                                          |
+| Side-effect imports in `src` | `grep -rn "^import '\." packages/*/src`                                      | Nine `decorator-plugin/src/decorators/*.ts` files import `../metadata/symbol-metadata.ts` for effect. One hit in `cli/src/templates/full-stack-app-files.ts:54` is inside a template string (generated code), so an audit must mask strings.                                                                                               |
+| Source masker                | `scripts/npm-specifier-audit.ts:234`                                         | `maskNonCode(source)` blanks comments and string/template contents, length-preserving; reused rather than re-implemented.                                                                                                                                                                                                                  |
+| Package descriptions         | `scripts/jsr-metadata.ts:83`                                                 | `PACKAGE_METADATA` holds a reviewed one-line description for all 51 packages (idempotency and localization included).                                                                                                                                                                                                                      |
+| Packed-manifest check        | `scripts/node-build-gate.ts:35`                                              | `workspaceProtocolSpecifiers(manifest)` reports any `workspace:` left in shipped dependency fields; reused by the publisher.                                                                                                                                                                                                               |
+| Pack-and-boot gate           | `scripts/check-node-build.ts`                                                | Packs all 51 with `pnpm pack`, refuses `workspace:`, but installs only the kernel/runtime/decorator closure and boots one fixture on Node 24, Node 22 and Bun.                                                                                                                                                                             |
+| `release:verify`             | `scripts/verify-release.ts:93-156,181-243`                                   | Check 2 reads `jsr:@setu-ts/*` entries in member `deno.json` `imports`; since M111a member import maps carry no `@setu-ts` alias (e.g. `packages/kernel/deno.json`), so check 2 is vacuous. Check 5 enforces `@module`-first for jsr.io README rendering. Checks 1, 3, 4, 6, 7, 8, 9, 10 are registry-independent.                         |
+| Version sites                | `scripts/version-sites.ts`                                                   | `deno.json`, `package.json` and `src/version.ts` must agree with the tag; unchanged here.                                                                                                                                                                                                                                                  |
+| `@since` gate                | `scripts/check-since-tags.ts:50,143,273,461,526`                             | Fetches `jsr.io/@setu-ts/<pkg>/meta.json` and the SOURCE file at the claimed version; `symbolPresent` matches a declaration regex that already accepts `declare` (`.d.ts`-compatible). A version newer than every published one is skipped, so after JSR stops every new tag would be skipped forever.                                     |
+| Compat suite                 | `compat/package.json`, `compat/.npmrc`, `compat/compat.test.mjs:228,375`     | 49 `@jsr/setu-ts__*` deps at `latest` through `npm.jsr.io`; `idempotency-plugin` and `localization-plugin` are missing and `PENDING_FIRST_PUBLISH` is empty, so check 1 fails — the weekly run has failed since 2026-10-05 (`gh run list --workflow compat.yml`). Check 9 scans only grpc/telemetry for `npm:` in `import()`.              |
+| CI dry run                   | `.github/workflows/ci.yml:587-637`                                           | `publish-dry-run` runs `deno task publish:check` (`deno publish --dry-run`), `release:verify` and `check:versions`.                                                                                                                                                                                                                        |
+| npm trusted publishing       | docs.npmjs.com/trusted-publishers                                            | npm CLI ≥ 11.5.1, Node ≥ 22.14.0; provenance generated automatically from a public repository with no `--provenance` flag; `repository.url` "must exactly match your GitHub repository"; configuration names owner, repo, workflow filename, optional environment. The repository is public (`gh repo view`).                              |
+| `npm trust`                  | docs.npmjs.com/cli/v11/commands/npm-trust                                    | npm ≥ 11.15.0 (`--allow-publish` first appears there; verified against the docs and npm 11.16.0's help): `npm trust github <pkg> --file release.yml --repo setu-ts/setu-ts --env <name> --allow-publish --yes`; the package must already exist; account 2FA required, with a 5-minute skip window that covers a scripted loop over all 51. |
+| Trust expiry                 | docs.npmjs.com/trusted-publishers ("Trusted publisher configuration expiry") | A new configuration must complete its first successful publish THROUGH it within 2 days, which validates it and binds it to the repository's identity; otherwise it expires and must be deleted and recreated. npm does not check a configuration when it is saved. OIDC is tried before any token.                                        |
+| Registry state               | `npm view @setu-ts/kernel`                                                   | `E404`: nothing is published under `@setu-ts`; the organization exists (claimed 2026-10-10, owner `dkpaul91`).                                                                                                                                                                                                                             |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                 | Resolution (picked side)                                                                                                                                                                                                                                                                                                                                     | Doc deliverable (same PR)                                                                                                                       |
-| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| C1 | ROADMAP 111c: "Blocked on the maintainer claiming the `@setu-ts` npm organization." The organization was claimed on 2026-10-10.                                                                                          | Reality. The block is gone.                                                                                                                                                                                                                                                                                                                                  | ROADMAP 111c bullet replaced with the claim date and owner; the measured-coupling table row updated the same way.                               |
-| C2 | ROADMAP 111c bundles the machinery and the first publish, with an exit criterion of a live `npm install`. The publish cannot precede 111d (§0).                                                                          | Split. 111c ends at a proven, dry-run-gated machinery; the cut after 111d performs the bootstrap, the trust configuration and the live exit proof.                                                                                                                                                                                                           | ROADMAP 111c objective and exit rewritten; a "v0.9.0 cut" block added after 111d listing those three steps; the Sequencing paragraph corrected. |
-| C3 | ROADMAP's bootstrap is a manual local publish, while its exit criterion requires "provenance on all packages". A local publish produces no provenance (it needs a CI OIDC identity), so `0.9.0` itself would carry none. | The bootstrap runs in `release.yml`, authenticated by a short-lived granular token supplied once by the maintainer (§3.6), with `--provenance`; `0.9.0` then carries provenance and the exit criterion holds. If the token cannot create scoped packages (§1, undocumented), §8 risk 1's fallback applies and the exit criterion is narrowed in the same PR. | ROADMAP bootstrap bullet rewritten; `docs/releasing.md` one-time setup rewritten.                                                               |
-| C4 | ROADMAP 111f owns `docs/releasing.md`, but the `v0.9.0` cut, which precedes 111f, follows that runbook.                                                                                                                  | The publish-mechanics sections move here (one-time setup, publish, partial-failure recovery, verification); prose describing the toolchain generally stays with 111f.                                                                                                                                                                                        | `docs/releasing.md` publish sections rewritten; ROADMAP 111f bullet narrowed to "the remaining toolchain prose".                                |
-| C5 | ROADMAP 111c: "`compat/` … becomes the post-publish proof". The compat weekly run has failed since 2026-10-05 because two members never reached JSR.                                                                     | The switch to npm fixes the coverage gap; until the first npm publish the workflow reports the scope as unpublished rather than failing (§3.9).                                                                                                                                                                                                              | `compat/README.md` and the `compat.yml` header rewritten.                                                                                       |
-| C6 | `CLAUDE.md` (Verification, Before-reporting), `AGENTS.md:70`, `apps/graphql-demo/README.md:79` and `scripts/version-sweep.ts:18` name `deno task publish:check` as a mandatory gate; §3.10 removes that task.            | The gate is replaced, not dropped: `deno task release:publish --dry-run` packs and checks every tarball, and `tsc -b` with `isolatedDeclarations` covers the slow-type rule.                                                                                                                                                                                 | Each named site re-pointed in the same PR (§5).                                                                                                 |
+| #  | Conflict                                                                                                                                                                                                                                                                                                                         | Resolution (picked side)                                                                                                                                                                                                                                                                                                                                          | Doc deliverable (same PR)                                                                                                                       |
+| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | ROADMAP 111c: "Blocked on the maintainer claiming the `@setu-ts` npm organization." The organization was claimed on 2026-10-10.                                                                                                                                                                                                  | Reality. The block is gone.                                                                                                                                                                                                                                                                                                                                       | ROADMAP 111c bullet replaced with the claim date and owner; the measured-coupling table row updated the same way.                               |
+| C2 | ROADMAP 111c bundles the machinery and the first publish, with an exit criterion of a live `npm install`. The publish cannot precede 111d (§0).                                                                                                                                                                                  | Split. 111c ends at a proven, dry-run-gated machinery; the cut after 111d performs the bootstrap, the trust configuration and the live exit proof.                                                                                                                                                                                                                | ROADMAP 111c objective and exit rewritten; a "v0.9.0 cut" block added after 111d listing those three steps; the Sequencing paragraph corrected. |
+| C3 | ROADMAP's bootstrap is a manual local publish of the real release, while its exit criterion requires "provenance on all packages". A local publish produces no provenance, so `0.9.0` itself would carry none; and a trusted-publisher configuration made AFTER that publish is validated by nothing and expires in 2 days (§1). | The local publish is of a README-only PLACEHOLDER version, which only creates the names; trust is configured next, and `0.9.0` is the first publish through it, from `release.yml` by OIDC (§3.6). That one publish validates all 51 configurations and carries provenance, so the exit criterion holds for every real version. No npm token exists at any point. | ROADMAP bootstrap bullet rewritten; `docs/releasing.md` one-time setup rewritten.                                                               |
+| C4 | ROADMAP 111f owns `docs/releasing.md`, but the `v0.9.0` cut, which precedes 111f, follows that runbook.                                                                                                                                                                                                                          | The publish-mechanics sections move here (one-time setup, publish, partial-failure recovery, verification); prose describing the toolchain generally stays with 111f.                                                                                                                                                                                             | `docs/releasing.md` publish sections rewritten; ROADMAP 111f bullet narrowed to "the remaining toolchain prose".                                |
+| C5 | ROADMAP 111c: "`compat/` … becomes the post-publish proof". The compat weekly run has failed since 2026-10-05 because two members never reached JSR.                                                                                                                                                                             | The switch to npm fixes the coverage gap; until the first npm publish the workflow reports the scope as unpublished rather than failing (§3.9).                                                                                                                                                                                                                   | `compat/README.md` and the `compat.yml` header rewritten.                                                                                       |
+| C6 | `CLAUDE.md` (Verification, Before-reporting), `AGENTS.md:70`, `apps/graphql-demo/README.md:79` and `scripts/version-sweep.ts:18` name `deno task publish:check` as a mandatory gate; §3.10 removes that task.                                                                                                                    | The gate is replaced, not dropped: `deno task release:publish --dry-run` packs and checks every tarball, and `tsc -b` with `isolatedDeclarations` covers the slow-type rule.                                                                                                                                                                                      | Each named site re-pointed in the same PR (§5).                                                                                                 |
 
 ## 3. Design decisions
 
@@ -173,26 +175,36 @@ from the npm documentation pages named in the row.
   `publish` job; that job's install carries `--ignore-scripts`; it names environment `npm`);
   `release:verify` check 8 is updated to read the artifact upload in its new place.
 
-### 3.6 Authentication: OIDC, with a one-time bootstrap token
+### 3.6 Authentication: OIDC only, after a placeholder bootstrap
 
-- **Decision:** the `publish` job sets `NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}`. With
-  the secret absent (every release after the first) npm authenticates through OIDC. For the
-  bootstrap the maintainer creates a granular token (write, bypass 2FA, shortest expiry), stores it
-  as `NPM_BOOTSTRAP_TOKEN` in the `npm` environment, tags `v0.9.0`, then runs the trust loop
-  (`npm trust github … --yes` over the 51 names, written out in `docs/releasing.md` rather than
-  committed as a script, since it runs once), revokes the token and deletes the secret, then sets
-  every package's publishing access to "Require two-factor authentication and disallow tokens",
-  which npm documents as leaving trusted publishing working. Before the tag, the maintainer creates
-  the `npm` GitHub environment with themselves as required reviewer, so a publish waits for an
-  approval. The publisher passes `--provenance` in CI in both modes. With both a token and an OIDC
-  identity available, npm tries OIDC first and falls back to the token (§1), so the bootstrap run
-  authenticates by token only because no trusted publisher exists yet.
-- **Why:** trusted publishing needs the package to exist (§1); a CI publish with a token still
-  produces provenance, a local one cannot (C3). Disallowing tokens afterwards means a secret
-  re-added to the environment, or a token leaked anywhere, cannot publish; only `release.yml` in
-  environment `npm` can.
-- **Test home:** none automated (a one-time maintainer action); the runbook carries the steps and
-  the cut's exit proof checks provenance on every package.
+- **Decision:** `release.yml` publishes by OIDC alone; no job reads an npm token, and no secret is
+  added. Trusted publishing needs each package to exist (§1), so the names are created once by a
+  placeholder: new `scripts/npm-placeholders.ts` writes, for every member of `PUBLISHED_PACKAGES`, a
+  directory under `.tmp/npm-placeholders/` holding a `package.json` (`name`, version
+  `0.0.0-bootstrap.0`, the §3.1 `description`, `license`, `repository`, `publishConfig.access`) and
+  a README saying the version is a placeholder and naming the first real release. It publishes
+  nothing; `deno task release:placeholders` runs it. The cut's one-time procedure in
+  `docs/releasing.md`, in order: (1) create the `npm` GitHub environment with the maintainer as
+  required reviewer; (2) generate the placeholders and publish each locally with the maintainer's
+  2FA, `npm publish --tag bootstrap --access public`; (3) run the trust loop
+  (`npm trust github …
+  --file release.yml --repo setu-ts/setu-ts --env npm --allow-publish --yes`
+  over the 51 names, npm ≥ 11.15.0); (4) within 2 days, tag `v0.9.0` — the first publish through
+  each configuration, which validates it; (5) confirm with `npm trust list`, then deprecate every
+  placeholder version, remove the `bootstrap` dist-tag, and set each package's publishing access to
+  "Require two-factor authentication and disallow tokens", which npm documents as leaving trusted
+  publishing working. If step 4 misses the window, or the 0.9.0 run stops part-way, the runbook says
+  to re-run the publisher (it skips published versions) before the window closes, or else delete and
+  recreate the expired configurations and publish within 2 days of that.
+- **Why:** a placeholder is the smallest thing that can create a name, and it needs no provenance,
+  so it can be published by hand. Configuring trust before the real release lets `0.9.0` validate
+  the configurations and carry provenance, where publishing `0.9.0` first would leave every
+  configuration unvalidated and expiring 2 days later (§1). It also removes the only npm token the
+  previous design needed, together with the question of whether a token may create scoped packages.
+- **Test home:** `test/unit/npm-placeholders.test.ts` (one placeholder per published member, no
+  `dist`, `src` or `scripts` in it, the version string, the README naming the release); the
+  remaining steps are one-time maintainer actions, and the cut's exit proof checks provenance on
+  every `0.9.0` package and `latest` pointing at it.
 
 ### 3.7 `release:verify` re-pointed
 
@@ -283,38 +295,39 @@ change is the published manifest gaining `sideEffects`, recorded in the CHANGELO
 | (no package barrel change)                                                                    | —        | —                                                                                              |
 | `auditSideEffects`, `SIDE_EFFECT_MODULES` (`scripts/side-effects.ts`)                         | fn/const | `scripts/node-manifests.ts` (renders `sideEffects`, refuses findings).                         |
 | `packedManifestProblems`, `packumentHasVersion`, `distTagFor` (`scripts/npm-release-gate.ts`) | fn       | `scripts/npm-publish.ts`; `scripts/verify-release.ts` check 11.                                |
+| `placeholderFiles` (`scripts/npm-placeholders.ts`)                                            | fn       | `release:placeholders` task, run once at the cut (§3.6).                                       |
 | `readTar` (`scripts/tar-read.ts`)                                                             | fn       | `scripts/check-since-tags.ts` npm path.                                                        |
 | `REPOSITORY_URL` (`scripts/npm-release-gate.ts`)                                              | const    | `scripts/node-manifests.ts` (renders it) and `packedManifestProblems` (checks it): one source. |
 
 ### 4.1 Options — every option names its consumer
 
-| Option                         | Consumer                    | Behavior (per implementation)                                                        |
-| ------------------------------ | --------------------------- | ------------------------------------------------------------------------------------ |
-| `release:publish --dry-run`    | CI `publish-dry-run` job    | Packs, checks, looks each version up and `npm publish --dry-run`s all 51; no upload. |
-| `NPM_BOOTSTRAP_TOKEN` (secret) | `release.yml` `publish` job | Present once for the bootstrap; absent afterwards, when OIDC authenticates.          |
-| `GITHUB_ACTIONS` (env, read)   | `scripts/npm-publish.ts`    | `true` adds `--provenance`; otherwise none (a local publish cannot produce one).     |
+| Option                       | Consumer                 | Behavior (per implementation)                                                        |
+| ---------------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
+| `release:publish --dry-run`  | CI `publish-dry-run` job | Packs, checks, looks each version up and `npm publish --dry-run`s all 51; no upload. |
+| `GITHUB_ACTIONS` (env, read) | `scripts/npm-publish.ts` | `true` adds `--provenance`; otherwise none (a local publish cannot produce one).     |
 
 ## 5. Implementation files
 
-| File                                                                                        | Purpose                                                                       |
-| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `scripts/node-manifests.ts`                                                                 | §3.1 fields, `LICENSE` copies, `sideEffects` from §3.2                        |
-| `scripts/side-effects.ts`                                                                   | §3.2 audit and table                                                          |
-| `scripts/npm-release-gate.ts`                                                               | §3.4 pure checks                                                              |
-| `scripts/npm-publish.ts` (replaces `scripts/publish-packages.ts`)                           | §3.3 orchestration                                                            |
-| `scripts/tar-read.ts`, `scripts/check-since-tags.ts`                                        | §3.9                                                                          |
-| `scripts/verify-release.ts`                                                                 | §3.7                                                                          |
-| `scripts/check-node-build.ts`, `scripts/fixtures/node-boot/**`                              | §3.8                                                                          |
-| `scripts/release-packages.ts`, `scripts/publication-hold.ts`                                | comments re-pointed at npm; list and hold logic unchanged                     |
-| `scripts/release-notes.ts`                                                                  | §3.11                                                                         |
-| `scripts/script-coverage.ts`                                                                | `side-effects.ts`, `npm-release-gate.ts`, `tar-read.ts` added as targets      |
-| `packages/**/package.json`, `packages/**/LICENSE`                                           | regenerated                                                                   |
-| `deno.json`                                                                                 | `release:publish` → npm publisher; `publish:check` removed; since-tags net    |
-| `.github/workflows/release.yml`, `ci.yml`, `compat.yml`                                     | §3.5, §3.10                                                                   |
-| `compat/package.json`, `compat/compat.test.mjs`, `compat/README.md`; delete `compat/.npmrc` | §3.10                                                                         |
-| `docs/releasing.md`, `ROADMAP.md`, `CHANGELOG.md`, `CLAUDE.md`                              | C1–C5, Unreleased entry, status flip                                          |
-| `CLAUDE.md`, `AGENTS.md`, `apps/graphql-demo/README.md`, `scripts/version-sweep.ts`         | C6: every `publish:check` reference re-pointed at `release:publish --dry-run` |
-| `test/unit/release-notes.test.ts`                                                           | §3.11 install line; the `publish-dry-run` pins kept                           |
+| File                                                                                        | Purpose                                                                                         |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `scripts/node-manifests.ts`                                                                 | §3.1 fields, `LICENSE` copies, `sideEffects` from §3.2                                          |
+| `scripts/side-effects.ts`                                                                   | §3.2 audit and table                                                                            |
+| `scripts/npm-release-gate.ts`                                                               | §3.4 pure checks                                                                                |
+| `scripts/npm-publish.ts` (replaces `scripts/publish-packages.ts`)                           | §3.3 orchestration                                                                              |
+| `scripts/npm-placeholders.ts`                                                               | §3.6 placeholder generator; `release:placeholders` task in `deno.json`                          |
+| `scripts/tar-read.ts`, `scripts/check-since-tags.ts`                                        | §3.9                                                                                            |
+| `scripts/verify-release.ts`                                                                 | §3.7                                                                                            |
+| `scripts/check-node-build.ts`, `scripts/fixtures/node-boot/**`                              | §3.8                                                                                            |
+| `scripts/release-packages.ts`, `scripts/publication-hold.ts`                                | comments re-pointed at npm; list and hold logic unchanged                                       |
+| `scripts/release-notes.ts`                                                                  | §3.11                                                                                           |
+| `scripts/script-coverage.ts`                                                                | `side-effects.ts`, `npm-release-gate.ts`, `tar-read.ts`, `npm-placeholders.ts` added as targets |
+| `packages/**/package.json`, `packages/**/LICENSE`                                           | regenerated                                                                                     |
+| `deno.json`                                                                                 | `release:publish` → npm publisher; `publish:check` removed; since-tags net                      |
+| `.github/workflows/release.yml`, `ci.yml`, `compat.yml`                                     | §3.5, §3.10                                                                                     |
+| `compat/package.json`, `compat/compat.test.mjs`, `compat/README.md`; delete `compat/.npmrc` | §3.10                                                                                           |
+| `docs/releasing.md`, `ROADMAP.md`, `CHANGELOG.md`, `CLAUDE.md`                              | C1–C5, Unreleased entry, status flip                                                            |
+| `CLAUDE.md`, `AGENTS.md`, `apps/graphql-demo/README.md`, `scripts/version-sweep.ts`         | C6: every `publish:check` reference re-pointed at `release:publish --dry-run`                   |
+| `test/unit/release-notes.test.ts`                                                           | §3.11 install line; the `publish-dry-run` pins kept                                             |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -326,11 +339,12 @@ held to the 90% bar by `scripts/script-coverage.ts`; orchestration files (`npm-p
 | ------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test/unit/side-effects.test.ts`            | `scripts/side-effects.ts`     | expression statement, effect import, static block each found; masked string ignored; unlisted finding and stale entry refused.                                                              |
 | `test/unit/npm-release-gate.test.ts`        | `scripts/npm-release-gate.ts` | one manifest per rule violated (`src` missing from `files` included); a valid manifest passes; packument lookup; `latest` vs `next`; npm `11.5.0` refused, `11.5.1` and `11.16.0` accepted. |
+| `test/unit/npm-placeholders.test.ts`        | `scripts/npm-placeholders.ts` | one placeholder per published member; no code, `scripts` or `files` beyond README; version `0.0.0-bootstrap.0`; README names the first release.                                             |
 | `test/unit/tar-read.test.ts`                | `scripts/tar-read.ts`         | multi-entry archive; ustar prefix names; 512-byte padding; truncated or corrupt header refused.                                                                                             |
 | `test/unit/check-since-tags.test.ts` (ext.) | `scripts/check-since-tags.ts` | `0.8.x` routed to JSR, later to npm; symbol present and absent in the tarball's `src`, non-exported type included; unpublished version skipped or reported; cache reuse.                    |
 | `test/unit/release-notes.test.ts` (ext.)    | `scripts/release-notes.ts`    | body carries the pinned `npm install` line and no `jsr:` specifier.                                                                                                                         |
 | `test/unit/node-manifests.test.ts` (ext.)   | `scripts/node-manifests.ts`   | new fields; description refusal; `LICENSE` drift; `sideEffects` false vs list.                                                                                                              |
-| `test/apps-gate.test.ts` (ext.)             | workflows                     | `id-token: write` only in `publish`; `--ignore-scripts`; environment `npm`; compat probe step.                                                                                              |
+| `test/apps-gate.test.ts` (ext.)             | workflows                     | `id-token: write` only in `publish`; no `secrets.` reference and no `NODE_AUTH_TOKEN` assignment in `publish`; `--ignore-scripts`; environment `npm`; compat probe step.                    |
 
 Negative controls (each observed failing, then reverted): drop `repository` from the renderer;
 publish a packed manifest whose `@setu-ts` dependency is `^0.7.0`; declare `decorator-plugin`
@@ -357,18 +371,15 @@ deno task check:docs
 
 ## 8. Risks & mitigations
 
-1. **A granular token may not be able to create a new scoped package** (§1, undocumented). → A dry
-   run cannot detect this (`npm publish --dry-run` never asks the registry for permission), so the
-   real publish is the test: the publisher publishes `common` first and stops at the first failure,
-   so a token that cannot create packages fails there with nothing live. The bootstrap then becomes
-   the local manual publish the ROADMAP first described: the runbook carries both procedures, and
-   the cut's exit criterion is narrowed to "provenance on every version after `0.9.0`", recorded in
-   the ROADMAP at that time.
+1. **The 2-day trust window is missed, or the 0.9.0 run stops part-way** (§1). → The publisher is
+   resumable and skips published versions, so a re-run inside the window validates the remaining
+   configurations; past the window the runbook deletes and recreates the expired ones. Configuring
+   trust is the last step before tagging, so the window is spent waiting only on CI.
 2. **`repository.url`'s exact expected form is not spelled out** in the npm docs. → The value is one
    constant (§4); the first publish rejects a mismatch with a provenance error before any package
    goes live, and the publisher stops at the first failure.
 3. **`npm publish` of a tarball with provenance or OIDC behaving differently from a directory
-   publish.** → The CI dry run exercises the tarball path on every PR; the bootstrap publishes
+   publish.** → The CI dry run exercises the tarball path on every PR; the 0.9.0 publish does
    `common` first, so a failure costs nothing else.
 4. **The `sideEffects` audit misses an effect** (a value initializer that mutates global state). →
    The bundle leg proves the one known effect; the table requires a reason per entry; `false` can be
@@ -378,8 +389,12 @@ deno task check:docs
 6. **`npm publish --dry-run --provenance` behaving differently without `id-token: write`** (the CI
    dry-run job has none, and the npm docs say nothing about provenance on a dry run). → Measured on
    the first CI run of the dry-run job; if npm refuses, the publisher omits `--provenance` only when
-   `--dry-run` is set, and the bootstrap run is the one that exercises provenance.
-7. **`--ignore-scripts` in the publish job could break the build** if a build step needs a native
+   `--dry-run` is set, and the `0.9.0` run is the one that exercises provenance.
+7. **51 local placeholder publishes each asking for a 2FA code.** → A one-time cost, accepted; the
+   runbook passes `--otp` per command. Whether the registry also points `latest` at a placeholder
+   published under `--tag bootstrap` is unverified; the `0.9.0` publish under `--tag latest`
+   overwrites it, and the exit proof checks `latest`.
+8. **`--ignore-scripts` in the publish job could break the build** if a build step needs a native
    binary. → `tsc` is pure JavaScript; the CI dry run uses the same install flags.
 
 ## 9. Out of scope
@@ -399,7 +414,7 @@ before merge.
 | ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | npm publish credential (OIDC token) | Third-party install scripts or test code reach the token       | Only the `publish` job has `id-token: write`; it installs with `--ignore-scripts` and runs no tests (§3.5).              |
 | Trusted-publisher claim             | Any workflow job in the repository can publish                 | Trust bound to `release.yml` and environment `npm`; the environment can carry required reviewers.                        |
-| Bootstrap token                     | Long-lived publish token outlives its use                      | Granular, shortest expiry, environment-scoped secret, revoked and deleted after the trust loop (§3.6).                   |
+| Placeholder publish                 | A placeholder ships code, or a token is created for it         | Generated README-only manifests (§3.6, tested); published by the maintainer with 2FA, no token at any point.             |
 | Any npm token after the bootstrap   | A leaked or re-added token publishes outside `release.yml`     | Every package set to "Require 2FA and disallow tokens" after the trust loop; trusted publishing keeps working (§3.6).    |
 | Lifecycle scripts at publish time   | A manifest script runs inside the job holding `id-token`       | `pnpm pack --ignore-scripts` and `npm publish --ignore-scripts` (§3.3), beside the install's `--ignore-scripts`.         |
 | Published tarball content           | A dev dependency, test file or local path ships                | `files` limits the tarball; packed-manifest checks run on the exact bytes uploaded (§3.4); dry run lists contents in CI. |
