@@ -6094,8 +6094,28 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   gaps, all closed: an untested `release:verify` version-site check (extracted to
   `scripts/version-sites.ts`), the undocumented `Symbol.metadata` install, a missing
   `serverBuildPath` note, and the tracking flip — complete (PR #446)
-- **Next milestone** — M111b, the test suite on Node under Vitest (prep in the `m111b-node-tests`
-  worktree); M104 — the `v0.9.0` client-brief run — follows the `v0.9.0` cut; see ROADMAP.md.
+- **Milestone 111b** (every member + `scripts/` + CI — the test suite on Node under Vitest): the
+  package suites run under Vitest 5 on Node 24, with `perFile` 90% branch/function/line thresholds,
+  so a file under the bar is now a failing exit code rather than a table a human reads. A committed
+  codemod (`scripts/codemods/std-to-vitest.ts`, with a `--check` gate refusing unawaited async
+  assertions) converted 1,561 files; 165 that used `Deno.*` were converted by hand. Vitest 5's OXC
+  leaves TC39 decorators unlowered, so an `enforce: 'pre'` plugin lowers them with esbuild first —
+  disabling it fails decorator-plugin with a `SyntaxError`. Deno-only runtime proofs keep a named
+  `test:deno-lane` over the same files. A swap report compares every file's Deno and Node leaf
+  counts (Deno 19,201 → Node 19,375; gains are 58 added proofs and 7 suites Deno had skipped whole),
+  and was shown to fail on a deliberately lost file. The converted suite exposed five real defects,
+  each fixed with maintainer approval: Node `rm` could not remove an empty directory without
+  `recursive`; transport headers lost an own `__proto__` key on Node; a dead guard in the cache
+  coalescer; SSE writes after close; and `@hono/node-server` labelling an untyped streamed body
+  `text/plain` where Deno, Bun and Workers send no type. Verification found a skipped real-import
+  test, a streaming test that had dropped its content-type assertion, and five always-true
+  `canImportNpm()` stubs. The committed-tree security audit (one fresh-context round) failed on two
+  Low findings — `deno.lock` pinning `source-map-js@1.2.1`, which failed CI's audit job, and the
+  untyped-body change leaving such bodies MIME-sniffable undocumented — both fixed afterwards and
+  NOT re-audited, at the maintainer's direction. Not run locally: Keycloak, Postgres-backed Drizzle
+  and Prisma, Pub/Sub, Service Bus, Cosmos, LocalStack, Vault — complete (PR pending)
+- **Next milestone** — M111c, the first npm publish; M104 — the `v0.9.0` client-brief run — follows
+  the `v0.9.0` cut; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
