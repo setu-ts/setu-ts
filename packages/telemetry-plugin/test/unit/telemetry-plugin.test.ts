@@ -11,11 +11,6 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IPluginContext, ITelemetryService, ITraceDiagnosticsSource } from '@setu-ts/common';
 import manifest from '../../deno.json' with { type: 'json' };
 
-/** Whether `npm:` imports are available in this environment. */
-function canImportNpm(): boolean {
-  return true;
-}
-
 /** A recording logger satisfying the ILogger surface the reporter uses. */
 function createRecordingLogger() {
   const lines: Array<{
@@ -84,10 +79,8 @@ describe('TelemetryPlugin', () => {
     expect(mock.middlewareAdded).toHaveLength(0);
   });
 
-  it('should take the real loadOtelTracerProvider path (console) and register the service', {
-    skip: !canImportNpm(),
-  }, async () => {
-    // Guarded (not swallowed): with imports available this drives the real
+  it('should take the real loadOtelTracerProvider path (console) and register the service', async () => {
+    // Not swallowed: this drives the real
     // lazy-load path in loadOtelTracerProvider and must register a usable
     // service under the telemetry token — a failure here is a real failure.
     const mock = createMockContext();
@@ -1142,10 +1135,8 @@ describe('TelemetryPlugin — M98g trace diagnostics availability matrix', () =>
     ).toThrow();
   });
 
-  it('drives the ACTIVE collector through the real built-in provider (guarded)', {
-    skip: !canImportNpm(),
-  }, async () => {
-    // Guarded (not swallowed): with imports available this drives the real
+  it('drives the ACTIVE collector through the real built-in provider', async () => {
+    // Not swallowed: this drives the real
     // lazy-load path with the diagnostics option and must register a source
     // that retains completed spans of an approved operation.
     const mock = createMockContext();

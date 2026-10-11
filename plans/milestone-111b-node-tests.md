@@ -511,3 +511,34 @@ late heartbeats and writes after close without repeating cleanup or serializing 
 - The swap report's leaf parser matched test names with `.`, which skips U+2028/U+2029, so a name
   carrying a Unicode line separator was dropped from the Deno count. Its patterns now use the `s`
   flag, with a regression in `swap-report.test.ts`.
+- `WorkersResponse` (`test/node-helpers.ts`) subclasses the native `Response` and changes only what
+  workerd itself does differently: status 101 and a `webSocket` member. The 56 cloudflare-plugin
+  files that build Workers responses install it for their own run and restore the native class
+  after, so every other `Response` behavior under test is Node's own.
+
+### 10.3 Permission-scoped proofs — dispositions (§3.10)
+
+| File (pre-swap)                                                                   | What it asserted                                             | Disposition on Node                                                                                                 |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `storage-plugin` `local-provider`, `providers/local-health`, `storage-plugin` (3) | a fake filesystem rejecting with a `PermissionDenied` string | Runtime-neutral already (no real permission involved); unchanged, and the Node-specific wording branch is asserted. |
+| `telemetry-plugin` five real-import suites                                        | skipped without Deno's `import` permission                   | Node always permits the import, so the guard is removed and every case runs unconditionally.                        |
+| `decorator-plugin` `unit/controller-discovery`, `integration/decorator-plugin`    | real `import()` discovery, skipped without the permission    | Runs unconditionally. The integration file's probe returned `false` on Node and skipped it; fixed in verification.  |
+| `cli` `fixtures/generated-project.ts`                                             | a scaffold boots under its own generated permissions         | Kept: it still spawns `deno` with the project's own task grants.                                                    |
+| `mail-plugin`, `messaging-plugin` `outage-real`                                   | comments only (a `NotCapable` on `::1` reconnects)           | No assertion to move.                                                                                               |
+
+None is retired.
+
+### 10.4 Verification findings fixed on this branch
+
+- `decorator-plugin/test/integration/decorator-plugin.test.ts` gated its real-import discovery case
+  on Deno's permission API, which is absent on Node, so the case was skipped on every Node run while
+  the file runs nowhere else. It now runs unconditionally; breaking its fixture path fails it.
+- `runtime/test/integration/streaming.test.ts` had dropped its "`stream()` sets no content-type"
+  assertion. Measured: Deno sends no content-type, while `@hono/node-server` writes
+  `text/plain; charset=UTF-8` for any body that lacks one. The assertion is restored per runtime.
+  The divergence itself predates M111b (it is node-server's default since M23) and is left as an
+  open question for the maintainer rather than changed here.
+- Five telemetry-plugin files kept a `canImportNpm()` that always returned `true`, leaving dead
+  `skip` options and comments describing an `ignore` guard that no longer existed; removed.
+- Ten source files measure exactly 90.0 on one metric under V8-on-Node (for example
+  `resilience-plugin/src/patterns/retry.ts` branch). They meet the bar with no margin.

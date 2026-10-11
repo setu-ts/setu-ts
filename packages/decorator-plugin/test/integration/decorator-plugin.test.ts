@@ -34,29 +34,6 @@ import { metadataStore } from '../../src/metadata/metadata-store.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeFileSystem, createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
-// Whether the runner can perform a real `import()` of a `file://` URL. The
-// real-`import()` discovery path is an external I/O line; under
-// non-interactive `deno test -P` (no read/import grant) it is skipped
-// (CLAUDE.md: an external I/O line may stay behind a guarded test, but the
-// branching logic around it is still exercised by the injectable-importer
-// unit tests). Probed synchronously via the permission API to avoid a
-// circular top-level `await import(import.meta.url)`.
-function probeImportPermission(): boolean {
-  const g = globalThis as {
-    Deno?: { permissions?: { querySync?: (p: unknown) => { state: string } } };
-  };
-  const deno = g.Deno;
-  if (deno?.permissions?.querySync === undefined) {
-    return false;
-  }
-  try {
-    return deno.permissions.querySync({ name: 'import' }).state === 'granted';
-  } catch {
-    return false;
-  }
-}
-const realImportAvailable = probeImportPermission();
-
 const guardFn: MiddlewareFunction = () => {};
 const otherGuardFn: MiddlewareFunction = () => {};
 
@@ -407,9 +384,10 @@ describe('DecoratorPlugin registration (integration)', () => {
     expect(decoratorDef.schema?.body).toBe(programmaticDef.schema?.body);
   });
 
+  // Node always grants a real `import()` of a `file://` URL, so the default
+  // discovery importer runs here unguarded (M111b; it was Deno-permission gated).
   it(
     'consumes autoDiscover + controllersPath (real import path)',
-    { skip: !realImportAvailable },
     async () => {
       const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
         /\/$/,

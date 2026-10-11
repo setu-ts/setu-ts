@@ -1,25 +1,16 @@
 /**
- * Guarded real-import integration test for the OTLP exporter path.
- *
- * When the OTel npm packages are installed, this test exercises the real
- * import and verifies a full round-trip span. When absent, it skips.
+ * Real-import integration test for the OTLP exporter path: exercises the real
+ * import of the installed OTel packages and verifies a full round-trip span.
  *
  * @module
  */
 import { describe, expect, it } from 'vitest';
 
-// Probe whether npm: imports are available
-function canImportNpm(): boolean {
-  return true;
-}
-
 describe('OTel real-import integration', () => {
   it(
     'should load OTLP exporter and build a real span',
-    { skip: !canImportNpm() },
     async () => {
-      // Guarded by `ignore: !canImportNpm()`; not swallowed — a real failure
-      // inside must fail the test, not pass silently.
+      // Not swallowed: a real failure inside must fail the test.
       // Lazy-load the OTel packages
       const sdkMod = await import('@opentelemetry/sdk-trace-base');
       const resourcesMod = await import('@opentelemetry/resources');
@@ -63,9 +54,7 @@ describe('OTel real-import integration', () => {
 
   it(
     'should load OTLP trace exporter constructor',
-    { skip: !canImportNpm() },
     async () => {
-      // Guarded by `ignore: !canImportNpm()`; not swallowed.
       const mod = await import(
         '@opentelemetry/exporter-trace-otlp-http'
       );
@@ -84,7 +73,6 @@ describe('OTel real-import integration', () => {
   // ReadableSpan, not on spanContext().
   it(
     'should parent real OTel span to incoming traceparent context',
-    { skip: !canImportNpm() },
     async () => {
       const sdkMod = await import('@opentelemetry/sdk-trace-base');
       const resourcesMod = await import('@opentelemetry/resources');

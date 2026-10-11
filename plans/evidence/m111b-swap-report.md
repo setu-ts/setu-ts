@@ -1653,7 +1653,7 @@ several suites.
 | packages/database-plugin/src/adapters/dynamo/dynamo-data-source.ts          | 94.3 / 100 / 94.2  | 92.56 / 100 / 96.8    |               1952 |                    1971 |
 | packages/database-plugin/src/adapters/memory/memory-adapter.ts              | 97.2 / 100 / 98.3  | 94.56 / 100 / 98.14   |               1952 |                    1971 |
 | packages/database-plugin/src/adapters/mongo/mongo-adapter.ts                | 93.2 / 100 / 90.4  | 97.5 / 92.85 / 98.66  |               1952 |                    1971 |
-| packages/database-plugin/src/adapters/mongo/mongo-data-source.ts            | 94.4 / 100 / 98.3  | 92.68 / 100 / 98.52   |               1952 |                    1971 |
+| packages/database-plugin/src/adapters/mongo/mongo-data-source.ts            | 94.4 / 100 / 98.3  | 92.07 / 100 / 98.03   |               1952 |                    1971 |
 | packages/database-plugin/src/adapters/mongo/mongo-mapping.ts                | 100 / 100 / 100    | 97.14 / 100 / 100     |               1952 |                    1971 |
 | packages/database-plugin/src/adapters/prisma/prisma-adapter.ts              | 93.6 / 95.7 / 96.2 | 92.07 / 96.36 / 96.83 |               1952 |                    1971 |
 | packages/database-plugin/src/authorization/database-grant-source.ts         | 97.5 / 100 / 100   | 96.49 / 100 / 100     |               1952 |                    1971 |
@@ -1661,9 +1661,9 @@ several suites.
 | packages/database-plugin/src/outbox/database-outbox-store.ts                | 99.2 / 100 / 98.2  | 98.71 / 100 / 99      |               1952 |                    1971 |
 | packages/database-plugin/src/plugin/database-plugin.ts                      | 96.3 / 100 / 98.6  | 93.61 / 100 / 99.03   |               1952 |                    1971 |
 | packages/database-plugin/src/query/query-builder.ts                         | 94.4 / 100 / 97.2  | 92.85 / 100 / 96.38   |               1952 |                    1971 |
-| packages/database-plugin/src/services/database-service.ts                   | 94.9 / 100 / 97    | 97.77 / 100 / 96.83   |               1952 |                    1971 |
+| packages/database-plugin/src/services/database-service.ts                   | 94.9 / 100 / 97    | 96.66 / 100 / 96.83   |               1952 |                    1971 |
 | packages/decorator-plugin/src/metadata/metadata-store.ts                    | 99.2 / 100 / 100   | 98.97 / 100 / 100     |                465 |                     469 |
-| packages/decorator-plugin/src/plugin/decorator-plugin.ts                    | 98.6 / 100 / 99.2  | 94.29 / 100 / 97.57   |                465 |                     469 |
+| packages/decorator-plugin/src/plugin/decorator-plugin.ts                    | 98.6 / 100 / 99.2  | 96.05 / 100 / 98.96   |                465 |                     469 |
 | packages/decorator-plugin/src/plugin/ingress-registration.ts                | 95.8 / 100 / 99    | 94.66 / 100 / 99.17   |                465 |                     469 |
 | packages/decorator-plugin/src/resolvers/parameter-resolver.ts               | 98.4 / 100 / 99.1  | 97.67 / 100 / 97.77   |                465 |                     469 |
 | packages/diagnostics-plugin/src/client/client.ts                            | 94 / 100 / 93.9    | 90.45 / 95.83 / 94.54 |                868 |                     895 |

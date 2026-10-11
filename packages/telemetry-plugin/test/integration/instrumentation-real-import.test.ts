@@ -1,18 +1,16 @@
 /**
- * Guarded real-import integration test for auto-instrumentation packages.
+ * Real-import integration test for auto-instrumentation packages.
  *
  * Drives each of the five loaders through their **default** `importFn` (no
  * injection), so the real literal `import()` path — the branch no unit test
- * runs — is exercised. When the OTel npm packages are installed this proves
- * the default loads; when absent it skips.
+ * runs — is exercised against the installed OTel packages.
  *
- * **Deno-only caveat:** this test resolves the specifiers through Deno's own
- * loader, so it passes on Deno whether or not the specifier survives JSR's
- * static npm-compatibility rewrite. That is precisely why it could never have
- * caught X7-3 (the `npm:` string shipping verbatim in the published artifact):
- * the published shape is only observable in a published artifact, which the
- * compat suite checks — see `compat/compat.test.mjs`. Do not mistake this file
- * for coverage of the published artifact.
+ * **Caveat:** this resolves the specifiers through the test runner's own
+ * loader against the workspace source, so it cannot show what a published
+ * artifact ships (the X7-3 class: a specifier that survives in source but not in
+ * the package). That shape is observable only in a published artifact, which
+ * the compat suite checks — see `compat/compat.test.mjs`. Do not mistake this
+ * file for coverage of the published artifact.
  *
  * @module
  * @since 0.2.0
@@ -27,11 +25,6 @@ import {
   loadAmqplibInstrumentation,
   loadKafkaJsInstrumentation,
 } from '../../src/instrumentation/queue-instrumentation.ts';
-
-// Probe whether npm: imports are available
-function canImportNpm(): boolean {
-  return true;
-}
 
 /** The instrumentation export name each loader's module must expose. */
 const EXPORT_BY_KIND = {
@@ -57,7 +50,6 @@ describe('Auto-instrumentation real-imports', () => {
   for (const { kind, load } of loaders) {
     it(
       `should load ${kind} through the default importer`,
-      { skip: !canImportNpm() },
       async () => {
         const { instance } = await load();
         // The instance is a construction of the module's expected export, so a
@@ -75,7 +67,6 @@ describe('Auto-instrumentation real-imports', () => {
 
   it(
     'should construct BatchSpanProcessor and SimpleSpanProcessor from sdk-trace-base',
-    { skip: !canImportNpm() },
     async () => {
       const sdkMod = await import('@opentelemetry/sdk-trace-base');
       expect(sdkMod.BatchSpanProcessor).toBeDefined();
