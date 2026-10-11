@@ -23,7 +23,7 @@ import { resolveSecrets } from '../secret/secret-resolver.ts';
 import { SessionService } from '../services/session-service.ts';
 import { CacheSessionStore } from '../stores/cache-session-store.ts';
 import { MemorySessionStore } from '../stores/memory-session-store.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Middleware priorities this plugin registers at. */
 const MIDDLEWARE_PRIORITY = {
@@ -76,7 +76,7 @@ export function SessionPlugin(options: SessionPluginOptions = {}): IPlugin {
 
   return {
     name: 'session-plugin',
-    version: denoJson.version,
+    version: VERSION,
     dependencies: [CAPABILITIES.RUNTIME],
     // Ordered after these so the lookups below see them when present. Neither
     // is required: without secrets the env fallback applies, and the cache store

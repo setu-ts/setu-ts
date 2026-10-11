@@ -22,7 +22,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import { ViewEngine } from '../engines/view-engine.ts';
 
 import type { ViewPluginOptions } from './options.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'view-plugin';
@@ -68,7 +68,7 @@ export function ViewPlugin(options: ViewPluginOptions = {}): IPlugin {
   const engineName = options.engine ?? 'hono-jsx';
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.VIEW],
     register(ctx: IPluginContext): void {
       ctx.services.register(CAPABILITIES.VIEW, engine);

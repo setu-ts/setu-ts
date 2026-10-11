@@ -33,7 +33,21 @@ export interface LimitsClock {
  *
  * @internal
  */
-export const CONNECTOR_LIMITS = {
+/** The connector's transport limits, fixed at construction rather than configurable. */
+export interface ConnectorTransportLimits {
+  readonly anonymousRatePerSecond: number;
+  readonly anonymousBurst: number;
+  readonly sessionRatePerSecond: number;
+  readonly sessionBurst: number;
+  readonly maxHandlerConcurrency: number;
+  readonly preAuthConcurrency: number;
+  readonly verifyingConcurrency: number;
+  readonly maxHeaderBytes: number;
+  readonly maxResponseBytes: number;
+  readonly maxEventLimit: number;
+}
+
+export const CONNECTOR_LIMITS: ConnectorTransportLimits = {
   /** Anonymous refusal-bucket refill rate, refusals per second. */
   anonymousRatePerSecond: 5,
   /** Anonymous refusal-burst capacity. */

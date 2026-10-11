@@ -19,7 +19,7 @@ import { GraphqlService } from '../services/graphql-service.ts';
 import { createGraphqlHandler } from '../http/graphql-handler.ts';
 import { GRAPHQL_TRANSPORT_WS } from '../transports/ws/ws-protocol.ts';
 import { ApqResolver } from '../apq/apq-resolver.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Create a handler logger wrapper from a plugin context logger.
@@ -63,7 +63,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
 
   return {
     name: 'graphql-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAP.GRAPHQL],
     optionalDependencies: ['logger', CAP.HEALTH, CAP.WEBSOCKET, CAP.CACHE, CAP.RUNTIME],
 

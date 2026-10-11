@@ -552,7 +552,7 @@ export interface NatsMessagingOptions extends MessagingCommonOptions {
    *
    * @example
    * ```typescript
-   * import * as nats from 'npm:nats@2.x';
+   * import * as nats from 'nats';
    * MessagingPlugin({ broker: 'nats', client, headersFactory: () => nats.headers() });
    * ```
    */

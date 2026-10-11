@@ -3,12 +3,12 @@
  *
  * Loads `@opentelemetry/instrumentation-http` for the `http` kind and
  * `@opentelemetry/instrumentation-undici` for the `fetch` kind via lazy
- * `npm:` imports. Honors the inject-or-lazy seam.
+ * dynamic imports. Honors the inject-or-lazy seam.
  *
- * Each default `importFn` keeps its `npm:` specifier as a **literal** at the
- * `import()` call. JSR's npm-compatibility rewrite is static and reaches only
- * a literal argument; a specifier routed through a `(spec) => import(spec)`
- * indirection ships `npm:` verbatim and cannot load on Node or Bun (X7-3).
+ * Each default `importFn` keeps its package specifier as a **literal** at the
+ * `import()` call. Static analysis (a bundler, the type checker, the
+ * repository's import audit) reaches only a literal argument; a specifier routed
+ * through a `(spec) => import(spec)` indirection hides the dependency (X7-3).
  *
  * @module
  * @since 0.2.0
@@ -20,10 +20,10 @@ export interface LoadedInstrumentation {
   specifier: string;
 }
 
-/** The `npm:` specifier the `http` loader resolves. */
+/** The package specifier the `http` loader resolves. */
 const HTTP_SPECIFIER = '@opentelemetry/instrumentation-http';
 
-/** The `npm:` specifier the `fetch` (undici) loader resolves. */
+/** The package specifier the `fetch` (undici) loader resolves. */
 const FETCH_SPECIFIER = '@opentelemetry/instrumentation-undici';
 
 /**

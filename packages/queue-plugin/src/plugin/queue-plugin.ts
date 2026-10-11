@@ -57,7 +57,7 @@ import {
   createDisabledQueueSource,
   QueueObservationCollector,
 } from '../diagnostics/queue-observation-collector.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Creates a queue plugin.
@@ -162,7 +162,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
 
   return {
     name: pluginName,
-    version: denoJson.version,
+    version: VERSION,
     provides: [token],
     // B5: Declare optional logger dependency so kernel ordering resolves
     // LoggerPlugin first when installed, but remains optional. `METRICS` is

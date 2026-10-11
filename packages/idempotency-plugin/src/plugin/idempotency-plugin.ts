@@ -5,7 +5,7 @@
  */
 import type { IIdempotencyService, ILogger, IPlugin } from '@setu-ts/common';
 import { CAPABILITIES, createConnectionErrorReporter, PLUGIN_PRIORITY } from '@setu-ts/common';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 import { PURGE_JOB_NAME } from '../constants.ts';
 import { resolveDefaults, validatePluginOptionShape } from '../core/options.ts';
 import { createIdempotencyIndicator } from '../health/indicator.ts';
@@ -42,7 +42,7 @@ export function IdempotencyPlugin(options?: IdempotencyPluginOptions): IPlugin {
 
   return {
     name: 'idempotency-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.IDEMPOTENCY],
     priority: PLUGIN_PRIORITY.NORMAL,
     ...(transactional === undefined ? {} : {

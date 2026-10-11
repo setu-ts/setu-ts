@@ -9,11 +9,7 @@
 
 // Re-export resilience policy types from common so consumers don't need a
 // separate @setu-ts/common dependency.
-import type {
-  BackoffStrategy,
-  CircuitBreakerPolicy,
-  RetryPolicy,
-} from '@setu-ts/common';
+import type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy } from '@setu-ts/common';
 import type { ClientIdempotencyOptions } from './idempotency-key.ts';
 
 export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy };

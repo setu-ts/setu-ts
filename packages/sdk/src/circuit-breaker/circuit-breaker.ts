@@ -48,7 +48,7 @@ export function createCircuitBreaker(
   policy: CircuitBreakerPolicy,
   timing: IClientTiming,
   isFailure: (error: unknown) => boolean,
-) {
+): { execute: <T>(fn: () => Promise<T>) => Promise<T> } {
   const state: State = { failures: [], openedAt: null, halfOpenInFlight: false };
 
   const execute = async <T>(fn: () => Promise<T>): Promise<T> => {

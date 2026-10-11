@@ -123,7 +123,7 @@ export class TaskPool {
      * Every call site is optional-chained, so an application without the
      * metrics plugin runs exactly the code M45 shipped.
      */
-    private readonly collector?: WorkerPoolCollector,
+    private readonly collector?: WorkerPoolCollector | undefined,
     /**
      * Receives a worker-level error that settled no task: an idle worker that
      * crashed, or one that failed during startup with nothing queued. Such an

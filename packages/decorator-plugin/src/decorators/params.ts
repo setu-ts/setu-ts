@@ -26,9 +26,12 @@
  * ```
  * @module
  */
+import '../metadata/symbol-metadata.ts';
+
 import type { IRequestContext } from '@setu-ts/common';
 
 import { defer } from '../metadata/pending.ts';
+import { requireDecoratorMetadata } from '../metadata/symbol-metadata.ts';
 import type { ParameterMetadata } from '../metadata/metadata-store.ts';
 import { CONTEXT_PARAMETER_METADATA } from './security.ts';
 
@@ -96,7 +99,7 @@ export function Params<const S extends readonly ParamSource<unknown>[]>(
   ): (...args: A) => R => {
     const handler = String(context.name);
     sources.forEach((src, index) => {
-      defer(context.metadata, (store, target) => {
+      defer(requireDecoratorMetadata(context), (store, target) => {
         store.storeParam(target, handler, { ...src.descriptor, index });
       });
     });

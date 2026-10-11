@@ -79,7 +79,7 @@ const MAX_CONCURRENCY = 4;
  *
  * @internal
  */
-export const QUEUE_COLLECTOR_ERRORS = {
+export const QUEUE_COLLECTOR_ERRORS: Readonly<Record<string, string>> = {
   badOptions: 'Queue diagnostics: the diagnostics option must be an object.',
   notEnabled: 'Queue diagnostics: enabled must be the literal true.',
   badInstanceAlias: 'Queue diagnostics: instanceAlias must be a string.',

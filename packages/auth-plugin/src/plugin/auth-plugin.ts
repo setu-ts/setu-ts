@@ -61,7 +61,7 @@ import { createScopedRbac } from '../scoped/scoped-policy.ts';
 import type { ScopedRbac } from '../scoped/scoped-policy.ts';
 import { GrantResolutionError } from '../scoped/errors.ts';
 import type { LoadedSamlProvider } from '../saml/routes.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 const AUTH_MIDDLEWARE_PRIORITY = 300;
 
@@ -151,7 +151,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
 
   return {
     name: 'auth-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [
       ...(options.jwt === undefined ? [] : [CAPABILITIES.JWT]),
       CAPABILITIES.AUTH,

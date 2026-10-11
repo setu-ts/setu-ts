@@ -1,18 +1,18 @@
 /**
  * Database instrumentation loader for ioredis.
  *
- * Loads `@opentelemetry/instrumentation-ioredis` via lazy `npm:` import.
+ * Loads `@opentelemetry/instrumentation-ioredis` via a lazy dynamic import.
  * Honors the inject-or-lazy seam.
  *
- * The default `importFn` keeps its `npm:` specifier as a **literal** at the
- * `import()` call — the only form that survives JSR's static
- * npm-compatibility rewrite and loads on Node or Bun (X7-3).
+ * The default `importFn` keeps its package specifier as a **literal** at the
+ * `import()` call — the only form static analysis (a bundler, the type
+ * checker, the repository's import audit) can see (X7-3).
  *
  * @module
  * @since 0.2.0
  */
 
-/** The `npm:` specifier the ioredis loader resolves. */
+/** The package specifier the ioredis loader resolves. */
 const IOREDIS_SPECIFIER = '@opentelemetry/instrumentation-ioredis';
 
 /**

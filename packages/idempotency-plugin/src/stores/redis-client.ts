@@ -3,7 +3,7 @@
  * and structural validation of an injected client (plan §3.5).
  *
  * ioredis is never a hard dependency. It is either injected through plugin
- * options or loaded lazily through a dynamic `npm:` import.
+ * options or loaded lazily through a dynamic import.
  *
  * @module
  */

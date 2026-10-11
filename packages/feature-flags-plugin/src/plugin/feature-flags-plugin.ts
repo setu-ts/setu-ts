@@ -13,7 +13,7 @@ import { MemoryProvider } from '../providers/memory-provider.ts';
 import { DatabaseProvider } from '../providers/database-provider.ts';
 import { LaunchDarklyProvider } from '../providers/launchdarkly-provider.ts';
 import { FeatureFlagService } from '../services/feature-flags-service.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'feature-flags-plugin';
@@ -93,7 +93,7 @@ export function createProvider(
 export function FeatureFlagsPlugin(options: FeatureFlagsPluginOptions): IPlugin {
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.FEATURE_FLAGS],
     optionalDependencies: [CAPABILITIES.LOGGER],
     priority: PLUGIN_PRIORITY.NORMAL,

@@ -60,7 +60,7 @@ const defaultImporter = async (): Promise<GraphqlModuleLike> => {
  * @throws {GraphqlRuntimeLoadError} If loading fails
  */
 export async function loadGraphqlModule(
-  importer = defaultImporter,
+  importer: () => Promise<GraphqlModuleLike> = defaultImporter,
 ): Promise<GraphqlRuntime> {
   try {
     const module = await importer();

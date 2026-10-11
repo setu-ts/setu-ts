@@ -19,7 +19,7 @@ import { GrpcService } from '../services/grpc-service.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import { loadConnectModule } from '../transports/connect-loader.ts';
 import { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name; `PluginResolver` throws if it is registered twice. */
 const PLUGIN_NAME = 'grpc-plugin';
@@ -37,7 +37,7 @@ const PLUGIN_NAME = 'grpc-plugin';
 export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     optionalDependencies: ['logger', CAPABILITIES.HEALTH],
     provides: [CAPABILITIES.GRPC],
     priority: PLUGIN_PRIORITY.NORMAL,

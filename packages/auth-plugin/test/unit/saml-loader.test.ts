@@ -46,6 +46,6 @@ describe('SAML loader', () => {
   });
 
   it('names the real specifier', () => {
-    expect(SAML_SPECIFIER).toBe('npm:@node-saml/node-saml@^5');
+    expect(SAML_SPECIFIER).toBe('@node-saml/node-saml');
   });
 });

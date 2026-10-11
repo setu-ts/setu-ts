@@ -14,6 +14,8 @@
  * @module
  * @since 0.9.0
  */
+import '../metadata/symbol-metadata.ts';
+
 import type { Constructor, PolicyDefinition, PolicyTarget } from '@setu-ts/common';
 import { classDecorator, methodDecorator } from '../metadata/context-bridge.ts';
 import type { SetuClassDecorator, SetuMethodDecorator } from '../metadata/context-bridge.ts';

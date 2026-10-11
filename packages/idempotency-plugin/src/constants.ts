@@ -135,7 +135,7 @@ export const RECORDABLE_STATUS_MAX = 499;
 export const RELEASE_STATUSES: readonly number[] = [408, 425, 429];
 
 /** Regex the Redis and Durable Object store `namespace` must match. */
-export const STORE_NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+export const STORE_NAMESPACE_PATTERN: RegExp = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 /**
  * Header names a replayed response may carry, beyond any per-route

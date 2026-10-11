@@ -25,7 +25,7 @@ import { SmtpProvider } from '../providers/smtp-provider.ts';
 import { SesProvider } from '../providers/ses-provider.ts';
 import { SendGridProvider } from '../providers/sendgrid-provider.ts';
 import type { MailPluginOptions } from '../interfaces/index.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'mail-plugin';
@@ -102,7 +102,7 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     // The VIEW edge is what makes the `register()`-time engine lookup a
     // contract rather than plugin-order luck: the resolver orders an optional
     // dependency first (`plugin-resolver.ts`), and `view-plugin` declares no

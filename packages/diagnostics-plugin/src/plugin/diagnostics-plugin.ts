@@ -31,7 +31,7 @@ import type {
   TimerHandle,
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 import type { DiagnosticsPluginOptions, IDiagnosticsPlugin } from '../interfaces/index.ts';
 import { DiagnosticsSessionState } from '../security/session.ts';
 import { createConnectorHandler } from '../transport/connector-handler.ts';
@@ -66,7 +66,7 @@ const MAX_SESSION_LIFETIME_MS = 43_200_000;
  *
  * @internal
  */
-export const PLUGIN_ERRORS = {
+export const PLUGIN_ERRORS: Readonly<Record<string, string>> = {
   notEnabled:
     'DiagnosticsPlugin: enabled must be true to activate the local diagnostics connector.',
   invalidPort: 'DiagnosticsPlugin: port must be an integer from 1024 to 65535.',
@@ -207,7 +207,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
 
   return {
     name: 'diagnostics-plugin',
-    version: denoJson.version,
+    version: VERSION,
     dependencies: [CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER],
     optionalDependencies: [
       CAPABILITIES.HEALTH_DIAGNOSTICS,

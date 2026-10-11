@@ -75,7 +75,7 @@ export type InstrumentationLoader = (
 
 /**
  * Per-kind loaders the registry dispatches to. The registry takes them as an
- * option so tests can drive the lazy-load path without a real `npm:` import;
+ * option so tests can drive the lazy-load path without a real dynamic import;
  * production passes the real loaders (the defaults below).
  *
  * @internal
@@ -113,7 +113,7 @@ export function isInstrumentationSupported(
  * @param provider - The OTel TracerProvider (from `TracerHost.otelProvider`); absent = no-op.
  * @param reporter - Invoked once per outcome as the registry builds. The plugin
  *   passes a `ctx.logger`-backed reporter; absent = outcomes are only recorded.
- * @param loaders - Per-kind loaders; defaults to the real lazy `npm:` loaders.
+ * @param loaders - Per-kind loaders; defaults to the real lazy loaders.
  *   Injectable so the lazy path is testable without a real import.
  * @returns An instrumentation handle (resolved after all lazy loads settle).
  * @since 0.2.0
@@ -195,7 +195,7 @@ export async function buildInstrumentationRegistry(
     enabledInstrumentations.push({ kind, instance });
   }
 
-  // Async helper: lazy npm: import path.
+  // Async helper: lazy dynamic-import path.
   async function enableLazy(
     kind: InstrumentationKind,
     configArg: unknown | undefined,

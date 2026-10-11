@@ -18,7 +18,7 @@ import type { ReactRouterPluginOptions } from '../interfaces/index.ts';
 import { createPublicFileHandler, createStaticAssetHandler } from '../assets/static-assets.ts';
 import { SsrService } from '../services/ssr-service.ts';
 import { assertSsrRuntime, loadRequestHandler } from '../handler/server-build.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'react-router-plugin';
@@ -124,7 +124,7 @@ function clientBuildRoot(assetsDir: string): string | undefined {
 export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     optionalDependencies: ['runtime'],
     provides: [CAPABILITIES.SSR],
     priority: PLUGIN_PRIORITY.NORMAL,

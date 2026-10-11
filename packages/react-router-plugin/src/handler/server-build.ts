@@ -170,7 +170,7 @@ export async function loadRequestHandler(
     rr = options?.rrImportHook ? await options.rrImportHook() : await import('react-router');
   } catch (err) {
     throw new Error(
-      `Failed to import react-router. Ensure it is available in the ` +
+      `Failed to import 'react-router'. Ensure it is available in the ` +
         `runtime/module resolution. Cause: ${err instanceof Error ? err.message : String(err)}`,
     );
   }

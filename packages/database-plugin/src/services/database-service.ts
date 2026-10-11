@@ -28,7 +28,7 @@ import { DuplicateKeyError } from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
-  type NativeDrizzleQueryHandle,
+  type DrizzleQueryHandleProvider,
   readDrizzleQueryHandle,
 } from '../query/drizzle-query.ts';
 import type { IDynamoAccessPathReportingDataSource } from '../adapters/dynamo/dynamo-data-source.ts';
@@ -201,7 +201,7 @@ export class DatabaseService implements IDatabaseService {
     /** The adapter type (used for unsupported-operation checks). */
     private readonly _adapterType: DatabaseAdapterType,
     /** Adapter-specific options for logging and tuning. */
-    private readonly _options?: DatabaseAdapterOptions,
+    private readonly _options?: DatabaseAdapterOptions | undefined,
     /** Optional logger for query logging. */
     private readonly _logger?: { debug(msg: string, meta?: Record<string, unknown>): void },
     /** Monotonic clock — injected from `ctx.runtime.hrtime()`. NEVER `Date.now()`. */
@@ -215,6 +215,22 @@ export class DatabaseService implements IDatabaseService {
     private readonly _clearTimer: (handle: unknown) => void = defaultClearTimer,
   ) {
     ADAPTER_TYPES.set(this, { type: _adapterType, adapter: _adapter });
+    // The typed-query seam (M70j) is attached here rather than declared as a
+    // computed-key method: a computed-key class member cannot be emitted under
+    // `isolatedDeclarations` (TS9038) even with an explicit type, so the
+    // symbol key is assigned through the structural provider cast and read
+    // back structurally by `readDrizzleQueryHandle` — the runtime shape is
+    // unchanged.
+    (this as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE] = () => {
+      assertDrizzleAdapter(this._adapterType);
+      const handle = readDrizzleQueryHandle(this._adapter);
+      if (handle.scope !== 'outer') {
+        throw new Error(
+          "Drizzle query access expected 'outer' scope but received 'transaction' scope.",
+        );
+      }
+      return handle;
+    };
   }
 
   /** Returns a repository bound to the named entity on the outer database scope. */
@@ -224,18 +240,6 @@ export class DatabaseService implements IDatabaseService {
     }
     const dataSource = this.wrapDataSource(entity, this._createDataSource(entity));
     return new InternalRepo<Entity, Id>(dataSource);
-  }
-
-  /** Provide the configured native Drizzle instance through the internal protocol. */
-  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
-    assertDrizzleAdapter(this._adapterType);
-    const handle = readDrizzleQueryHandle(this._adapter);
-    if (handle.scope !== 'outer') {
-      throw new Error(
-        "Drizzle query access expected 'outer' scope but received 'transaction' scope.",
-      );
-    }
-    return handle;
   }
 
   /** @inheritdoc */

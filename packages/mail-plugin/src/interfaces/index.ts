@@ -20,10 +20,10 @@ export type OutgoingMail = MailMessage & { readonly from: string };
  * - `'log'` — writes each message to the resolved {@linkcode ILogger} (and an
  *   optional sink); the zero-dependency default, works on every runtime
  *   including Cloudflare Workers. For testing/local development.
- * - `'smtp'` — SMTP via `nodemailer` (injected transport or lazy `npm:`
+ * - `'smtp'` — SMTP via `nodemailer` (injected transport or lazy dynamic
  *   import); Node/Deno/Bun only (raw sockets, not available on Workers).
  * - `'ses'` — AWS Simple Email Service via `@aws-sdk/client-sesv2` (injected
- *   client or lazy `npm:` import).
+ *   client or lazy dynamic import).
  * - `'sendgrid'` — SendGrid v3 HTTP API over web-standard `fetch`
  *   (zero-dependency, Workers-portable).
  *

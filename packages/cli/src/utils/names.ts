@@ -144,13 +144,15 @@ export function isPathSegmentSafe(names: DerivedNames): boolean {
  * The rule a generating verb's name refusal states, shared so the five
  * commands that print it cannot drift from {@linkcode isIdentifierSafe}.
  */
-export const IDENTIFIER_NAME_RULE = 'it must contain a letter, must not start with a digit, and ' +
+export const IDENTIFIER_NAME_RULE: string =
+  'it must contain a letter, must not start with a digit, and ' +
   'may hold only letters, digits and the separators `-`, `_` and space — no path separator, ' +
   'quote or other punctuation, since each form becomes a TypeScript identifier and a file ' +
   'name — and not a Windows device name (`con`, `nul`, `com1`, …), in at most 255 bytes.';
 
 /** The rule `setu new`'s project-name refusal states; see {@linkcode isPathSegmentSafe}. */
-export const PROJECT_NAME_RULE = 'It must start with a letter or digit and hold only letters, ' +
+export const PROJECT_NAME_RULE: string =
+  'It must start with a letter or digit and hold only letters, ' +
   'digits, `.` and `-` (a space or `_` becomes `-`) — no path separator, control character, ' +
   'quote or other punctuation — not a Windows device name (`con`, `nul`, `com1`, …, with or ' +
   'without an extension) and not ending in `.`, in at most 255 bytes.';

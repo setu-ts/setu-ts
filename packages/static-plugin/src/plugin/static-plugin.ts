@@ -9,7 +9,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { StaticPluginOptions } from '../interfaces/index.ts';
 import { StaticFilesService } from '../services/static-files-service.ts';
 import { createStaticHandler } from '../handler/static-handler.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Creates a StaticPlugin that serves static files from a configured root directory.
@@ -21,7 +21,7 @@ import denoJson from '../../deno.json' with { type: 'json' };
 export function StaticPlugin(options: StaticPluginOptions): IPlugin {
   return {
     name: 'static-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.STATIC_FILES],
     register(ctx: IPluginContext): void {
       const { root, urlPrefix = '/' } = options;

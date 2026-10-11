@@ -23,7 +23,7 @@ import {
   validateCacheControl,
 } from '../routes/catalogue-route.ts';
 import { createLocalizer } from '../service/localizer.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'localization-plugin';
@@ -104,7 +104,7 @@ export function LocalizationPlugin(options: LocalizationPluginOptions): IPlugin 
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.LOCALIZATION],
     // The logger orders first so a partial-catalogue warning raised during
     // `register()` reaches it. Nothing else is resolved at registration — the

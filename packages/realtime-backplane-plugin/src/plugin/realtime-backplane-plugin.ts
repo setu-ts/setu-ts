@@ -26,7 +26,7 @@ import {
 } from '../diagnostics/realtime-observations.ts';
 import type { RealtimeBackplanePluginOptions } from '../interfaces/index.ts';
 import { createBackplane } from '../transports/backplane-factory.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'realtime-backplane-plugin';
@@ -69,7 +69,7 @@ export function RealtimeBackplanePlugin(
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.REALTIME_BACKPLANE],
     // Resolved by the messaging arm; absent for every other transport.
     optionalDependencies: [CAPABILITIES.MESSAGING],

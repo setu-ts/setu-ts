@@ -26,7 +26,7 @@ import { SESSION_TENANT_BINDING_KEY } from '@setu-ts/common';
  *
  * @since 0.2.0
  */
-export const TENANT_BINDING_KEY = SESSION_TENANT_BINDING_KEY;
+export const TENANT_BINDING_KEY: string = SESSION_TENANT_BINDING_KEY;
 
 /**
  * Reads the tenant id a session is bound to, or `undefined` when unbound.

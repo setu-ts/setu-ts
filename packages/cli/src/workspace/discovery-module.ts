@@ -29,7 +29,7 @@ import {
 export const DISCOVERY_MODULE = 'src/discovery/services.ts';
 
 /** The specifier a member's own modules import {@linkcode DISCOVERY_MODULE} by. */
-export const DISCOVERY_SPECIFIER = `./${DISCOVERY_MODULE}`;
+export const DISCOVERY_SPECIFIER: string = `./${DISCOVERY_MODULE}`;
 
 /** The exported constant carrying the member's own port. */
 export const SERVICE_PORT_EXPORT = 'SERVICE_PORT';

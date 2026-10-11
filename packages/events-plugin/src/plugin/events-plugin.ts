@@ -28,7 +28,7 @@ import {
 import { subscribeHandler } from '../handlers/event-handler.ts';
 import type { IEventHandler } from '../handlers/event-handler.ts';
 import type { EventDispatchOptions } from '../interfaces/index.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'events-plugin';
@@ -107,7 +107,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     optionalDependencies: ['logger'],
     provides: [CAPABILITIES.EVENTS],
     priority: PLUGIN_PRIORITY.NORMAL,

@@ -7,6 +7,8 @@
  *
  * @module
  */
+import '../metadata/symbol-metadata.ts';
+
 import type { HttpMethod } from '@setu-ts/common';
 
 import { methodDecorator } from '../metadata/context-bridge.ts';

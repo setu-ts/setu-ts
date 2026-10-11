@@ -42,7 +42,7 @@ export const DEFAULT_BASE_PATH = '/';
  * @param path - The configured base path. Defaults to {@linkcode DEFAULT_BASE_PATH}.
  * @returns The normalized prefix; `''` means "mounted at the root".
  */
-export function normalizeBasePath(path = DEFAULT_BASE_PATH): string {
+export function normalizeBasePath(path: string = DEFAULT_BASE_PATH): string {
   const trimmed = path.trim();
   if (trimmed === '' || trimmed === '/') {
     return '';

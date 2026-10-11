@@ -9,7 +9,7 @@
 import type { IPlugin, IResilienceService } from '@setu-ts/common';
 import type { ResiliencePluginOptions } from '../interfaces/index.ts';
 import { ResilienceService } from '../services/resilience-service.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Creates a resilience plugin.
@@ -35,7 +35,7 @@ import denoJson from '../../deno.json' with { type: 'json' };
 export function ResiliencePlugin(options?: ResiliencePluginOptions): IPlugin {
   return {
     name: 'resilience-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: ['resilience'],
     priority: 500,
 

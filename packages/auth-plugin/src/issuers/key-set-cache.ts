@@ -19,7 +19,7 @@ import type { CompiledIssuer } from './trusted-issuer.ts';
 import { isAcceptableUrl } from './trusted-issuer.ts';
 
 /** Largest key-set or discovery response accepted, in bytes. */
-export const MAX_RESPONSE_BYTES = 64 * 1024;
+export const MAX_RESPONSE_BYTES: number = 64 * 1024;
 /** Largest number of keys accepted in one key set. */
 export const MAX_KEYS = 64;
 

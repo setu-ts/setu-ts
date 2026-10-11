@@ -16,7 +16,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY, resolveRegistryEntry } from '@setu-ts/co
 import type { CqrsPluginOptions } from '../interfaces/index.ts';
 import { CommandBus } from '../bus/command-bus.ts';
 import { QueryBus } from '../bus/query-bus.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'cqrs-plugin';
@@ -107,7 +107,7 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.CQRS, CAPABILITIES.COMMAND_BUS, CAPABILITIES.QUERY_BUS],
     priority: PLUGIN_PRIORITY.NORMAL,
 

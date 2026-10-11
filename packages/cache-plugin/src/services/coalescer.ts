@@ -119,4 +119,4 @@ export function createCoalescer(): Coalescer {
  *
  * @internal
  */
-export const cacheCoalescer = createCoalescer();
+export const cacheCoalescer: Coalescer = createCoalescer();

@@ -38,7 +38,7 @@ import {
   compileCacheDiagnosticsAlias,
   createCacheDiagnosticsSource,
 } from '../diagnostics/cache-observations.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Default store backend when none is specified. */
 const DEFAULT_STORE = 'memory';
@@ -97,7 +97,7 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
 
   return {
     name: pluginName,
-    version: denoJson.version,
+    version: VERSION,
     optionalDependencies: ['logger'],
     provides: [token],
     priority: PLUGIN_PRIORITY.NORMAL,

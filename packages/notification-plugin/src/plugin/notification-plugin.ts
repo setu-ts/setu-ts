@@ -40,7 +40,7 @@ import { SlackChannel } from '../channels/slack-channel.ts';
 import { TwilioProvider } from '../providers/twilio-provider.ts';
 import { FcmProvider } from '../providers/fcm-provider.ts';
 import { SlackProvider } from '../providers/slack-provider.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'notification-plugin';
@@ -75,7 +75,7 @@ export function NotificationPlugin(options: NotificationPluginOptions): IPlugin 
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     optionalDependencies: [CAPABILITIES.MAIL],
     provides: [CAPABILITIES.NOTIFICATION],
     priority: PLUGIN_PRIORITY.NORMAL,

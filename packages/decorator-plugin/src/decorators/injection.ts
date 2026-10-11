@@ -4,6 +4,8 @@
  *
  * @module
  */
+import '../metadata/symbol-metadata.ts';
+
 import type { ServiceScope } from '@setu-ts/common';
 
 import { classDecorator } from '../metadata/context-bridge.ts';

@@ -152,6 +152,21 @@ describe('discoverControllers', () => {
     expect(count()).toBe(1);
   });
 
+  it('hands the importer only absolute file: URLs (M111a §3.9)', async () => {
+    // tsc wraps this computed import() in __rewriteRelativeImportExtension,
+    // which rewrites only a "./" or "../" specifier ending in .ts. An absolute
+    // file: URL is outside that shape, so the helper passes it through.
+    const fs = createFakeFileSystem({ '/d/a.ts': '', '/d/nested/b.ts': '' });
+    const seen: string[] = [];
+    const importer: ModuleImporter = (spec) => {
+      seen.push(spec);
+      return Promise.resolve();
+    };
+    await discoverControllers({ path: '/d' }, createFakeRuntime({ fs }), metadataStore, importer);
+    expect(seen).toHaveLength(2);
+    for (const spec of seen) expect(spec.startsWith('file:///')).toBe(true);
+  });
+
   it('records an import error and continues with remaining files', async () => {
     const fs = createFakeFileSystem({ '/d/good.ts': '', '/d/bad.ts': '' });
     const importer: ModuleImporter = (spec) => {

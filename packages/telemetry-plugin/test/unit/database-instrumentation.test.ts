@@ -60,7 +60,7 @@ describe('database-instrumentation', () => {
     const result = await loadIORedisInstrumentation(undefined, importFn);
     expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
+    expect(result.specifier).toBe('@opentelemetry/instrumentation-ioredis');
   });
 
   it('loadIORedisInstrumentation should reject when importFn rejects', async () => {

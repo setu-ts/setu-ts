@@ -30,7 +30,7 @@ import { LocalStorageProvider } from '../providers/local-provider.ts';
 import { S3Provider } from '../providers/s3-provider.ts';
 import { GcsProvider } from '../providers/gcs-provider.ts';
 import { AzureBlobProvider } from '../providers/azure-provider.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'storage-plugin';
@@ -153,7 +153,7 @@ export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     optionalDependencies: ['logger', 'health'],
     provides: [CAPABILITIES.STORAGE],
     priority: PLUGIN_PRIORITY.NORMAL,

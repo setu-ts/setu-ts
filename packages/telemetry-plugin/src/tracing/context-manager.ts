@@ -29,15 +29,15 @@ export type ContextManagerOutcome =
   | { readonly activated: true; readonly adopted: 'registered' | 'existing' }
   | { readonly activated: false; readonly reason: string };
 
-/** The `npm:` specifier the context-manager loader resolves. */
+/** The package specifier the context-manager loader resolves. */
 const CONTEXT_MANAGER_SPECIFIER = '@opentelemetry/context-async-hooks';
 
 /**
  * Lazily loads OTel's async-local-storage manager.
  *
- * The specifier is a **literal** at the `import()` call — the only form that
- * survives JSR's static npm-compatibility rewrite and loads on Node or Bun
- * (M70e / X7-3).
+ * The specifier is a **literal** at the `import()` call — the only form static
+ * analysis (a bundler, the type checker, the repository's import audit) can
+ * see (M70e / X7-3).
  *
  * @returns A context manager suitable for global registration
  * @throws {Error} If `@opentelemetry/context-async-hooks` cannot be resolved

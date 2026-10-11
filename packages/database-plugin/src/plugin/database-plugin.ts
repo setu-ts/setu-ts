@@ -42,7 +42,7 @@ import {
   readQueryProgress,
 } from '../health/database-capacity.ts';
 import type { DataSource } from '../repositories/base-repository.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Default adapter when none is specified. */
 const DEFAULT_ADAPTER: DatabaseAdapterType = 'memory';
@@ -109,7 +109,7 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
   return {
     name: pluginName,
-    version: denoJson.version,
+    version: VERSION,
     optionalDependencies: ['logger'],
     provides: [token],
     priority: PLUGIN_PRIORITY.NORMAL,

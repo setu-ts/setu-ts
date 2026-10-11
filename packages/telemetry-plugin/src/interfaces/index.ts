@@ -240,7 +240,7 @@ export interface TraceDiagnosticsOptions {
 export interface InstrumentationConfig {
   /**
    * An already-constructed OTel `Instrumentation` instance — the INJECT half of the
-   * inject-or-lazy seam. When set, the registry skips the lazy `npm:` import and uses
+   * inject-or-lazy seam. When set, the registry skips the lazy dynamic import and uses
    * this instance directly.
    */
   readonly instrumentation?: unknown;

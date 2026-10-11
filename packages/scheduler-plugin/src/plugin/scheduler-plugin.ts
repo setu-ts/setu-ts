@@ -45,7 +45,7 @@ import {
   createSchedulerDiagnosticsSource,
   SchedulerObservationCollector,
 } from '../diagnostics/scheduler-observations.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Creates a scheduler plugin.
@@ -140,7 +140,7 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
 
   return {
     name: 'scheduler-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: ['scheduler'],
     priority: 100,
 

@@ -513,7 +513,7 @@ export interface SamlProfile {
 /**
  * The structural shape of the SAML library module, injected
  * through {@linkcode SamlProvider.module} instead of the lazy
- * `@node-saml/node-saml` import — on a runtime where dynamic `npm:`
+ * `@node-saml/node-saml` import — on a runtime where dynamic package
  * imports are unavailable, or to pin a vetted build.
  *
  * Only the `SAML` class is read; it is checked to be a constructor when the

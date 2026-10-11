@@ -3,8 +3,9 @@
  * `@hono/node-server` (Hono's platform serve layer).
  *
  * Uses an injectable {@linkcode NodeServeHost} interface that exposes
- * `serve({ fetch, port, hostname })` defaulting to a lazy `npm:` import of
- * `@hono/node-server@^2.0.0`. This allows unit testing without a real Node
+ * `serve({ fetch, port, hostname })` defaulting to a lazy import of
+ * `@hono/node-server` (a regular dependency of this package, so a bare install
+ * can serve on Node). This allows unit testing without a real Node
  * server. `serve()` is called with node-server's own defaults, which install
  * its lightweight `Request`/`Response` as globals — see the note on
  * `defaultNodeServeHost`.

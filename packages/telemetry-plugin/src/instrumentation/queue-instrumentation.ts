@@ -2,21 +2,21 @@
  * Queue instrumentation loaders for amqplib and kafkajs.
  *
  * Loads `@opentelemetry/instrumentation-amqplib` and
- * `@opentelemetry/instrumentation-kafkajs` via lazy `npm:` imports.
+ * `@opentelemetry/instrumentation-kafkajs` via lazy dynamic imports.
  * Honors the inject-or-lazy seam.
  *
- * Each default `importFn` keeps its `npm:` specifier as a **literal** at the
- * `import()` call — the only form that survives JSR's static
- * npm-compatibility rewrite and loads on Node or Bun (X7-3).
+ * Each default `importFn` keeps its package specifier as a **literal** at the
+ * `import()` call — the only form static analysis (a bundler, the type
+ * checker, the repository's import audit) can see (X7-3).
  *
  * @module
  * @since 0.2.0
  */
 
-/** The `npm:` specifier the amqplib loader resolves. */
+/** The package specifier the amqplib loader resolves. */
 const AMQLIB_SPECIFIER = '@opentelemetry/instrumentation-amqplib';
 
-/** The `npm:` specifier the kafkajs loader resolves. */
+/** The package specifier the kafkajs loader resolves. */
 const KAFKAJS_SPECIFIER = '@opentelemetry/instrumentation-kafkajs';
 
 /**
