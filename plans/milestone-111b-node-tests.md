@@ -431,6 +431,10 @@ converted tests demonstrated defects. The original tests-only scope now includes
 - SSE sends and comments share one guarded enqueue operation. Encoding stays behind that guard, so
   closed connections still ignore unserializable messages. A retained timer callback after close
   must not write or repeat cleanup; stream cancellation and backpressure behavior stay covered.
+- A fifth adjustment, approved on 2026-10-11 after verification measured it: the Node adapter
+  removes the `text/plain; charset=UTF-8` default `@hono/node-server` writes for a byte or stream
+  body that sets no `content-type`, so Node sends what the Fetch standard, Deno, Bun and Workers
+  send (no type). It predates M111b; the conversion only made it visible.
 
 The manifest generator also follows the converted imports, including npm package aliases, and
 preserves the root test commands and esbuild install decision. This is tooling within the approved
@@ -461,6 +465,8 @@ The original CLI path validation and publish-option validation remain obligation
 | Following a symbolic link removes its target                                                    | Remove the link itself; prove target contents remain.                                             |
 | A malformed-key header changes the result prototype or silently disappears                      | Copy only own enumerable entries as own data properties; preserve the ordinary prototype.         |
 | The framework-header merge changes caller/header precedence or permits reserved-header spoofing | Keep existing precedence and validated reserved transport metadata; exercise the broker consumer. |
+| Removing node-server's default drops a type the application set                                 | Strip only when the framework response is bytes or a stream and names no `content-type`.          |
+| The `writeHead` wrapper leaks into later responses on a kept-alive connection                   | Wrap the one exchange's `outgoing` for one call, restoring the original before delegating.        |
 
 **Implementation-audit obligations:** exercise empty/nonempty/missing/file/symlink removal with
 positive controls and a negative control that restores the original adapter; send ordinary and
@@ -535,9 +541,10 @@ None is retired.
   the file runs nowhere else. It now runs unconditionally; breaking its fixture path fails it.
 - `runtime/test/integration/streaming.test.ts` had dropped its "`stream()` sets no content-type"
   assertion. Measured: Deno sends no content-type, while `@hono/node-server` writes
-  `text/plain; charset=UTF-8` for any body that lacks one. The assertion is restored per runtime.
-  The divergence itself predates M111b (it is node-server's default since M23) and is left as an
-  open question for the maintainer rather than changed here.
+  `text/plain; charset=UTF-8` for any body that lacks one (its default since M23). At the
+  maintainer's direction the divergence is fixed here (§10, fifth adjustment) rather than recorded:
+  the assertion is `null` on every runtime, `integration/node-content-type.test.ts` drives each body
+  kind through a real Node socket, and removing the suppression fails both.
 - Five telemetry-plugin files kept a `canImportNpm()` that always returned `true`, leaving dead
   `skip` options and comments describing an `ignore` guard that no longer existed; removed.
 - Ten source files measure exactly 90.0 on one metric under V8-on-Node (for example

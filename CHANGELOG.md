@@ -788,6 +788,15 @@ All notable changes to this project are documented here. The format follows
   can restore the original workspace while preserving nonempty directories.
 - Messaging transport headers preserve own `__proto__` fields and framework-header precedence
   without invoking the object prototype setter.
+- **A streamed response without a content-type no longer reaches Node clients labelled as text
+  (M111b).** `@hono/node-server` writes `text/plain; charset=UTF-8` for any body that lacks a
+  `content-type`, so `ctx.response.stream(...)` with no type set arrived as text on Node while Deno,
+  Bun and Workers send none. The Node adapter now removes that default whenever the framework
+  response is a byte or stream body that sets no type, matching the Fetch standard, which implies a
+  type only for a string body. Explicit types (`send`, `text`, `json`, a set header) are unchanged.
+  A Node client that relied on the injected `text/plain` must now set the header itself.
+  `NodeServeHost.serve`'s `fetch` callback gains an optional second `env` parameter (node-server's
+  `{ outgoing }`); a host that never passes it is unaffected.
 
 - **MongoDB refuses an operator-shaped key (`@setu-ts/database-plugin`, M105).** Since M78 a key
   value that was an object — `findById({ $ne: 'x' })`, or such a value inside a composite key —

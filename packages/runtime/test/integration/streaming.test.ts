@@ -69,12 +69,9 @@ describe('streaming integration', () => {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/stream`);
       expect(response.status).toBe(200);
-      // stream() sets no content-type. Deno sends none; @hono/node-server writes
-      // `text/plain; charset=UTF-8` for any body that lacks one, so that is what a
-      // Node client receives.
-      expect(response.headers.get('content-type')).toBe(
-        'Deno' in globalThis ? null : 'text/plain; charset=UTF-8',
-      );
+      // stream() sets no content-type, and no runtime adds one: the Node
+      // adapter removes the default @hono/node-server would otherwise write.
+      expect(response.headers.get('content-type')).toBeNull();
 
       const body = response.body;
       if (!body) throw new Error('expected body');
