@@ -244,6 +244,20 @@ from the npm documentation pages named in the row.
   negative control: declare `decorator-plugin` `sideEffects: false` with the generator guard removed
   → the bundle leg fails.
 
+> **Correction — implementation stop, measured 2026-10-12:** the required §3.8/§6 bundle negative
+> control does not fail on the current source. With the renderer forced to `sideEffects: false` and
+> `checkDecoratorSideEffects` removed from generation, all 51 tarballs installed/imported and all
+> four boot legs passed (exit 0), including the esbuild bundle's decorated route.
+> `decorators/controller.ts:9,28-30` and `decorators/http.ts:14` use the context bridge, which
+> imports `requireDecoratorMetadata` from `metadata/symbol-metadata.ts` at
+> `metadata/context-bridge.ts:42` and calls it at `:110,128,153,158`. The negative bundle still
+> contains both `installSymbolMetadata(Symbol)` and `requireDecoratorMetadata`, despite the packed
+> manifest declaring `false`. This is a used value-import path, so the serving proof does not
+> discriminate the declared `sideEffects` list from `false`. The renderer, guard and every generated
+> manifest were restored. No package source was changed. The intended negative-control design needs
+> correction before implementation verification can continue; the positive bundle result alone does
+> not prove the manifest's retention control.
+
 ### 3.9 `@since` is checked against npm for versions after the JSR line
 
 - **Decision:** `check-since-tags.ts` gains a registry router: a tag naming `0.8.x` or earlier is
