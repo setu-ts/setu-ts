@@ -1,6 +1,6 @@
 /**
  * Unit tests for the decidable half of the Node pack-and-boot gate
- * (M111a plan §3.10): the `workspace:` scan, the install closure, and the
+ * (M111a plan §3.10): the `workspace:` scan and the
  * skip-versus-fail decision.
  *
  * @module
@@ -10,7 +10,6 @@ import { expect } from '@std/expect';
 import {
   classifyLeg,
   decideOutcome,
-  installClosure,
   type LegResult,
   workspaceProtocolSpecifiers,
 } from '../../scripts/node-build-gate.ts';
@@ -43,41 +42,6 @@ describe('workspaceProtocolSpecifiers', () => {
     expect(workspaceProtocolSpecifiers('x')).toEqual([]);
     expect(workspaceProtocolSpecifiers({ dependencies: 'nope', peerDependencies: { a: 1 } }))
       .toEqual([]);
-  });
-});
-
-describe('installClosure', () => {
-  const graph = new Map<string, readonly string[]>([
-    ['@setu-ts/kernel', ['@setu-ts/common']],
-    ['@setu-ts/runtime', ['@setu-ts/common']],
-    ['@setu-ts/decorator-plugin', ['@setu-ts/common']],
-    ['@setu-ts/common', []],
-    ['@setu-ts/unrelated', ['@setu-ts/common']],
-  ]);
-
-  it('includes each root and its transitive dependencies once, sorted', () => {
-    expect(installClosure(['@setu-ts/kernel', '@setu-ts/runtime'], graph)).toEqual([
-      '@setu-ts/common',
-      '@setu-ts/kernel',
-      '@setu-ts/runtime',
-    ]);
-  });
-
-  it('does not pull in a package nothing in the closure depends on', () => {
-    expect(installClosure(['@setu-ts/kernel'], graph)).not.toContain('@setu-ts/unrelated');
-  });
-
-  it('refuses a name that is not a workspace package', () => {
-    expect(() => installClosure(['@setu-ts/missing'], graph)).toThrow(
-      '@setu-ts/missing is not a workspace package',
-    );
-    const broken = new Map([['@setu-ts/a', ['@setu-ts/gone']]]);
-    expect(() => installClosure(['@setu-ts/a'], broken)).toThrow('@setu-ts/gone');
-  });
-
-  it('terminates on a dependency cycle', () => {
-    const cyclic = new Map([['a', ['b']], ['b', ['a']]]);
-    expect(installClosure(['a'], cyclic)).toEqual(['a', 'b']);
   });
 });
 

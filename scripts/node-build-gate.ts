@@ -8,9 +8,6 @@
  *
  * - {@linkcode workspaceProtocolSpecifiers} — a packed manifest still naming
  *   `workspace:` installs for nobody, so any such field is a refusal;
- * - {@linkcode installClosure} — npm 404s an unpublished dependency unless its
- *   tarball is in the SAME install, so the boot installs the transitive
- *   `@setu-ts` closure of its roots;
  * - {@linkcode decideOutcome} — a leg whose runtime binary is absent is a
  *   reported skip (exit 77, the `check:apps` convention) unless the run passed
  *   `--require-all`, which CI does, so a skip can never read as a pass there.
@@ -44,38 +41,6 @@ export function workspaceProtocolSpecifiers(manifest: unknown): readonly string[
     }
   }
   return found;
-}
-
-/**
- * The transitive closure of `roots` over the workspace's regular
- * `dependencies`, sorted.
- *
- * Only `dependencies` are followed: an optional peer is not installed by npm
- * and a dev dependency never reaches a consumer, so following either would
- * pack and install packages the boot does not need.
- *
- * @param roots - The package names the boot installs directly
- * @param dependenciesOf - Each workspace package name → its `@setu-ts`
- *   regular dependencies
- * @returns Every package that must be installed together
- * @throws {Error} When a root or a dependency names no workspace package —
- *   the closure would otherwise silently miss the tarball npm then 404s on
- */
-export function installClosure(
-  roots: readonly string[],
-  dependenciesOf: ReadonlyMap<string, readonly string[]>,
-): readonly string[] {
-  const seen = new Set<string>();
-  const pending = [...roots];
-  while (pending.length > 0) {
-    const name = pending.pop() as string;
-    if (seen.has(name)) continue;
-    const deps = dependenciesOf.get(name);
-    if (deps === undefined) throw new Error(`${name} is not a workspace package`);
-    seen.add(name);
-    pending.push(...deps);
-  }
-  return [...seen].sort();
 }
 
 /** One runtime leg of the boot. */
