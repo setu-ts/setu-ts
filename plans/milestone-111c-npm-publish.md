@@ -236,27 +236,27 @@ from the npm documentation pages named in the row.
   plain `npm install`, and the fixture imports every package and asserts each exposes a surface, on
   Node 24, Node 22 and Bun. A new bundle leg runs esbuild (root devDependency, `0.28.2`) with
   `bundle: true` and tree shaking over a fixture importing one decorator, writes the bundle, and
-  runs it on Node 24: the decorated controller must serve, which only holds if `symbol-metadata.js`
-  survived the bundler under the declared `sideEffects`.
-- **Why:** this is the pre-publish equivalent of `compat/`, run on every PR; and it is the one real
-  bundler proof of §3.2.
-- **Test home:** `test/unit/node-build-gate.test.ts` (any new pure helper); the CI `node-build` job;
-  negative control: declare `decorator-plugin` `sideEffects: false` with the generator guard removed
-  → the bundle leg fails.
-
-> **Correction — implementation stop, measured 2026-10-12:** the required §3.8/§6 bundle negative
-> control does not fail on the current source. With the renderer forced to `sideEffects: false` and
-> `checkDecoratorSideEffects` removed from generation, all 51 tarballs installed/imported and all
-> four boot legs passed (exit 0), including the esbuild bundle's decorated route.
-> `decorators/controller.ts:9,28-30` and `decorators/http.ts:14` use the context bridge, which
-> imports `requireDecoratorMetadata` from `metadata/symbol-metadata.ts` at
-> `metadata/context-bridge.ts:42` and calls it at `:110,128,153,158`. The negative bundle still
-> contains both `installSymbolMetadata(Symbol)` and `requireDecoratorMetadata`, despite the packed
-> manifest declaring `false`. This is a used value-import path, so the serving proof does not
-> discriminate the declared `sideEffects` list from `false`. The renderer, guard and every generated
-> manifest were restored. No package source was changed. The intended negative-control design needs
-> correction before implementation verification can continue; the positive bundle result alone does
-> not prove the manifest's retention control.
+  runs it on Node 24: the decorated controller must serve, which only holds if the bundle installs
+  `Symbol.metadata` (Node 24 lacks it).
+- **Why:** this is the pre-publish equivalent of `compat/`, run on every PR, and the one end-to-end
+  proof that a bundled decorated application still installs its metadata carrier.
+- **What the bundle leg does NOT prove (measured during implementation, 2026-10-12):** it cannot
+  tell the declared retention list from `sideEffects: false`. Every module that defines a decorator
+  also imports `requireDecoratorMetadata` from `metadata/symbol-metadata.ts` as a VALUE (directly,
+  or through `metadata/context-bridge.ts:42`); the only effect-only importer,
+  `decorators/response-status.ts`, defines no decorator. Any bundle that uses a decorator therefore
+  keeps the module and its top-level `installSymbolMetadata(...)` statement under both declarations.
+  With the renderer forced to `false` and the guard removed, all four legs passed. The retention
+  list stays because it is the true statement about that module and protects a future effect-only
+  importer, but it is enforced by the §3.2 audit and `checkDecoratorSideEffects` at generation, not
+  by this leg.
+- **Test home:** `test/unit/node-build-gate.test.ts` (any new pure helper); the CI `node-build` job.
+  Negative control, applied to a scratch copy of the packed `decorator-plugin` and never committed:
+  delete the top-level `installSymbolMetadata(...)` call from `dist/metadata/symbol-metadata.js` →
+  the bundle leg fails on Node 24 with `DecoratorMetadataUnavailableError`, proving the leg detects
+  a bundle that lost the install. The retention list's own control is unit level: the
+  `sideEffects: false` rendering for `decorator-plugin` is refused by the generator guard
+  (`test/unit/node-manifests.test.ts`).
 
 ### 3.9 `@since` is checked against npm for versions after the JSR line
 
@@ -371,9 +371,12 @@ held to the 90% bar by `scripts/script-coverage.ts`; orchestration files (`npm-p
 | `test/apps-gate.test.ts` (ext.)             | workflows                     | `id-token: write` only in `publish`; no `secrets.` reference and no `NODE_AUTH_TOKEN` assignment in `publish`; `--ignore-scripts`; environment `npm`; compat probe step.                    |
 
 Negative controls (each observed failing, then reverted): drop `repository` from the renderer;
-publish a packed manifest whose `@setu-ts` dependency is `^0.7.0`; declare `decorator-plugin`
-`sideEffects: false` with the guard removed (bundle leg); route `0.9.0` to JSR (`@since` npm cases);
-put `id-token: write` back at workflow level (apps-gate).
+publish a packed manifest whose `@setu-ts` dependency is `^0.7.0`; delete the packed install call
+from a scratch `decorator-plugin` tarball (bundle leg, §3.8); render `decorator-plugin`
+`sideEffects: false` (refused by the generator guard); route `0.9.0` to JSR (`@since` npm cases);
+put `id-token: write` back at workflow level (apps-gate). The `@since` routing control and the
+removed-packument-lookup control must fail BEHAVIOURALLY: a mutation that fails type checking proves
+nothing, so each is applied in a form that still type-checks.
 
 ## 7. Verification gates
 
