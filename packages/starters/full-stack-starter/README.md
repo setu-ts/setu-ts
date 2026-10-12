@@ -10,7 +10,8 @@ SSR support.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/full-stack-starter
+npm install @setu-ts/full-stack-starter
+# Deno: deno add npm:@setu-ts/full-stack-starter
 ```
 
 Or via npm/yarn/pnpm:
@@ -249,8 +250,8 @@ A loader then calls `context.get(pricingContext)?.quote(4900)`.
 Three things to know:
 
 - **`di: {}` falls back to the kernel registry.** `DiPlugin`'s `autoRegister` defaults to `true`,
-  which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own services. On `0.8.0`
-  and earlier it defaulted to `false`, so write `di: { autoRegister: true }` there, or every page
+  which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own services. Earlier
+  releases defaulted it to `false`, so write `di: { autoRegister: true }` there, or every page
   answers 500 with `No provider registered for DI token 'logger'`.
 - **There is no per-request scope.** Nothing creates a scope for each request, so a `scoped` service
   resolved from the root container acts as a singleton. For one instance per request, call
@@ -348,7 +349,7 @@ Two consequences follow from the list being positional:
 
 ## See Also
 
-- [JSR Registry](https://jsr.io/@setu-ts/full-stack-starter)
+- [npm](https://www.npmjs.com/package/@setu-ts/full-stack-starter)
 - [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#starter-exports-and-option-arms)
 - [rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
 - [microservice-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/microservice-starter/README.md)

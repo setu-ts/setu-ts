@@ -16,7 +16,8 @@ Provides configurable static file serving with support for:
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/static-plugin
+npm install @setu-ts/static-plugin
+# Deno: deno add npm:@setu-ts/static-plugin
 ```
 
 ## Usage

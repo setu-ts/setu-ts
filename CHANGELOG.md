@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-12
+
 ### Added
 
 - **The CLI is a Node program (M111d).** `setu` ships as an npm `bin`
@@ -562,6 +564,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The installation documentation teaches npm.** `0.9.0` is published to npm only, while the
+  README, `PUBLIC_API.md`, the getting-started, runtime-deployment, decorators and custom-plugins
+  guides and eighteen package READMEs still taught `jsr:` installs — pins that could never resolve
+  at `0.9.0`. Each install line is now `npm install @setu-ts/<pkg>` (`bun add`, or
+  `deno add npm:@setu-ts/<pkg>` on Deno), and the examples import `hono` rather than `@hono/hono`.
+  `PUBLIC_API.md`'s description of `setu add` pins, the Workers manifest and the workspace root no
+  longer mentions the `@jsr` scope or an `.npmrc`, which the CLI stopped writing in M111d. Earlier
+  releases stay on JSR.
+
 - **Breaking: `node` is the default generated target, and every target installs the framework from
   npm (M111d).** `setu new` and `setu generate app` without `--runtime` now scaffold a Node project;
   pass `--runtime deno` for the previous default. Generated manifests pin `@setu-ts/*` from npm
@@ -817,6 +828,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`release:bump` completes, and leaves history alone.** The task granted run access to `git` only,
+  so a real bump rewrote every file and then died with `NotCapable` before regenerating the member
+  manifests. It also rewrote the versions recorded in archived plans under `plans/archive/` and the
+  fixtures of a colocated `*.test.ts`; both are now left as written.
+
 - **`setu adopt` moves a project's `deno.jsonc` (M111d).** Adoption moved `deno.json` but left a
   `deno.jsonc` at the repository root, beside the workspace's new `deno.json`, so the member had no
   manifest and the project's own was ignored. It now moves with the member, and its pre-0.9 pins are
@@ -970,13 +986,13 @@ All notable changes to this project are documented here. The format follows
 
 - **The runtime deployment guide's setup commands did not run.** `npm install jsr:…`,
   `npm add jsr:…` and `bun add jsr:…` all fail, and `wrangler init --type` takes no `--type`; the
-  guide now uses `npx jsr add` / `bunx jsr add` and `setu new`. It also showed a `package.json`
-  `imports` block Node cannot use, a `node:20` Docker base below the documented Node 22 floor,
-  Workers startup that cached a failed start for the isolate's life, `ctx.runtime` in request
-  handlers (where `ctx` has no `runtime`), and a 120-second Workers execution limit that does not
-  exist: an HTTP Worker has no wall-clock limit, and its CPU time is what is capped. Each startup
-  retry constructs a fresh application, because the kernel refuses restarting one after plugin
-  registration has begun.
+  guide now uses `npm install` / `bun add` against the npm packages (see Changed) and `setu new`. It
+  also showed a `package.json` `imports` block Node cannot use, a `node:20` Docker base below the
+  documented Node 22 floor, Workers startup that cached a failed start for the isolate's life,
+  `ctx.runtime` in request handlers (where `ctx` has no `runtime`), and a 120-second Workers
+  execution limit that does not exist: an HTTP Worker has no wall-clock limit, and its CPU time is
+  what is capped. Each startup retry constructs a fresh application, because the kernel refuses
+  restarting one after plugin registration has begun.
 
 - **The getting-started guide's CLI install command did not work.** It omitted `-g`, which Deno 2.9
   requires for a global install, and `-n setu`, without which the binary is named `cli` and every

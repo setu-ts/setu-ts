@@ -42,6 +42,8 @@ packages it imports **directly** — `@setu-ts/common` reaches `@setu-ts/kernel`
 workspace. Build without the root `deno.json` and Deno resolves that specifier against JSR instead
 of the local workspace member:
 
+<!-- version:history -->
+
 ```
 error: Could not find version of '@setu-ts/common' that matches specified version constraint '^0.8.0'
 ```

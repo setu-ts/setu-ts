@@ -116,14 +116,12 @@ mkdir my-app && cd my-app
 npm init -y
 npm pkg set type=module
 
-# Add Setu-TS packages from JSR (npm has no `jsr:` protocol, so `npm install jsr:…` fails)
-npx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
+# Add Setu-TS packages from npm
+npm install @setu-ts/kernel @setu-ts/runtime @setu-ts/common
 npm install --save-dev tsx
 ```
 
-`npx jsr add` writes ordinary npm dependencies and an `.npmrc` that points the `@jsr` scope at JSR's
-npm registry, so imports stay `@setu-ts/kernel`. Or let `setu new my-app --runtime node` scaffold
-all of this.
+Or let `setu new my-app --runtime node` scaffold all of this.
 
 ### Application
 
@@ -156,9 +154,9 @@ console.log('Server running on http://localhost:3000');
     "dev": "tsx watch main.ts"
   },
   "dependencies": {
-    "@setu-ts/common": "npm:@jsr/setu-ts__common@^0.8.0",
-    "@setu-ts/kernel": "npm:@jsr/setu-ts__kernel@^0.8.0",
-    "@setu-ts/runtime": "npm:@jsr/setu-ts__runtime@^0.8.0"
+    "@setu-ts/common": "^0.9.0",
+    "@setu-ts/kernel": "^0.9.0",
+    "@setu-ts/runtime": "^0.9.0"
   },
   "devDependencies": {
     "tsx": "^4.20.0"
@@ -184,7 +182,7 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-COPY package*.json .npmrc ./
+COPY package*.json ./
 RUN npm ci
 
 COPY . .
@@ -234,7 +232,7 @@ curl -fsSL https://deno.land/install.sh | sh
 mkdir my-app && cd my-app
 
 # Add Setu-TS packages
-deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
+deno add npm:@setu-ts/kernel npm:@setu-ts/runtime npm:@setu-ts/common
 ```
 
 ### Application
@@ -266,9 +264,9 @@ console.log('Server running on http://localhost:3000');
     "dev": "deno run --watch --allow-net --allow-env main.ts"
   },
   "imports": {
-    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.8.0",
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0"
+    "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.9.0",
+    "@setu-ts/runtime": "npm:@setu-ts/runtime@^0.9.0",
+    "@setu-ts/common": "npm:@setu-ts/common@^0.9.0"
   }
 }
 ```
@@ -360,8 +358,8 @@ curl -fsSL https://bun.sh/install | bash
 mkdir my-app && cd my-app
 bun init -y
 
-# Add Setu-TS packages from JSR (`bun add jsr:…` is refused as an invalid dependency name)
-bunx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
+# Add Setu-TS packages from npm
+bun add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
 ```
 
 ### Application
@@ -441,8 +439,8 @@ bun build --compile --outfile my-app main.ts
 setu new my-app --runtime cloudflare-workers
 cd my-app && npm install
 
-# Or add Setu-TS to an existing Worker (npm has no `jsr:` protocol, so `npm add jsr:…` fails)
-npx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/cloudflare-plugin @setu-ts/common
+# Or add Setu-TS to an existing Worker
+npm install @setu-ts/kernel @setu-ts/runtime @setu-ts/cloudflare-plugin @setu-ts/common
 
 # Log in to Cloudflare once, before the first deploy
 npx wrangler login

@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/idempotency-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "A repeated request, queue job or broker message does its work once per key",
   "repository": {
     "type": "git",

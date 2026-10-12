@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/database-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Repository pattern and Unit of Work over MongoDB, Prisma, Drizzle, D1, or memory",
   "repository": {
     "type": "git",

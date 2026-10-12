@@ -5,7 +5,8 @@ First-party testing utilities for the Setu-TS framework.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/testing
+npm install @setu-ts/testing
+# Deno: deno add npm:@setu-ts/testing
 ```
 
 ## Usage

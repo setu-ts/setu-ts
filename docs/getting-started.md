@@ -32,17 +32,8 @@ three packages and about ten lines of code.
 
 ## Installation
 
-Setu-TS is published on [JSR](https://jsr.io/@setu-ts). Each runtime installs it with its own
-tooling:
-
-### Deno
-
-```bash
-mkdir my-app && cd my-app
-deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
-```
-
-`deno add` creates the `deno.json` for you.
+Setu-TS is published on [npm](https://www.npmjs.com/org/setu-ts) under the `@setu-ts` scope. Each
+runtime installs it with its own tooling:
 
 ### Node.js
 
@@ -50,20 +41,30 @@ deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
 mkdir my-app && cd my-app
 npm init -y
 npm pkg set type=module
-npx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
+npm install @setu-ts/kernel @setu-ts/runtime @setu-ts/common
 ```
 
-`npm install jsr:…` does **not** work — npm has no `jsr:` protocol. `npx jsr add` writes ordinary
-npm dependencies (`"@setu-ts/kernel": "npm:@jsr/setu-ts__kernel@^0.8.0"`) plus an `.npmrc` pointing
-the `@jsr` scope at JSR's npm registry, so your imports stay `@setu-ts/kernel`.
+`pnpm add` and `yarn add` work the same way.
 
 ### Bun
 
 ```bash
 mkdir my-app && cd my-app
 bun init -y
-bunx jsr add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
+bun add @setu-ts/kernel @setu-ts/runtime @setu-ts/common
 ```
+
+### Deno
+
+```bash
+mkdir my-app && cd my-app
+deno add npm:@setu-ts/kernel npm:@setu-ts/runtime npm:@setu-ts/common
+```
+
+`deno add` creates the `deno.json` for you, mapping each `@setu-ts/…` import to its npm package.
+
+Earlier releases were published on JSR (`jsr:@setu-ts/…`). They stay there, but nothing new is
+published to JSR; see the [upgrading guide](upgrading.md) to move an existing project.
 
 ## Your First Application
 
@@ -126,7 +127,7 @@ curl http://localhost:3000/hello
 Add the testing utilities and the standard test library:
 
 ```bash
-deno add jsr:@setu-ts/testing jsr:@std/testing jsr:@std/expect
+deno add npm:@setu-ts/testing jsr:@std/testing jsr:@std/expect
 ```
 
 Create `test/app.test.ts`:
@@ -369,8 +370,9 @@ Deno grants nothing by default. The flags an application commonly needs:
 
 ### `npm error Unsupported URL Type "jsr:"`
 
-You ran `npm install jsr:@setu-ts/…`. npm cannot install `jsr:` specifiers; use
-`npx jsr add @setu-ts/<package>` (or `bunx jsr add` on Bun).
+You ran `npm install jsr:@setu-ts/…`, an instruction from the JSR era. npm has no `jsr:` protocol,
+and from `v0.9.0` you do not need one: install from npm directly with
+`npm install @setu-ts/<package>` (`bun add` on Bun, `deno add npm:@setu-ts/<package>` on Deno).
 
 ### `deno test` fails on `main_test.ts`
 

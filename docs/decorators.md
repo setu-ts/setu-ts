@@ -26,7 +26,7 @@ The `DecoratorPlugin` reads the metadata and translates it into framework capabi
 ### Install Dependencies
 
 ```bash
-deno add jsr:@setu-ts/decorator-plugin jsr:@setu-ts/di-plugin
+npm install @setu-ts/decorator-plugin @setu-ts/di-plugin
 ```
 
 ### Enable Decorators
@@ -59,6 +59,8 @@ app.register(RuntimePlugin());
 app.register(DiPlugin()); // Optional: adds a container, so `scope` is honored
 app.register(DecoratorPlugin()); // Required for decorator processing
 ```
+
+<!-- version:history -->
 
 The container falls back to the kernel's service registry for a token it has no provider for, so a
 class can inject a framework capability such as `CAPABILITIES.CACHE` or `CAPABILITIES.LOGGER`, which

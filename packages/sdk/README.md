@@ -44,14 +44,14 @@ const board = createRealtimeClient({
 ## Installation
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/sdk@^0.8.0
-
 # npm / pnpm / yarn
-npx jsr add @setu-ts/sdk@^0.8.0
+npm install @setu-ts/sdk@^0.9.0
 
 # Bun
-bunx jsr add @setu-ts/sdk@^0.8.0
+bun add @setu-ts/sdk@^0.9.0
+
+# Deno
+deno add npm:@setu-ts/sdk@^0.9.0
 ```
 
 ## Quick Start

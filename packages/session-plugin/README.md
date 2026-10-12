@@ -10,7 +10,8 @@ encrypted cookie — AES-256-GCM under a key derived by HKDF-SHA256, entirely th
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/session-plugin
+npm install @setu-ts/session-plugin
+# Deno: deno add npm:@setu-ts/session-plugin
 ```
 
 ## Quick start
@@ -228,7 +229,7 @@ Hono's `html` tag escapes interpolated strings. When using it or the view plugin
 engines, mark this helper's generated markup as raw at the application rendering boundary:
 
 ```typescript
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 import type { IRequestContext } from '@setu-ts/common';
 import { csrfTokenField } from '@setu-ts/session-plugin';
 import { raw } from '@setu-ts/view-plugin';

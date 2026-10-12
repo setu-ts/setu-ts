@@ -9,7 +9,8 @@ decorators, database support, and authentication.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/rest-starter
+npm install @setu-ts/rest-starter
+# Deno: deno add npm:@setu-ts/rest-starter
 ```
 
 Or via npm/yarn/pnpm when using the Node-compatible runtime:
@@ -205,6 +206,8 @@ application is constructed**: `DecoratorPlugin` branches on the presence of a co
 `@Injectable` class becomes a container provider honoring its `scope`. Omitted (the default), those
 classes are constructed directly and registered in the kernel's `ServiceRegistry`.
 
+<!-- version:history -->
+
 A token the container does not hold falls back to the kernel registry, because `DiPlugin`'s
 `autoRegister` defaults to `true`. That is what lets `@Inject(CAPABILITIES.LOGGER)`, or any other
 framework capability, reach a decorated class. `di: { autoRegister: false }` turns the fallback off.
@@ -292,7 +295,7 @@ accepts additional registrations.
 
 ## See Also
 
-- [JSR Registry](https://jsr.io/@setu-ts/rest-starter)
+- [npm](https://www.npmjs.com/package/@setu-ts/rest-starter)
 - [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#starter-exports-and-option-arms)
 
 ## Exports

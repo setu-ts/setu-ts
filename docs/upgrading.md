@@ -10,12 +10,14 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
-## Unreleased
+## 0.9.0
 
 ### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`
 
 From 0.9.0 the packages are published to npm under their own names (`@setu-ts/kernel`, …), and the
 CLI is a Node program. What an existing project changes depends on its target:
+
+<!-- version:history -->
 
 - **Node, Bun or Workers project.** Replace each `npm:@jsr/setu-ts__<pkg>@^0.8.0` dependency with
   `^0.9.0` under the key it already has (`"@setu-ts/kernel": "^0.9.0"`), delete the
@@ -194,6 +196,8 @@ project reached through a linked parent directory needs no change.
 
 ### Refresh `main.dev.ts` and production images (M101f)
 
+<!-- version:history -->
+
 Upgrade every `@setu-ts/*` pin together before `setu devtool enable`; mixed versions are refused.
 Apply the complete factory edit in the CLI README: the second parameter AND both usage spreads. The
 development entry now stops when composition is discarded. Restore an edited entry before
@@ -361,6 +365,8 @@ A subscription to an unknown Kafka topic now retries for about 9 s (`retry`), th
 `KafkaTopicUnavailableError` (M101b) — so on a broker without `auto.create.topics.enable`, `start()`
 for a declared subscription to a missing topic fails after that budget rather than at once. Create
 the topic first, or set `retry: { retries: 0 }` to fail immediately.
+
+<!-- version:history -->
 
 ## 0.8.0
 

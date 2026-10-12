@@ -108,6 +108,8 @@ const app = createApplication({
 await app.start({ port: 3000 });
 ```
 
+<!-- version:history -->
+
 The container falls back to the kernel's service registry, so a class can inject a framework
 capability such as `CAPABILITIES.LOGGER`, as a Nest provider can inject a global module's export. On
 `0.8.0` and earlier pass `DiPlugin({ autoRegister: true })`: the default there was `false`, and the

@@ -11,11 +11,11 @@ here under the `CAPABILITIES.RUNTIME` token by the `RuntimePlugin`. No other pac
 ## Installation
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/runtime
+# npm (pnpm add / yarn add / bun add work the same way)
+npm install @setu-ts/runtime
 
-# npm / pnpm / yarn / bun (via JSR's npm compatibility layer)
-npx jsr add @setu-ts/runtime
+# Deno
+deno add npm:@setu-ts/runtime
 ```
 
 ## What's Inside

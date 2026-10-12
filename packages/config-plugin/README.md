@@ -6,7 +6,8 @@ structurally compatible schema validation.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/config-plugin
+npm install @setu-ts/config-plugin
+# Deno: deno add npm:@setu-ts/config-plugin
 ```
 
 ## Quick Start
@@ -141,6 +142,8 @@ it is optional. A section schema is not interchangeable with `validationSchema`:
 the whole flat snapshot, while the former receives only its declared, prefix-stripped keys.
 
 ## Configuration Provenance
+
+<!-- version:history -->
 
 `diagnostics` is the explicit opt-in (0.8.0) to value-free provenance for the approved keys only:
 

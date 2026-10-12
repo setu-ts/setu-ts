@@ -22,7 +22,8 @@ Zero npm dependencies: plurals, numbers and dates come from the platform's `Intl
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/localization-plugin
+npm install @setu-ts/localization-plugin
+# Deno: deno add npm:@setu-ts/localization-plugin
 ```
 
 ## Usage
@@ -171,7 +172,7 @@ custom `key` replaces that and must include `ctx.request.locale` itself.
 A component receives finished strings as props; the rendering runtime escapes them.
 
 ```typescript
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { renderView, ViewPlugin } from '@setu-ts/view-plugin';

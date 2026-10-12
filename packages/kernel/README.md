@@ -11,11 +11,11 @@ through `IRuntimeServices` provided by the runtime plugin.
 ## Installation
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/kernel
+# npm (pnpm add / yarn add / bun add work the same way)
+npm install @setu-ts/kernel
 
-# npm / pnpm / yarn / bun (via JSR's npm compatibility layer)
-npx jsr add @setu-ts/kernel
+# Deno
+deno add npm:@setu-ts/kernel
 ```
 
 ## What's Inside
@@ -31,6 +31,8 @@ npx jsr add @setu-ts/kernel
 
 Only the seven public exports listed above are part of the public API; all concrete classes are
 internal.
+
+<!-- version:history -->
 
 ## Kernel diagnostics (optional, since 0.8.0)
 
