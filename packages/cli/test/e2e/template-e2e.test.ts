@@ -127,14 +127,14 @@ describe('template scaffolding — end to end', () => {
 
   for (const template of listTemplates()) {
     it(`scaffolds a ${template.name} project whose files exist on disk`, async () => {
-      expect(await run(['new', 'svc', '--template', template.name])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'svc', '--template', template.name])).toBe(0);
       for (const name of ['deno.json', 'main.ts', 'setu.config.ts', 'README.md']) {
         expect((await nodeFs.stat(`${root}/svc/${name}`)).isFile()).toBe(true);
       }
     });
 
     it(`emits a ${template.name} config declaring every plugin in the manifest`, async () => {
-      await run(['new', 'svc', '--template', template.name]);
+      await run(['new', '--runtime', 'deno', 'svc', '--template', template.name]);
       const config = await nodeFs.readFile(`${root}/svc/setu.config.ts`, 'utf8');
       const manifest = JSON.parse(await nodeFs.readFile(`${root}/svc/deno.json`, 'utf8'));
       for (const match of config.matchAll(/from '(@setu-ts\/[a-z-]+)'/g)) {
@@ -149,7 +149,7 @@ describe('template scaffolding — end to end', () => {
     // could not resolve. E8 replaced the gate with a SHAPE: the functional form
     // imports `@setu-ts/common` alone, so the file compiles in a bare project
     // and the refusal is no longer needed.
-    await run(['new', 'bare']);
+    await run(['new', '--runtime', 'deno', 'bare']);
     expect(await run(['g', 'controller', 'user', '--dir', `${root}/bare`])).toBe(0);
 
     const module = await nodeFs.readFile(`${root}/bare/src/controllers/user.controller.ts`, 'utf8');
@@ -160,14 +160,14 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('allows a controller in a class-based project', async () => {
-    await run(['new', 'svc', '--template', 'class-based']);
+    await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based']);
     expect(await run(['g', 'controller', 'user', '--dir', `${root}/svc`])).toBe(0);
   });
 
   describe('the hostile name set', () => {
     for (const { name, accepted } of HOSTILE_NAMES) {
       it(`${accepted ? 'generates' : 'refuses'} the name "${name}"`, async () => {
-        await run(['new', 'svc']);
+        await run(['new', '--runtime', 'deno', 'svc']);
         const project = `${root}/svc`;
         for (const schematic of UNGATED) {
           const code = await run(['g', schematic, name, '--dir', project]);
@@ -177,7 +177,7 @@ describe('template scaffolding — end to end', () => {
     }
 
     it('never writes a file for a refused name', async () => {
-      await run(['new', 'svc']);
+      await run(['new', '--runtime', 'deno', 'svc']);
       const project = `${root}/svc`;
       expect(await run(['g', 'service', '2fa', '--dir', project])).toBe(2);
       await expect(nodeFs.stat(`${project}/src/services`)).rejects.toThrow();
@@ -191,7 +191,7 @@ describe('template scaffolding — end to end', () => {
   // that does not resolve, type-checks nowhere else in the suite. This is that
   // check.
   it('type-checks the scaffolded class-based project, including its emitted classes', async () => {
-    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
     const project = `${root}/svc`;
 
     const sources = [
@@ -218,7 +218,7 @@ describe('template scaffolding — end to end', () => {
   // nowhere else — `args` is an opaque string literal as far as the CLI's own
   // `deno check` is concerned.
   it('type-checks the scaffolded microservice project, including the discovery args', async () => {
-    expect(await run(['new', 'msvc', '--template', 'microservice'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'msvc', '--template', 'microservice'])).toBe(0);
     const project = `${root}/msvc`;
 
     const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
@@ -240,7 +240,7 @@ describe('template scaffolding — end to end', () => {
   // signature, or an alias the manifest never declares, type-checks nowhere
   // else in the suite.
   it('type-checks the scaffolded full-stack project, config and app tree', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const project = `${root}/shop`;
 
     // The .tsx files are deliberately excluded: they need React and the npm
@@ -267,7 +267,7 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('refuses the retired independent DI switch', async () => {
-    expect(await run(['new', 'svc', '--template', 'rest', '--di'])).toBe(2);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'rest', '--di'])).toBe(2);
     expect(err.join('\n')).toContain('--style class-based');
   });
 
@@ -389,7 +389,7 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('grants the Deno start task the read permission SSR needs', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const manifest = JSON.parse(await nodeFs.readFile(`${root}/shop/deno.json`, 'utf8'));
 
     // Without it the project scaffolds, starts, and fails on its first request:
@@ -399,7 +399,7 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('emits no hello-world route, which would shadow the SSR index', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const config = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
 
     // An exact '/' handler beats the catch-all the SSR plugin mounts, so the
@@ -409,7 +409,7 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('wires the class-based config with DI and the emitted classes', async () => {
-    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
     const config = await nodeFs.readFile(`${root}/svc/setu.config.ts`, 'utf8');
 
     // The args string, rendered into the plugin call. The showcase classes come
@@ -446,7 +446,7 @@ describe('template scaffolding — end to end', () => {
   // raises TS2561 naming the key and its nearest match; without it, nothing.
   describe('the full-stack config resolver', () => {
     it('emits the annotation that restores excess-property checking', async () => {
-      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const config = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
 
       expect(config).toContain('(config): FullStackStarterOptions => ({');
@@ -459,7 +459,7 @@ describe('template scaffolding — end to end', () => {
     });
 
     it('makes a misspelled arm a COMPILE error in the generated project', async () => {
-      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
 
@@ -489,7 +489,7 @@ describe('template scaffolding — end to end', () => {
   // checked by NEITHER of the project's own check paths. The route answered 404.
   describe('the full-stack seam host', () => {
     it('type-checks a generated artifact through the project OWN check task', async () => {
-      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'route', 'widget', '--dir', project])).toBe(0);
       await useWorkspacePackages(project);
@@ -528,7 +528,7 @@ describe('template scaffolding — end to end', () => {
     });
 
     it('imports the seam barrels from the generated config', async () => {
-      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const config = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
 
       expect(config).toContain("from './src/controllers/index.ts'");
@@ -540,7 +540,7 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('emits parameter-level @Inject in the class-based controller', async () => {
-    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
     const controller = await nodeFs.readFile(
       `${root}/svc/src/controllers/greeting.controller.ts`,
       'utf8',
@@ -577,7 +577,7 @@ describe('template scaffolding — end to end', () => {
 
   for (const [group, schematics] of Object.entries(NON_COLLIDING_GROUPS)) {
     it(`type-checks a ${group} project generated over every accepted name`, async () => {
-      expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
       const project = `${root}/svc`;
 
       if (schematics.includes('job')) {
@@ -661,7 +661,7 @@ describe('setu generate module, end to end', () => {
   }
 
   it('type-checks a rest project carrying two generated modules', async () => {
-    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
 
     expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
@@ -692,7 +692,7 @@ describe('setu generate module, end to end', () => {
   // container's presence — so the emitted `@Inject` has to compile and resolve
   // on both paths, not just the one the showcase template takes.
   it('type-checks a class-based project carrying a generated module', async () => {
-    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
 
     expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
@@ -719,7 +719,7 @@ describe('setu generate module, end to end', () => {
   });
 
   it('regenerates the barrel without refusing, and lists each module once', async () => {
-    await run(['new', 'shop', '--template', 'class-based']);
+    await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based']);
     const project = `${root}/shop`;
     await run(['g', 'module', 'user', '--dir', project]);
 
@@ -744,9 +744,9 @@ describe('setu generate module, end to end', () => {
   // see whether Deno actually resolves the specifier from the project.
   for (
     const [label, argv] of [
-      ['no template', ['new', 'bare']],
-      ['--template rest', ['new', 'bare', '--template', 'rest']],
-      ['--template full-stack', ['new', 'bare', '--template', 'full-stack']],
+      ['no template', ['new', '--runtime', 'deno', 'bare']],
+      ['--template rest', ['new', '--runtime', 'deno', 'bare', '--template', 'rest']],
+      ['--template full-stack', ['new', '--runtime', 'deno', 'bare', '--template', 'full-stack']],
     ] as const
   ) {
     it(`type-checks the module test it generates into a ${label} project`, async () => {
@@ -847,7 +847,7 @@ await app.stop();
   // context positionally. Compiling is not working.
   for (const template of ['rest', 'class-based']) {
     it(`serves requests from generated modules on --template ${template}`, async () => {
-      expect(await run(['new', 'shop', '--template', template])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'orders', '--dir', project])).toBe(0);
       expect(await run(['g', 'module', 'order-item', '--dir', project])).toBe(0);
@@ -867,7 +867,7 @@ await app.stop();
   // one-line class of fix, so it ships here rather than on a separate branch
   // (a deliberate deviation from this milestone's plan, at the maintainer's call).
   it('serves requests from a generated standalone controller', async () => {
-    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
     expect(await run(['g', 'controller', 'widgets', '--dir', project])).toBe(0);
 
@@ -881,7 +881,7 @@ await app.stop();
   });
 
   it('still refuses to overwrite a module that already exists', async () => {
-    await run(['new', 'shop', '--template', 'class-based']);
+    await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based']);
     const project = `${root}/shop`;
     await run(['g', 'module', 'user', '--dir', project]);
     err = [];

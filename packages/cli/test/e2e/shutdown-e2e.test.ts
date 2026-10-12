@@ -86,7 +86,7 @@ describe('generated entry — graceful shutdown', () => {
 
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     it(`runs the shutdown hooks and exits 0 on ${signal}`, async () => {
-      expect(await run(['new', 'svc'])).toBe(0);
+      expect(await run(['new', 'svc', '--runtime', 'deno'])).toBe(0);
       const project = `${root}/svc`;
       await useWorkspacePackages(project);
       await nodeFs.writeFile(`${project}/src/plugins/index.ts`, SHUTDOWN_PROBE_BARREL);

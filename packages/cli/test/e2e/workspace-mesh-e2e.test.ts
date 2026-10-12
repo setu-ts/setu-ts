@@ -204,7 +204,17 @@ describe('a three-service workspace — end to end', () => {
    */
   async function mesh(transport: string, template = 'microservice'): Promise<string> {
     expect(
-      await run(['new', 'acme', '--workspace', '--port', String(base), '--transport', transport]),
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'acme',
+        '--workspace',
+        '--port',
+        String(base),
+        '--transport',
+        transport,
+      ]),
     ).toBe(0);
     const ws = `${root}/acme`;
     for (const member of MEMBERS) {
@@ -451,7 +461,7 @@ describe('a three-service workspace — end to end', () => {
   // because a controller that compiles and answers 500 has shipped here before.
   it('serves a decorated, injected module generated entirely through the CLI', async () => {
     expect(
-      await run(['new', 'acme', '--workspace', '--port', String(base)]),
+      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]),
     ).toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'class-based', '--dir', ws])).toBe(0);

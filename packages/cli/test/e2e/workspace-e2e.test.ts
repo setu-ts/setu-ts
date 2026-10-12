@@ -113,7 +113,8 @@ describe('workspace scaffolding — end to end', () => {
    * @returns The workspace root directory
    */
   async function twoMembers(): Promise<string> {
-    expect(await run(['new', 'acme', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
     expect(await run(['g', 'app', 'billing', '--template', 'microservice', '--dir', ws])).toBe(0);
@@ -121,7 +122,8 @@ describe('workspace scaffolding — end to end', () => {
   }
 
   it('builds and serves a custom-scoped workspace library through SSR, and ignores node_modules', async () => {
-    expect(await run(['new', 'shop', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/shop`;
     // Exercise the upgrade of a root created before node_modules was ignored.
     await nodeFs.writeFile(`${ws}/.gitignore`, 'coverage/\n');
@@ -155,25 +157,18 @@ describe('workspace scaffolding — end to end', () => {
         output: new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr),
       };
     };
-    const vitePath = `${project}/vite.config.ts`;
-    const vite = await nodeFs.readFile(vitePath, 'utf8');
-    try {
-      await nodeFs.writeFile(
-        vitePath,
-        vite.replace(
-          '(id) => isDeclared(frameworkPackages, id) || isDeclared(workspaceLibraries, id)',
-          'frameworkPackages',
-        ),
-      );
-      const broken = await build();
-      expect(broken.code, broken.output).not.toBe(0);
-      expect(broken.output).toContain('@custom/shared');
-      expect(broken.output).toMatch(/failed to resolve import/i);
-    } finally {
-      await nodeFs.writeFile(vitePath, vite);
-    }
+    // The server bundle loads the library from the workspace at runtime rather
+    // than freezing a copy of it at build time. Before M111d the generated
+    // externals rule was the only way Vite could resolve the library at all, and
+    // a control removing it failed the build. A Deno workspace now links its
+    // members into node_modules (`nodeModulesDir: "auto"`), so Vite resolves the
+    // library and externalizes it by its node_modules default with or without
+    // the rule (measured) — no control can tell those two apart any more.
+    const serverBundle = async () =>
+      await nodeFs.readFile(`${project}/build/server/index.js`, 'utf8');
     const built = await build();
     expect(built.code, built.output).toBe(0);
+    expect(await serverBundle()).toMatch(/from ["']@custom\/shared["']/);
     await withGeneratedServer(project, async (origin) => {
       const response = await fetch(origin);
       expect(response.status).toBe(200);
@@ -219,7 +214,9 @@ describe('workspace scaffolding — end to end', () => {
   // renderer, and the gate above could not see it because it only ever used the
   // default. `setu generate command-handler` had the same defect independently.
   it('is formatted and lints clean with a BROKER transport, and after generating', async () => {
-    expect(await run(['new', 'acme', '--workspace', '--transport', 'rabbitmq'])).toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--transport', 'rabbitmq']),
+    ).toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
 
@@ -262,7 +259,7 @@ describe('workspace scaffolding — end to end', () => {
   // family is swept because the width was a per-caller guess: six of the eight
   // call sites never overrode the default.
   it('stays formatted after generating THREE artifacts of every family', async () => {
-    expect(await run(['new', 'shop', '--template', 'microservice'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'microservice'])).toBe(0);
     const project = `${root}/shop`;
 
     const families = [
@@ -324,7 +321,7 @@ describe('workspace scaffolding — end to end', () => {
   });
 
   it('creates a root whose files exist on disk', async () => {
-    expect(await run(['new', 'acme', '--workspace'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace'])).toBe(0);
     for (const name of ['deno.json', WORKSPACE_MANIFEST, 'README.md', '.gitignore']) {
       expect((await nodeFs.stat(`${root}/acme/${name}`)).isFile()).toBe(true);
     }
@@ -437,7 +434,8 @@ describe('workspace scaffolding — end to end', () => {
   });
 
   it('does not start a dependent until its prerequisite answers /ready', async () => {
-    expect(await run(['new', 'acme', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
     expect(
@@ -549,7 +547,17 @@ describe('workspace scaffolding — end to end', () => {
   // resolve every `@setu-ts/*` pin from the member's own manifest.
   it('type-checks a class-based member in a broker workspace, from the root', async () => {
     expect(
-      await run(['new', 'acme', '--workspace', '--transport', 'rabbitmq', '--port', String(base)]),
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'acme',
+        '--workspace',
+        '--transport',
+        'rabbitmq',
+        '--port',
+        String(base),
+      ]),
     )
       .toBe(0);
     const ws = `${root}/acme`;
@@ -612,7 +620,8 @@ describe('workspace scaffolding — end to end', () => {
   // exactly the shape no unit test can check — the two-member case above never
   // exercises it, because by then both maps have an entry.
   it('type-checks a lone member, whose map is empty', async () => {
-    expect(await run(['new', 'solo', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'solo', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/solo`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
 
@@ -640,7 +649,8 @@ describe('workspace scaffolding — end to end', () => {
   // What it CAN check is everything up to the build: the member exists, the root
   // gained exactly one field, and the server-side modules type-check.
   it('adds a full-stack member and enables node_modules at the root', async () => {
-    expect(await run(['new', 'shop', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/shop`;
     expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
 
@@ -676,7 +686,8 @@ describe('workspace scaffolding — end to end', () => {
   });
 
   it('type-checks a full-stack member in a grpc workspace', async () => {
-    expect(await run(['new', 'shop', '--workspace', '--transport', 'grpc'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--transport', 'grpc']))
+      .toBe(0);
     const ws = `${root}/shop`;
     expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
 

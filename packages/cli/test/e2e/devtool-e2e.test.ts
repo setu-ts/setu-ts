@@ -206,6 +206,8 @@ describe('a scaffolded devtool project, driven end to end', () => {
     expect(
       await run([
         'new',
+        '--runtime',
+        'deno',
         'sources',
         '--template',
         'rest',
@@ -302,11 +304,11 @@ const snapshot = await client.snapshot();`,
     }
   });
   it('formats both standalone and workspace development entries without a repair', async () => {
-    expect(await run(['new', 'formatted', '--devtool'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'formatted', '--devtool'])).toBe(0);
     const standalone = await denoRun(`${root}/formatted`, ['fmt', '--check']);
     expect(standalone.output).not.toContain('not formatted');
     expect(standalone.code).toBe(0);
-    expect(await run(['new', 'workspace', '--workspace'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'workspace', '--workspace'])).toBe(0);
     expect(await run(['generate', 'app', 'orders', '--devtool'], `${root}/workspace`)).toBe(0);
     const member = await denoRun(`${root}/workspace/apps/orders`, ['fmt', '--check']);
     expect(member.output).not.toContain('not formatted');
@@ -315,7 +317,17 @@ const snapshot = await client.snapshot();`,
   it('stops and exits when a hand-edited factory drops either part of the composition', async () => {
     for (const dropped of ['plugins', 'diagnostics']) {
       const appPort = await unusedPort();
-      expect(await run(['new', dropped, '--devtool', '--devtool-port', String(await unusedPort())]))
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          dropped,
+          '--devtool',
+          '--devtool-port',
+          String(await unusedPort()),
+        ]),
+      )
         .toBe(
           0,
         );
@@ -352,7 +364,9 @@ const snapshot = await client.snapshot();`,
     const appPort = await unusedPort();
     const oldPort = await unusedPort();
     const newPort = await unusedPort();
-    expect(await run(['new', 'acme', '--workspace', '--port', String(appPort)])).toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(appPort)]),
+    ).toBe(0);
     const workspace = `${root}/acme`;
     expect(
       await run([
@@ -405,7 +419,17 @@ const snapshot = await client.snapshot();`,
     async () => {
       const devtoolPort = await unusedPort();
       const appPort = await unusedPort();
-      expect(await run(['new', 'shop', '--devtool', '--devtool-port', String(devtoolPort)])).toBe(
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          'shop',
+          '--devtool',
+          '--devtool-port',
+          String(devtoolPort),
+        ]),
+      ).toBe(
         0,
       );
       const project = `${root}/shop`;
@@ -446,7 +470,17 @@ const snapshot = await client.snapshot();`,
   it('refuses to boot without credentials, with a named message and no connector', async () => {
     const devtoolPort = await unusedPort();
     const appPort = await unusedPort();
-    expect(await run(['new', 'shop', '--devtool', '--devtool-port', String(devtoolPort)])).toBe(0);
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'shop',
+        '--devtool',
+        '--devtool-port',
+        String(devtoolPort),
+      ]),
+    ).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
 
@@ -460,7 +494,7 @@ const snapshot = await client.snapshot();`,
   it('enables the devtool on a project carrying the pre-M98c factory, refusing first', async () => {
     const devtoolPort = await unusedPort();
     const appPort = await unusedPort();
-    expect(await run(['new', 'legacy'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'legacy'])).toBe(0);
     const project = `${root}/legacy`;
 
     // Rewrite the config to the shape every pre-M98c project carries: a
@@ -585,10 +619,10 @@ const snapshot = await client.snapshot();`,
     // The enable flow added the pin the entry resolves through — the exact
     // specifier the create-time paths write, not a registry fall-through.
     expect(after.imports['@setu-ts/diagnostics-plugin']).toBe(
-      'jsr:@setu-ts/diagnostics-plugin@^0.8.0',
+      'npm:@setu-ts/diagnostics-plugin@^0.8.0',
     );
     // Repoint the pin at this workspace too, so the check and the boot below
-    // measure the workspace source rather than a published JSR snapshot —
+    // measure the workspace source rather than a published snapshot —
     // the same repointing `useWorkspacePackages` performs, applied to the key
     // the enable flow just added.
     const repointed = { ...after };

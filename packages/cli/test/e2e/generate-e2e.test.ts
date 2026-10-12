@@ -44,7 +44,7 @@ describe('setu end-to-end on a real filesystem', () => {
   });
 
   it('boots a functional websocket route after add and completes an RFC 6455 handshake', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     expect(await run(['add', 'websocket', '--dir', project])).toBe(0);
     expect(await run(['g', 'ws-route', 'board', '--dir', project])).toBe(0);
@@ -100,7 +100,7 @@ describe('setu end-to-end on a real filesystem', () => {
   });
 
   it('runs a generated permission guard through real auth for 401, 403 and 200', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     expect(await run(['add', 'auth', '--dir', project])).toBe(0);
     expect(await run(['g', 'guard', 'reports', '--dir', project])).toBe(0);
@@ -140,7 +140,7 @@ try {
   });
 
   it('scaffolds a project whose files exist on disk', async () => {
-    expect(await run(['new', 'shop-api'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop-api'])).toBe(0);
     for (const name of ['deno.json', 'main.ts', 'README.md', '.gitignore']) {
       const info = await nodeFs.stat(`${root}/shop-api/${name}`);
       expect(info.isFile()).toBe(true);
@@ -148,16 +148,16 @@ try {
   });
 
   it('scaffolds a deno.json that parses and pins the framework', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const manifest = JSON.parse(await nodeFs.readFile(`${root}/shop-api/deno.json`, 'utf8'));
-    expect(manifest.imports['@setu-ts/kernel']).toContain('jsr:@setu-ts/kernel@');
+    expect(manifest.imports['@setu-ts/kernel']).toContain('npm:@setu-ts/kernel@');
     // No compiler options: standard decorators need none, so emitting a key
     // here would assert a setting nothing reads.
     expect(manifest.compilerOptions).toBeUndefined();
   });
 
   it('generates into the scaffolded project and reads the file back', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
 
     expect(await run(['g', 'service', 'user-profile', '--dir', project])).toBe(0);
@@ -177,7 +177,7 @@ try {
   });
 
   it('refuses generation at a workspace root without creating src', async () => {
-    expect(await run(['new', 'acme', '--workspace'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace'])).toBe(0);
     const workspace = `${root}/acme`;
 
     expect(await run(['generate', 'controller', 'orders', '--dir', workspace])).not.toBe(0);
@@ -191,7 +191,7 @@ try {
       `{
   // The plugin gate must read JSONC without rewriting it.
   "imports": {
-    "@setu-ts/auth-plugin": "jsr:@setu-ts/auth-plugin@^0.8.0",
+    "@setu-ts/auth-plugin": "npm:@setu-ts/auth-plugin@^0.8.0",
   },
 }
 `,
@@ -202,7 +202,7 @@ try {
   });
 
   it('creates nested directories that did not exist', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     // `src/jobs` rather than `src` itself: a scaffolded project now carries the
     // three seam barrels that need no plugin, so `src/routes`, `src/middleware`
     // and `src/plugins` exist from the start. `job` hosts no seam, so its
@@ -218,7 +218,7 @@ try {
   // handler a decorator-free project can generate reaches a registration site
   // with no edit to a file the developer owns.
   it('wires a generated route into a template-less project with no hand edit', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
 
     expect(await run(['g', 'route', 'orders', '--dir', project])).toBe(0);
@@ -234,7 +234,7 @@ try {
   });
 
   it('honours the plugin gate against a real manifest on disk', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
 
     // auth-plugin is absent from the scaffolded manifest.
@@ -242,7 +242,7 @@ try {
     await expect(nodeFs.stat(`${project}/src/guards/admin.guard.ts`)).rejects.toThrow();
 
     const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8'));
-    manifest.imports['@setu-ts/auth-plugin'] = 'jsr:@setu-ts/auth-plugin@^0.1.0';
+    manifest.imports['@setu-ts/auth-plugin'] = 'npm:@setu-ts/auth-plugin@^0.1.0';
     await nodeFs.writeFile(`${project}/deno.json`, JSON.stringify(manifest, null, 2));
 
     expect(await run(['g', 'guard', 'admin', '--dir', project])).toBe(0);
@@ -251,13 +251,13 @@ try {
   });
 
   it('writes nothing to disk under --dry-run', async () => {
-    expect(await run(['new', 'shop-api', '--dry-run'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop-api', '--dry-run'])).toBe(0);
     await expect(nodeFs.stat(`${root}/shop-api`)).rejects.toThrow();
     expect(out.some((line) => line.startsWith('would create'))).toBe(true);
   });
 
   it('refuses to overwrite a real file and leaves it byte-identical', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
     await run(['g', 'service', 'billing', '--dir', project]);
 
@@ -288,7 +288,7 @@ try {
   // so unlocking a gated schematic meant hand-editing `deno.json`. This is the
   // whole round trip on a REAL filesystem — refused, added, accepted.
   it('unlocks a gated schematic through setu add', async () => {
-    expect(await run(['new', 'svc'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc'])).toBe(0);
     const project = `${root}/svc`;
 
     // Refused first, so the test cannot pass because the gate was never there.
@@ -300,7 +300,7 @@ try {
     const manifest = JSON.parse(
       await nodeFs.readFile(`${project}/deno.json`, 'utf8'),
     ) as { imports: Record<string, string> };
-    expect(manifest.imports['@setu-ts/auth-plugin']).toContain('jsr:@setu-ts/auth-plugin@');
+    expect(manifest.imports['@setu-ts/auth-plugin']).toContain('npm:@setu-ts/auth-plugin@');
 
     // And now the same command succeeds — which is only possible because
     // `detectPlugins` reads the manifest `add` just wrote.
@@ -309,7 +309,7 @@ try {
   });
 
   it('activates an added ingress provider before generating its class-based artifact', async () => {
-    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
     const project = `${root}/svc`;
 
     expect(await run(['add', 'events', '--dir', project])).toBe(0);
@@ -358,7 +358,7 @@ await app.stop();
   // The guard existed (M60) but returned early for any project without
   // `decorator-plugin`, on a premise E8 and M65 had both invalidated.
   it('refuses a controller whose HTTP path a route already claims, functionally', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
 
     // The default composition: no decorator-plugin, which is exactly the case the
@@ -394,7 +394,7 @@ await app.stop();
   // imported and nothing could run, so every project that used it hand-wrote the
   // same runner. Type-checking it is not enough — the point is that it RUNS.
   it('generates a migration runner that actually applies migrations', async () => {
-    expect(await run(['new', 'svc'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc'])).toBe(0);
     const project = `${root}/svc`;
     expect(await run(['add', 'database', '--dir', project])).toBe(0);
     expect(await run(['g', 'migration', 'add-users', '--dir', project])).toBe(0);
@@ -441,7 +441,7 @@ await app.stop();
   });
 
   it('generates every ungated schematic into one project', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
 
     // `controller` is gated on decorator-plugin, which this project lacks.
