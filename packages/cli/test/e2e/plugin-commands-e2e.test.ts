@@ -1,0 +1,133 @@
+/**
+ * A plugin-contributed command, discovered and run by the real `setu` binary
+ * from a real installed project.
+ *
+ * Since M111d the CLI is a Node program, so it loads a project's
+ * `setu.config.ts` through `tsx` and resolves the project's `@setu-ts/*`
+ * imports from that project's `node_modules`. That is the path these cases
+ * drive end to end, for both targets: an npm project after `npm install`, and a
+ * Deno project after `deno install` (whose `nodeModulesDir: "auto"` creates the
+ * `node_modules` the CLI reads). A Deno project NOT yet installed is refused by
+ * name, with the command that fixes it, rather than failing deep in a resolver.
+ *
+ * @module
+ */
+import { denoBinary, tempDir } from '../../../../test/node-helpers.ts';
+import { spawn } from 'node:child_process';
+import * as nodeFs from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
+import { runCli } from '../../src/cli.ts';
+import { npmInstall, type RegistryOverlay, runIn, startOverlay } from '../fixtures/node-project.ts';
+
+const SETU = new URL('../../src/bin.ts', import.meta.url).pathname;
+
+let overlay: RegistryOverlay;
+let root = '';
+
+beforeAll(async () => {
+  overlay = await startOverlay();
+}, 900_000);
+afterAll(async () => {
+  await overlay?.close();
+});
+beforeEach(async () => {
+  root = await tempDir({ prefix: 'setu-plugin-commands-' });
+});
+afterEach(async () => {
+  await nodeFs.rm(root, { recursive: true }).catch(() => {});
+});
+
+/** Runs the in-process CLI with the temp root as its working directory. */
+async function run(args: readonly string[], cwd = root): Promise<number> {
+  return await runCli(args, {
+    fs: createNodeRuntimeServices().fs!,
+    cwd,
+    now: () => 0,
+    log: () => {},
+    error: () => {},
+  });
+}
+
+/** Runs the `setu` binary on Node through `tsx`, inside a project. */
+function setu(
+  project: string,
+  args: readonly string[],
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const tsx = createRequire(import.meta.url).resolve('tsx/esm');
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [
+        '--import',
+        new URL('../../../../test/node-source-register.ts', import.meta.url).href,
+        '--import',
+        pathToFileURL(tsx).href,
+        SETU,
+        ...args,
+      ],
+      { cwd: project, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+/**
+ * Scaffolds a project whose generated plugin contributes `greet:hello`.
+ *
+ * @param runtime - The target to scaffold
+ * @returns The project directory
+ */
+async function projectWithCommand(runtime: 'node' | 'deno'): Promise<string> {
+  expect(await run(['new', 'shop', '--template', 'rest', '--runtime', runtime])).toBe(0);
+  const project = `${root}/shop`;
+  expect(await run(['generate', 'plugin', 'greet'], project)).toBe(0);
+  const path = `${project}/src/plugins/greet.plugin.ts`;
+  const source = await nodeFs.readFile(path, 'utf8');
+  const registered = source.replace(
+    'ctx.services.register(GREET, service);',
+    "ctx.services.register(GREET, service);\n      ctx.cli.register('greet:hello', () => {\n        console.log('HELLO-FROM-PLUGIN');\n      });",
+  );
+  expect(registered).not.toBe(source);
+  await nodeFs.writeFile(path, registered);
+  return project;
+}
+
+describe('setu runs a plugin-contributed command', () => {
+  it('from an installed Node project', async () => {
+    const project = await projectWithCommand('node');
+    const install = await npmInstall(project, overlay);
+    expect(install.code, install.output).toBe(0);
+
+    const listed = await setu(project, ['commands']);
+    expect(listed.code, listed.stderr).toBe(0);
+    expect(listed.stdout).toContain('greet:hello');
+
+    const ran = await setu(project, ['greet:hello']);
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(ran.stdout).toContain('HELLO-FROM-PLUGIN');
+  });
+
+  it('from a Deno project once deno install has linked node_modules', async () => {
+    const project = await projectWithCommand('deno');
+
+    // Not installed: the CLI cannot import the config from Node, and says how
+    // to fix it instead of failing inside a resolver.
+    const refused = await setu(project, ['greet:hello']);
+    expect(refused.code).not.toBe(0);
+    expect(refused.stderr).toContain('deno install');
+
+    const install = await runIn(project, denoBinary(), ['install'], overlay);
+    expect(install.code, install.output).toBe(0);
+    const ran = await setu(project, ['greet:hello']);
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(ran.stdout).toContain('HELLO-FROM-PLUGIN');
+  });
+});

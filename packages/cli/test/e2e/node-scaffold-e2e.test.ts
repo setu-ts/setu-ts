@@ -139,6 +139,40 @@ describe('a scaffolded npm project runs its own scripts', () => {
     });
   }
 
+  // Generated code is formatted with the project's own Prettier settings and
+  // must compile, lint and serve like the scaffold it lands in. A class-based
+  // module lists its service in `providers` and constructs it in its test, so a
+  // type-only import there compiles nowhere and boots nowhere — the M111d
+  // review found exactly that in output no Node gate had ever generated.
+  for (
+    const [style, args] of [
+      ['class-based', ['--template', 'class-based']],
+      ['functional', ['--template', 'rest']],
+    ] as const
+  ) {
+    it(`generates code that checks, lints, formats, tests and serves: ${style}`, async () => {
+      expect(await run(['new', 'shop', ...args])).toBe(0);
+      const project = `${root}/shop`;
+      for (
+        const artifact of [['module', 'widget'], ['service', 'billing'], ['middleware', 'audit']]
+      ) {
+        expect(await run(['generate', ...artifact, '--dir', project]), artifact.join(' ')).toBe(0);
+      }
+      const install = await npmInstall(project, overlay);
+      expect(install.code, install.output).toBe(0);
+      for (const script of ['check', 'lint', 'format:check', 'test']) {
+        const result = await npmRun(project, script);
+        expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
+      }
+      const { result, output } = await withNodeServer(project, async (origin) => {
+        const response = await fetch(`${origin}/widget`);
+        await response.body?.cancel();
+        return response.status;
+      });
+      expect(result, output).toBe(200);
+    });
+  }
+
   // `--broker redis` declares the client its plugin loads: a package manager
   // never installs an optional peer for the consumer, so before M111d the first
   // boot failed at the plugin's own `import('ioredis')`.
