@@ -251,25 +251,36 @@ describe('the npm-profile dev runner, stopped', () => {
   // and the inherited output pipe. Locally `bash` execs a lone command and hid
   // it. This shell runs the command as a CHILD, as `dash` does, so the defect
   // reproduces anywhere; the runner must still leave no server behind.
-  it('stops every member when the script shell does not forward signals', async () => {
-    const orders = await unusedPort();
-    const billing = await unusedPort();
-    await writeNodeWorkspace(
-      [{ name: 'orders', port: orders }, { name: 'billing', port: billing, dependsOn: ['orders'] }],
-      0,
-    );
-    const shell = `${root}/non-forwarding-sh`;
-    await nodeFs.writeFile(shell, '#!/bin/sh\nshift\n/bin/sh -c "$1; :"\n', { mode: 0o755 });
-    await runNodeRunner(20_000, { NPM_CONFIG_SCRIPT_SHELL: shell });
-    expect(await observed()).toBe('true');
-    // Shutdown is asynchronous: give the members' groups a moment to exit.
-    const deadline = performance.now() + 5_000;
-    while (performance.now() < deadline && (await listening(orders) || await listening(billing))) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    expect({ orders: await listening(orders), billing: await listening(billing) })
-      .toEqual({ orders: false, billing: false });
-  });
+  // POSIX only: the fixture is a `/bin/sh` script, and Windows has no process
+  // groups — the runner signals the child directly there, by design.
+  it.skipIf(process.platform === 'win32')(
+    'stops every member when the script shell does not forward signals',
+    async () => {
+      const orders = await unusedPort();
+      const billing = await unusedPort();
+      await writeNodeWorkspace(
+        [{ name: 'orders', port: orders }, {
+          name: 'billing',
+          port: billing,
+          dependsOn: ['orders'],
+        }],
+        0,
+      );
+      const shell = `${root}/non-forwarding-sh`;
+      await nodeFs.writeFile(shell, '#!/bin/sh\nshift\n/bin/sh -c "$1; :"\n', { mode: 0o755 });
+      await runNodeRunner(20_000, { NPM_CONFIG_SCRIPT_SHELL: shell });
+      expect(await observed()).toBe('true');
+      // Shutdown is asynchronous: give the members' groups a moment to exit.
+      const deadline = performance.now() + 5_000;
+      while (
+        performance.now() < deadline && (await listening(orders) || await listening(billing))
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect({ orders: await listening(orders), billing: await listening(billing) })
+        .toEqual({ orders: false, billing: false });
+    },
+  );
 });
 
 describe('the generated dev runner, executed', () => {
