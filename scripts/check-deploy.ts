@@ -536,11 +536,24 @@ export const GENERATED_LAYOUTS: readonly string[] = [
 ];
 
 /**
- * The shell check run inside the built image: no development entry, and no cached connector
- * source anywhere in the module cache.
+ * The shell check run inside the built image: no development entry, and no connector PACKAGE in
+ * the module cache or the project's `node_modules`.
+ *
+ * It matches package PATHS, never file contents: the framework now installs from npm, whose
+ * tarballs carry each package's README, and the events and queue READMEs name the connector in
+ * prose — a content grep reported both as cached connector source. The first clause is a positive
+ * control: a cache that moved, or holds no framework package at all, would otherwise let the
+ * absence check pass without having looked anywhere.
  */
-export const PRODUCTION_DEVTOOL_PROBE: string =
-  `test ! -e /srv/apps/${GENERATED_MEMBER}/main.dev.ts && ! grep -rl diagnostics-plugin /deno-dir`;
+export const PRODUCTION_DEVTOOL_PROBE: string = [
+  `test -n "$(find /deno-dir -path '*@setu-ts/kernel*' -print -quit)"`,
+  `test ! -e /srv/apps/${GENERATED_MEMBER}/main.dev.ts`,
+  // `|| true`: a member with no `node_modules` makes find exit non-zero, which must not end the
+  // chain before the absence is checked.
+  `found="$(find /deno-dir /srv/node_modules -path '*diagnostics-plugin*' 2>/dev/null || true)"`,
+  `echo "$found"`,
+  `test -z "$found"`,
+].join(' && ');
 
 /**
  * Converts a file URL into the native path `Deno.Command` expects.
@@ -598,116 +611,27 @@ export function generatedResources(): GeneratedResources {
 }
 
 /**
- * The scope whose packages carry the lazily imported broker drivers.
- *
- * Every `npm:` edge stripped below belongs to a package under it, so the
- * hardening never touches a third-party entry or any version pin.
- */
-const FRAMEWORK_JSR_SCOPE = '@setu-ts/';
-
-/** A lockfile with its framework npm edges removed, and how many were removed. */
-export interface StrippedLock {
-  /** The rewritten lockfile text, newline-terminated as Deno writes it. */
-  readonly lock: string;
-  /** How many `npm:` edges were removed, across every framework entry. */
-  readonly stripped: number;
-}
-
-/**
- * Removes every `npm:` edge from the framework's own jsr entries in a lockfile.
- *
- * This is what makes the gate SEE the defect V7-5's fix opened, rather than
- * catching it intermittently at best. The generated image starts with `--frozen`, so
- * the lockfile it ships must already name every edge a lazily imported driver
- * asks for at registration — and nothing on the HOST is obliged to put them
- * there: Deno records a jsr package's npm edge list nondeterministically on a
- * cold cache. Before this step the gate's starting condition was whatever the
- * host's own install happened to write, so a host that got a complete lockfile
- * handed the image a property it never established. Measured: with no strip, a
- * Dockerfile regressed to `RUN deno cache main.ts` alone — the exact pre-fix
- * form — PASSES the gate, while the same image dies in a cluster on
- * `The lockfile is out of date`.
- *
- * Stripping the edges first takes that luck out of the measurement: the image
- * has to establish lock completeness itself, which is exactly what its own
- * `RUN deno cache main.ts && deno install && deno install --frozen` is for.
- * Only the edge LISTS go — every resolved version pin stays — so the scaffold
- * the image is built from is still the realistic one V7-5 required rather than
- * the stub that made build and runtime coincidentally agree.
- *
- * It also drives the one gap the image's own build-time verify cannot see.
- * `deno install --frozen` proves the INSTALL view of completeness, and that is
- * not the whole set: measured, `deno install` restores
- * `@setu-ts/messaging-plugin`'s `npm:amqplib`/`npm:ioredis` and not
- * `@setu-ts/queue-plugin`'s, while `deno cache main.ts` restores
- * `queue-plugin`'s and not `messaging-plugin`'s, and a build without the cache
- * step passes `--frozen` with `queue-plugin`'s edge still absent. Running the
- * stripped case through to a served `/health` is what exercises their union.
- *
- * @param lockJson - The scaffold's `deno.lock` contents
- * @returns The rewritten lockfile and the number of edges removed
- */
-export function stripFrameworkNpmEdges(lockJson: string): StrippedLock {
-  const lock = JSON.parse(lockJson) as {
-    jsr?: Record<string, { dependencies?: string[] }>;
-  };
-  let stripped = 0;
-  for (const [name, entry] of Object.entries(lock.jsr ?? {})) {
-    if (!name.startsWith(FRAMEWORK_JSR_SCOPE)) continue;
-    const dependencies = entry.dependencies;
-    if (dependencies === undefined) continue;
-    const kept = dependencies.filter((edge) => !edge.startsWith('npm:'));
-    stripped += dependencies.length - kept.length;
-    // Deno omits the key entirely for a package with no dependencies, so an
-    // empty array would be a shape it never writes.
-    if (kept.length === 0) delete entry.dependencies;
-    else entry.dependencies = kept;
-  }
-  return { lock: `${JSON.stringify(lock, null, 2)}\n`, stripped };
-}
-
-/**
- * Applies {@link stripFrameworkNpmEdges} to a scaffolded workspace's lockfile.
- *
- * Reports the count so the caller can refuse a strip that removed NOTHING: this
- * scaffold registers a Redis broker and a queue, so its installed lockfile
- * always carries framework npm edges, and a zero means the lockfile moved, was
- * never written, or no longer records edges this way — each of which would turn
- * the hardening into a step that quietly proves nothing.
- *
- * @param root - Generated workspace root
- * @returns How many framework `npm:` edges were removed
- */
-export async function hardenScaffoldLock(root: string): Promise<number> {
-  const path = `${root}/deno.lock`;
-  const { lock, stripped } = stripFrameworkNpmEdges(await Deno.readTextFile(path));
-  await Deno.writeTextFile(path, lock);
-  return stripped;
-}
-
-/**
  * Installs the scaffold exactly as its printed next step requests, resolves the
- * selected application's entry point into that root lockfile, strips the
- * framework's npm edges back out, then builds its Dockerfile.
+ * selected application's entry point into that root lockfile, then builds its
+ * Dockerfile.
  *
- * The strip is the point rather than an oddity: see {@link stripFrameworkNpmEdges}.
- * The install and cache stay because V7-5 needs the image built against a
- * realistically RESOLVED lockfile — every version pin present — and what the
- * image must not be allowed to inherit is only the edge lists its own build
- * step is responsible for.
+ * The framework resolves from npm (through the overlay), and the npm section of
+ * the lockfile is deterministic — measured in M111d across three cold installs
+ * with fresh caches, which wrote byte-identical sections. That is why no edge is
+ * stripped here any more: the strip existed because Deno recorded a JSR
+ * package's npm edges nondeterministically, which the npm path does not.
  *
  * @param root - Generated workspace root
  * @param image - Image tag owned by this invocation
+ * @param registry - The overlay URL every install resolves the framework from
  * @param execute - Subprocess seam for the ordered-command regression test
- * @param harden - Lockfile seam for the same test; defaults to the real strip
- * @returns The install/cache/harden failure, or the image build result
+ * @returns The install/cache failure, or the image build result
  */
 export async function buildGeneratedImage(
   root: string,
   image: string,
   registry: string,
   execute: typeof run = run,
-  harden: (root: string) => Promise<number> = hardenScaffoldLock,
 ): ReturnType<typeof run> {
   const env = { NPM_CONFIG_REGISTRY: registry };
   const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root, env });
@@ -720,17 +644,6 @@ export async function buildGeneratedImage(
     `apps/${GENERATED_MEMBER}/main.ts`,
   ], { quiet: true, cwd: root, env });
   if (!cached.success) return cached;
-
-  const stripped = await harden(root);
-  if (stripped === 0) {
-    return {
-      success: false,
-      stdout: '',
-      stderr: `the scaffold's deno.lock records no @setu-ts npm edges, so stripping ` +
-        `them proves nothing — check that ${root}/deno.lock was written by the ` +
-        `install above`,
-    };
-  }
 
   // The image's own install step resolves the framework from the same registry, reached on the
   // host's loopback — hence the host network for the BUILD only; the container runs with none.
@@ -861,6 +774,8 @@ async function checkGenerated(): Promise<CheckOutcome> {
       ], { quiet: true });
       if (!connectorCache.success) {
         console.error(`  ✗ production carries a devtool entry or cached connector (${layout})`);
+        // The probe's grep prints every matching path, which is what says WHERE.
+        console.error(connectorCache.stdout + connectorCache.stderr);
         return 'failed';
       }
       console.log(`  ✓ production excludes the devtool (${layout})`);

@@ -379,6 +379,18 @@ sections above are left as written, and this list is what shipped.
 - **`devtool enable` reads the Deno manifest first**, so a directory with no manifest reports "not a
   project" and an npm project reports its runtime, instead of the Node default naming the wrong
   problem.
+- **§3.16 — the `lock.jsr` hardening is deleted.** Measured: a Deno workspace with a Redis
+  microservice member, installed and cached three times against the overlay with a fresh `DENO_DIR`
+  each run, wrote byte-identical `npm` lockfile sections (30 entries, the same integrity hashes and
+  edges, `@setu-ts/messaging-plugin` recording `ioredis` as an edge and optional peer) and no
+  `@setu-ts` entry under `jsr`. The nondeterminism the strip existed for does not occur on the npm
+  path, and there is nothing under `jsr` to strip, so `stripFrameworkNpmEdges`, `hardenScaffoldLock`
+  and the zero-count refusal are removed; the generated image's `--frozen` boot under the gate is
+  what proves the lockfile complete. The gate's devtool-exclusion probe also changed: it grepped
+  `/deno-dir` file CONTENTS for `diagnostics-plugin`, and npm tarballs carry each package's README,
+  whose Diagnostics sections in `events-plugin` and `queue-plugin` name the connector — so it failed
+  a correct image. It now matches package PATHS in the cache and in `/srv/node_modules`, behind a
+  positive control that the cache holds `@setu-ts/kernel`, and prints what it matched on failure.
 
 ## 4. Exported surface — every symbol names its consumer
 
