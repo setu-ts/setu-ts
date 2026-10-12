@@ -2,7 +2,7 @@ import * as nodeFs from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { createServer } from 'node:net';
-import { type MainProcess, nodeProcess, runMain } from '../../src/main.ts';
+import { emitInterrupt, type MainProcess, nodeProcess, runMain } from '../../src/main.ts';
 
 // Host process reads and exits: Deno's (generated Deno source is emitted by the
 // allowlisted modules as text) and Node's. Only the boundary may touch them.
@@ -128,6 +128,48 @@ describe('the process boundary of packages/cli/src', () => {
       console.error = originalError;
       await new Promise<void>((resolve) => held.close(() => resolve()));
     }
+  });
+
+  it('disposes the host after the run, so an open terminal reader cannot keep it alive', async () => {
+    let disposed = 0;
+    const host: MainProcess = {
+      args: ['--version'],
+      cwd: () => '/work',
+      isTerminal: () => false,
+      prompt: () => Promise.resolve(null),
+      log: () => {},
+      error: () => {},
+      portAvailable: () => Promise.resolve(true),
+      dispose: () => {
+        disposed++;
+      },
+    };
+    expect(await runMain({ fs: createFakeFs(), now: () => 0 }, host)).toBe(0);
+    expect(disposed).toBe(1);
+  });
+
+  it('delivers a Ctrl+C at a question as the SIGINT event, never as a real signal', () => {
+    // process.kill would terminate the process outright on Windows, and on any
+    // platform where no handler is registered; the event only runs handlers.
+    const originalKill = process.kill;
+    let killed = false;
+    process.kill = (() => {
+      killed = true;
+      return true;
+    }) as typeof process.kill;
+    let handled = 0;
+    const handler = (): void => {
+      handled++;
+    };
+    process.on('SIGINT', handler);
+    try {
+      emitInterrupt();
+    } finally {
+      process.off('SIGINT', handler);
+      process.kill = originalKill;
+    }
+    expect(handled).toBe(1);
+    expect(killed).toBe(false);
   });
 
   it('never ends the process itself; the executable sets the exit code', async () => {

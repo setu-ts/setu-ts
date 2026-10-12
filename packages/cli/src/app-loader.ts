@@ -148,6 +148,30 @@ async function exists(fs: IFileSystem, path: string): Promise<boolean> {
 }
 
 /**
+ * The directory above `path`, or `undefined` at a root.
+ *
+ * Splits on either separator, because a Windows path arrives with backslashes:
+ * cutting at the last `/` alone would turn `C:\repo\apps\api` into the
+ * PREFIX `C:\repo\apps\ap` — a sibling Node never resolves through.
+ * `joinPath` never resolves `..`, so the parent is the text before the last
+ * separator; a POSIX root, a drive root (`C:\`, `C:`) and a UNC share root
+ * (`\\server\share`) have none.
+ *
+ * @param path - An absolute directory
+ * @returns Its parent, or `undefined` when it is a root
+ */
+export function parentDir(path: string): string | undefined {
+  const trimmed = path.length > 1 ? path.replace(/[\\/]+$/, '') : path;
+  if (trimmed === '' || trimmed === '/' || /^[A-Za-z]:$/.test(trimmed)) return undefined;
+  if (/^\\\\[^\\]+\\[^\\]+$/.test(trimmed)) return undefined;
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  if (cut < 0) return undefined;
+  if (cut === 0) return '/';
+  const parent = trimmed.slice(0, cut);
+  return /^[A-Za-z]:$/.test(parent) ? `${parent}\\` : parent;
+}
+
+/**
  * Why a Deno project's config cannot be imported by this Node CLI, if it can't.
  *
  * The CLI imports `setu.config.ts` through Node resolution, which cannot read a
@@ -173,14 +197,10 @@ export async function denoInstallRefusal(
   }
   if (manifest === undefined) return undefined;
 
-  for (let current = dir;;) {
+  for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
     if (await exists(fs, joinPath(current, 'node_modules', '@setu-ts', 'kernel'))) {
       return undefined;
     }
-    if (current === '/' || current === '') break;
-    // `joinPath` never resolves `..`, so the parent is the text before the
-    // last separator; the root's parent is the root.
-    current = current.slice(0, current.lastIndexOf('/')) || '/';
   }
 
   const text = new TextDecoder().decode(await fs.readFile(manifest));

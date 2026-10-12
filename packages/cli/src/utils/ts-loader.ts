@@ -15,6 +15,13 @@
  * `tsx` is a regular dependency of this package, loaded lazily so that the many
  * commands that never import project code do not pay for it.
  *
+ * Known limitation (tsx 4.23): `tsImport` also registers a CommonJS hook that
+ * discovers configuration from the process rather than from the option passed
+ * here, so a project with NO `tsconfig.json` that loads a CommonJS (`.cts`)
+ * helper can see another project's path aliases through it. Every scaffolded
+ * npm project carries a `tsconfig.json`, and the ES module path — the one
+ * `setu.config.ts` and custom schematics take — honours the option.
+ *
  * @module
  */
 

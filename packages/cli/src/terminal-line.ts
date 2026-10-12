@@ -1,16 +1,21 @@
 /**
- * Reads one answer from a terminal on Node — the line reader behind the
+ * Reads answers from a terminal on Node — the line reader behind the
  * interactive prompter.
  *
- * Three behaviours make it safe to wait on, and each is a reason this is not a
- * bare `question()`:
+ * One `readline` interface serves the whole run, opened on the first question
+ * and closed by {@linkcode LineReader.close}. Lines that arrive while no
+ * question is pending — an answer typed or pasted ahead — are queued for the
+ * next one rather than lost with a per-question interface. Four behaviours make
+ * it safe to wait on:
  * - a terminal Ctrl+C reaches `readline` as a keystroke in raw mode, never as a
  *   process signal, so the interface's own `'SIGINT'` event is translated into
  *   the run's interrupt — without a listener readline only pauses the stream;
  * - the run's interrupt signal cancels a pending question, so an interrupt
  *   delivered from outside (or by the translation above) never waits for Enter;
- * - the interface is closed whatever the outcome, because an open one keeps the
- *   process alive after `exitCode` is set.
+ * - an input stream error ends the reader instead of escaping as an uncaught
+ *   `'error'` and leaving the question pending;
+ * - `close()` releases the interface, because an open one keeps the process
+ *   alive after the exit code is set.
  *
  * Every non-answer resolves `null` — EOF, an interrupt, a stream error — which
  * the prompter reads as "stop asking".
@@ -18,7 +23,7 @@
  * @module
  */
 
-import { createInterface } from 'node:readline/promises';
+import { createInterface, type Interface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 
 /** The streams and hooks one {@linkcode createLineReader} reads through. */
@@ -33,48 +38,76 @@ export interface LineReaderOptions {
   readonly onInterrupt: () => void;
 }
 
+/** A line reader shared by every question in one run. */
+export interface LineReader {
+  /** Asks one question, resolving the line or `null` when there is none. */
+  read(message: string, signal?: AbortSignal): Promise<string | null>;
+  /** Releases the interface; later reads resolve `null`. */
+  close(): void;
+}
+
 /**
- * Builds the asynchronous line reader the terminal prompter calls once per
- * question.
+ * Builds the line reader the terminal prompter calls once per question.
  *
  * @param options - The streams and the interrupt hook
- * @returns A reader resolving the line typed, or `null` when there is none
+ * @returns The reader
  */
-export function createLineReader(
-  options: LineReaderOptions,
-): (message: string, signal?: AbortSignal) => Promise<string | null> {
-  return async (message, signal) => {
-    if (signal?.aborted === true) return null;
-    const rl = createInterface({
-      input: options.input,
-      output: options.output,
-      terminal: options.terminal,
+export function createLineReader(options: LineReaderOptions): LineReader {
+  let rl: Interface | undefined;
+  let ended = false;
+  const queued: string[] = [];
+  // The one question that may be pending; `settle` resolves it.
+  let pending: ((value: string | null) => void) | undefined;
+
+  const settle = (value: string | null): void => {
+    const resolve = pending;
+    pending = undefined;
+    resolve?.(value);
+  };
+  const end = (): void => {
+    ended = true;
+    settle(null);
+  };
+
+  const open = (): Interface => {
+    if (rl !== undefined) return rl;
+    rl = createInterface({ input: options.input, output: options.output, terminal: options.terminal });
+    rl.on('line', (line) => {
+      if (pending === undefined) queued.push(line);
+      else settle(line);
     });
-    // A question that ends without an answer — EOF, Ctrl+C, or the signal —
-    // resolves this instead, so `question()`'s pending promise never decides.
-    let settleEarly: (value: null) => void = () => {};
-    const early = new Promise<null>((resolve) => {
-      settleEarly = resolve;
-    });
-    const onClose = (): void => settleEarly(null);
-    const onSigint = (): void => {
+    rl.on('close', end);
+    rl.on('error', end);
+    rl.on('SIGINT', () => {
       options.onInterrupt();
-      settleEarly(null);
-    };
-    const onAbort = (): void => settleEarly(null);
-    rl.once('close', onClose);
-    rl.once('SIGINT', onSigint);
-    signal?.addEventListener('abort', onAbort, { once: true });
-    try {
-      // The rejection `question()` raises when the interface closes under it is
-      // swallowed here and reported through `early` instead.
-      const answer = rl.question(message).catch(() => null);
-      return await Promise.race([answer, early]);
-    } finally {
-      signal?.removeEventListener('abort', onAbort);
-      rl.off('close', onClose);
-      rl.off('SIGINT', onSigint);
-      rl.close();
-    }
+      settle(null);
+    });
+    return rl;
+  };
+
+  return {
+    read(message, signal) {
+      if (ended || signal?.aborted === true) return Promise.resolve(null);
+      const reader = open();
+      options.output.write(message);
+      const next = queued.shift();
+      if (next !== undefined) return Promise.resolve(next);
+      return new Promise((resolve) => {
+        const onAbort = (): void => settle(null);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        pending = (value) => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve(value);
+        };
+        reader.resume();
+      });
+    },
+    close() {
+      const current = rl;
+      rl = undefined;
+      ended = true;
+      settle(null);
+      current?.close();
+    },
   };
 }

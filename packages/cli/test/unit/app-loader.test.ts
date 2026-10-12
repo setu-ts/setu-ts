@@ -6,6 +6,7 @@ import {
   configModulePath,
   denoInstallRefusal,
   loadApp,
+  parentDir,
 } from '../../src/app-loader.ts';
 
 describe('configModulePath', () => {
@@ -259,5 +260,31 @@ describe('denoInstallRefusal', () => {
     const refusal = await denoInstallRefusal(fs, '/app');
     expect(refusal).toContain('docs/upgrading.md');
     expect(refusal).not.toContain('deno install');
+  });
+});
+
+describe('parentDir', () => {
+  it('walks POSIX parents to the root and stops there', () => {
+    expect(parentDir('/ws/apps/api')).toBe('/ws/apps');
+    expect(parentDir('/ws/apps/api/')).toBe('/ws/apps');
+    expect(parentDir('/ws')).toBe('/');
+    expect(parentDir('/')).toBeUndefined();
+  });
+
+  it('walks Windows parents, never a path prefix', () => {
+    // Cutting at the last `/` alone made `C:\\repo\\apps\\ap` the next probe.
+    expect(parentDir('C:\\repo\\apps\\api')).toBe('C:\\repo\\apps');
+    expect(parentDir('C:\\repo')).toBe('C:\\');
+    expect(parentDir('C:\\')).toBeUndefined();
+    expect(parentDir('C:')).toBeUndefined();
+  });
+
+  it('stops at a UNC share root', () => {
+    expect(parentDir('\\\\server\\share\\app')).toBe('\\\\server\\share');
+    expect(parentDir('\\\\server\\share')).toBeUndefined();
+  });
+
+  it('answers undefined for a relative name with no separator', () => {
+    expect(parentDir('app')).toBeUndefined();
   });
 });

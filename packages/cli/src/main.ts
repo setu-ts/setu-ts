@@ -36,6 +36,8 @@ export interface MainProcess {
   readonly log: (message: string) => void;
   readonly error: (message: string) => void;
   readonly portAvailable: (port: number) => Promise<boolean>;
+  /** Releases anything the host opened for the run (the terminal reader). */
+  readonly dispose?: () => void;
 }
 
 /** @ignore Runs the CLI boundary and returns the code the host should exit with. */
@@ -52,32 +54,36 @@ export async function runMain(runtime: MainRuntime, host: MainProcess): Promise<
     ? createTerminalPrompter(host.isTerminal, host.prompt, host.log, interruption.signal)
     : undefined;
 
-  return await runCli(host.args, {
-    fs: runtime.fs,
-    cwd: host.cwd(),
-    now: runtime.now,
-    log: host.log,
-    error: host.error,
-    interrupt: interruption.signal,
-    ...(prompter === undefined ? {} : { ask: prompter }),
-    portAvailable: host.portAvailable,
-  });
+  try {
+    return await runCli(host.args, {
+      fs: runtime.fs,
+      cwd: host.cwd(),
+      now: runtime.now,
+      log: host.log,
+      error: host.error,
+      interrupt: interruption.signal,
+      ...(prompter === undefined ? {} : { ask: prompter }),
+      portAvailable: host.portAvailable,
+    });
+  } finally {
+    host.dispose?.();
+  }
 }
 
 /**
  * @ignore Builds the real Node process adapter used by the executable.
  *
  * A Ctrl+C typed at a question arrives inside `readline` as a keystroke, not as
- * a process signal, so it is re-raised as one: the `SIGINT` handler
- * {@linkcode runMain} registered then aborts the run exactly as an outside
- * signal would, and there is one interrupt path rather than two.
+ * a process signal, so it is delivered as one: emitting the `SIGINT` EVENT runs
+ * the handler {@linkcode runMain} registered, which aborts the run exactly as an
+ * outside signal would, so there is one interrupt path rather than two. It is
+ * an event, never `process.kill`: a real signal terminates the process outright
+ * on Windows, and on any platform where no handler was registered.
  *
- * @param onInterrupt - Replaces the re-raise; for tests
+ * @param onInterrupt - Replaces the event; for tests
  */
-export function nodeProcess(
-  onInterrupt: () => void = () => process.kill(process.pid, 'SIGINT'),
-): MainProcess {
-  const readLine = createLineReader({
+export function nodeProcess(onInterrupt: () => void = emitInterrupt): MainProcess {
+  const reader = createLineReader({
     input: process.stdin,
     output: process.stdout,
     terminal: process.stdin.isTTY === true,
@@ -87,11 +93,23 @@ export function nodeProcess(
     args: process.argv.slice(2),
     cwd: () => process.cwd(),
     isTerminal: () => process.stdin.isTTY === true,
-    prompt: readLine,
+    prompt: (message, signal) => reader.read(message, signal),
     log: (message) => console.log(message),
     error: (message) => console.error(message),
     portAvailable: (port) => portIsFree(port),
+    dispose: () => reader.close(),
   };
+}
+
+/**
+ * @ignore Delivers an interrupt to this process's `SIGINT` handlers as an event.
+ *
+ * Never a real signal: `process.kill(process.pid, 'SIGINT')` terminates the
+ * process outright on Windows, and on any platform where no handler was
+ * registered, before output drains or cleanup runs.
+ */
+export function emitInterrupt(): void {
+  process.emit('SIGINT', 'SIGINT');
 }
 
 /** Whether nothing is listening on a loopback port, decided by binding it. */
