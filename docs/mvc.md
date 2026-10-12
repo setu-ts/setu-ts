@@ -31,7 +31,7 @@ escaped by the JSX runtime, zero client JavaScript. `ViewPlugin({ engine: 'hono-
 the `html` tagged-template arm, which needs no `jsxImportSource` and works in a plain `.ts` file.
 **Declare `hono` as a direct dependency** — `npm install hono` — because the application's own
 compiler resolves `hono/jsx/jsx-runtime` and `hono/html`; the view plugin's own `hono` dependency
-resolves only under a hoisting installer (npm, Bun), not pnpm or Deno. See the
+resolves only under a hoisting installer (npm, Bun), not pnpm or Deno; see the
 [view-plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/view-plugin/README.md#installation).
 The `'custom'` arm registers an application-supplied `IViewEngine` verbatim.
 
