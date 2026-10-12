@@ -6177,7 +6177,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   closed with negative controls and found three more Lows, one a regression from a round-1 fix.
   Those were fixed and NOT re-audited, at the maintainer's direction. `setu adopt` also now moves a
   project's `deno.jsonc` (pre-existing, folded in at the maintainer's direction) — complete (PR
-  pending)
+  #450)
 - **Next milestone** — the `v0.9.0` cut (placeholders, trust, OIDC publish), then M104, the `v0.9.0`
   client-brief run; see ROADMAP.md.
 
