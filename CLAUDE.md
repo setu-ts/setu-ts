@@ -6178,10 +6178,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Those were fixed and NOT re-audited, at the maintainer's direction. `setu adopt` also now moves a
   project's `deno.jsonc` (pre-existing, folded in at the maintainer's direction) — complete (PR
   #450)
-- **Release `v0.9.0`** — on `release/v0.9.0`, cut 2026-10-12 (PR pending). The first npm release:
-  **52 packages** under `@setu-ts`, three of them (`localization-plugin`, `idempotency-plugin`,
-  `create`) published for the first time; `v0.8.0` and earlier stay on JSR. Publishing needs the
-  one-time npm bootstrap first (placeholders, trust, then the tag inside the two-day window — see
+- **Release `v0.9.0`** — on `release/v0.9.0`, cut 2026-10-12 (PR #451). The first npm release: **52
+  packages** under `@setu-ts`, three of them (`localization-plugin`, `idempotency-plugin`, `create`)
+  published for the first time; `v0.8.0` and earlier stay on JSR. Publishing needs the one-time npm
+  bootstrap first (placeholders, trust, then the tag inside the two-day window — see
   `docs/releasing.md`). **The cut pulled the install half of M111f forward** at the maintainer's
   direction: the docs still taught `jsr:` installs, which the bump moved to `^0.9.0`, a version that
   never exists on JSR. Every user-facing install line now uses npm, examples import `hono` rather
