@@ -490,3 +490,83 @@ deno task check:docs
 - The repository's own Prettier/ESLint and porting `scripts/`/root `test/` (111e).
 - Every other install line and the JSR sunset (111f).
 - The Deno target's `jsr:@std/*` dependencies (JSR keeps operating).
+
+## 10. Design security review (recorded after implementation)
+
+This plan had no design review, but the milestone moves several trust boundaries: the CLI now
+executes project TypeScript through `tsx` on Node, reads terminal input through a new reader,
+rewrites a foreign project's manifest during adoption, resolves Prettier configuration from the
+filesystem, and generates projects and Dockerfiles that install from npm. Recorded after
+implementation (the M101a §11 / M101b §10 / M101h §12 precedent); it does not claim to have guided
+the design.
+
+**Flows reviewed.**
+
+- `setu <plugin-command>` and custom schematics import the target project's `setu.config.ts` and
+  `.setu/schematics/*.ts` through `tsImport` (`src/utils/ts-loader.ts`), resolving the project's
+  `@setu-ts/*` from its own `node_modules`.
+- `nodeProcess` reads prompt answers from stdin through one readline reader and writes argv-derived
+  names and prompt text back to the terminal (the M99e escaping applies).
+- `setu adopt` reads a pre-0.9 project's `deno.json` / `package.json` (JSONC tolerated) and rewrites
+  `jsr:@setu-ts/*` and `npm:@jsr/setu-ts__*` pins in place.
+- `formatForTarget` resolves Prettier configuration per destination file and formats everything the
+  CLI writes into an npm-target project.
+- Generated manifests pin `@setu-ts/*` at `^<cli version>` and a selected transport's client at the
+  plugin's own peer range; generated Dockerfiles take an optional `NPM_CONFIG_REGISTRY` build
+  argument.
+- Test and gate tooling only: `scripts/registry-overlay.ts` (a loopback npm registry over the tree's
+  packs, proxying everything else upstream) and `scripts/pack-members.ts` (a repository-wide build
+  lock with stale-owner reclaim).
+
+**Assets.** The developer's filesystem outside the target project; the integrity of the terminal;
+the integrity of the dependencies a generated project installs; any registry credential; the
+contents of a project being adopted.
+
+**Attackers.**
+
+- A hostile project name, flag value or prompt answer (control characters, escape sequences, path
+  segments).
+- A hostile manifest in a project brought in by `setu adopt` (crafted keys and values, JSONC
+  comments, regex metacharacters in values).
+- A file planted in a directory above the target project (a Prettier config, a `node_modules`).
+- Another local process on the same machine (the overlay's loopback port; a second gate run sharing
+  the build lock).
+- A reader of the built image's history.
+- The target project's own code is trusted: running its `setu.config.ts` to list its commands is the
+  documented behaviour, as it was on Deno.
+
+**Obligations.**
+
+1. **The CLI imports project code only from the project it was pointed at.** `tsImport` resolves
+   `setu.config.ts` and custom schematics under the resolved `--dir` (or the working directory), and
+   a schematic name cannot escape `.setu/schematics/`.
+2. **Terminal output stays escaped on the Node boundary.** Every argv-derived name, prompt answer
+   and error message the CLI prints passes through the M99e escaping; the new reader adds no
+   unescaped echo path.
+3. **Adoption rewrites only framework pins, in place.** A key/value pair is rewritten only when its
+   key is the framework package its value names; regex metacharacters in a value cannot widen the
+   match; nothing else in the manifest changes; an unreadable manifest is reported, never silently
+   skipped.
+4. **Prettier configuration cannot reach outside the developer's intent.** Report whether
+   `resolveConfig` reads configuration above the target project, and what loading a JavaScript
+   config there would execute.
+5. **No registry or credential is baked into generated output.** Generated manifests carry no
+   `.npmrc` or registry URL; the Dockerfile build argument is unset when empty, never becomes an
+   `ENV`, and the file warns that its value is recorded in image history.
+6. **The overlay serves only loopback and only the tree's own packs.** It binds `127.0.0.1`, tarball
+   routes cannot traverse outside the pack directory, and a name it does not hold is proxied to the
+   public registry rather than answered from disk.
+7. **The build lock cannot be stolen from a live owner.** Stale-owner reclaim happens only when the
+   recorded owner is dead on the same host, and a failed build cleans its staging.
+8. **An interrupt removes only what the run created.** SIGINT rollback restores overwritten bytes
+   and removes only files and empty directories this run created.
+
+**Findings.**
+
+| #  | Finding                                                                                                                                                        | Disposition                                                                                                 |
+| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| V1 | Third Codex review (P2): the test source-redirect hook rewrote the scaffolded project's own imports, so `plugin-commands-e2e` never loaded the packed tarballs | Fixed in `08335f13`; a poisoned-kernel control fails under the old hook and passes under the new one        |
+| V2 | Third Codex review (P2): adoption skipped a commented `deno.json` silently, leaving its JSR pins unmapped                                                      | Fixed in `08335f13`: JSONC parsed, pins rewritten in place with comments kept, unreadable manifest reported |
+| V3 | Third Codex review (P2): a credential in the registry build argument would persist in image history                                                            | Fixed in `08335f13`: the generated Dockerfile says so and names `--secret`; obligation 5                    |
+| V4 | Third Codex review (P3): e2e paths built from `URL.pathname` broke in a checkout path containing spaces                                                        | Fixed in `08335f13` (`fileURLToPath`)                                                                       |
+| O1 | Pre-existing (on `develop`): `setu adopt` never moves a project's own `deno.jsonc`, leaving it beside the workspace root's new `deno.json`                     | Not changed here; left for a `fix/…` branch                                                                 |
