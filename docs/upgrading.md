@@ -366,6 +366,80 @@ A subscription to an unknown Kafka topic now retries for about 9 s (`retry`), th
 for a declared subscription to a missing topic fails after that budget rather than at once. Create
 the topic first, or set `retry: { retries: 0 }` to fail immediately.
 
+### Run Node.js 22 or later
+
+The documented floor was Node 18; five packages use `Promise.withResolvers`, which Node 22 was the
+first to ship. Upgrade runtimes and production images to Node 22 or newer before installing `0.9.0`
+(CI verifies on Node 24).
+
+### Test a missing header against `undefined`, not `null`
+
+`@Params(Header('X-Name'))` now passes `undefined` for an absent header, like a missing cookie or
+query parameter. A handler testing `=== null` must test `=== undefined`.
+
+### Match bare package names in lazy-import errors
+
+Lazy-import failures now name the bare package (`ioredis`, `@connectrpc/connect`,
+`@node-saml/node-saml`) instead of an `npm:…` specifier, including `GrpcRuntimeLoadError.specifier`
+and the telemetry loaders' reported `specifier`. Code matching the old strings must match the bare
+name.
+
+### Handle a rejecting NATS publish
+
+`NatsBroker.publish()` now resolves only once JetStream has stored the message, and rejects with an
+error naming the subject when no stream captures it. A publish that used to resolve silently now
+rejects: await it, handle the rejection, and make sure a stream captures every subject you publish
+to.
+
+### Keep RabbitMQ names within 255 bytes
+
+An exchange, queue, topic, message id or header name over 255 bytes is now refused (a processor at
+registration, a publish before it is sent) instead of jamming the channel. Shorten any that exceed
+the limit, counting the suffixes the queue adapter appends to a job name.
+
+### Set a content type on streamed responses that clients read as text
+
+On Node, a `ctx.response.stream(...)` body with no `content-type` no longer arrives labelled
+`text/plain; charset=UTF-8`, matching Deno, Bun and Workers. Set the content type explicitly where a
+client relied on that default, and send `X-Content-Type-Options: nosniff` for untrusted bytes.
+
+### Order a global `cacheMiddleware` after the locale and tenant middleware
+
+`cache-plugin` and `cloudflare-plugin`'s `cacheApiMiddleware` now key on the resolved locale and
+tenant, read when the cache middleware runs. A GLOBAL cache middleware must therefore run after the
+locale (and tenancy) middleware — give it a higher priority number — and a per-request locale
+override must happen before the lookup. Existing cached entries simply miss once.
+
+### Encode Vault secret names you relied on reaching Vault raw
+
+Each `/`-separated segment of a Vault secret name is now percent-encoded, and a name with an empty,
+`.` or `..` segment is refused. A name that relied on a literal `%`, `?` or `#` reaching Vault
+unencoded now reads a different path; rename those secrets. `connect()` also refuses an address that
+is not an absolute `http:`/`https:` URL.
+
+### Set `retry.maxRetryAfterMs` if a server's `Retry-After` may exceed the default cap
+
+Generated and hand-built SDK clients now cap how long an honoured `Retry-After` may make them wait,
+and surface the original error at once when the hint exceeds the cap. Raise `retry.maxRetryAfterMs`
+where longer server-directed waits are acceptable. Client construction also refuses non-finite or
+invalid retry counts and delays.
+
+### Repair scaffolded Workers and full-stack projects
+
+Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
+copy the fix from a fresh scaffold:
+
+- **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
+  `setu new --runtime
+  cloudflare-workers` project does (the old pair fails `npm install` with
+  `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
+  new entry carries, so a bindings-only deploy is picked up.
+- **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
+  without it the first `start` fails with "Failed to load React Router server build".
+- **Generated guards:** `setu generate guard <name>` now emits `requirePermission('<name>')`, which
+  answers `501` unless `AuthPlugin` is registered with an `rbac` option. A guard generated earlier
+  is unchanged.
+
 <!-- version:history -->
 
 ## 0.8.0

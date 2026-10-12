@@ -1701,7 +1701,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Server-rendered HTML as a capability — views named by reference, never by path                                                          |
 | **Responsibilities** | Register an `IViewEngine` under `CAPABILITIES.VIEW`; `'hono-jsx'` / `'hono-html'` / `'custom'` arms; `view` health indicator; the `Suspense` refusal |
-| **Dependencies**     | `common`, `@hono/hono` (both default arms add no new third-party package to the resolution set)                                          |
+| **Dependencies**     | `common`, `hono` (both default arms add no new third-party package to the resolution set)                                          |
 | **Public API**       | `ViewPlugin()`; `renderView()`; `raw`; `ViewRenderError`; `UnresolvedSuspenseError`; `ViewPluginOptions`                                 |
 | **Extension Points** | The `'custom'` engine arm; `@Render(Component)` in `decorator-plugin` resolves the same token                                            |
 | **Rules**            | No filesystem lookup, so Workers-portable by construction; output is a buffered primitive string, never a stream; rendering is stateless, so no `onClose` |

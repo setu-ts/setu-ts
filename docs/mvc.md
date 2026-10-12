@@ -29,8 +29,9 @@ rendering strategy; one engine serves both, and the selected mode is reported by
 indicator. `ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with `hono/jsx`,
 escaped by the JSX runtime, zero client JavaScript. `ViewPlugin({ engine: 'hono-html' })` selects
 the `html` tagged-template arm, which needs no `jsxImportSource` and works in a plain `.ts` file.
-**Both arms require `hono` as a direct dependency** — `npm install hono` — because neither
-`hono/jsx/jsx-runtime` nor `hono/html` resolves through a transitive one; see the
+**Declare `hono` as a direct dependency** — `npm install hono` — because the application's own
+compiler resolves `hono/jsx/jsx-runtime` and `hono/html`; the view plugin's own `hono` dependency
+resolves only under a hoisting installer (npm, Bun), not pnpm or Deno. See the
 [view-plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/view-plugin/README.md#installation).
 The `'custom'` arm registers an application-supplied `IViewEngine` verbatim.
 

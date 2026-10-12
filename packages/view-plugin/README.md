@@ -22,11 +22,12 @@ npm install @setu-ts/view-plugin hono
 # Deno: deno add npm:@setu-ts/view-plugin npm:hono
 ```
 
-**`hono` is required, not optional.** The default `'hono-jsx'` arm compiles JSX through
-`hono/jsx/jsx-runtime`, and the `'hono-html'` arm imports `hono/html` — the application's own
-compiler resolves both, so a project that installs only this package fails to resolve
-`hono/jsx/jsx-runtime` on its first component. Add the JSX transform to the application manifest
-alongside it:
+**Declare `hono` directly.** The default `'hono-jsx'` arm compiles JSX through
+`hono/jsx/jsx-runtime`, and the `'hono-html'` arm's components import `hono/html` — both resolved by
+the application's own compiler, not by this package. This package depends on `hono`, so a hoisting
+installer (npm, Bun) happens to make it resolvable; pnpm's strict layout and a Deno import map do
+not, and `hono/jsx/jsx-runtime` fails to resolve on the first component. Add the JSX transform to
+the application manifest alongside it:
 
 ```json
 {

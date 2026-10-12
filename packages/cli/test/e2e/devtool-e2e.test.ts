@@ -33,6 +33,7 @@ import {
   useWorkspacePackages,
   workspaceEntrypoint,
 } from '../fixtures/generated-project.ts';
+import { VERSION } from '../../src/version.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -619,7 +620,7 @@ const snapshot = await client.snapshot();`,
     // The enable flow added the pin the entry resolves through — the exact
     // specifier the create-time paths write, not a registry fall-through.
     expect(after.imports['@setu-ts/diagnostics-plugin']).toBe(
-      'npm:@setu-ts/diagnostics-plugin@^0.8.0',
+      `npm:@setu-ts/diagnostics-plugin@^${VERSION}`,
     );
     // Repoint the pin at this workspace too, so the check and the boot below
     // measure the workspace source rather than a published snapshot —

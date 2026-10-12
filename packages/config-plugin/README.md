@@ -143,9 +143,7 @@ the whole flat snapshot, while the former receives only its declared, prefix-str
 
 ## Configuration Provenance
 
-<!-- version:history -->
-
-`diagnostics` is the explicit opt-in (0.8.0) to value-free provenance for the approved keys only:
+`diagnostics` is the explicit opt-in to value-free provenance for the approved keys only:
 
 ```typescript
 app.register(ConfigPlugin({

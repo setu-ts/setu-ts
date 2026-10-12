@@ -314,7 +314,7 @@ EXPOSE 3000
 CMD ["run", "--allow-net", "--allow-env", "main.ts"]
 ```
 
-> This snippet is for **your own** project, where dependencies come from JSR. To build an image of
+> This snippet is for **your own** project, where dependencies come from npm. To build an image of
 > an example in this repository, use the parameterized [`docker/Dockerfile`](../docker/Dockerfile)
 > instead — it builds from the repository root, which the workspace requires. See
 > [Deployment](./deployment.md).

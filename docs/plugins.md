@@ -18,40 +18,45 @@ Packages are organized into tiers based on their role in the framework:
 
 ## Optional npm drivers
 
-Most packages here declare **no npm dependencies at all**. Nearly all packages that declare them do
-so because they offer an OPTIONAL driver — a Redis client, a cloud SDK, a database ORM — where the
-rule is always the same: **nothing is imported until you select the arm that needs it.** Choosing
-`MemoryStore` never loads `ioredis`; choosing `LogProvider` never loads `nodemailer`.
+Most packages depend on nothing but their `@setu-ts/*` siblings. Where a package offers a driver — a
+Redis client, a cloud SDK, a database ORM — it declares that driver as an **optional peer
+dependency**, and the rule is always the same: **nothing is imported until you select the arm that
+needs it.** Choosing `MemoryStore` never loads `ioredis`; choosing `LogProvider` never loads
+`nodemailer`.
 
 Three packages are the exception, and the table marks them `always`: for `graphql-plugin`,
 `grpc-plugin` and `react-router-plugin` the driver **is** the capability rather than one choice
-among several, so there is nothing to select and nothing that stays unloaded.
+among several, so there is nothing to select. Their driver is still an optional peer, so it is still
+yours to install.
 
-What differs is what "declare" means in each ecosystem, and it is worth being precise because the
-two answers are genuinely different:
+**A package manager never installs an optional peer.** Installing `@setu-ts/messaging-plugin` brings
+none of its six broker clients; selecting the Kafka arm without `kafkajs` installed fails at startup
+with the runtime's module-not-found error naming the package. Install the driver for the arm you
+select, beside the plugin:
 
-|                        | Deno / JSR                                    | Node / Bun (npm)                         |
-| ---------------------- | --------------------------------------------- | ---------------------------------------- |
-| Adding the package     | fetches nothing extra                         | installs the declared drivers            |
-| Selecting a driver arm | resolves the `npm:` specifier on first import | already present                          |
-| Never selecting one    | the driver is never fetched                   | the driver sits unused in `node_modules` |
+```bash
+npm install @setu-ts/messaging-plugin kafkajs
+# Deno: deno add npm:@setu-ts/messaging-plugin npm:kafkajs
+```
 
-The npm column is not a packaging choice we made. JSR's npm-compatibility build turns every `npm:`
-specifier it finds into a `dependencies` entry of the published package, and npm has no concept of
-an optional-but-declared runtime dependency that fits this pattern. So on npm, installing
-`@setu-ts/messaging-plugin` does bring its six broker clients with it, even if your application only
-ever uses the in-memory broker.
+`setu new --broker`/`--queue` and a workspace's `--transport` already add the client for the arm
+they wire. `setu add` installs the plugin alone, and any arm you select by hand needs its driver
+installed as above.
+
+Three packages carry a real (non-optional) dependency beyond their siblings: `kernel` depends on
+`hono` (its router), `runtime` on `@hono/node-server` (the Node adapter), and `view-plugin` on
+`hono` (both view engines).
 
 ### Which packages declare drivers
 
-Every package NOT listed here declares zero npm dependencies — that includes `common`, `kernel`,
+Every package NOT listed here declares no optional driver — that includes `common`, `kernel`,
 `exceptions`, `sdk`, `cloudflare-plugin`, `session-plugin`, `validation-plugin`, `openapi-plugin`,
-`static-plugin`, `websocket-plugin`, `worker-pool-plugin`, `diagnostics-plugin`, and the three
-starters. `cli` is on that list too, which is worth saying out loud because its source is full of
-`npm:` strings: those are DATA it writes into a generated project's manifest, not specifiers it
-imports, so nothing follows them into its own dependency graph.
+`static-plugin`, `websocket-plugin`, `worker-pool-plugin`, `diagnostics-plugin`, `view-plugin`, and
+the three starters. `cli` is on that list too, which is worth saying out loud because its source is
+full of package names: those are DATA it writes into a generated project's manifest, not specifiers
+it imports.
 
-| Package                     | Declared npm drivers                                                                                                                                                    | Arm that needs them                                                                 |
+| Package                     | Optional peer drivers                                                                                                                                                   | Arm that needs them                                                                 |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `auth-plugin`               | `ioredis`, `@node-saml/node-saml`                                                                                                                                       | `RedisRateLimitStore`; a `saml` sign-in provider (needs `nodejs_compat` on Workers) |
 | `cache-plugin`              | `ioredis`                                                                                                                                                               | `store: 'redis'`                                                                    |
@@ -65,7 +70,7 @@ imports, so nothing follows them into its own dependency graph.
 | `queue-plugin`              | `ioredis`, `amqplib`, `@aws-sdk/client-sqs`, `@aws-sdk/client-sns`                                                                                                      | the matching adapter                                                                |
 | `react-router-plugin`       | `react-router`                                                                                                                                                          | always (SSR request handler)                                                        |
 | `realtime-backplane-plugin` | `ioredis`                                                                                                                                                               | `transport: 'redis'`                                                                |
-| `runtime`                   | `@hono/node-server`, `ws`                                                                                                                                               | the Node HTTP and WebSocket adapters                                                |
+| `runtime`                   | `ws`                                                                                                                                                                    | the Node WebSocket adapter                                                          |
 | `scheduler-plugin`          | `ioredis`                                                                                                                                                               | `RedisLock`                                                                         |
 | `secrets-plugin`            | `@aws-sdk/client-secrets-manager`, `@google-cloud/secret-manager`, `@azure/identity`, `@azure/keyvault-secrets`                                                         | the matching cloud provider                                                         |
 | `storage-plugin`            | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`, `@google-cloud/storage`, `@azure/storage-blob`                                                                   | the matching provider                                                               |

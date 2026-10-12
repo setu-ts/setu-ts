@@ -9,6 +9,7 @@ import {
   WORKSPACE_VERSION,
 } from '../../src/workspace/manifest.ts';
 import { LEGACY_DENO_RUN_ALL, workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+import { VERSION } from '../../src/version.ts';
 
 const CONFIG = 'export function createApp(\n' +
   '  _env?: Readonly<Record<string, unknown>>,\n' +
@@ -24,7 +25,7 @@ const MEMBER_DENO_JSON = JSON.stringify({
     test: 'deno test -A',
     'db:push': 'deno run -A tools/push.ts',
   },
-  imports: { '@setu-ts/common': 'npm:@setu-ts/common@^0.8.0' },
+  imports: { '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}` },
   fmt: { lineWidth: 100 },
 });
 
@@ -69,8 +70,8 @@ describe('the devtool manifest merge', () => {
       fmt: Record<string, unknown>;
     };
     expect(member.imports).toEqual({
-      '@setu-ts/common': 'npm:@setu-ts/common@^0.8.0',
-      '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0',
+      '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}`,
+      '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}`,
     });
     expect(member.fmt).toEqual({ lineWidth: 100 });
     expect(member.tasks['db:push']).toBe('deno run -A tools/push.ts');
@@ -102,7 +103,7 @@ describe('the devtool manifest merge', () => {
       imports: Record<string, string>;
     };
     expect(member.imports).toEqual({
-      '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0',
+      '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}`,
     });
   });
 
@@ -125,7 +126,7 @@ describe('the devtool manifest merge', () => {
       'Framework pins in',
     );
     expect(h.err.text()).toContain('npm:@setu-ts/diagnostics-plugin@^0.6.0');
-    expect(h.err.text()).toContain('npm:@setu-ts/diagnostics-plugin@^0.8.0');
+    expect(h.err.text()).toContain(`npm:@setu-ts/diagnostics-plugin@^${VERSION}`);
     expect(h.fs.writes).toEqual([]);
   });
 
@@ -137,7 +138,7 @@ describe('the devtool manifest merge', () => {
         dev: 'deno run --allow-net --allow-env main.dev.ts',
         check: 'deno check main.ts setu.config.ts main.dev.ts',
       },
-      imports: { '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0' },
+      imports: { '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}` },
     }) + '\n';
     h.fs.writeFile('/ws/apps/orders/deno.json', new TextEncoder().encode(memberSource));
     expect(await h.run(['enable', 'orders'])).toBe(0);
