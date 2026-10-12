@@ -189,7 +189,10 @@ export function parentDir(path: string): string | undefined {
  * @returns The directories, nearest first
  */
 export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<string[]> {
-  const project = dir.replace(/[\\/]+$/, '');
+  // Compared with one separator: `joinPath` joins with `/` while a native Windows path keeps
+  // `\`, so `C:\ws/apps/api` and `C:\ws\apps\api` must read as the same member.
+  const slashes = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const project = slashes(dir);
   const chain: string[] = [];
   for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
     chain.push(current);
@@ -197,7 +200,7 @@ export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<s
     const read = await readWorkspaceManifest(fs, current);
     const listed = read.ok &&
       read.manifest.members.some((member) =>
-        joinPath(current!, joinPath(MEMBERS_DIR, member.name)) === project
+        slashes(joinPath(current!, joinPath(MEMBERS_DIR, member.name))) === project
       );
     return listed ? chain : [dir];
   }

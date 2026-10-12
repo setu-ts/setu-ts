@@ -6,6 +6,7 @@ import {
   configModuleExists,
   configModulePath,
   denoInstallRefusal,
+  installSearchDirs,
   loadApp,
   parentDir,
 } from '../../src/app-loader.ts';
@@ -295,6 +296,14 @@ describe('denoInstallRefusal', () => {
       expect(await denoInstallRefusal(fs, project), `${contents} at ${project}`)
         .toContain('deno install');
     }
+  });
+
+  // PR #450 review: `joinPath` joins with `/` while a native Windows path keeps
+  // backslashes, so a listed member must match across the two separators.
+  it('recognises a listed member on a native Windows path', async () => {
+    const fs = createFakeFs({ 'C:\\ws/setu.workspace.json': workspace('api') });
+    expect(await installSearchDirs(fs, 'C:\\ws\\apps\\api'))
+      .toEqual(['C:\\ws\\apps\\api', 'C:\\ws\\apps', 'C:\\ws']);
   });
 
   it('refuses an uninstalled Deno project, naming deno install', async () => {
