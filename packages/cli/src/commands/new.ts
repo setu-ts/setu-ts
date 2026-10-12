@@ -8,6 +8,7 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
@@ -754,9 +755,10 @@ export async function runNewCommand(
   }
 
   try {
+    const formatted = await formatForTarget(files, runtime, undefined, deps.error);
     const outcomes = await writeFiles(
       deps.fs,
-      files,
+      formatted,
       deps.interrupt === undefined ? { root: root } : { root: root, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);

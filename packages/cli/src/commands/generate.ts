@@ -4,6 +4,7 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
@@ -508,9 +509,10 @@ export async function runGenerateCommand(
   }
 
   try {
+    const formatted = await formatForTarget(files, runtime, dir, deps.error);
     const outcomes = await writeFiles(
       deps.fs,
-      files,
+      formatted,
       deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);

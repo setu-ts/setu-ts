@@ -89,7 +89,7 @@ function classController(names: DerivedNames): string {
   return `import { Body, Controller, Ctx, Get, Inject, Params, Post } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
-import { ${names.pascal}Service } from './${names.kebab}.service.ts';
+import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 /** HTTP controller for the ${names.kebab} resource. */
 @Controller('/${names.kebab}')
@@ -116,7 +116,7 @@ export class ${names.pascal}Controller {
 function classTest(names: DerivedNames, runtime: TargetRuntime): string {
   return `${testHarnessFor(runtime).imports}
 
-import { ${names.pascal}Service } from './${names.kebab}.service.ts';
+import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 describe('${names.pascal}Service', () => {
   it('starts with no records', () => {
@@ -130,7 +130,7 @@ function classModule(names: DerivedNames): string {
   return `import { Module } from '@setu-ts/decorator-plugin';
 
 import { ${names.pascal}Controller } from './${names.kebab}.controller.ts';
-import { ${names.pascal}Service } from './${names.kebab}.service.ts';
+import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 /**
  * The ${names.kebab} module.

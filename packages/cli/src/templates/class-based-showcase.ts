@@ -42,7 +42,7 @@ export class GreetingService {
  */
 const CONTROLLER_SOURCE =
   `import { Controller, Get, Inject, Param, Params } from '@setu-ts/decorator-plugin';
-import { GreetingService } from '../services/greeting.service.ts';
+import type { GreetingService } from '../services/greeting.service.ts';
 
 /**
  * A decorated controller.

@@ -24,6 +24,7 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
+  'prettier': '^3.9.10',
   'tsx': '^4.23.0',
   'vitest': '5.0.3',
   'zod-v3': 'npm:zod@^3.24.0',
@@ -95,6 +96,14 @@ export interface Override {
 
 /** The committed overrides (M111a plan §3.1), each with its reason. */
 export const OVERRIDES: readonly Override[] = [
+  {
+    package: 'packages/cli',
+    dependency: 'prettier',
+    kind: 'regular-dependency',
+    reason: 'the CLI formats every file it writes into an npm-target project with ' +
+      'Prettier (utils/prettier-format.ts), so a fresh scaffold passes its own ' +
+      '`npm run format:check` — loaded lazily, but required (M111d §3.7, maintainer-approved)',
+  },
   {
     package: 'packages/cli',
     dependency: 'tsx',

@@ -15,6 +15,7 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { escapeName } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
@@ -731,7 +732,12 @@ export async function runAddCommand(
   try {
     outcomes = await writeFiles(
       deps.fs,
-      edits.map((edit) => ({ ...edit, managed: true })),
+      await formatForTarget(
+        edits.map((edit) => ({ ...edit, managed: true })),
+        runtime,
+        dir,
+        deps.error,
+      ),
       deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
   } catch (cause) {

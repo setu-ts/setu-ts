@@ -1,5 +1,6 @@
 /** Workspace maintenance commands. */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import { devEntryVariants, DEVTOOL_ENTRY_MODULE, renderDevEntry } from '../devtool/dev-entry.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -184,7 +185,7 @@ export async function runWorkspaceCommand(
   try {
     const outcomes = await writeFiles(
       deps.fs,
-      files,
+      await formatForTarget(files, next.runtime, dir, deps.error),
       deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);

@@ -39,6 +39,7 @@ import { renderConfigOptions } from './env-file.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 import { renderEquals, testHarnessFor } from '../schematics/test-harness.ts';
 import { frameworkSpecifier } from './framework-specifier.ts';
+import { NPM_TOOLING_DEV_DEPENDENCIES, NPM_TOOLING_SCRIPTS, npmToolingFiles } from './npm-tooling.ts';
 
 /**
  * The devtool composition parameter every generated factory accepts as its
@@ -1309,13 +1310,23 @@ function tsconfigOptions(
   const template = manifest?.tsconfigCompilerOptions;
   const workers = runtime === 'cloudflare-workers'
     ? {
-      allowImportingTsExtensions: true,
-      noEmit: true,
       // A template's own `lib` wins: a frontend build needs the DOM for the code
       // it ships to a browser.
       lib: template?.['lib'] ?? ['ES2022'],
       types: [WORKERS_TYPES_PACKAGE, ...templateTypes(template)],
     }
+    : {};
+  // Every npm-manifest target type-checks with its own `tsc` (M111d §3.7), and
+  // its imports end in `.ts` — which `tsc` accepts only alongside `noEmit`. A
+  // Deno project's `tsconfig.json` serves its frontend build alone.
+  const checked = runtime === 'deno' ? {} : { allowImportingTsExtensions: true, noEmit: true };
+  // TypeScript 6 includes no `@types/*` package unless `types` names it, so the
+  // runtime's own declarations are named — `process` and `node:test` on Node,
+  // `bun:test` on Bun. Workers names its own below.
+  const runtimeTypes = runtime === 'node'
+    ? { types: ['node', ...templateTypes(template)] }
+    : runtime === 'bun'
+    ? { types: ['bun', ...templateTypes(template)] }
     : {};
   return {
     target: 'ES2022',
@@ -1325,6 +1336,8 @@ function tsconfigOptions(
     verbatimModuleSyntax: true,
     skipLibCheck: true,
     ...template,
+    ...checked,
+    ...runtimeTypes,
     ...workers,
   };
 }
@@ -1460,7 +1473,8 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   // the only checker present. `tsc` reads the `tsconfig.json` the scaffold
   // already emitted and nothing consumed.
   //
-  // The three are pinned as a SET, because they are not independent: every
+  // `wrangler` and its types are pinned as a SET (TypeScript comes from the
+  // shared npm tooling, `npm-tooling.ts`), because they are not independent: every
   // `wrangler` release declares a peer range on `@cloudflare/workers-types`
   // starting at its own bundled workerd date, and npm refuses an install whose
   // ranges do not intersect. `wrangler` moved that peer from `^4` to `^5` inside
@@ -1476,7 +1490,6 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   if (runtime === 'cloudflare-workers') {
     return {
       wrangler: '~4.148.0',
-      typescript: '^5.7.0',
       [WORKERS_TYPES_PACKAGE]: '^5.20261006.1',
     };
   }
@@ -1535,11 +1548,12 @@ function standaloneNpmFiles(
     // devDependencies have ONE home. Inlining Workers' here meant a package
     // added to that helper would be silently ignored on this path.
     ...runtimeDevDependencies(runtime),
+    ...(onWorkers ? NPM_TOOLING_DEV_DEPENDENCIES : {}),
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
     ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
-    ...(onWorkers ? { check: 'tsc --noEmit', dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
+    ...(onWorkers ? { ...NPM_TOOLING_SCRIPTS, dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
   };
 
   return [
@@ -1571,6 +1585,7 @@ function standaloneNpmFiles(
         JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
       }\n`,
     },
+    ...(onWorkers ? npmToolingFiles(manifest?.npmBuild?.outputDir) : []),
   ];
 }
 
@@ -1830,7 +1845,7 @@ describe('application composition', () => {
             name: projectName,
             version: '0.1.0',
             type: 'module',
-            scripts: npmScripts(runtime, manifest),
+            scripts: { ...npmScripts(runtime, manifest), ...NPM_TOOLING_SCRIPTS },
             dependencies: npmDependencies(host, runtime),
             // Runtime-level first, so a template that pins its own copy of the
             // same package wins — the template knows what its build needs.
@@ -1844,6 +1859,7 @@ describe('application composition', () => {
             devDependencies: {
               ...npmDevFrameworkDependencies(host, runtime),
               ...runtimeDevDependencies(runtime),
+              ...NPM_TOOLING_DEV_DEPENDENCIES,
               ...manifest?.npmDevDependencies,
             },
           },
@@ -1858,6 +1874,7 @@ describe('application composition', () => {
         JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
       }\n`,
     });
+    for (const file of npmToolingFiles(manifest?.npmBuild?.outputDir)) files.push(file);
   }
 
   files.push({

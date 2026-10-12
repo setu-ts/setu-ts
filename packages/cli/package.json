@@ -47,6 +47,7 @@
   "dependencies": {
     "@setu-ts/common": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "prettier": "^3.9.10",
     "tsx": "^4.23.0"
   },
   "devDependencies": {

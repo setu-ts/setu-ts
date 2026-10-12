@@ -10,6 +10,7 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
@@ -276,7 +277,7 @@ export async function runAdoptCommand(
     try {
       await writeFiles(
         deps.fs,
-        planned,
+        await formatForTarget(planned, profile.runtime, project, deps.error),
         deps.interrupt === undefined
           ? { root: project }
           : { root: project, signal: deps.interrupt },
@@ -316,7 +317,12 @@ export async function runAdoptCommand(
       try {
         await writeFiles(
           deps.fs,
-          [{ path: entryPath, contents: rewritten, managed: true }],
+          await formatForTarget(
+            [{ path: entryPath, contents: rewritten, managed: true }],
+            profile.runtime,
+            project,
+            deps.error,
+          ),
           deps.interrupt === undefined
             ? { root: project }
             : { root: project, signal: deps.interrupt },
