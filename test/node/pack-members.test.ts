@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs, rmSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
   acquireLock,
@@ -73,7 +74,7 @@ async function overlayEntries(root: string): Promise<string[]> {
 }
 
 describe('packCacheKey', () => {
-  const self = new URL('../../scripts/pack-members.ts', import.meta.url).pathname;
+  const self = fileURLToPath(new URL('../../scripts/pack-members.ts', import.meta.url));
 
   // Codex review (M111d): a changed README or root build config reused the
   // previous tarball, because neither was hashed.
@@ -108,7 +109,7 @@ describe('packCacheKey with a member that has no sources', () => {
     const root = await repository();
     try {
       await fs.rm(join(root, 'packages/alpha/src'), { recursive: true });
-      const self = new URL('../../scripts/pack-members.ts', import.meta.url).pathname;
+      const self = fileURLToPath(new URL('../../scripts/pack-members.ts', import.meta.url));
       const key = await packCacheKey(root, ['packages/alpha'], self);
       expect(key).toMatch(/^[0-9a-f]{24}$/);
     } finally {

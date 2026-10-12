@@ -703,8 +703,20 @@ async function checkGenerated(): Promise<CheckOutcome> {
   const resources = generatedResources();
   // Nothing is on npm until the cut, and the scaffold pins the CLI's own version, so the
   // framework installs from the tree's own packs; everything else through it from npm.
-  const overlay = await startRegistryOverlay({ root: Deno.cwd() });
+  let overlay: Awaited<ReturnType<typeof startRegistryOverlay>> | undefined;
   try {
+    // Inside the `try`: packing the tree can fail (no `pnpm install`, a build error), and that
+    // must report as this mode failing — with the temp workspace removed — not escape the run.
+    try {
+      overlay = await startRegistryOverlay({ root: Deno.cwd() });
+    } catch (cause) {
+      console.error(
+        `  ✗ the local registry overlay did not start (run \`pnpm install\` first): ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+      return 'failed';
+    }
     // Scaffold exactly what a user gets, with the real CLI as a subprocess. Scaffolding writes
     // files, then the printed install step resolves the workspace before the image build.
     const cli = (args: readonly string[]) =>
@@ -883,7 +895,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
     await run(['docker', 'rm', '-f', resources.container], { quiet: true });
     await run(['docker', 'rm', '-f', '-v', resources.broker], { quiet: true });
     await run(['docker', 'image', 'rm', '-f', resources.image], { quiet: true });
-    await overlay.close();
+    await overlay?.close();
     await Deno.remove(workspace, { recursive: true });
   }
 }

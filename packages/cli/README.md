@@ -102,11 +102,14 @@ The frontend build runs on npm even when the server runs on Deno. Deno and Worke
 standalone `package.json` for Vite and React Router; Node and Bun get those dev dependencies merged
 into the manifest they already have.
 
-| Runtime              | Emits                                                                                     |
-| -------------------- | ----------------------------------------------------------------------------------------- |
-| `deno`               | `deno.json` (JSR imports, `start` task), `main.ts` binding a port via `app.start()`       |
-| `node` / `bun`       | `package.json` (npm-compat JSR deps), `.npmrc` mapping `@jsr`, `tsconfig.json`, `main.ts` |
-| `cloudflare-workers` | `deno.json`, `wrangler.toml`, `src/index.ts` exporting `fetch` — no `listen`              |
+| Runtime              | Emits                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| `node` (default)     | `package.json` (`@setu-ts/*` from npm), `tsconfig.json`, ESLint and Prettier config, `main.ts` |
+| `bun`                | the same npm manifests as `node`, run with `bun`                                               |
+| `deno`               | `deno.json` (`npm:@setu-ts/*` imports, `nodeModulesDir: "auto"`, `start` task), `main.ts`      |
+| `cloudflare-workers` | `deno.json`, `package.json`, `wrangler.toml`, `src/index.ts` exporting `fetch` — no `listen`   |
+
+No target emits an `.npmrc` or a JSR registry mapping: every target takes the framework from npm.
 
 Every target also gets a `README.md` and a `.gitignore`.
 
@@ -151,7 +154,7 @@ install, and `setu generate --help` lists only what is available here.
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run`           | Prints `would create <path>` per file and writes absolutely nothing.                                                                                                                                                                                                                                                                                                                                                        |
 | `--dir <path>`        | Operate on this directory instead of the working directory.                                                                                                                                                                                                                                                                                                                                                                 |
-| `--runtime <target>`  | On `new`, the entry shape and manifest (default `deno`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                    |
+| `--runtime <target>`  | On `new`, the entry shape and manifest (default `node`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                    |
 | `--template <name>`   | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.                                                                                                                                                                                                                                                                                                                                |
 | `--env-file <path>`   | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                        |
 | `--broker <name>`     | `new` only: the standalone project's message broker (`memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). Rewrites the template's `MessagingPlugin` wiring, adds the connection variable to the dotenv pair, and emits `docker/compose.yaml` starting the broker. Refused wherever it would be a silent no-op: Cloudflare Workers, starter-composed templates, and templates registering no messaging. |
@@ -350,20 +353,21 @@ is what makes `--dry-run` exact.
 
 ```typescript
 import { runCli } from '@setu-ts/cli';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const code = await runCli(['generate', 'service', 'billing'], {
   fs: runtime.fs!,
-  cwd: Deno.cwd(),
+  cwd: process.cwd(),
   now: () => runtime.now(),
   log: console.log,
   error: console.error,
 });
 ```
 
-`runCli` returns an exit code and never calls `Deno.exit`. The dependency bundle has no default on
-purpose: `src/main.ts` owns the process boundary, so every other path stays testable.
+`runCli` returns an exit code and never exits the process. The dependency bundle has no default on
+purpose: `src/main.ts` (`runMain` with `nodeProcess`) owns the process boundary, so every other path
+stays testable.
 
 ## Interactive scaffolding
 
@@ -378,8 +382,8 @@ project, and `--dry-run` stays exact.
 
 Non-interactive by construction in three layers: `runCli`'s dependency bundle takes prompting as an
 OPTIONAL `ask` member no programmatic caller passes; the installed executable supplies it only when
-stdin is a terminal; and Deno's own prompt returns `null` on a non-terminal. All three fail closed
-to the documented defaults. `--yes` is the explicit escape hatch.
+stdin is a terminal; and the reader answers `null` once input ends. All three fail closed to the
+documented defaults. `--yes` is the explicit escape hatch.
 
 ## Not yet supported
 

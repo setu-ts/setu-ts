@@ -5,8 +5,10 @@
  *
  * One importer is exempt: a project a test INSTALLED under the repository's `.tmp/`. Its
  * `node_modules` holds the tree's packed tarballs, which is what such a test exists to exercise —
- * redirecting its imports to source would let a broken export or packaging defect pass. A temp file
- * with no install of the package still resolves to source, as before.
+ * redirecting its imports to source would let a broken export or packaging defect pass. That holds
+ * for EVERY framework import in such a project, including a package it failed to install: a missing
+ * dependency must fail there as it would for a user, not be quietly supplied from source. A temp
+ * file under no install still resolves to source, as before.
  *
  * @module
  */
@@ -21,18 +23,18 @@ type Resolved = { url: string; shortCircuit?: boolean };
 const SCRATCH = fileURLToPath(new URL('../.tmp/', import.meta.url));
 
 /**
- * Whether `parentURL` belongs to a project under `.tmp/` that has `name` installed.
+ * Whether `parentURL` belongs to a project under `.tmp/` that has installed the framework — any
+ * `node_modules/@setu-ts` between the importer and `.tmp/`.
  *
  * @param parentURL - The importing module's URL, if any
- * @param name - The package name (`@setu-ts/<member>`)
- * @returns `true` when Node should resolve the import from that install
+ * @returns `true` when Node should resolve every framework import from that install
  */
-export function installedForImporter(parentURL: string | undefined, name: string): boolean {
+export function installedForImporter(parentURL: string | undefined): boolean {
   if (parentURL === undefined || !parentURL.startsWith('file:')) return false;
   let dir = dirname(fileURLToPath(parentURL));
   if (!dir.startsWith(SCRATCH)) return false;
   while (dir.startsWith(SCRATCH) && dir.length > SCRATCH.length - 1) {
-    if (existsSync(join(dir, 'node_modules', name, 'package.json'))) return true;
+    if (existsSync(join(dir, 'node_modules', '@setu-ts'))) return true;
     dir = dirname(dir);
   }
   return false;
@@ -46,8 +48,7 @@ export function resolve(
 ): Resolved | Promise<Resolved> {
   const target = sourceExport(specifier);
   if (target === null) return next(specifier, context);
-  const name = specifier.split('/').slice(0, 2).join('/');
-  return installedForImporter(context.parentURL, name)
+  return installedForImporter(context.parentURL)
     ? next(specifier, context)
     : { url: pathToFileURL(target).href, shortCircuit: true };
 }

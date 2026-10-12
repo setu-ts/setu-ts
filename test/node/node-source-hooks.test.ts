@@ -24,22 +24,23 @@ describe('the test source redirect', () => {
     const { root, project } = await fixture();
     try {
       const parent = pathToFileURL(join(project, 'src', 'config.ts')).href;
-      expect(installedForImporter(parent, '@setu-ts/kernel')).toBe(true);
-      expect(resolve('@setu-ts/kernel', { parentURL: parent }, deferred).url)
+      expect(installedForImporter(parent)).toBe(true);
+      expect((await resolve('@setu-ts/kernel', { parentURL: parent }, deferred)).url)
         .toBe('deferred:@setu-ts/kernel');
     } finally {
       await rm(root, { recursive: true });
     }
   });
 
-  it('still redirects a package the project has not installed', async () => {
+  // PR #450 review: a framework package the installed project LACKS must fail
+  // there, as it would for a user — not be quietly supplied from source, which
+  // would hide exactly the packaging defect this exemption exists to expose.
+  it('defers even a framework package the installed project lacks', async () => {
     const { root, project } = await fixture();
     try {
       const parent = pathToFileURL(join(project, 'src', 'config.ts')).href;
-      expect(installedForImporter(parent, '@setu-ts/runtime')).toBe(false);
-      const resolved = resolve('@setu-ts/runtime', { parentURL: parent }, deferred);
-      expect(resolved).toMatchObject({ shortCircuit: true });
-      expect(resolved.url).toContain('/packages/runtime/src/');
+      expect((await resolve('@setu-ts/runtime', { parentURL: parent }, deferred)).url)
+        .toBe('deferred:@setu-ts/runtime');
     } finally {
       await rm(root, { recursive: true });
     }
@@ -48,11 +49,10 @@ describe('the test source redirect', () => {
   it('redirects a temp file with no install, and the repository source', async () => {
     const { root, bare } = await fixture();
     try {
-      expect(installedForImporter(pathToFileURL(join(bare, 'a.ts')).href, '@setu-ts/kernel'))
-        .toBe(false);
+      expect(installedForImporter(pathToFileURL(join(bare, 'a.ts')).href)).toBe(false);
       const repo = pathToFileURL(join(process.cwd(), 'packages/cli/src/cli.ts')).href;
-      expect(installedForImporter(repo, '@setu-ts/kernel')).toBe(false);
-      expect(resolve('@setu-ts/kernel', { parentURL: repo }, deferred).url)
+      expect(installedForImporter(repo)).toBe(false);
+      expect((await resolve('@setu-ts/kernel', { parentURL: repo }, deferred)).url)
         .toContain('/packages/kernel/src/');
     } finally {
       await rm(root, { recursive: true });
@@ -60,11 +60,11 @@ describe('the test source redirect', () => {
   });
 
   it('redirects when there is no importer or it is not a file', () => {
-    expect(installedForImporter(undefined, '@setu-ts/kernel')).toBe(false);
-    expect(installedForImporter('data:text/javascript,0', '@setu-ts/kernel')).toBe(false);
+    expect(installedForImporter(undefined)).toBe(false);
+    expect(installedForImporter('data:text/javascript,0')).toBe(false);
   });
 
-  it('defers a specifier that is not a workspace package', () => {
-    expect(resolve('node:fs', {}, deferred).url).toBe('deferred:node:fs');
+  it('defers a specifier that is not a workspace package', async () => {
+    expect((await resolve('node:fs', {}, deferred)).url).toBe('deferred:node:fs');
   });
 });

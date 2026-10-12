@@ -13,7 +13,7 @@ import type { IApplication } from '@setu-ts/common';
 import { CONFIG_EXPORT, CONFIG_MODULE } from './constants.ts';
 import { joinPath, toFileUrl } from './utils/file-writer.ts';
 import { escapeName } from './utils/names.ts';
-import { WORKSPACE_MANIFEST } from './workspace/manifest.ts';
+import { MEMBERS_DIR, readWorkspaceManifest, WORKSPACE_MANIFEST } from './workspace/manifest.ts';
 import { importModule, type ModuleLoader } from './schematics/custom.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -174,18 +174,32 @@ export function parentDir(path: string): string | undefined {
 
 /**
  * The directories whose `node_modules` may install a Deno project's framework:
- * the project, and — when it is a workspace member — each ancestor up to and
- * including the nearest workspace root. Outside a workspace, the project alone.
+ * the project, and — when it is a member of a workspace — each ancestor up to
+ * and including that workspace's root. Outside a workspace, the project alone.
+ *
+ * An ancestor counts as this project's workspace only when its
+ * {@linkcode WORKSPACE_MANIFEST} is one this CLI can read AND lists a member at
+ * exactly `<ancestor>/apps/<name>` = the project. The mere presence of the file
+ * is not enough: a `setu.workspace.json` planted beside a planted
+ * `node_modules/@setu-ts/kernel` in a shared parent would otherwise widen the
+ * search to reach it.
  *
  * @param fs - The CLI's filesystem
  * @param dir - The project root (absolute)
  * @returns The directories, nearest first
  */
 export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<string[]> {
+  const project = dir.replace(/[\\/]+$/, '');
   const chain: string[] = [];
   for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
     chain.push(current);
-    if (await exists(fs, joinPath(current, WORKSPACE_MANIFEST))) return chain;
+    if (!(await exists(fs, joinPath(current, WORKSPACE_MANIFEST)))) continue;
+    const read = await readWorkspaceManifest(fs, current);
+    const listed = read.ok &&
+      read.manifest.members.some((member) =>
+        joinPath(current!, joinPath(MEMBERS_DIR, member.name)) === project
+      );
+    return listed ? chain : [dir];
   }
   return [dir];
 }

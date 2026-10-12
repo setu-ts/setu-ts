@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { hostname } from 'node:os';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 
@@ -188,7 +189,9 @@ export async function packMembers(
   members: readonly string[] = PUBLISHED_PACKAGES,
   deps: PackDeps = {},
 ): Promise<ReadonlyMap<string, PackedMember>> {
-  const self = new URL(import.meta.url).pathname;
+  // `fileURLToPath`, not `.pathname`: the latter keeps percent-encoding, so a checkout path with a
+  // space would make this file unreadable to the key — which would then never change on an edit.
+  const self = fileURLToPath(import.meta.url);
   const key = await packCacheKey(root, members, self);
   const cacheDir = join(root, '.tmp', 'overlay', key);
   const index = join(cacheDir, 'packs.json');

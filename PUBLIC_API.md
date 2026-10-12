@@ -9273,7 +9273,7 @@ so `deno install` creates that directory; until it has, plugin commands refuse b
 command that fixes it. A Deno project pinning the framework from JSR (`jsr:@setu-ts/…`, 0.8 and
 earlier) is refused the same way, pointing at the upgrade guide.
 
-#### `@setu-ts/cli/main` — the process boundary
+### `@setu-ts/cli/main` — the process boundary
 
 | Export          | Kind      | Description                                                                                                                                   |
 | --------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -9288,7 +9288,7 @@ an interrupt ends a pending question rather than waiting for Enter; `denoProcess
 replaced by `nodeProcess`. Both executables set `process.exitCode` rather than calling
 `process.exit`, so output still draining to a pipe is not cut off.
 
-#### `@setu-ts/create`
+### `@setu-ts/create`
 
 | Export       | Kind     | Description                                                                                |
 | ------------ | -------- | ------------------------------------------------------------------------------------------ |

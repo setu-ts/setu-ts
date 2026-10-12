@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { createFakeApp } from '../fixtures/fake-app.ts';
+import { renderWorkspaceManifest } from '../../src/workspace/manifest.ts';
 import {
   configModuleExists,
   configModulePath,
@@ -222,6 +223,16 @@ describe('loadApp — discovery-time platform bindings', () => {
   });
 });
 
+/** A workspace manifest this CLI can read, listing the named members. */
+const workspace = (...members: string[]) =>
+  renderWorkspaceManifest({
+    version: 1,
+    basePort: 3000,
+    runtime: 'deno',
+    transport: 'http',
+    members: members.map((name, index) => ({ name, port: 3000 + index })),
+  });
+
 describe('denoInstallRefusal', () => {
   it('passes a project with no Deno manifest', async () => {
     const fs = createFakeFs({ '/app/package.json': '{}' });
@@ -238,7 +249,7 @@ describe('denoInstallRefusal', () => {
 
   it('passes a workspace member satisfied by the root node_modules', async () => {
     const fs = createFakeFs({
-      '/ws/setu.workspace.json': '{}',
+      '/ws/setu.workspace.json': workspace('api'),
       '/ws/apps/api/deno.json': '{}',
       '/ws/node_modules/@setu-ts/kernel/package.json': '{}',
     });
@@ -258,11 +269,32 @@ describe('denoInstallRefusal', () => {
 
   it('ignores a kernel above the workspace root', async () => {
     const fs = createFakeFs({
-      '/tmp/ws/setu.workspace.json': '{}',
+      '/tmp/ws/setu.workspace.json': workspace('api'),
       '/tmp/ws/apps/api/deno.json': '{}',
       '/tmp/node_modules/@setu-ts/kernel/package.json': '{}',
     });
     expect(await denoInstallRefusal(fs, '/tmp/ws/apps/api')).toContain('deno install');
+  });
+
+  // PR #450 review: the mere presence of a workspace manifest must not widen
+  // the search. A planted `{}` beside a planted kernel, a manifest that does not
+  // list this project, or one listing it at another path, leaves the project
+  // to its own `node_modules`.
+  it('does not trust a workspace manifest that does not list the project', async () => {
+    const cases: readonly (readonly [string, string, string])[] = [
+      ['/tmp/setu.workspace.json', '{}', '/tmp/app'],
+      ['/tmp/setu.workspace.json', workspace('other'), '/tmp/apps/app'],
+      ['/tmp/setu.workspace.json', workspace('app'), '/tmp/app'],
+    ];
+    for (const [path, contents, project] of cases) {
+      const fs = createFakeFs({
+        [path]: contents,
+        [`${project}/deno.json`]: '{}',
+        '/tmp/node_modules/@setu-ts/kernel/package.json': '{}',
+      });
+      expect(await denoInstallRefusal(fs, project), `${contents} at ${project}`)
+        .toContain('deno install');
+    }
   });
 
   it('refuses an uninstalled Deno project, naming deno install', async () => {

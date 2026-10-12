@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { packCacheKey, type PackedMember } from '../../scripts/pack-members.ts';
 import { PUBLISHED_PACKAGES } from '../../scripts/release-packages.ts';
 import {
@@ -257,7 +258,7 @@ describe('startRegistryOverlay', () => {
     const root = await tempDir();
     dirs.push(root);
     const pack = await packOf('from the cache');
-    const self = new URL('../../scripts/pack-members.ts', import.meta.url).pathname;
+    const self = fileURLToPath(new URL('../../scripts/pack-members.ts', import.meta.url));
     const key = await packCacheKey(root, PUBLISHED_PACKAGES, self);
     await fs.mkdir(join(root, '.tmp/overlay', key), { recursive: true });
     await fs.writeFile(join(root, '.tmp/overlay', key, 'packs.json'), JSON.stringify([pack]));

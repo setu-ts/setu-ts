@@ -13878,10 +13878,10 @@ transport now declares its client package. The scaffold gates did not move whole
 type-drift e2e keep their Deno checks, and Node is proved end to end by `node-scaffold-e2e` (every
 host installed from a local registry overlay of the tree's own packs, then run through its own
 `check`, `lint`, `format:check`, `test` and `start`), `bin-e2e` and `plugin-commands-e2e`, whose
-control proves the installed tarballs — not workspace source — are what load.
-`check:deploy
---generated` builds the generated image against that overlay. The plan's §3.17 records
-every correction made by measurement, including the deletion of the `lock.jsr` hardening.
+control proves the installed tarballs — not workspace source — are what load. The deploy gate's
+`--generated` mode (`check:deploy`) builds the generated image against that overlay. The plan's
+§3.17 records every correction made by measurement, including the deletion of the `lock.jsr`
+hardening.
 
 ### The v0.9.0 cut — after 111c and 111d
 
