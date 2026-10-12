@@ -14,7 +14,9 @@
   "publishConfig": {
     "access": "public"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/bin.js"
+  ],
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -36,12 +38,16 @@
       "default": "./dist/main.js"
     }
   },
+  "bin": {
+    "setu": "./dist/bin.js"
+  },
   "scripts": {
     "build": "tsc -b"
   },
   "dependencies": {
     "@setu-ts/common": "workspace:^",
-    "@setu-ts/runtime": "workspace:^"
+    "@setu-ts/runtime": "workspace:^",
+    "tsx": "^4.23.0"
   },
   "devDependencies": {
     "@setu-ts/auth-plugin": "workspace:^",

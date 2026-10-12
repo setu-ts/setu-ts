@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { createFakeApp } from '../fixtures/fake-app.ts';
-import { configModuleExists, configModulePath, loadApp } from '../../src/app-loader.ts';
+import {
+  configModuleExists,
+  configModulePath,
+  denoInstallRefusal,
+  loadApp,
+} from '../../src/app-loader.ts';
 
 describe('configModulePath', () => {
   it('defaults to setu.config.ts at the project root', () => {
@@ -213,5 +218,46 @@ describe('loadApp — discovery-time platform bindings', () => {
           },
         })),
     ).rejects.toThrow('Plugin commands are unavailable in this project');
+  });
+});
+
+describe('denoInstallRefusal', () => {
+  it('passes a project with no Deno manifest', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    expect(await denoInstallRefusal(fs, '/app')).toBeUndefined();
+  });
+
+  it('passes a Deno project whose framework packages are linked', async () => {
+    const fs = createFakeFs({
+      '/app/deno.json': '{"nodeModulesDir":"auto"}',
+      '/app/node_modules/@setu-ts/kernel/package.json': '{}',
+    });
+    expect(await denoInstallRefusal(fs, '/app')).toBeUndefined();
+  });
+
+  it('passes a workspace member satisfied by the root node_modules', async () => {
+    const fs = createFakeFs({
+      '/ws/apps/api/deno.json': '{}',
+      '/ws/node_modules/@setu-ts/kernel/package.json': '{}',
+    });
+    expect(await denoInstallRefusal(fs, '/ws/apps/api')).toBeUndefined();
+  });
+
+  it('refuses an uninstalled Deno project, naming deno install', async () => {
+    const fs = createFakeFs({
+      '/app/deno.jsonc': '{ "imports": { "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.9.0" } }',
+    });
+    const refusal = await denoInstallRefusal(fs, '/app');
+    expect(refusal).toContain('deno install');
+    expect(refusal).not.toContain('upgrading');
+  });
+
+  it('refuses a JSR-pinned project, naming the upgrade guide', async () => {
+    const fs = createFakeFs({
+      '/app/deno.json': '{ "imports": { "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0" } }',
+    });
+    const refusal = await denoInstallRefusal(fs, '/app');
+    expect(refusal).toContain('docs/upgrading.md');
+    expect(refusal).not.toContain('deno install');
   });
 });

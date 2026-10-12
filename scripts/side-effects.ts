@@ -7,6 +7,8 @@ import { maskNonCode } from './npm-specifier-audit.ts';
 export const SIDE_EFFECT_MODULES: Readonly<Record<string, string>> = {
   'packages/decorator-plugin/src/metadata/symbol-metadata.ts':
     'Installs Symbol.metadata write-if-absent before TC39 decorated class definition (M111a).',
+  'packages/cli/src/bin.ts':
+    'The setu executable: runs the CLI on load, reached only through package.json bin (M111d).',
 };
 
 /** One source finding, including the target of an effect-only import. */

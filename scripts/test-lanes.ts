@@ -83,7 +83,6 @@ export const NODE_EXCLUDED_TESTS = [
 
 /** Sources measured only by the Deno lane. */
 export const DENO_ONLY_SOURCES = [
-  'packages/cli/src/main.ts',
   'packages/runtime/src/adapters/deno/deno-dns-resolver.ts',
   'packages/runtime/src/adapters/deno/deno-http-adapter.ts',
   'packages/runtime/src/adapters/deno/deno-runtime.ts',

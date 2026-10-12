@@ -27,7 +27,13 @@ import {
 import { resolveDir } from '../utils/file-writer.ts';
 import { awaitInterruptibly, InterruptedError, throwIfInterrupted } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
-import { type AppLoader, configModuleExists, configModulePath, loadApp } from '../app-loader.ts';
+import {
+  type AppLoader,
+  configModuleExists,
+  configModulePath,
+  denoInstallRefusal,
+  loadApp,
+} from '../app-loader.ts';
 
 /**
  * The registration shape the kernel stores under `CAPABILITIES.CLI_COMMAND`.
@@ -54,7 +60,7 @@ export interface PluginCommandDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
-  /** Loads the config module; defaults to a real dynamic `import()`. */
+  /** Loads the config module; defaults to a real import through `tsx`. */
   readonly loadApp?: AppLoader;
   /** Interrupts dispatch and runs application teardown before returning 130. */
   readonly interrupt?: AbortSignal;
@@ -82,6 +88,8 @@ async function withPluginCommands(
   use: (commands: readonly RegisteredCommand[]) => Promise<number> | number,
 ): Promise<number> {
   throwIfInterrupted(deps.interrupt);
+  const refusal = await denoInstallRefusal(deps.fs, dir);
+  if (refusal !== undefined) throw new Error(refusal);
   const app = await loadApp(dir, config, deps.loadApp);
   try {
     throwIfInterrupted(deps.interrupt);

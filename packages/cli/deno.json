@@ -32,6 +32,7 @@
     }
   },
   "imports": {
+    "tsx/esm/api": "npm:tsx@^4.23.0/esm/api",
     "vitest": "npm:vitest@5.0.3"
   }
 }

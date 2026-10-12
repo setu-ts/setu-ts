@@ -2,8 +2,8 @@
  * Loading the target project's application factory.
  *
  * This is the one place the CLI imports user code. It resolves
- * `setu.config.ts` (or `--config <path>`), imports it with a REAL dynamic
- * `import()`, and validates that it exports the factory the contract requires
+ * `setu.config.ts` (or `--config <path>`), imports it for real through `tsx`
+ * (`utils/ts-loader.ts`), and validates that it exports the factory the contract requires
  * — each failure naming the resolved path and what was expected.
  *
  * @module
@@ -134,6 +134,65 @@ function isApplication(value: unknown): value is IApplication {
     typeof candidate.services === 'object' && candidate.services !== null;
 }
 
+/** The Deno manifests whose presence marks a project as a Deno target. */
+const DENO_MANIFESTS = ['deno.json', 'deno.jsonc'] as const;
+
+/** Whether a path exists on the CLI's filesystem. */
+async function exists(fs: IFileSystem, path: string): Promise<boolean> {
+  try {
+    await fs.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why a Deno project's config cannot be imported by this Node CLI, if it can't.
+ *
+ * The CLI imports `setu.config.ts` through Node resolution, which cannot read a
+ * Deno import map. A generated Deno project sets `nodeModulesDir: "auto"`, so
+ * after `deno install` its framework packages are linked into a `node_modules`
+ * the import resolves through. Without that link the import would fail inside
+ * module resolution with a message naming a package rather than the cause, so
+ * it is refused here, by name, first. Node resolution walks up, so a workspace
+ * member is satisfied by its workspace root's `node_modules`.
+ *
+ * @param fs - The CLI's filesystem
+ * @param dir - The project root (absolute)
+ * @returns The refusal, or `undefined` when the project is not a Deno project
+ *   or its packages are installed
+ */
+export async function denoInstallRefusal(
+  fs: IFileSystem,
+  dir: string,
+): Promise<string | undefined> {
+  let manifest: string | undefined;
+  for (const name of DENO_MANIFESTS) {
+    if (await exists(fs, joinPath(dir, name))) manifest = joinPath(dir, name);
+  }
+  if (manifest === undefined) return undefined;
+
+  for (let current = dir;;) {
+    if (await exists(fs, joinPath(current, 'node_modules', '@setu-ts', 'kernel'))) {
+      return undefined;
+    }
+    if (current === '/' || current === '') break;
+    // `joinPath` never resolves `..`, so the parent is the text before the
+    // last separator; the root's parent is the root.
+    current = current.slice(0, current.lastIndexOf('/')) || '/';
+  }
+
+  const text = new TextDecoder().decode(await fs.readFile(manifest));
+  if (text.includes('jsr:@setu-ts/')) {
+    return `${escapeName(manifest)} pins the framework from JSR, which this CLI cannot load. ` +
+      `Move the project to the npm packages first — see docs/upgrading.md.`;
+  }
+  return `This Deno project's packages are not installed where Node can import them. ` +
+    `Run \`deno install\` in ${escapeName(dir)} (its manifest sets nodeModulesDir: "auto"), ` +
+    `then run this command again.`;
+}
+
 /**
  * Imports the project's config module and calls its factory.
  *
@@ -142,7 +201,7 @@ function isApplication(value: unknown): value is IApplication {
  *
  * @param dir - The project root (absolute)
  * @param config - The `--config` override, when supplied
- * @param load - The module loader; defaults to a real dynamic `import()`
+ * @param load - The module loader; defaults to a real import through `tsx`
  * @returns The unstarted application
  * @throws {Error} If the module cannot be imported, exports no
  * {@linkcode CONFIG_EXPORT} function, or that function does not produce an
