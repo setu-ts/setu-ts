@@ -424,6 +424,13 @@ and surface the original error at once when the hint exceeds the cap. Raise `ret
 where longer server-directed waits are acceptable. Client construction also refuses non-finite or
 invalid retry counts and delays.
 
+### Import `hono`, not `@hono/hono`, in views and templates
+
+`@setu-ts/view-plugin` now depends on the npm package `hono`; `@hono/hono` is the JSR name and does
+not exist on npm. Rewrite `@hono/hono/html` and `@hono/hono/jsx` imports as `hono/html` and
+`hono/jsx`, set `jsxImportSource` to `hono/jsx`, and install `hono` as a direct dependency
+(`npm install hono`, or `deno add npm:hono` on Deno), since your own compiler resolves those paths.
+
 ### Repair projects scaffolded by an earlier `setu new`
 
 Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
@@ -632,7 +639,9 @@ unchanged — so any value reaching it is written to the page verbatim. With a u
 emit `&lt;script&gt;`.
 
 Nothing in the plugin changed and no version is affected — the engine always behaved this way. What
-changed is the documentation. If you copied that shape, switch to either escaping form:
+changed is the documentation. If you copied that shape, switch to either escaping form. The
+`@hono/hono` import below is the JSR name earlier releases used; on npm write `hono/html` instead
+(see "Import `hono`, not `@hono/hono`" under 0.9.0):
 
 ```tsx
 // JSX — what `ViewPlugin()` selects with no options.
