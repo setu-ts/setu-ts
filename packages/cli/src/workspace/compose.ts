@@ -167,7 +167,12 @@ WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 # member and root manifests, so this unlocked fetch cannot float or touch any
 # other file in the image.
 RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
-RUN deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
+# The registry the install step resolves from. Unset by default, which is the
+# public npm registry; a gate building against a local registry passes it with
+# \`--build-arg\`. An ARG never reaches the running container's environment.
+ARG NPM_CONFIG_REGISTRY=
+
+RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,
@@ -281,7 +286,12 @@ COPY ${MEMBERS_DIR}/\${MEMBER}/package.json ./${MEMBERS_DIR}/\${MEMBER}/
 # directory is absent, while \`lib[s]\` matches nothing and copies nothing.
 COPY lib[s] ./${LIBS_DIR}/
 
-RUN ${profile.install}
+# The registry the install step resolves from. Unset by default, which is the
+# public npm registry; a gate building against a local registry passes it with
+# \`--build-arg\`. An ARG never reaches the running container's environment.
+ARG NPM_CONFIG_REGISTRY=
+
+RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && ${profile.install}
 
 # Then the member itself.
 COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}

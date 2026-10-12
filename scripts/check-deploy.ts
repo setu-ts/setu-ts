@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-console -- this CI script reports progress, drift and skips.
 import { fromFileUrl } from 'jsr:@std/path@^1.1.6';
-import { walk } from 'jsr:@std/fs@^1.0.19';
+import { startRegistryOverlay } from './registry-overlay.ts';
 
 /**
  * @module
@@ -336,12 +336,17 @@ async function onPath(tool: string): Promise<boolean> {
 
 async function run(
   command: readonly string[],
-  options: { readonly quiet?: boolean; readonly cwd?: string } = {},
+  options: {
+    readonly quiet?: boolean;
+    readonly cwd?: string;
+    readonly env?: Readonly<Record<string, string>>;
+  } = {},
 ): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const quiet = options.quiet === true;
   const output = await new Deno.Command(command[0], {
     args: [...command.slice(1)],
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.env === undefined ? {} : { env: { ...options.env } }),
     stdout: quiet ? 'piped' : 'inherit',
     stderr: quiet ? 'piped' : 'inherit',
   }).output();
@@ -550,106 +555,19 @@ export function nativeFilePath(fileUrl: URL): string {
   return fromFileUrl(fileUrl);
 }
 
-/** The CLI's executable entry (`main.ts` owns the process boundary), absolute: scaffold steps
- * run with the WORKSPACE as their cwd. */
-const CLI_ENTRY = nativeFilePath(new URL('../packages/cli/src/main.ts', import.meta.url));
-
 /**
- * How long the registry lookup may take before it counts as unreachable.
- *
- * Generous, because the answer decides what the image is built against and a
- * slow registry is not a wrong one — but finite, because the alternative is
- * waiting for the CI job's own timeout.
+ * How the gate runs the CLI: as the published `setu` binary runs — `src/bin.ts` on Node, its
+ * TypeScript loaded through `tsx` and `@setu-ts/*` mapped to this tree's sources. Absolute, because
+ * scaffold steps run with the WORKSPACE as their cwd.
  */
-const REGISTRY_TIMEOUT_MS = 10_000;
-
-/**
- * The version a generated scaffold can actually resolve from the registry.
- *
- * `setu new` stamps generated projects with the CLI's OWN version, and the
- * image build below resolves that version from jsr.io for real — which is the
- * point of this check, and is also why it cannot pass on a release branch: the
- * version being released is not published yet, so `deno cache` inside the image
- * fails with `Could not find version of '@setu-ts/common'`. That is not a defect
- * in the scaffold; a version that does not exist is untestable by construction.
- *
- * So the check asks the registry. When the pinned version is published it is
- * used unchanged, which is the faithful case and the one that holds on `main`.
- * When it is not, the newest PUBLISHED version is substituted and the
- * substitution is printed: the generated Dockerfile, its permissions and its
- * security posture are still proved against real jsr.io resolution, which is
- * what this gate exists for.
- *
- * A registry that cannot be reached returns `null`, leaving the pinned version
- * in place: failing loudly on an unresolvable specifier is better than silently
- * building something other than what was asked for.
- *
- * The request is BOUNDED, which a refused connection does not need but a hung
- * one does: a socket the registry accepts and never answers leaves the fetch
- * pending, so the `catch` never runs and this gate waits until the CI job's own
- * timeout kills it. `AbortSignal.timeout` turns that into the same `null` as
- * every other failure to reach the registry.
- *
- * @param pinned - The version the scaffold was stamped with
- * @param fetchImpl - Injected for tests; defaults to the global
- * @returns The version to build against, or `null` when the registry is unreachable
- */
-export async function resolvableScaffoldVersion(
-  pinned: string,
-  fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = (url, init) =>
-    fetch(url, init),
-): Promise<string | null> {
-  let meta: { readonly latest?: string; readonly versions?: Record<string, unknown> };
-  try {
-    const response = await fetchImpl('https://jsr.io/@setu-ts/kernel/meta.json', {
-      signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
-    });
-    if (!response.ok) return null;
-    meta = JSON.parse(await response.text()) as typeof meta;
-  } catch {
-    return null;
-  }
-  if (Object.hasOwn(meta.versions ?? {}, pinned)) return pinned;
-  return meta.latest ?? null;
-}
-
-/**
- * The `@setu-ts` version a scaffolded workspace was stamped with.
- *
- * Read from the emitted files rather than from this repository's manifests, so
- * it is whatever `setu new` actually wrote.
- *
- * @param root - The scaffolded workspace root
- * @returns The pinned version, or `null` when no specifier carries one
- */
-export async function scaffoldPinnedVersion(root: string): Promise<string | null> {
-  for await (const entry of walk(root, { exts: ['.json'], includeDirs: false })) {
-    const match = /jsr:@setu-ts\/[a-z0-9-]+@\^?([0-9][^"']*)/.exec(
-      await Deno.readTextFile(entry.path),
-    );
-    if (match?.[1] !== undefined) return match[1];
-  }
-  return null;
-}
-
-/**
- * Rewrites every `@setu-ts` specifier in a scaffold from one version to another.
- *
- * @param root - The scaffolded workspace root
- * @param from - The version the scaffold carries
- * @param to - The version to build against
- */
-export async function repinScaffold(root: string, from: string, to: string): Promise<void> {
-  const pattern = new RegExp(
-    `(@setu-ts/[a-z0-9-]+@\\^?)${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
-    'g',
-  );
-  for await (const entry of walk(root, { exts: ['.json', '.ts', '.tsx'], includeDirs: false })) {
-    const source = await Deno.readTextFile(entry.path);
-    const rewritten = source.replace(pattern, `$1${to}`);
-    if (rewritten !== source) await Deno.writeTextFile(entry.path, rewritten);
-  }
-}
+export const CLI_COMMAND: readonly string[] = [
+  'node',
+  '--import',
+  new URL('../test/node-source-register.ts', import.meta.url).href,
+  '--import',
+  new URL('../packages/cli/node_modules/tsx/dist/esm/index.mjs', import.meta.url).href,
+  nativeFilePath(new URL('../packages/cli/src/bin.ts', import.meta.url)),
+];
 
 /** Resources owned by one generated-deployment gate invocation. */
 export interface GeneratedResources {
@@ -787,10 +705,12 @@ export async function hardenScaffoldLock(root: string): Promise<number> {
 export async function buildGeneratedImage(
   root: string,
   image: string,
+  registry: string,
   execute: typeof run = run,
   harden: (root: string) => Promise<number> = hardenScaffoldLock,
 ): ReturnType<typeof run> {
-  const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root });
+  const env = { NPM_CONFIG_REGISTRY: registry };
+  const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root, env });
   if (!installed.success) return installed;
 
   const cached = await execute([
@@ -798,7 +718,7 @@ export async function buildGeneratedImage(
     'cache',
     '--lock=deno.lock',
     `apps/${GENERATED_MEMBER}/main.ts`,
-  ], { quiet: true, cwd: root });
+  ], { quiet: true, cwd: root, env });
   if (!cached.success) return cached;
 
   const stripped = await harden(root);
@@ -812,14 +732,20 @@ export async function buildGeneratedImage(
     };
   }
 
+  // The image's own install step resolves the framework from the same registry, reached on the
+  // host's loopback — hence the host network for the BUILD only; the container runs with none.
   return await execute([
     'docker',
     'build',
     '--quiet',
+    '--network',
+    'host',
     '-f',
     `${root}/docker/Dockerfile`,
     '--build-arg',
     `MEMBER=${GENERATED_MEMBER}`,
+    '--build-arg',
+    `NPM_CONFIG_REGISTRY=${registry}`,
     '-t',
     image,
     root,
@@ -862,15 +788,20 @@ async function checkGenerated(): Promise<CheckOutcome> {
   });
   const root = `${workspace}/${GENERATED_WORKSPACE}`;
   const resources = generatedResources();
+  // Nothing is on npm until the cut, and the scaffold pins the CLI's own version, so the
+  // framework installs from the tree's own packs; everything else through it from npm.
+  const overlay = await startRegistryOverlay({ root: Deno.cwd() });
   try {
     // Scaffold exactly what a user gets, with the real CLI as a subprocess. Scaffolding writes
     // files, then the printed install step resolves the workspace before the image build.
     const cli = (args: readonly string[]) =>
-      run([Deno.execPath(), 'run', '-A', CLI_ENTRY, ...args], { quiet: true, cwd: workspace });
+      run([...CLI_COMMAND, ...args], { quiet: true, cwd: workspace });
     const created = await cli([
       'new',
       GENERATED_WORKSPACE,
       '--workspace',
+      '--runtime',
+      'deno',
       '--transport',
       'redis',
       '--port',
@@ -882,21 +813,6 @@ async function checkGenerated(): Promise<CheckOutcome> {
       if (!created.success) console.error(created.stderr);
       if (!member.success) console.error(member.stderr);
       return 'failed';
-    }
-
-    // A release branch pins the version being released, which is not on the registry until the
-    // tag run publishes it — so the build below could never resolve it. Substitute the newest
-    // published version in that case, and say so: the scaffold, its Dockerfile and its security
-    // posture are still proved against real jsr.io resolution, which is what this gate is for.
-    const pinned = await scaffoldPinnedVersion(root);
-    if (pinned !== null) {
-      const resolvable = await resolvableScaffoldVersion(pinned);
-      if (resolvable !== null && resolvable !== pinned) {
-        console.log(
-          `  ${pinned} is not published yet — building against ${resolvable}, the newest that is`,
-        );
-        await repinScaffold(root, pinned, resolvable);
-      }
     }
 
     // Build the user Dockerfile against all supported manifest layouts. The last
@@ -924,7 +840,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
         );
       }
       console.log(`  installing and building the generated image (${layout}) …`);
-      const built = await buildGeneratedImage(root, resources.image);
+      const built = await buildGeneratedImage(root, resources.image, overlay.url);
       if (!built.success) {
         console.error(`  ✗ the generated workspace failed to install or build (${layout})`);
         console.error(built.stderr);
@@ -1052,6 +968,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
     await run(['docker', 'rm', '-f', resources.container], { quiet: true });
     await run(['docker', 'rm', '-f', '-v', resources.broker], { quiet: true });
     await run(['docker', 'image', 'rm', '-f', resources.image], { quiet: true });
+    await overlay.close();
     await Deno.remove(workspace, { recursive: true });
   }
 }

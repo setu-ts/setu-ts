@@ -424,6 +424,9 @@ describe('rendered manifests', () => {
   });
 });
 
+/** The overlay URL a gate run hands every install. */
+const REGISTRY = 'http://127.0.0.1:4873/';
+
 /** A `harden` seam that records its call site without touching a filesystem. */
 const recordingHarden = (log: string[], stripped = 2) => (root: string): Promise<number> => {
   log.push(`harden:${root}`);
@@ -432,13 +435,18 @@ const recordingHarden = (log: string[], stripped = 2) => (root: string): Promise
 
 describe('generated deployment install ordering', () => {
   it('locks the generated entry point before building from the same workspace root', async () => {
-    const calls: { command: readonly string[]; cwd: string | undefined }[] = [];
+    const calls: {
+      command: readonly string[];
+      cwd: string | undefined;
+      env: Readonly<Record<string, string>> | undefined;
+    }[] = [];
     const order: string[] = [];
     await buildGeneratedImage(
       '/workspace/acme',
       'test-image',
+      REGISTRY,
       (command, options) => {
-        calls.push({ command, cwd: options?.cwd });
+        calls.push({ command, cwd: options?.cwd, env: options?.env });
         order.push(command.slice(-1)[0]!);
         return Promise.resolve({ success: true, stdout: '', stderr: '' });
       },
@@ -453,19 +461,31 @@ describe('generated deployment install ordering', () => {
       '/workspace/acme',
     ]);
     expect(calls).toHaveLength(3);
-    expect(calls[0]).toEqual({ command: [Deno.execPath(), 'install'], cwd: '/workspace/acme' });
+    // Every install resolves the framework from the same registry: the host's,
+    // and the image's own install step through the build argument.
+    const env = { NPM_CONFIG_REGISTRY: REGISTRY };
+    expect(calls[0]).toEqual({
+      command: [Deno.execPath(), 'install'],
+      cwd: '/workspace/acme',
+      env,
+    });
     expect(calls[1]).toEqual({
       command: [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
       cwd: '/workspace/acme',
+      env,
     });
     expect(calls[2]!.command).toEqual([
       'docker',
       'build',
       '--quiet',
+      '--network',
+      'host',
       '-f',
       '/workspace/acme/docker/Dockerfile',
       '--build-arg',
       'MEMBER=orders',
+      '--build-arg',
+      `NPM_CONFIG_REGISTRY=${REGISTRY}`,
       '-t',
       'test-image',
       '/workspace/acme',
@@ -478,6 +498,7 @@ describe('generated deployment install ordering', () => {
     const result = await buildGeneratedImage(
       '/workspace/acme',
       'test-image',
+      REGISTRY,
       (command) => {
         commands.push([...command]);
         return Promise.resolve(failure);
@@ -494,6 +515,7 @@ describe('generated deployment install ordering', () => {
     const result = await buildGeneratedImage(
       '/workspace/acme',
       'test-image',
+      REGISTRY,
       (command) => {
         commands.push([...command]);
         return Promise.resolve(
@@ -609,6 +631,7 @@ describe('generated deployment lock hardening', () => {
     const result = await buildGeneratedImage(
       '/workspace/acme',
       'test-image',
+      REGISTRY,
       (command) => {
         commands.push([...command]);
         return Promise.resolve({ success: true, stdout: '', stderr: '' });

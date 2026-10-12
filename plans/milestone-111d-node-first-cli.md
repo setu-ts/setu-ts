@@ -327,6 +327,59 @@ assertions name `jsr:` pins (`generate-e2e.test.ts:153,194,245,303`, `devtool-e2
   until the cut. Deno keeps M95a's air-gapped `--frozen` proof, which is Deno-specific.
 - **Test home:** `test/deploy-gate.test.ts`, plus the gate run itself.
 
+### 3.17 Corrections made during implementation
+
+Each item below replaced a plan claim that did not survive measurement or review; the design
+sections above are left as written, and this list is what shipped.
+
+- **§3.1 — one reader, not one interface per question.** A per-question `readline` interface lost a
+  line typed ahead (both answers arrive while the first question is pending, and closing the first
+  interface discards the second). `createLineReader` opens one interface for the run, queues lines
+  that arrive while no question is pending, and closes in `MainProcess.dispose`, which `runMain`
+  calls in a `finally`. A terminal Ctrl+C is delivered as the `SIGINT` EVENT (`emitInterrupt`),
+  never `process.kill`, which terminates the process outright on Windows.
+- **§3.7 — the CLI formats npm-target output with Prettier** (maintainer decision, 2026-10-12).
+  Measured: `deno fmt` and Prettier disagree on 3–13 files per template (long calls, wrapped
+  signatures, JSON arrays, JSX), and no renderer change satisfies both. Everything written into an
+  npm-target project — `new`, `generate`, `add`, `app`, `library`, `adopt` — passes through
+  `formatForTarget`, which resolves the project's Prettier config per destination file. TypeScript 6
+  includes no `@types` package unless `types` names it, so the generated tsconfig names `node` or
+  `bun`. `src/gen/` is ignored by both tools (a gRPC member's compiler output).
+- **§3.9 — no `db:migrate` task.** The generated runner is run directly (`npx tsx`, `bun run` or
+  `deno run -A src/migrations/run.ts`); the comment in the runner names the command.
+- **§3.13 — `createArgs` is a real export**, so `@setu-ts/create` is validated like every other
+  package; no executable-package rule was needed in `verify-release.ts`.
+- **§3.14 — the overlay advertises canonical tarball routes** (`/@scope/name/-/name-V.tgz`), so a
+  lockfile written against it names the same path npm uses; another version of a framework package
+  is proxied upstream. `packMembers` requires an installed workspace rather than installing, takes
+  ONE repository-wide build lock that records its owner and is reclaimed when that owner is dead,
+  cleans staging on every failure, and hashes every member's README and licence and the solution
+  `tsconfig.json`, `pnpm-workspace.yaml` and root licence (Codex review). Both scripts are tested on
+  Node in the root `tooling` Vitest target, which measures their coverage, rather than in
+  `SCRIPT_TARGETS`: the overlay binds a real socket, which the root Deno lane grants no permission
+  for.
+- **§3.15 — where Node coverage lives.** The type-drift e2e files (`template`, `generate`,
+  `seam-probe`, `workspace`, `workspace-mesh`, `broker-scaffold`, `adopted-route`, `shutdown`)
+  scaffold with an explicit `--runtime deno` and keep their Deno checks against workspace source:
+  their assertions are about generated wiring, and running each as an npm install would multiply the
+  suite's install count without asserting anything new. Node is proved end to end by a new
+  `node-scaffold-e2e` (every host installed from the overlay and run through its own `check`,
+  `lint`, `format:check`, `test` and `start`; generated code on both styles; a broker client; a
+  graceful SIGTERM), `bin-e2e`, `plugin-commands-e2e` (installed Node and Deno projects, and the
+  uninstalled-Deno refusal) and the npm-profile `dev-runner` cases. Workers hosts in
+  `scaffold-runs-e2e` format-check with Prettier, not `deno fmt`. The dependency-age case runs
+  against the overlay with `publishedAt: 'now'`, replacing the pin relaxation.
+- **The workspace SSR negative control no longer discriminates.** With `nodeModulesDir: "auto"`, a
+  Deno workspace links its libraries into `node_modules`, so Vite resolves and externalizes a
+  library with or without the generated externals rule (measured both ways). The control is removed
+  and the externalized import asserted positively; the rule stays for an unlinked layout.
+- **`setu add` recognises an inline plugin-array anchor** (Prettier puts a short array on one line),
+  and `importMapRetargets` reads an npm dependency's version range as naming the key's own package —
+  the CLI's own plain-range pins had made every npm project count as retargeted (Codex review).
+- **`devtool enable` reads the Deno manifest first**, so a directory with no manifest reports "not a
+  project" and an npm project reports its runtime, instead of the Node default naming the wrong
+  problem.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** (maintainer-approved 2026-10-12) `MainProcess.prompt` changes from
