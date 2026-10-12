@@ -81,21 +81,30 @@ async function markerPresent(fs: IFileSystem, path: string): Promise<boolean> {
  */
 const WRANGLER_CONFIGS = ['wrangler.toml', 'wrangler.json', 'wrangler.jsonc'] as const;
 
+/** Whether a Deno manifest sits in the directory. */
+async function hasDenoManifest(fs: IFileSystem, dir: string): Promise<boolean> {
+  return await markerPresent(fs, joinPath(dir, 'deno.json')) ||
+    await markerPresent(fs, joinPath(dir, 'deno.jsonc'));
+}
+
+/** The answer when no `package.json` decides: Deno when its manifest is present, else Node. */
+async function denoOrNode(fs: IFileSystem, dir: string): Promise<TargetRuntime> {
+  return await hasDenoManifest(fs, dir) ? 'deno' : 'node';
+}
+
 /**
  * Detects the runtime a project was scaffolded for.
  *
  * The order is what makes it unambiguous. A Cloudflare Workers project carries
  * BOTH a `deno.json` (which `setu generate` reads for plugin gating) and a
  * `package.json` (which `wrangler` needs), so it has to be recognised by
- * its Wrangler config first or it would be misread as Node. Deno is last because it
- * is the only target with no second marker — it deliberately has no
- * `package.json`, since one would switch Deno to `node_modules` resolution.
+ * its Wrangler config first or it would be misread as Node. Deno is decided by
+ * its own manifest, and a directory with no manifest at all is Node.
  *
  * @param fs - The filesystem to read through
  * @param dir - The project directory
- * @returns The detected runtime: `'deno'` when no `package.json` marks another
- *   target, and for a `package.json` with no `start` only when a `deno.json`
- *   sits beside it
+ * @returns The detected runtime: `'deno'` only when a `deno.json`/`deno.jsonc`
+ *   decides it, `'node'` when nothing else does
  * @throws {RuntimeMarkerUnreadableError} When a marker exists but cannot be
  *   read
  */
@@ -107,13 +116,17 @@ export async function detectTargetRuntime(
     if (await markerPresent(fs, joinPath(dir, config))) return 'cloudflare-workers';
   }
 
+  // With no usable `package.json` the Deno manifest decides, and a directory
+  // carrying neither falls back to Node, the default target since M111d. Never
+  // the bare fallback alone: a Deno-only project has no `package.json` at all,
+  // so flipping that fallback would misread every one of them as Node.
   // Presence is decided first so an access failure is refused, while a file
-  // that reads but does not parse keeps the deno fallback: the plugin detector
+  // that reads but does not parse takes the same fallback: the plugin detector
   // reports a malformed manifest, and this must not throw on the way there.
   const packagePath = joinPath(dir, 'package.json');
-  if (!await markerPresent(fs, packagePath)) return 'deno';
+  if (!await markerPresent(fs, packagePath)) return await denoOrNode(fs, dir);
   const packageJson = await readJsonManifest(fs, packagePath);
-  if (packageJson.kind !== 'ok') return 'deno';
+  if (packageJson.kind !== 'ok') return await denoOrNode(fs, dir);
 
   // The `start` script is the marker, because it is what the two targets
   // genuinely differ on: Bun runs TypeScript directly, Node needs a loader.
@@ -132,10 +145,7 @@ export async function detectTargetRuntime(
   // harness whose `@std/*` imports that project cannot resolve. A `deno.json`
   // decides it; otherwise the lockfile tells Bun from Node, the rule
   // `detectProjectRuntime` already uses for `setu adopt`.
-  if (
-    await markerPresent(fs, joinPath(dir, 'deno.json')) ||
-    await markerPresent(fs, joinPath(dir, 'deno.jsonc'))
-  ) return 'deno';
+  if (await hasDenoManifest(fs, dir)) return 'deno';
   for (const lockfile of ['bun.lock', 'bun.lockb']) {
     if (await markerPresent(fs, joinPath(dir, lockfile))) return 'bun';
   }

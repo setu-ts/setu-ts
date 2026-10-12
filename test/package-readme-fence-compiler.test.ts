@@ -147,6 +147,9 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/sdk/README.md': 15,
   'packages/telemetry-plugin/README.md': 2,
   'packages/testing/README.md': 10,
+  // M111d: the npm create entry. Shell lines only, so it is gated at zero —
+  // a TypeScript fence added later is then visible here rather than unchecked.
+  'packages/create/README.md': 0,
 };
 
 /** Reads every fence the engine would compile from one README. */
@@ -216,7 +219,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(43);
+    expect(Object.keys(READMES)).toHaveLength(44);
 
     // And pin the COVERAGE: every package README is gated or explicitly named
     // as a known gap. Half of them were in neither before v0.6.0, which is how

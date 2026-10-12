@@ -92,8 +92,8 @@ describe('detectProjectRuntime', () => {
     expect(await detectProjectRuntime(fs, '/p')).toBe('node');
   });
 
-  it('defaults a directory with neither manifest to deno', async () => {
-    expect(await detectProjectRuntime(createFakeFs({}), '/p')).toBe('deno');
+  it('defaults a directory with neither manifest to node', async () => {
+    expect(await detectProjectRuntime(createFakeFs({}), '/p')).toBe('node');
   });
 });
 
@@ -126,10 +126,11 @@ describe('what an npm workspace renders', () => {
     expect(rootFile('deno.json')).toBe('');
   });
 
-  // Without it `npm install` cannot resolve a single framework package: they come
-  // from JSR through npm compatibility. Measured in a real two-member workspace.
-  it('maps the @jsr scope at the root', () => {
-    expect(rootFile('.npmrc')).toContain('@jsr:registry=https://npm.jsr.io');
+  // The framework installs from npm under its own names, so the root carries no
+  // registry mapping (before 0.9 it mapped the @jsr scope).
+  it('writes no .npmrc at the root', () => {
+    expect(workspaceRootFiles('acme', 3000, HTTP, NODE).some((file) => file.path === '.npmrc'))
+      .toBe(false);
   });
 
   // Bun installs into each member too, so an ignore naming only the root would
@@ -209,8 +210,8 @@ describe('what an npm workspace renders', () => {
     // dependencies through the root manifest and lockfile.
     expect(dockerfile).toContain(NODE.install);
     expect(dockerfile).toContain('COPY package.json');
-    // Without the scope mapping the install resolves no framework package at all.
-    expect(dockerfile).toContain('.npmrc');
+    // No registry mapping is copied: the framework installs from npm.
+    expect(dockerfile).not.toContain('.npmrc');
     // Shared libraries BEFORE the install, not after: a member that depends on one
     // is linked by the install itself, so a library arriving later is a dependency
     // the install could not resolve.

@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-console -- this CI script reports progress, drift and skips.
 import { fromFileUrl } from 'jsr:@std/path@^1.1.6';
-import { walk } from 'jsr:@std/fs@^1.0.19';
+import { startRegistryOverlay } from './registry-overlay.ts';
 
 /**
  * @module
@@ -336,12 +336,17 @@ async function onPath(tool: string): Promise<boolean> {
 
 async function run(
   command: readonly string[],
-  options: { readonly quiet?: boolean; readonly cwd?: string } = {},
+  options: {
+    readonly quiet?: boolean;
+    readonly cwd?: string;
+    readonly env?: Readonly<Record<string, string>>;
+  } = {},
 ): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const quiet = options.quiet === true;
   const output = await new Deno.Command(command[0], {
     args: [...command.slice(1)],
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.env === undefined ? {} : { env: { ...options.env } }),
     stdout: quiet ? 'piped' : 'inherit',
     stderr: quiet ? 'piped' : 'inherit',
   }).output();
@@ -531,11 +536,24 @@ export const GENERATED_LAYOUTS: readonly string[] = [
 ];
 
 /**
- * The shell check run inside the built image: no development entry, and no cached connector
- * source anywhere in the module cache.
+ * The shell check run inside the built image: no development entry, and no connector PACKAGE in
+ * the module cache or the project's `node_modules`.
+ *
+ * It matches package PATHS, never file contents: the framework now installs from npm, whose
+ * tarballs carry each package's README, and the events and queue READMEs name the connector in
+ * prose — a content grep reported both as cached connector source. The first clause is a positive
+ * control: a cache that moved, or holds no framework package at all, would otherwise let the
+ * absence check pass without having looked anywhere.
  */
-export const PRODUCTION_DEVTOOL_PROBE: string =
-  `test ! -e /srv/apps/${GENERATED_MEMBER}/main.dev.ts && ! grep -rl diagnostics-plugin /deno-dir`;
+export const PRODUCTION_DEVTOOL_PROBE: string = [
+  `test -n "$(find /deno-dir -path '*@setu-ts/kernel*' -print -quit)"`,
+  `test ! -e /srv/apps/${GENERATED_MEMBER}/main.dev.ts`,
+  // `|| true`: a member with no `node_modules` makes find exit non-zero, which must not end the
+  // chain before the absence is checked.
+  `found="$(find /deno-dir /srv/node_modules -path '*diagnostics-plugin*' 2>/dev/null || true)"`,
+  `echo "$found"`,
+  `test -z "$found"`,
+].join(' && ');
 
 /**
  * Converts a file URL into the native path `Deno.Command` expects.
@@ -550,106 +568,19 @@ export function nativeFilePath(fileUrl: URL): string {
   return fromFileUrl(fileUrl);
 }
 
-/** The CLI's executable entry (`main.ts` owns the process boundary), absolute: scaffold steps
- * run with the WORKSPACE as their cwd. */
-const CLI_ENTRY = nativeFilePath(new URL('../packages/cli/src/main.ts', import.meta.url));
-
 /**
- * How long the registry lookup may take before it counts as unreachable.
- *
- * Generous, because the answer decides what the image is built against and a
- * slow registry is not a wrong one — but finite, because the alternative is
- * waiting for the CI job's own timeout.
+ * How the gate runs the CLI: as the published `setu` binary runs — `src/bin.ts` on Node, its
+ * TypeScript loaded through `tsx` and `@setu-ts/*` mapped to this tree's sources. Absolute, because
+ * scaffold steps run with the WORKSPACE as their cwd.
  */
-const REGISTRY_TIMEOUT_MS = 10_000;
-
-/**
- * The version a generated scaffold can actually resolve from the registry.
- *
- * `setu new` stamps generated projects with the CLI's OWN version, and the
- * image build below resolves that version from jsr.io for real — which is the
- * point of this check, and is also why it cannot pass on a release branch: the
- * version being released is not published yet, so `deno cache` inside the image
- * fails with `Could not find version of '@setu-ts/common'`. That is not a defect
- * in the scaffold; a version that does not exist is untestable by construction.
- *
- * So the check asks the registry. When the pinned version is published it is
- * used unchanged, which is the faithful case and the one that holds on `main`.
- * When it is not, the newest PUBLISHED version is substituted and the
- * substitution is printed: the generated Dockerfile, its permissions and its
- * security posture are still proved against real jsr.io resolution, which is
- * what this gate exists for.
- *
- * A registry that cannot be reached returns `null`, leaving the pinned version
- * in place: failing loudly on an unresolvable specifier is better than silently
- * building something other than what was asked for.
- *
- * The request is BOUNDED, which a refused connection does not need but a hung
- * one does: a socket the registry accepts and never answers leaves the fetch
- * pending, so the `catch` never runs and this gate waits until the CI job's own
- * timeout kills it. `AbortSignal.timeout` turns that into the same `null` as
- * every other failure to reach the registry.
- *
- * @param pinned - The version the scaffold was stamped with
- * @param fetchImpl - Injected for tests; defaults to the global
- * @returns The version to build against, or `null` when the registry is unreachable
- */
-export async function resolvableScaffoldVersion(
-  pinned: string,
-  fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = (url, init) =>
-    fetch(url, init),
-): Promise<string | null> {
-  let meta: { readonly latest?: string; readonly versions?: Record<string, unknown> };
-  try {
-    const response = await fetchImpl('https://jsr.io/@setu-ts/kernel/meta.json', {
-      signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
-    });
-    if (!response.ok) return null;
-    meta = JSON.parse(await response.text()) as typeof meta;
-  } catch {
-    return null;
-  }
-  if (Object.hasOwn(meta.versions ?? {}, pinned)) return pinned;
-  return meta.latest ?? null;
-}
-
-/**
- * The `@setu-ts` version a scaffolded workspace was stamped with.
- *
- * Read from the emitted files rather than from this repository's manifests, so
- * it is whatever `setu new` actually wrote.
- *
- * @param root - The scaffolded workspace root
- * @returns The pinned version, or `null` when no specifier carries one
- */
-export async function scaffoldPinnedVersion(root: string): Promise<string | null> {
-  for await (const entry of walk(root, { exts: ['.json'], includeDirs: false })) {
-    const match = /jsr:@setu-ts\/[a-z0-9-]+@\^?([0-9][^"']*)/.exec(
-      await Deno.readTextFile(entry.path),
-    );
-    if (match?.[1] !== undefined) return match[1];
-  }
-  return null;
-}
-
-/**
- * Rewrites every `@setu-ts` specifier in a scaffold from one version to another.
- *
- * @param root - The scaffolded workspace root
- * @param from - The version the scaffold carries
- * @param to - The version to build against
- */
-export async function repinScaffold(root: string, from: string, to: string): Promise<void> {
-  const pattern = new RegExp(
-    `(@setu-ts/[a-z0-9-]+@\\^?)${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
-    'g',
-  );
-  for await (const entry of walk(root, { exts: ['.json', '.ts', '.tsx'], includeDirs: false })) {
-    const source = await Deno.readTextFile(entry.path);
-    const rewritten = source.replace(pattern, `$1${to}`);
-    if (rewritten !== source) await Deno.writeTextFile(entry.path, rewritten);
-  }
-}
+export const CLI_COMMAND: readonly string[] = [
+  'node',
+  '--import',
+  new URL('../test/node-source-register.ts', import.meta.url).href,
+  '--import',
+  new URL('../packages/cli/node_modules/tsx/dist/esm/index.mjs', import.meta.url).href,
+  nativeFilePath(new URL('../packages/cli/src/bin.ts', import.meta.url)),
+];
 
 /** Resources owned by one generated-deployment gate invocation. */
 export interface GeneratedResources {
@@ -680,117 +611,30 @@ export function generatedResources(): GeneratedResources {
 }
 
 /**
- * The scope whose packages carry the lazily imported broker drivers.
- *
- * Every `npm:` edge stripped below belongs to a package under it, so the
- * hardening never touches a third-party entry or any version pin.
- */
-const FRAMEWORK_JSR_SCOPE = '@setu-ts/';
-
-/** A lockfile with its framework npm edges removed, and how many were removed. */
-export interface StrippedLock {
-  /** The rewritten lockfile text, newline-terminated as Deno writes it. */
-  readonly lock: string;
-  /** How many `npm:` edges were removed, across every framework entry. */
-  readonly stripped: number;
-}
-
-/**
- * Removes every `npm:` edge from the framework's own jsr entries in a lockfile.
- *
- * This is what makes the gate SEE the defect V7-5's fix opened, rather than
- * catching it intermittently at best. The generated image starts with `--frozen`, so
- * the lockfile it ships must already name every edge a lazily imported driver
- * asks for at registration — and nothing on the HOST is obliged to put them
- * there: Deno records a jsr package's npm edge list nondeterministically on a
- * cold cache. Before this step the gate's starting condition was whatever the
- * host's own install happened to write, so a host that got a complete lockfile
- * handed the image a property it never established. Measured: with no strip, a
- * Dockerfile regressed to `RUN deno cache main.ts` alone — the exact pre-fix
- * form — PASSES the gate, while the same image dies in a cluster on
- * `The lockfile is out of date`.
- *
- * Stripping the edges first takes that luck out of the measurement: the image
- * has to establish lock completeness itself, which is exactly what its own
- * `RUN deno cache main.ts && deno install && deno install --frozen` is for.
- * Only the edge LISTS go — every resolved version pin stays — so the scaffold
- * the image is built from is still the realistic one V7-5 required rather than
- * the stub that made build and runtime coincidentally agree.
- *
- * It also drives the one gap the image's own build-time verify cannot see.
- * `deno install --frozen` proves the INSTALL view of completeness, and that is
- * not the whole set: measured, `deno install` restores
- * `@setu-ts/messaging-plugin`'s `npm:amqplib`/`npm:ioredis` and not
- * `@setu-ts/queue-plugin`'s, while `deno cache main.ts` restores
- * `queue-plugin`'s and not `messaging-plugin`'s, and a build without the cache
- * step passes `--frozen` with `queue-plugin`'s edge still absent. Running the
- * stripped case through to a served `/health` is what exercises their union.
- *
- * @param lockJson - The scaffold's `deno.lock` contents
- * @returns The rewritten lockfile and the number of edges removed
- */
-export function stripFrameworkNpmEdges(lockJson: string): StrippedLock {
-  const lock = JSON.parse(lockJson) as {
-    jsr?: Record<string, { dependencies?: string[] }>;
-  };
-  let stripped = 0;
-  for (const [name, entry] of Object.entries(lock.jsr ?? {})) {
-    if (!name.startsWith(FRAMEWORK_JSR_SCOPE)) continue;
-    const dependencies = entry.dependencies;
-    if (dependencies === undefined) continue;
-    const kept = dependencies.filter((edge) => !edge.startsWith('npm:'));
-    stripped += dependencies.length - kept.length;
-    // Deno omits the key entirely for a package with no dependencies, so an
-    // empty array would be a shape it never writes.
-    if (kept.length === 0) delete entry.dependencies;
-    else entry.dependencies = kept;
-  }
-  return { lock: `${JSON.stringify(lock, null, 2)}\n`, stripped };
-}
-
-/**
- * Applies {@link stripFrameworkNpmEdges} to a scaffolded workspace's lockfile.
- *
- * Reports the count so the caller can refuse a strip that removed NOTHING: this
- * scaffold registers a Redis broker and a queue, so its installed lockfile
- * always carries framework npm edges, and a zero means the lockfile moved, was
- * never written, or no longer records edges this way — each of which would turn
- * the hardening into a step that quietly proves nothing.
- *
- * @param root - Generated workspace root
- * @returns How many framework `npm:` edges were removed
- */
-export async function hardenScaffoldLock(root: string): Promise<number> {
-  const path = `${root}/deno.lock`;
-  const { lock, stripped } = stripFrameworkNpmEdges(await Deno.readTextFile(path));
-  await Deno.writeTextFile(path, lock);
-  return stripped;
-}
-
-/**
  * Installs the scaffold exactly as its printed next step requests, resolves the
- * selected application's entry point into that root lockfile, strips the
- * framework's npm edges back out, then builds its Dockerfile.
+ * selected application's entry point into that root lockfile, then builds its
+ * Dockerfile.
  *
- * The strip is the point rather than an oddity: see {@link stripFrameworkNpmEdges}.
- * The install and cache stay because V7-5 needs the image built against a
- * realistically RESOLVED lockfile — every version pin present — and what the
- * image must not be allowed to inherit is only the edge lists its own build
- * step is responsible for.
+ * The framework resolves from npm (through the overlay), and the npm section of
+ * the lockfile is deterministic — measured in M111d across three cold installs
+ * with fresh caches, which wrote byte-identical sections. That is why no edge is
+ * stripped here any more: the strip existed because Deno recorded a JSR
+ * package's npm edges nondeterministically, which the npm path does not.
  *
  * @param root - Generated workspace root
  * @param image - Image tag owned by this invocation
+ * @param registry - The overlay URL every install resolves the framework from
  * @param execute - Subprocess seam for the ordered-command regression test
- * @param harden - Lockfile seam for the same test; defaults to the real strip
- * @returns The install/cache/harden failure, or the image build result
+ * @returns The install/cache failure, or the image build result
  */
 export async function buildGeneratedImage(
   root: string,
   image: string,
+  registry: string,
   execute: typeof run = run,
-  harden: (root: string) => Promise<number> = hardenScaffoldLock,
 ): ReturnType<typeof run> {
-  const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root });
+  const env = { NPM_CONFIG_REGISTRY: registry };
+  const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root, env });
   if (!installed.success) return installed;
 
   const cached = await execute([
@@ -798,28 +642,23 @@ export async function buildGeneratedImage(
     'cache',
     '--lock=deno.lock',
     `apps/${GENERATED_MEMBER}/main.ts`,
-  ], { quiet: true, cwd: root });
+  ], { quiet: true, cwd: root, env });
   if (!cached.success) return cached;
 
-  const stripped = await harden(root);
-  if (stripped === 0) {
-    return {
-      success: false,
-      stdout: '',
-      stderr: `the scaffold's deno.lock records no @setu-ts npm edges, so stripping ` +
-        `them proves nothing — check that ${root}/deno.lock was written by the ` +
-        `install above`,
-    };
-  }
-
+  // The image's own install step resolves the framework from the same registry, reached on the
+  // host's loopback — hence the host network for the BUILD only; the container runs with none.
   return await execute([
     'docker',
     'build',
     '--quiet',
+    '--network',
+    'host',
     '-f',
     `${root}/docker/Dockerfile`,
     '--build-arg',
     `MEMBER=${GENERATED_MEMBER}`,
+    '--build-arg',
+    `NPM_CONFIG_REGISTRY=${registry}`,
     '-t',
     image,
     root,
@@ -862,15 +701,32 @@ async function checkGenerated(): Promise<CheckOutcome> {
   });
   const root = `${workspace}/${GENERATED_WORKSPACE}`;
   const resources = generatedResources();
+  // Nothing is on npm until the cut, and the scaffold pins the CLI's own version, so the
+  // framework installs from the tree's own packs; everything else through it from npm.
+  let overlay: Awaited<ReturnType<typeof startRegistryOverlay>> | undefined;
   try {
+    // Inside the `try`: packing the tree can fail (no `pnpm install`, a build error), and that
+    // must report as this mode failing — with the temp workspace removed — not escape the run.
+    try {
+      overlay = await startRegistryOverlay({ root: Deno.cwd() });
+    } catch (cause) {
+      console.error(
+        `  ✗ the local registry overlay did not start (run \`pnpm install\` first): ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+      return 'failed';
+    }
     // Scaffold exactly what a user gets, with the real CLI as a subprocess. Scaffolding writes
     // files, then the printed install step resolves the workspace before the image build.
     const cli = (args: readonly string[]) =>
-      run([Deno.execPath(), 'run', '-A', CLI_ENTRY, ...args], { quiet: true, cwd: workspace });
+      run([...CLI_COMMAND, ...args], { quiet: true, cwd: workspace });
     const created = await cli([
       'new',
       GENERATED_WORKSPACE,
       '--workspace',
+      '--runtime',
+      'deno',
       '--transport',
       'redis',
       '--port',
@@ -882,21 +738,6 @@ async function checkGenerated(): Promise<CheckOutcome> {
       if (!created.success) console.error(created.stderr);
       if (!member.success) console.error(member.stderr);
       return 'failed';
-    }
-
-    // A release branch pins the version being released, which is not on the registry until the
-    // tag run publishes it — so the build below could never resolve it. Substitute the newest
-    // published version in that case, and say so: the scaffold, its Dockerfile and its security
-    // posture are still proved against real jsr.io resolution, which is what this gate is for.
-    const pinned = await scaffoldPinnedVersion(root);
-    if (pinned !== null) {
-      const resolvable = await resolvableScaffoldVersion(pinned);
-      if (resolvable !== null && resolvable !== pinned) {
-        console.log(
-          `  ${pinned} is not published yet — building against ${resolvable}, the newest that is`,
-        );
-        await repinScaffold(root, pinned, resolvable);
-      }
     }
 
     // Build the user Dockerfile against all supported manifest layouts. The last
@@ -924,7 +765,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
         );
       }
       console.log(`  installing and building the generated image (${layout}) …`);
-      const built = await buildGeneratedImage(root, resources.image);
+      const built = await buildGeneratedImage(root, resources.image, overlay.url);
       if (!built.success) {
         console.error(`  ✗ the generated workspace failed to install or build (${layout})`);
         console.error(built.stderr);
@@ -945,6 +786,8 @@ async function checkGenerated(): Promise<CheckOutcome> {
       ], { quiet: true });
       if (!connectorCache.success) {
         console.error(`  ✗ production carries a devtool entry or cached connector (${layout})`);
+        // The probe's grep prints every matching path, which is what says WHERE.
+        console.error(connectorCache.stdout + connectorCache.stderr);
         return 'failed';
       }
       console.log(`  ✓ production excludes the devtool (${layout})`);
@@ -1052,6 +895,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
     await run(['docker', 'rm', '-f', resources.container], { quiet: true });
     await run(['docker', 'rm', '-f', '-v', resources.broker], { quiet: true });
     await run(['docker', 'image', 'rm', '-f', resources.image], { quiet: true });
+    await overlay?.close();
     await Deno.remove(workspace, { recursive: true });
   }
 }

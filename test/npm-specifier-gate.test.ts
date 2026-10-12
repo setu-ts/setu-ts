@@ -4,7 +4,7 @@
  * Runs `auditPackageSources('packages')` over the whole tree on every suite
  * run and asserts it is clean: no computed `import()` in a package `src` tree
  * without a `computed-specifier` marker. The vacuity guard asserts the walker
- * actually visited files and found the three known marked sites, so a broken
+ * actually visited files and found the two known marked sites, so a broken
  * walker cannot pass by scanning nothing.
  *
  * @module
@@ -66,13 +66,15 @@ describe('npm-specifier gate (whole packages/ tree)', () => {
     expect(result.filesVisited).toBe(expected);
   });
 
-  it('found exactly the three known marked computed-import sites', async () => {
+  it('found exactly the two known marked computed-import sites', async () => {
     const result = await auditPackageSources('packages');
-    // Three legitimate computed imports, each marked with a reason:
-    //   packages/cli/src/schematics/custom.ts
+    // Two legitimate computed imports, each marked with a reason:
     //   packages/decorator-plugin/src/discovery/controller-discovery.ts
     //   packages/react-router-plugin/src/handler/server-build.ts
-    // A fourth would be visible here (plan §8 R5).
-    expect(result.markedSites).toBe(3);
+    // The CLI's custom-schematic loader was the third until M111d, which loads
+    // project modules through tsx's tsImport (packages/cli/src/utils/ts-loader.ts)
+    // — a function call naming a project file, not an import expression.
+    // A third would be visible here (plan §8 R5).
+    expect(result.markedSites).toBe(2);
   });
 });

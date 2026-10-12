@@ -5,21 +5,25 @@ framework.
 
 ## Installation
 
+`setu` is a Node program (Node 22 or later), published to npm with a `bin`. Run it without an
+install, install it globally, or start through `npm create`:
+
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
+npx @setu-ts/cli new my-app
+npm install --global @setu-ts/cli          # then: setu new my-app
+npm create @setu-ts my-app                 # the same as setu new my-app
 ```
 
-Use the global install, or pass `--no-config --no-lock` to an ad-hoc `deno run` inside a project so
-Deno does not write the CLI's dependency graph into the project's lockfile.
-
-The `-n setu` is required, not decorative: Deno derives the binary name from the package, which for
-a package called `cli` would install a binary named `cli`. All help text shows `setu`.
+It loads a project's TypeScript — `setu.config.ts` for plugin commands, a custom schematic — through
+`tsx`, resolving the project's own imports from its `node_modules`. A Deno project sets
+`nodeModulesDir: "auto"` so `deno install` creates that directory; run it once before
+`setu <plugin-command>`.
 
 ## Scaffolding a project
 
 ```bash
-setu new my-app                                  # Deno, minimal (runtime plugin only)
-setu new my-app --runtime node                   # deno | node | bun | cloudflare-workers — see below
+setu new my-app                                  # Node, minimal (runtime plugin only)
+setu new my-app --runtime deno                   # node (default) | deno | bun | cloudflare-workers — see below
 setu new my-app --template rest                  # rest | microservice | class-based | full-stack
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
 setu new my-app --template rest --env-file config/.env.local
@@ -98,11 +102,14 @@ The frontend build runs on npm even when the server runs on Deno. Deno and Worke
 standalone `package.json` for Vite and React Router; Node and Bun get those dev dependencies merged
 into the manifest they already have.
 
-| Runtime              | Emits                                                                                     |
-| -------------------- | ----------------------------------------------------------------------------------------- |
-| `deno`               | `deno.json` (JSR imports, `start` task), `main.ts` binding a port via `app.start()`       |
-| `node` / `bun`       | `package.json` (npm-compat JSR deps), `.npmrc` mapping `@jsr`, `tsconfig.json`, `main.ts` |
-| `cloudflare-workers` | `deno.json`, `wrangler.toml`, `src/index.ts` exporting `fetch` — no `listen`              |
+| Runtime              | Emits                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| `node` (default)     | `package.json` (`@setu-ts/*` from npm), `tsconfig.json`, ESLint and Prettier config, `main.ts` |
+| `bun`                | the same npm manifests as `node`, run with `bun`                                               |
+| `deno`               | `deno.json` (`npm:@setu-ts/*` imports, `nodeModulesDir: "auto"`, `start` task), `main.ts`      |
+| `cloudflare-workers` | `deno.json`, `package.json`, `wrangler.toml`, `src/index.ts` exporting `fetch` — no `listen`   |
+
+No target emits an `.npmrc` or a JSR registry mapping: every target takes the framework from npm.
 
 Every target also gets a `README.md` and a `.gitignore`.
 
@@ -147,7 +154,7 @@ install, and `setu generate --help` lists only what is available here.
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run`           | Prints `would create <path>` per file and writes absolutely nothing.                                                                                                                                                                                                                                                                                                                                                        |
 | `--dir <path>`        | Operate on this directory instead of the working directory.                                                                                                                                                                                                                                                                                                                                                                 |
-| `--runtime <target>`  | On `new`, the entry shape and manifest (default `deno`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                    |
+| `--runtime <target>`  | On `new`, the entry shape and manifest (default `node`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                    |
 | `--template <name>`   | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.                                                                                                                                                                                                                                                                                                                                |
 | `--env-file <path>`   | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                        |
 | `--broker <name>`     | `new` only: the standalone project's message broker (`memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). Rewrites the template's `MessagingPlugin` wiring, adds the connection variable to the dotenv pair, and emits `docker/compose.yaml` starting the broker. Refused wherever it would be a silent no-op: Cloudflare Workers, starter-composed templates, and templates registering no messaging. |
@@ -177,7 +184,9 @@ A relative `--dir` is resolved against the working directory.
 
 ## Devtool development
 
-`setu new --devtool` and `setu devtool enable <member>` opt a project into the
+The devtool is Deno-only — the diagnostics listener refuses every other runtime before it binds — so
+these commands need a Deno project (`--runtime deno`). `setu new --devtool` and
+`setu devtool enable <member>` opt a project into the
 [local diagnostics connector](https://github.com/setu-ts/setu-ts/blob/main/packages/diagnostics-plugin/README.md):
 they emit a `main.dev.ts` development entry the production graph never imports, add `dev` and
 `check` tasks, and — for a workspace member — record a `devtoolPort` in `setu.workspace.json`,
@@ -185,8 +194,8 @@ allocated so it never collides with any member's application port
 (`setu workspace ports --reallocate` moves both together).
 
 ```bash
-setu new my-app --devtool              # standalone; connector probes from 4919; override with --devtool-port <n>
-setu new acme --workspace && cd acme
+setu new my-app --runtime deno --devtool   # standalone; connector probes from 4919; override with --devtool-port <n>
+setu new acme --workspace --runtime deno && cd acme
 setu generate app orders --devtool     # member; the devtool port is allocated
 setu devtool enable billing            # a member that already exists
 setu devtool enable                    # a standalone project that already exists
@@ -344,20 +353,21 @@ is what makes `--dry-run` exact.
 
 ```typescript
 import { runCli } from '@setu-ts/cli';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const code = await runCli(['generate', 'service', 'billing'], {
   fs: runtime.fs!,
-  cwd: Deno.cwd(),
+  cwd: process.cwd(),
   now: () => runtime.now(),
   log: console.log,
   error: console.error,
 });
 ```
 
-`runCli` returns an exit code and never calls `Deno.exit`. The dependency bundle has no default on
-purpose: `src/main.ts` owns the process boundary, so every other path stays testable.
+`runCli` returns an exit code and never exits the process. The dependency bundle has no default on
+purpose: `src/main.ts` (`runMain` with `nodeProcess`) owns the process boundary, so every other path
+stays testable.
 
 ## Interactive scaffolding
 
@@ -372,8 +382,8 @@ project, and `--dry-run` stays exact.
 
 Non-interactive by construction in three layers: `runCli`'s dependency bundle takes prompting as an
 OPTIONAL `ask` member no programmatic caller passes; the installed executable supplies it only when
-stdin is a terminal; and Deno's own prompt returns `null` on a non-terminal. All three fail closed
-to the documented defaults. `--yes` is the explicit escape hatch.
+stdin is a terminal; and the reader answers `null` once input ends. All three fail closed to the
+documented defaults. `--yes` is the explicit escape hatch.
 
 ## Not yet supported
 

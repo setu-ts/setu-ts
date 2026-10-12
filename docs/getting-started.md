@@ -16,12 +16,13 @@ how to add the plugins most applications need.
 Dockerfile in one step:
 
 ```bash
-# Install the Setu CLI once
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
-
-# Create a REST application (add --runtime node, bun, or cloudflare-workers to change target)
-setu new my-app
+# Create a REST application on Node (add --runtime deno, bun, or cloudflare-workers to change target)
+npx @setu-ts/cli new my-app --template rest
+cd my-app && npm install && npm start
 ```
+
+`npm create @setu-ts my-app -- --template rest` is the same command, and
+`npm install --global @setu-ts/cli` makes it `setu new my-app --template rest`.
 
 The generated project's README lists its commands. See the [CLI guide](./cli.md) for templates and
 code generation.

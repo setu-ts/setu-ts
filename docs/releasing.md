@@ -1,6 +1,6 @@
 # Releasing to npm
 
-The npm publisher ships all 51 workspace members as `@setu-ts/*`. M111c builds the machinery; it
+The npm publisher ships all 52 workspace members as `@setu-ts/*`. M111c builds the machinery; it
 publishes nothing. The first real npm release, `v0.9.0`, waits for M111d's npm scaffolding. Existing
 versions through `0.8.0` remain on JSR. npm versions cannot be reused.
 
@@ -35,7 +35,7 @@ no session outlives a sitting.
    The placeholders only create names. Inspect the output first; it contains no framework code. A
    partial run can be resumed by publishing only missing names, checked with `npm view`.
 
-2. Prepare the reviewed `0.9.0` release tree before configuring trust. Then configure all 51
+2. Prepare the reviewed `0.9.0` release tree before configuring trust. Then configure all 52
    packages immediately before tagging. npm's 2FA skip window covers a scripted trust loop:
 
    ```fish
@@ -195,7 +195,7 @@ deno task check:node-build --require-all
 deno task release:publish --dry-run
 ```
 
-The npm dry run builds once, packs all 51 with scripts disabled, checks each exact packed manifest,
+The npm dry run builds once, packs all 52 with scripts disabled, checks each exact packed manifest,
 performs the packument lookup, and runs `npm publish <tarball> --dry-run`. It refuses publication
 holds, stale internal ranges, missing metadata and missing `dist` or `src` file entries. Only HTTP
 404 means a new package; registry errors fail the publisher. An existing version is skipped, so
@@ -384,7 +384,7 @@ await app.stop();
 
 Run `node proof.mjs` and `bun proof.mjs`; require 200 and `{"ok":true}`. Inspect
 `npm view <package>@0.9.0 dist.attestations --json` and `npm view <package> dist-tags --json` for
-all 51 names: provenance must exist and `latest` must name `0.9.0`. Confirm descriptions, repository
-links and README on npm. The weekly compat suite installs/imports all 51 and serves real sockets on
+all 52 names: provenance must exist and `latest` must name `0.9.0`. Confirm descriptions, repository
+links and README on npm. The weekly compat suite installs/imports all 52 and serves real sockets on
 Node/Bun. Before the first publish, its explicit scope probe reports HTTP 404 and skips; HTTP 200
 arms the suite, and any other status fails.

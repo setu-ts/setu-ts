@@ -8,6 +8,7 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
@@ -96,7 +97,7 @@ export interface NewDependencies {
    * when it is absent — every gate in this repository reaches the CLI through
    * an in-process `runCli` that passes none — no prompt is ever attempted and
    * each absent flag takes its documented default. The terminal implementation
-   * is supplied by `src/main.ts` only behind `Deno.stdin.isTerminal()`.
+   * is supplied by `src/main.ts` only when stdin is a terminal.
    */
   readonly ask?: Prompter;
   /** Cooperative interruption signal checked at prompts and writes. */
@@ -602,7 +603,7 @@ export async function runNewCommand(
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
     deps.log('  --style <name>      Code style for a styleable template: functional | class-based');
     deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
-    deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
+    deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default node)`);
     deps.log(
       `  --workspace         Create a monorepo root; add services with ` +
         `\`${PROGRAM_NAME} generate ${APP_VERB} <name>\``,
@@ -666,7 +667,7 @@ export async function runNewCommand(
     );
     return EXIT_USAGE;
   }
-  const runtime: TargetRuntime = runtimeFlag ?? 'deno';
+  const runtime: TargetRuntime = runtimeFlag ?? 'node';
 
   const names = deriveNames(rawName);
   // The project name becomes a filesystem path (`joinPath(dir, kebab)`) and never
@@ -754,9 +755,10 @@ export async function runNewCommand(
   }
 
   try {
+    const formatted = await formatForTarget(files, runtime, undefined, deps.error);
     const outcomes = await writeFiles(
       deps.fs,
-      files,
+      formatted,
       deps.interrupt === undefined ? { root: root } : { root: root, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);

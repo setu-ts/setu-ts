@@ -388,6 +388,18 @@ export function findSrcCycle(
 }
 
 /** Renders one member's `package.json` content (two-space JSON, trailing newline). */
+/**
+ * The executables a member installs, as `package.json` `bin` maps (M111d §3.2).
+ *
+ * Each target is a module reached ONLY through `bin` — never through
+ * `exports` — and is approved in `SIDE_EFFECT_MODULES`, since an executable
+ * runs on load. Rendered here so `--check` compares it like every other field.
+ */
+export const BIN_ENTRIES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  'packages/cli': { setu: './dist/bin.js' },
+  'packages/create': { create: './dist/bin.js' },
+};
+
 /** A dependency map as an object with its keys in code-unit order, independent of insertion order. */
 function sortedRecord(map: ReadonlyMap<string, string>): Record<string, string> {
   return Object.fromEntries([...map].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
@@ -421,6 +433,7 @@ export function renderPackageJson(member: MemberInput, classified: ClassifiedMem
     engines: { node: '>=22' },
     files: ['dist', 'src', 'README.md', 'LICENSE'],
     exports,
+    ...(BIN_ENTRIES[member.dir] === undefined ? {} : { bin: BIN_ENTRIES[member.dir] }),
     scripts: { build: 'tsc -b' },
   };
   if (classified.dependencies.size > 0) {

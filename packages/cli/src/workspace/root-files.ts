@@ -56,7 +56,7 @@ export function workspaceRootFiles(
   name: string,
   basePort: number,
   transport: TransportSpec,
-  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
   transportUrl?: string,
 ): readonly GeneratedFile[] {
   // BOTH globs at creation, so neither adding a service nor adding a library ever
@@ -79,6 +79,11 @@ export function workspaceRootFiles(
             // Root-only, and inherited by every member: a member declaring them
             // is redundant at best and refused at worst.
             ...rootManifestSettings(),
+            // So the Node `setu` CLI can import a member's `setu.config.ts`:
+            // `deno install` links every member's npm packages, and each
+            // library declaring a `package.json`, into this `node_modules`
+            // (M111d §3.4).
+            nodeModulesDir: 'auto',
           },
           null,
           2,
@@ -180,13 +185,6 @@ members can only meet on a bus they share. Every service added later inherits it
   return [
     rootManifest,
     workspaceDevRunner(profile),
-    // The `@jsr` scope has to be mapped for members to install framework packages
-    // through npm compatibility at all — measured in a two-member workspace, where
-    // without it `npm install` cannot resolve `@setu-ts/kernel`. Deno resolves
-    // `jsr:` specifiers itself and needs none.
-    ...(profile.manifestKind === 'npm'
-      ? [{ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' }]
-      : []),
     {
       path: WORKSPACE_MANIFEST,
       contents: renderWorkspaceManifest({

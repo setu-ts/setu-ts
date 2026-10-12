@@ -448,3 +448,23 @@ describe('--config and --dir', () => {
     expect(seen).toBe('file:///work/proj/setu.config.ts');
   });
 });
+
+describe('a Deno project the Node CLI cannot import', () => {
+  it('is refused before the config is loaded, naming deno install', async () => {
+    let loaded = false;
+    const err = createRecorder();
+    const code = await dispatchPluginCommand('db:migrate', parseArgs([]), {
+      fs: createFakeFs({ [CONFIG]: 'x', '/app/deno.json': '{"nodeModulesDir":"auto"}' }),
+      cwd: '/app',
+      log: () => {},
+      error: err.sink,
+      loadApp: () => {
+        loaded = true;
+        return Promise.resolve({ createApp: () => createFakeApp() });
+      },
+    });
+    expect(code).toBe(1);
+    expect(loaded).toBe(false);
+    expect(err.text()).toContain('deno install');
+  });
+});

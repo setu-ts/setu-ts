@@ -1,8 +1,8 @@
 import { tempDir } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
 /**
- * Drives the DEFAULT app loader — a real dynamic `import()` — so the production
- * path is exercised, not only the injected test seam.
+ * Drives the DEFAULT app loader — a real import through `tsx` — so the
+ * production path is exercised, not only the injected test seam.
  *
  * @module
  */
@@ -97,5 +97,46 @@ describe('app loader — real import()', () => {
 
   it('throws for a module that does not exist on disk', async () => {
     await expect(loadApp(root, 'variants/absent.ts')).rejects.toThrow('Cannot load');
+  });
+
+  // M111d §3.3: Node's own type stripping rejects a decorator, so a class-based
+  // project's config only loads through tsx; and the project's tsconfig is the
+  // one nearest the module, so its path alias resolves however the CLI was
+  // invoked. A loader reading the repository's tsconfig would miss `~/`.
+  it('loads a decorated config that imports through its own tsconfig path alias', async () => {
+    const project = await tempDir({ prefix: 'setu-app-ts-' });
+    await nodeFs.mkdir(`${project}/src`, { recursive: true });
+    await nodeFs.writeFile(
+      `${project}/tsconfig.json`,
+      JSON.stringify({ compilerOptions: { paths: { '~/*': ['./src/*'] } } }),
+    );
+    await nodeFs.writeFile(
+      `${project}/src/marker.ts`,
+      `export function marked(_value: unknown, context: ClassDecoratorContext): void {
+  (context.metadata as Record<string, unknown>).marked = true;
+}
+`,
+    );
+    await nodeFs.writeFile(
+      `${project}/setu.config.ts`,
+      `import { marked } from '~/marker.ts';
+
+@marked
+class Holder {}
+
+export function createApp() {
+  const metadata = (Holder as unknown as Record<symbol, Record<string, unknown> | undefined>)[
+    Symbol.for('Symbol.metadata')
+  ];
+  return {
+    services: { getAll: () => [metadata?.marked === true ? 'decorated' : 'plain'] },
+    start: () => Promise.resolve(),
+    stop: () => Promise.resolve(),
+  };
+}
+`,
+    );
+    const app = await loadApp(project);
+    expect(app.services.getAll('anything')).toEqual(['decorated']);
   });
 });

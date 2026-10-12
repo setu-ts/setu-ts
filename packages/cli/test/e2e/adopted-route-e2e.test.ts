@@ -73,7 +73,7 @@ describe('a hand-written module in a seam directory', () => {
   });
 
   it('stays hand-wired, and the generated project still boots and serves both', async () => {
-    expect(await run(['new', 'shop'])).toBe(0);
+    expect(await run(['new', 'shop', '--runtime', 'deno'])).toBe(0);
     const project = `${root}/shop`;
 
     // The developer's own module, registered from their own config — the exact

@@ -553,19 +553,19 @@ error[private-type-ref]: public type references private type
       );
     });
 
-    it('has the expected authoritative count of 54 targets', async () => {
+    it('has the expected authoritative count of 55 targets', async () => {
       const fs = {
         readTextFile: async (path: string) => await Deno.readTextFile(path),
         readDir: (path: string) => Deno.readDir(path),
         stat: (path: string) => Deno.stat(path),
       };
       const result = await collectApiEntrypoints(fs);
-      // 51 published packages (M109a added idempotency-plugin), runtime has 2
-      // exports (./src/index.ts + ./worker), cli has 2 exports (./src/index.ts +
-      // ./main), localization-plugin has 2 (./src/index.ts + ./format, M103),
-      // rest have 1 each
-      // = 51 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 54
-      expect(result.targets).toHaveLength(54);
+      // 52 published packages (M109a added idempotency-plugin, M111d added
+      // create), runtime has 2 exports (./src/index.ts + ./worker), cli has 2
+      // exports (./src/index.ts + ./main), localization-plugin has 2
+      // (./src/index.ts + ./format, M103), rest have 1 each
+      // = 52 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 55
+      expect(result.targets).toHaveLength(55);
     });
 
     it('maps each target to its correct package name', async () => {

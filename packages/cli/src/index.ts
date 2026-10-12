@@ -5,17 +5,19 @@
  *
  * Provides project scaffolding (`setu new`) and plugin-aware code generation
  * (`setu generate <schematic> <name>`). This barrel is the programmatic
- * surface; the executable entry point is `src/main.ts`.
+ * surface; the `setu` executable is `src/bin.ts`, over the process boundary in
+ * `src/main.ts`.
  *
  * @example
  * ```typescript
  * import { runCli } from '@setu-ts/cli';
- * import { createDenoRuntimeServices } from '@setu-ts/runtime';
+ * import { createNodeRuntimeServices } from '@setu-ts/runtime';
+ * import process from 'node:process';
  *
- * const runtime = createDenoRuntimeServices();
+ * const runtime = createNodeRuntimeServices();
  * const code = await runCli(['generate', 'service', 'billing'], {
  *   fs: runtime.fs!,
- *   cwd: Deno.cwd(),
+ *   cwd: process.cwd(),
  *   now: () => runtime.now(),
  *   log: console.log,
  *   error: console.error,

@@ -170,6 +170,7 @@ export const FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set([
   'cloudflare-plugin',
   'common',
   'config-plugin',
+  'create',
   'cqrs-plugin',
   'database-plugin',
   'decorator-plugin',
@@ -246,15 +247,22 @@ function normalizedSegments(path: string): readonly string[] {
 }
 
 /**
- * Whether an import target is the framework package `pkg` itself: the published
- * `jsr:` or npm-compatibility specifier (optionally versioned or with a subpath),
+ * Whether an import target is the framework package `pkg` itself: the npm
+ * specifier this CLI writes, or a pre-0.9 `jsr:` or npm-compatibility one
+ * (optionally versioned or with a subpath),
  * or a filesystem path whose last `packages/` segment is that package's
  * directory (a workspace checkout). Anything else — another package, a path that
  * only passes through `<pkg>/`, a URL — is a retarget (audit rounds 6 and 7).
  */
 function namesFrameworkPackage(pkg: string, value: string): boolean {
   for (
-    const prefix of [`jsr:@setu-ts/${pkg}`, `jsr:/@setu-ts/${pkg}`, `npm:@jsr/setu-ts__${pkg}`]
+    const prefix of [
+      `npm:@setu-ts/${pkg}`,
+      `npm:/@setu-ts/${pkg}`,
+      `jsr:@setu-ts/${pkg}`,
+      `jsr:/@setu-ts/${pkg}`,
+      `npm:@jsr/setu-ts__${pkg}`,
+    ]
   ) {
     if (value.startsWith(prefix)) {
       const rest = value.slice(prefix.length);
@@ -282,8 +290,8 @@ function namesFrameworkPackage(pkg: string, value: string): boolean {
  */
 export function importMapRetargets(manifest: unknown): boolean {
   if (!isRecord(manifest)) return false;
-  const maps: unknown[] = [
-    manifest['imports'],
+  const importMaps: unknown[] = [manifest['imports']];
+  const dependencyMaps: unknown[] = [
     manifest['dependencies'],
     manifest['devDependencies'],
     manifest['peerDependencies'],
@@ -292,20 +300,43 @@ export function importMapRetargets(manifest: unknown): boolean {
   const scopes = manifest['scopes'];
   if (scopes !== undefined) {
     if (!isRecord(scopes)) return true;
-    maps.push(...Object.values(scopes));
+    importMaps.push(...Object.values(scopes));
   }
-  for (const map of maps) {
-    if (map === undefined) continue;
-    if (!isRecord(map)) return true;
-    for (const [key, value] of Object.entries(map)) {
-      if (!key.startsWith('@setu-ts/')) continue;
-      const name = key.slice('@setu-ts/'.length);
-      const pkg = name.split('/')[0]!;
-      if (!FRAMEWORK_PACKAGES.has(pkg) || typeof value !== 'string') return true;
-      if (!namesFrameworkPackage(pkg, value)) return true;
+  const retargets = (maps: readonly unknown[], dependency: boolean): boolean => {
+    for (const map of maps) {
+      if (map === undefined) continue;
+      if (!isRecord(map)) return true;
+      for (const [key, value] of Object.entries(map)) {
+        if (!key.startsWith('@setu-ts/')) continue;
+        const name = key.slice('@setu-ts/'.length);
+        const pkg = name.split('/')[0]!;
+        if (!FRAMEWORK_PACKAGES.has(pkg) || typeof value !== 'string') return true;
+        if (dependency && isRegistryRange(value)) continue;
+        if (!namesFrameworkPackage(pkg, value)) return true;
+      }
     }
-  }
-  return false;
+    return false;
+  };
+  return retargets(importMaps, false) || retargets(dependencyMaps, true);
+}
+
+/**
+ * Whether an npm dependency value installs the KEY's own package from the
+ * registry: a version, range or tag (`^0.9.0`, `~1.2`, `latest`), or the
+ * workspace protocol, which links the member of that name. Everything else — a
+ * protocol (`npm:other@1`, `file:`, `git+…`, a URL), a path, or a `user/repo`
+ * shorthand — installs something the key does not name, and is a retarget.
+ *
+ * Since 0.9 this is the form the CLI itself writes into every npm manifest, so
+ * treating it as a retarget withheld every automatic edit from every npm project.
+ *
+ * @param value - A dependency map value
+ * @returns Whether it names the key's own registry package
+ */
+function isRegistryRange(value: string): boolean {
+  if (value.startsWith('workspace:')) return !value.slice('workspace:'.length).includes(':');
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) return false;
+  return value !== '' && !value.includes('/') && !value.startsWith('.');
 }
 
 /**

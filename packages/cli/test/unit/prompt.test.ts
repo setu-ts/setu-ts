@@ -17,7 +17,7 @@ describe('createTerminalPrompter', () => {
       () => false,
       () => {
         asked = true;
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => {},
     );
@@ -26,17 +26,21 @@ describe('createTerminalPrompter', () => {
   });
 
   it('treats a null answer as cancellation', async () => {
-    const prompter = createTerminalPrompter(() => true, () => null, () => {});
+    const prompter = createTerminalPrompter(() => true, () => Promise.resolve(null), () => {});
     expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
   });
 
   it('resolves the fallback for a bare Enter', async () => {
-    const prompter = createTerminalPrompter(() => true, () => '', () => {});
+    const prompter = createTerminalPrompter(() => true, () => Promise.resolve(''), () => {});
     expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'answer', value: 'rest' });
   });
 
   it('resolves an exact answer to itself', async () => {
-    const prompter = createTerminalPrompter(() => true, () => 'microservice', () => {});
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => Promise.resolve('microservice'),
+      () => {},
+    );
     expect(await prompter.select('Template?', CHOICES)).toEqual({
       kind: 'answer',
       value: 'microservice',
@@ -47,7 +51,7 @@ describe('createTerminalPrompter', () => {
     const answers = ['aaa', 'microservice'];
     const prompter = createTerminalPrompter(
       () => true,
-      () => answers.shift() ?? null,
+      () => Promise.resolve(answers.shift() ?? null),
       () => {},
     );
     expect(await prompter.select('Template?', CHOICES)).toEqual({
@@ -62,7 +66,7 @@ describe('createTerminalPrompter', () => {
     const answers = ['aaa', null];
     const prompter = createTerminalPrompter(
       () => true,
-      () => answers.shift() ?? null,
+      () => Promise.resolve(answers.shift() ?? null),
       () => {},
     );
     expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
@@ -78,7 +82,7 @@ describe('createTerminalPrompter', () => {
       () => true,
       () => {
         asked = true;
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => {},
       controller.signal,
@@ -93,7 +97,7 @@ describe('createTerminalPrompter', () => {
       () => true,
       () => {
         controller.abort();
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => {},
       controller.signal,
@@ -108,7 +112,7 @@ describe('createTerminalPrompter', () => {
       () => true,
       () => {
         asked = true;
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => controller.abort(),
       controller.signal,
@@ -124,7 +128,7 @@ describe('createTerminalPrompter', () => {
       () => true,
       () => {
         calls++;
-        return 'aaa';
+        return Promise.resolve('aaa');
       },
       (message) => {
         if (message.includes('is not one of')) controller.abort();
@@ -142,15 +146,14 @@ describe('createTerminalPrompter', () => {
       () => true,
       (message) => {
         question = message;
-        return '';
+        return Promise.resolve('');
       },
       (message) => printed.push(message),
     );
     await prompter.select('Template?', CHOICES);
     expect(printed.join('\n')).toContain('rest — REST set');
     expect(printed.join('\n')).toContain('microservice — microservice set');
-    // The default is rendered INSIDE the question text; the second argument of
-    // Deno's prompt() pre-fills an editable buffer and is deliberately unused.
+    // The default is rendered INSIDE the question text, never pre-filled.
     expect(question).toContain('Template? [rest]');
   });
 
@@ -168,7 +171,7 @@ describe('createTerminalPrompter', () => {
     const printed: string[] = [];
     const prompter = createTerminalPrompter(
       () => true,
-      () => answers.shift() ?? null,
+      () => Promise.resolve(answers.shift() ?? null),
       (message) => printed.push(message),
     );
     expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'answer', value: 'rest' });
@@ -181,7 +184,7 @@ describe('createTerminalPrompter', () => {
     for (const code of [7, 8, 27, 0x2028]) {
       expect(printed.join('\n').includes(String.fromCharCode(code))).toBe(false);
     }
-    // A pasted line feed survives prompt() and the sink escape keeps it, so
+    // A pasted line feed survives the line reader and the sink escape keeps it, so
     // only the per-site escape stops it forging a line of its own.
     expect(printed.flatMap((line) => line.split('\n')).filter((l) => l.startsWith('INJECTED')))
       .toEqual([]);
@@ -194,11 +197,32 @@ describe('createTerminalPrompter', () => {
     const esc = String.fromCharCode(27);
     const prompter = createTerminalPrompter(
       () => true,
-      () => '',
+      () => Promise.resolve(''),
       (message) => printed.push(message),
     );
     await prompter.select('Template?', [{ value: 'rest', label: `${esc}[2Kfake` }]);
     expect(printed.join('\n').includes(esc)).toBe(false);
     expect(printed.join('\n')).toContain('\\u001b[2Kfake');
+  });
+
+  it('hands the interrupt signal to the reader and cancels when it aborts mid-read', async () => {
+    // A reader awaiting input when Ctrl+C lands resolves null, and the
+    // prompter reports cancellation rather than taking the default.
+    const controller = new AbortController();
+    let received: AbortSignal | undefined;
+    const prompter = createTerminalPrompter(
+      () => true,
+      (_message, signal) => {
+        received = signal;
+        return new Promise((resolve) => {
+          signal?.addEventListener('abort', () => resolve(null), { once: true });
+          queueMicrotask(() => controller.abort());
+        });
+      },
+      () => {},
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+    expect(received).toBe(controller.signal);
   });
 });

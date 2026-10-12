@@ -39,8 +39,8 @@ import { InterruptedError } from './utils/interruption.ts';
 /**
  * Everything the CLI reaches the outside world through.
  *
- * There is deliberately no default: the process-level values (`Deno.cwd()`,
- * `console.log`, the Deno filesystem) belong to `src/main.ts`, the one module
+ * There is deliberately no default: the process-level values (`process.cwd()`,
+ * `console.log`, the host filesystem) belong to `src/main.ts`, the one module
  * that owns the process boundary. A defaulted `fs` here would let a
  * misconfigured call silently degrade to "no filesystem" at runtime.
  */
@@ -70,7 +70,7 @@ export interface CliDependencies {
    * OPTIONAL by construction: when absent — as in every gate, which reaches the
    * CLI through an in-process `runCli` — no prompt is ever attempted and each
    * absent flag takes its documented default. `src/main.ts` supplies the
-   * terminal implementation only behind `Deno.stdin.isTerminal()`.
+   * terminal implementation only when stdin is a terminal.
    */
   readonly ask?: Prompter;
   /** Cooperative interruption signal supplied by the process boundary. */
@@ -107,7 +107,7 @@ function printHelp(log: (message: string) => void): void {
   log('  --dry-run           Print what would be created, write nothing');
   log('  --dir <path>        Operate on this directory instead of the CWD');
   log(`  --config <path>     Load the app from this module instead of ./${CONFIG_MODULE}`);
-  log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (new; default deno)`);
+  log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (new; default node)`);
   log('  --yes, -y           Take every `new` default and ask nothing');
   log('');
   log('Schematics:');
@@ -123,10 +123,10 @@ function printHelp(log: (message: string) => void): void {
 /**
  * Parses `argv`, runs the requested command, and returns its exit code.
  *
- * Never terminates the process — `src/main.ts` owns the single `Deno.exit`, so
+ * Never terminates the process — `src/bin.ts` sets the exit code, so
  * every path here is testable.
  *
- * @param argv - The raw arguments (e.g. `Deno.args`)
+ * @param argv - The raw arguments (e.g. `process.argv.slice(2)`)
  * @param deps - Filesystem, working directory, clock, and output sinks
  * @returns `0` on success, `1` on a runtime error, `2` on a usage error
  */

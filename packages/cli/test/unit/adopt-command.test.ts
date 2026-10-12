@@ -254,6 +254,98 @@ describe('runAdoptCommand', () => {
     expect(err.text()).toContain('Interrupted;');
   });
 
+  // A pre-0.9 project pins the framework from JSR (Deno) or through the JSR npm
+  // alias (npm); the workspace root maps neither any more, so adoption moves
+  // the member's pins onto the npm names and says which it moved.
+  it('moves a Deno project off JSR pins as it adopts it', async () => {
+    const h = harness({
+      ...PROJECT,
+      '/work/svc/deno.json': JSON.stringify({
+        tasks: { start: 'deno run main.ts' },
+        imports: { '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^0.8.0' },
+      }),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/svc/apps/svc/deno.json')) as {
+      imports: Record<string, string>;
+    };
+    expect(manifest.imports['@setu-ts/kernel']).toMatch(/^npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain(
+      `moved @setu-ts/kernel from jsr:@setu-ts/kernel@^0.8.0 to ${
+        manifest.imports['@setu-ts/kernel']
+      }`,
+    );
+  });
+
+  // A Deno manifest may carry JSONC comments and trailing commas; `JSON.parse`
+  // used to skip such a file silently, leaving its JSR pins unmapped. Its pins
+  // move and its comments survive, because the rewrite edits values in place.
+  it('moves a commented deno.json off JSR pins and keeps its comments', async () => {
+    const h = harness({
+      ...PROJECT,
+      '/work/svc/deno.json': [
+        '{',
+        '  // framework pins',
+        '  "imports": { "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0", },',
+        '}',
+        '',
+      ].join('\n'),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = h.fs.read('/work/svc/apps/svc/deno.json');
+    expect(manifest).toContain('// framework pins');
+    expect(manifest).toMatch(/"@setu-ts\/kernel": "npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain('moved @setu-ts/kernel from jsr:@setu-ts/kernel@^0.8.0');
+  });
+
+  // A `deno.jsonc` project: the manifest moves with the member (it used to stay
+  // at the root, beside the workspace's new `deno.json`), its pins move onto npm,
+  // and its comments survive.
+  it('moves a deno.jsonc manifest into the member and rewrites its pins', async () => {
+    const { ['/work/svc/deno.json']: _dropped, ...withoutJson } = PROJECT;
+    const h = harness({
+      ...withoutJson,
+      '/work/svc/deno.jsonc': [
+        '{',
+        '  // framework pins',
+        '  "imports": { "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0", },',
+        '}',
+        '',
+      ].join('\n'),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const member = h.fs.read('/work/svc/apps/svc/deno.jsonc');
+    expect(member).toContain('// framework pins');
+    expect(member).toMatch(/"@setu-ts\/kernel": "npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain('moved deno.jsonc -> apps/svc/deno.jsonc');
+    // The root holds the workspace manifest alone.
+    expect(h.fs.has('/work/svc/deno.jsonc')).toBe(false);
+    expect(JSON.parse(h.fs.read('/work/svc/deno.json'))).toHaveProperty('workspace');
+  });
+
+  it('reports a manifest it cannot read rather than skipping it silently', async () => {
+    const h = harness({ ...PROJECT, '/work/svc/deno.json': '{ "imports": { ' });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    expect(h.err.text()).toContain('to move its framework pins onto npm');
+    expect(h.err.text()).toContain('by hand');
+  });
+
+  it('moves an npm project off the JSR alias as it adopts it', async () => {
+    const h = harness({
+      ...NODE_PROJECT,
+      '/work/svc/package.json': JSON.stringify({
+        scripts: { start: 'tsx main.ts' },
+        dependencies: { '@setu-ts/kernel': 'npm:@jsr/setu-ts__kernel@^0.8.0' },
+      }),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/svc/apps/svc/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(manifest.dependencies['@setu-ts/kernel']).toMatch(/^\^\d/);
+    expect(h.out.text()).toContain('moved @setu-ts/kernel from npm:@jsr/setu-ts__kernel@^0.8.0');
+  });
+
   it('moves the project under apps/ and writes the workspace above it', async () => {
     const h = harness();
     expect(await h.run(['--port', '4000'])).toBe(0);

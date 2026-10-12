@@ -1293,13 +1293,14 @@ RuntimePlugin)
 | ---- | ---- | --- | ------- |
 | ✅   | ✅   | ❌  | N/A     |
 
-The table describes the importable package. The `setu` command itself (`jsr:@setu-ts/cli/main`) runs
-on Deno only; `--runtime` scaffolds projects for all four runtimes.
+The table describes the importable package. The `setu` command itself is a Node program (Node 22 or
+later), published to npm with a `bin`; `--runtime` scaffolds projects for all four runtimes, Node by
+default.
 
 **Commands:**
 
 - `setu new <name>` - Create a new project (`--template rest|microservice|class-based|full-stack`,
-  `--style functional|class-based`, `--runtime deno|node|bun|cloudflare-workers`);
+  `--style functional|class-based`, `--runtime node|deno|bun|cloudflare-workers`, Node by default);
   `--style
   class-based` opts into decorators and dependency injection together on `rest` and
   `microservice`, and `--template class-based` is a byte-identical alias of
@@ -1315,17 +1316,41 @@ on Deno only; `--runtime` scaffolds projects for all four runtimes.
 **Installation:**
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
+npx @setu-ts/cli new my-app
+npm install --global @setu-ts/cli
 ```
-
-Use the global install, or pass `--no-config --no-lock` to an ad-hoc `deno run` inside a project so
-Deno does not write the CLI's dependency graph into the project's lockfile.
 
 **Links:**
 
 - [CLI Guide](./cli.md)
 - [README](../packages/cli/README.md)
 - [API Reference](./api/cli/src/index.ts/index.html)
+
+---
+
+### @setu-ts/create
+
+**Purpose:** The `npm create @setu-ts` entry point — `setu new` with the caller's arguments.
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ❌  | N/A     |
+
+The table describes the importable package (`createArgs`). The `create` executable is run by
+`npm create` on Node, and accepts exactly what `setu new` accepts.
+
+**Installation:**
+
+```bash
+npm create @setu-ts my-app -- --template rest
+```
+
+**Links:**
+
+- [README](../packages/create/README.md)
+- [API Reference](./api/create/src/index.ts/index.html)
 
 ---
 

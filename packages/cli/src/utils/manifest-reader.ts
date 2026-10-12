@@ -86,6 +86,21 @@ function stripTrailingCommas(source: string): string {
   return result;
 }
 
+/**
+ * Parses JSON, accepting JSONC: comments and trailing commas.
+ *
+ * @param source - Manifest text
+ * @returns The parsed value
+ * @throws {SyntaxError} When the text is neither JSON nor JSONC
+ */
+export function parseJsonc(source: string): unknown {
+  try {
+    return JSON.parse(source);
+  } catch {
+    return JSON.parse(stripTrailingCommas(stripComments(source)));
+  }
+}
+
 /** Reads a JSON manifest, accepting JSONC for read-only inspection. */
 export async function readJsonManifest(fs: IFileSystem, path: string): Promise<ManifestRead> {
   let source: string;

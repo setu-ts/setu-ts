@@ -8,7 +8,6 @@ import {
   GENERATED_LAYOUTS,
   GENERATED_MEMBER_ARGS,
   generatedResources,
-  hardenScaffoldLock,
   isClean,
   missingTools,
   nativeFilePath,
@@ -17,7 +16,6 @@ import {
   PRODUCTION_DEVTOOL_PROBE,
   renderDrift,
   SKIP_EXIT_CODE,
-  stripFrameworkNpmEdges,
 } from '../scripts/check-deploy.ts';
 
 const read = (path: string): string => Deno.readTextFileSync(path);
@@ -424,48 +422,54 @@ describe('rendered manifests', () => {
   });
 });
 
-/** A `harden` seam that records its call site without touching a filesystem. */
-const recordingHarden = (log: string[], stripped = 2) => (root: string): Promise<number> => {
-  log.push(`harden:${root}`);
-  return Promise.resolve(stripped);
-};
+/** The overlay URL a gate run hands every install. */
+const REGISTRY = 'http://127.0.0.1:4873/';
 
 describe('generated deployment install ordering', () => {
   it('locks the generated entry point before building from the same workspace root', async () => {
-    const calls: { command: readonly string[]; cwd: string | undefined }[] = [];
+    const calls: {
+      command: readonly string[];
+      cwd: string | undefined;
+      env: Readonly<Record<string, string>> | undefined;
+    }[] = [];
     const order: string[] = [];
     await buildGeneratedImage(
       '/workspace/acme',
       'test-image',
+      REGISTRY,
       (command, options) => {
-        calls.push({ command, cwd: options?.cwd });
+        calls.push({ command, cwd: options?.cwd, env: options?.env });
         order.push(command.slice(-1)[0]!);
         return Promise.resolve({ success: true, stdout: '', stderr: '' });
       },
-      recordingHarden(order),
     );
-    // The strip has to land AFTER the cache, whose output it removes, and
-    // BEFORE the build, which copies the lockfile into the image.
-    expect(order).toEqual([
-      'install',
-      'apps/orders/main.ts',
-      'harden:/workspace/acme',
-      '/workspace/acme',
-    ]);
+    expect(order).toEqual(['install', 'apps/orders/main.ts', '/workspace/acme']);
     expect(calls).toHaveLength(3);
-    expect(calls[0]).toEqual({ command: [Deno.execPath(), 'install'], cwd: '/workspace/acme' });
+    // Every install resolves the framework from the same registry: the host's,
+    // and the image's own install step through the build argument.
+    const env = { NPM_CONFIG_REGISTRY: REGISTRY };
+    expect(calls[0]).toEqual({
+      command: [Deno.execPath(), 'install'],
+      cwd: '/workspace/acme',
+      env,
+    });
     expect(calls[1]).toEqual({
       command: [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
       cwd: '/workspace/acme',
+      env,
     });
     expect(calls[2]!.command).toEqual([
       'docker',
       'build',
       '--quiet',
+      '--network',
+      'host',
       '-f',
       '/workspace/acme/docker/Dockerfile',
       '--build-arg',
       'MEMBER=orders',
+      '--build-arg',
+      `NPM_CONFIG_REGISTRY=${REGISTRY}`,
       '-t',
       'test-image',
       '/workspace/acme',
@@ -478,11 +482,11 @@ describe('generated deployment install ordering', () => {
     const result = await buildGeneratedImage(
       '/workspace/acme',
       'test-image',
+      REGISTRY,
       (command) => {
         commands.push([...command]);
         return Promise.resolve(failure);
       },
-      recordingHarden([]),
     );
     expect(result).toBe(failure);
     expect(commands).toEqual([[Deno.execPath(), 'install']]);
@@ -494,130 +498,19 @@ describe('generated deployment install ordering', () => {
     const result = await buildGeneratedImage(
       '/workspace/acme',
       'test-image',
+      REGISTRY,
       (command) => {
         commands.push([...command]);
         return Promise.resolve(
           commands.length === 1 ? { success: true, stdout: '', stderr: '' } : failure,
         );
       },
-      recordingHarden([]),
     );
     expect(result).toBe(failure);
     expect(commands).toEqual([
       [Deno.execPath(), 'install'],
       [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
     ]);
-  });
-});
-
-/**
- * A lockfile in the shape Deno writes, carrying the two entries the real defect
- * was measured on plus a third-party one that must be left alone.
- */
-const LOCK_FIXTURE = JSON.stringify(
-  {
-    version: '5',
-    specifiers: { 'jsr:@setu-ts/messaging-plugin@^0.7.0': '0.7.0' },
-    jsr: {
-      '@setu-ts/common@0.7.0': { integrity: 'aaa' },
-      '@setu-ts/messaging-plugin@0.7.0': {
-        integrity: 'bbb',
-        dependencies: ['jsr:@setu-ts/common', 'npm:amqplib', 'npm:ioredis'],
-      },
-      '@setu-ts/runtime@0.7.0': { integrity: 'ccc', dependencies: ['npm:ws'] },
-      '@hono/hono@4.13.5': { integrity: 'ddd', dependencies: ['npm:some-dep'] },
-    },
-    npm: { 'amqplib@0.10.9': { integrity: 'eee' } },
-  },
-  null,
-  2,
-);
-
-describe('stripFrameworkNpmEdges', () => {
-  const stripped = stripFrameworkNpmEdges(LOCK_FIXTURE);
-  const lock = JSON.parse(stripped.lock) as {
-    jsr: Record<string, { dependencies?: string[]; integrity: string }>;
-    npm: Record<string, unknown>;
-    specifiers: Record<string, string>;
-  };
-
-  it('removes every npm edge from a framework entry and counts them', () => {
-    expect(lock.jsr['@setu-ts/messaging-plugin@0.7.0']!.dependencies).toEqual([
-      'jsr:@setu-ts/common',
-    ]);
-    // Three across two entries: amqplib and ioredis from messaging, ws from runtime.
-    expect(stripped.stripped).toBe(3);
-  });
-
-  it('omits the key entirely when nothing survives, which is the shape Deno writes', () => {
-    // An empty array is not a shape Deno ever emits, so leaving one behind would
-    // make the image build from a lockfile no `deno install` could have produced.
-    expect(Object.hasOwn(lock.jsr['@setu-ts/runtime@0.7.0']!, 'dependencies')).toBe(false);
-  });
-
-  it('leaves a third-party jsr entry untouched', () => {
-    // The hardening asserts something about THIS framework's lazy drivers. Widening
-    // it to every entry would strip edges no generated build step restores.
-    expect(lock.jsr['@hono/hono@4.13.5']!.dependencies).toEqual(['npm:some-dep']);
-  });
-
-  it('keeps every version pin, so the image still builds against a resolved lockfile', () => {
-    // V7-5's whole complaint was a STUB lockfile making build and runtime agree by
-    // accident. Only the edge lists go; the specifier and npm sections are the
-    // resolved ones the install produced.
-    expect(lock.specifiers['jsr:@setu-ts/messaging-plugin@^0.7.0']).toBe('0.7.0');
-    expect(Object.hasOwn(lock.npm, 'amqplib@0.10.9')).toBe(true);
-    expect(lock.jsr['@setu-ts/common@0.7.0']!.integrity).toBe('aaa');
-  });
-
-  it('reports zero for a lockfile that carries no framework npm edge', () => {
-    // The count is what lets the gate refuse a strip that proves nothing.
-    const none = stripFrameworkNpmEdges(
-      JSON.stringify({ jsr: { '@setu-ts/common@0.7.0': { integrity: 'aaa' } } }),
-    );
-    expect(none.stripped).toBe(0);
-  });
-
-  it('tolerates a lockfile with no jsr section at all', () => {
-    expect(stripFrameworkNpmEdges(JSON.stringify({ version: '5' })).stripped).toBe(0);
-  });
-});
-
-describe('hardenScaffoldLock', () => {
-  it('rewrites the workspace lockfile in place and reports the count', async () => {
-    const root = await Deno.makeTempDir({ prefix: 'setu-harden-' });
-    try {
-      await Deno.writeTextFile(`${root}/deno.lock`, LOCK_FIXTURE);
-      expect(await hardenScaffoldLock(root)).toBe(3);
-      const rewritten = await Deno.readTextFile(`${root}/deno.lock`);
-      expect(rewritten).not.toContain('npm:amqplib"');
-      // Newline-terminated, because the build's own `deno install` rewrites this
-      // file and a missing trailing newline would show up as spurious churn.
-      expect(rewritten.endsWith('\n')).toBe(true);
-    } finally {
-      await Deno.remove(root, { recursive: true });
-    }
-  });
-});
-
-describe('generated deployment lock hardening', () => {
-  it('refuses to build when the strip removed nothing', async () => {
-    // A zero means the lockfile was not written where the gate looks, or no longer
-    // records edges this way — either of which silently turns the strip into a
-    // no-op and hands the build the same lucky lockfile it had before.
-    const commands: string[][] = [];
-    const result = await buildGeneratedImage(
-      '/workspace/acme',
-      'test-image',
-      (command) => {
-        commands.push([...command]);
-        return Promise.resolve({ success: true, stdout: '', stderr: '' });
-      },
-      () => Promise.resolve(0),
-    );
-    expect(result.success).toBe(false);
-    expect(result.stderr).toContain('records no @setu-ts npm edges');
-    expect(commands).toHaveLength(2);
   });
 });
 
@@ -635,7 +528,13 @@ describe('the generated deployment gate proves the devtool is excluded (M101f V8
     expect(PRODUCTION_DEVTOOL_PROBE).toContain(
       `test ! -e /srv/apps/${GENERATED_MEMBER_ARGS[2]}/main.dev.ts`,
     );
-    expect(PRODUCTION_DEVTOOL_PROBE).toContain('! grep -rl diagnostics-plugin /deno-dir');
+    // Package PATHS, in the cache AND node_modules — never a content grep, which an npm
+    // tarball's README defeats — behind a positive control that the cache holds the framework.
+    expect(PRODUCTION_DEVTOOL_PROBE).toContain(
+      "find /deno-dir /srv/node_modules -path '*diagnostics-plugin*'",
+    );
+    expect(PRODUCTION_DEVTOOL_PROBE).toContain("-path '*@setu-ts/kernel*'");
+    expect(PRODUCTION_DEVTOOL_PROBE).not.toContain('grep');
   });
 
   it('runs that probe on the --generated path, once per layout', () => {

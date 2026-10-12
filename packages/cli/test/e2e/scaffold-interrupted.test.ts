@@ -122,12 +122,14 @@ describe('interrupted scaffolding on the real filesystem', () => {
   it('identifies a pre-existing partial scaffold as interruption debris', async () => {
     await fixture(async (root, fs) => {
       await nodeFs.mkdir(`${root}/app`, { recursive: true });
-      await nodeFs.writeFile(`${root}/app/deno.json`, '{ "partial": true }\n');
+      // A file the scaffold would write — `package.json` on the Node default.
+      await nodeFs.writeFile(`${root}/app/package.json`, '{ "partial": true }\n');
       const retry = cli(root, fs);
 
       expect(await retry.run(['new', 'app', '--template', 'rest'])).toBe(1);
       expect(retry.err.text()).toContain(`delete ${root}/app and run this again`);
-      expect(await nodeFs.readFile(`${root}/app/deno.json`, 'utf8')).toBe('{ "partial": true }\n');
+      expect(await nodeFs.readFile(`${root}/app/package.json`, 'utf8'))
+        .toBe('{ "partial": true }\n');
     });
   });
 

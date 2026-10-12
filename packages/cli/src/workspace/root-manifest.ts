@@ -8,14 +8,13 @@
  * declaring it is refused with `"nodeModulesDir" field can only be specified in
  * the workspace root deno.json file` — so the root has to carry it.
  *
- * **It is not emitted at creation time, and that was measured rather than
- * assumed.** With `nodeModulesDir: "auto"` at the root, `deno check` on an
- * ordinary `microservice` member materialises every npm package the framework
- * lazily imports into `node_modules` — the AWS SDK, the Kafka and Redis clients,
- * `nodemailer` — none of which that member uses at runtime. A workspace with no
- * frontend member would pay for all of it on its first type-check. So the field
- * arrives with the member that needs it. Its companion ignore edit prevents
- * an older workspace from tracking those installed dependencies.
+ * Since M111d a new workspace root carries it from creation, because the Node
+ * `setu` CLI imports members through that `node_modules`; this edit remains for
+ * a workspace created before then. (Its earlier absence rested on a JSR-era
+ * measurement: `deno check` materialised every npm package the JSR framework
+ * lazily imported. The framework now installs from npm, where those clients are
+ * optional peers.) Its companion ignore edit prevents an older workspace from
+ * tracking the installed dependencies.
  *
  * The edit is a single-key merge on a file the CLI itself wrote, reported like
  * any other write, and it refuses rather than guesses whenever the root is not

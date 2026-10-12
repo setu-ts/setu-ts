@@ -20,7 +20,9 @@
  * @module
  */
 
+import { FRAMEWORK_RANGE, frameworkSpecifier } from '../templates/framework-specifier.ts';
 import type { IFileSystem } from '@setu-ts/common';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { DOCKERFILE, DOCKERIGNORE, workspaceContainerFiles } from '../workspace/compose.ts';
 import { transportSpec } from '../workspace/transport.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
@@ -84,7 +86,7 @@ const DEVTOOL_DEPENDENCY = '@setu-ts/diagnostics-plugin';
  * `--devtool` and one enabled later carry the identical entry — which is what
  * makes the byte-identical no-op outcome reachable on both.
  */
-const DEVTOOL_IMPORT = `jsr:${DEVTOOL_DEPENDENCY}@^${VERSION}`;
+const DEVTOOL_IMPORT = frameworkSpecifier('diagnostics-plugin', 'deno');
 
 /** Dependencies reached by the devtool command. */
 export interface DevtoolCommandDependencies {
@@ -748,23 +750,32 @@ async function enableStandalone(
     return EXIT_USAGE;
   }
 
+  const manifestRead = await readWritableDenoManifest(deps.fs, dir);
+  if (manifestRead.kind === 'missing') {
+    // No Deno manifest: an npm project is the wrong runtime, while a directory
+    // with no manifest at all is not a project — the runtime detector would read
+    // that as Node and report the runtime, which names the wrong problem.
+    try {
+      if (await isPresent(deps.fs, joinPath(dir, 'package.json'))) {
+        // Never Deno without a Deno manifest, so this always refuses.
+        const runtime = await detectTargetRuntime(deps.fs, dir);
+        return reportInapplicable(deps, devtoolRuntimeRefusal(runtime)!);
+      }
+    } catch (cause) {
+      return reportInapplicable(deps, escapeName(describeCause(cause)));
+    }
+    return reportInapplicable(
+      deps,
+      `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
+    );
+  }
   try {
     const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir));
     if (refusal !== undefined) return reportInapplicable(deps, refusal);
   } catch (cause) {
-    return reportInapplicable(
-      deps,
-      escapeName(cause instanceof Error ? cause.message : String(cause)),
-    );
+    return reportInapplicable(deps, escapeName(describeCause(cause)));
   }
 
-  const manifestRead = await readWritableDenoManifest(deps.fs, dir);
-  if (manifestRead.kind === 'missing') {
-    return reportInapplicable(
-      deps,
-      `No deno.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
-    );
-  }
   if (manifestRead.kind === 'refused') {
     deps.error(manifestRead.message);
     return EXIT_ERROR;
@@ -955,19 +966,49 @@ async function resolveDevtoolPort(
   return candidate;
 }
 
-/** Refuses mixed framework versions before any manifest merge. */
+/**
+ * Refuses mixed framework versions before any manifest merge.
+ *
+ * A pin passes only as the npm form this CLI writes —
+ * `npm:@setu-ts/<pkg>@^<version>`, optionally with a subpath. A project still
+ * pinned to `jsr:` predates the npm packages; it is refused with the upgrade
+ * guide named, never accepted because its version happens to match.
+ */
 function frameworkPinRefusal(handle: DenoJsonHandle): string | undefined {
   const wrong = Object.entries(handle.imports).filter(([key, value]) =>
     key.startsWith('@setu-ts/') &&
     (typeof value !== 'string' ||
-      /^jsr:@setu-ts\/[^@]+@(\^[^/]+)(?:\/.*)?$/.exec(value)?.[1] !== `^${VERSION}`)
+      /^npm:@setu-ts\/[^@]+@(\^[^/]+)(?:\/.*)?$/.exec(value)?.[1] !== FRAMEWORK_RANGE)
   );
   if (wrong.length === 0) return undefined;
   return `Framework pins in ${escapeName(handle.path)} disagree with this CLI:\n` +
     wrong.map(([key, value]) =>
-      `  ${escapeName(key)}: ${escapeName(String(value))}; expected jsr:${
-        escapeName(key)
-      }@^${VERSION}`
+      `  ${escapeName(key)}: ${escapeName(String(value))}; expected ${
+        escapeName(frameworkSpecifier(key.slice('@setu-ts/'.length), 'deno'))
+      }`
     ).join('\n') +
     `\nThe devtool entry imports types that exist only at ${VERSION}; upgrade the project first (see docs/upgrading.md), then run this again.`;
+}
+
+/**
+ * Whether a path exists. Only a missing path is absent; any other failure is
+ * thrown, so an unreadable manifest is reported rather than read as absence.
+ *
+ * @param fs - The filesystem to probe
+ * @param path - The absolute path
+ * @returns True when it exists
+ */
+async function isPresent(fs: IFileSystem, path: string): Promise<boolean> {
+  try {
+    await fs.stat(path);
+    return true;
+  } catch (cause) {
+    if (isMissingPath(cause)) return false;
+    throw cause;
+  }
+}
+
+/** A thrown value's message, or its string form. */
+function describeCause(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

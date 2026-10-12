@@ -18,6 +18,7 @@ import {
 } from '../../../src/commands/add.ts';
 import { VERSION } from '../../../src/constants.ts';
 import { parseArgs } from '../../../src/args.ts';
+import { runNewCommand } from '../../../src/commands/new.ts';
 import { listSchematics } from '../../../src/schematics/registry.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
 
@@ -116,7 +117,7 @@ describe('setu add testing', () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
     expect(await h.run(['testing'])).toBe(0);
     expect(JSON.parse(h.read('/app/deno.json')).imports['@setu-ts/testing'])
-      .toBe(`jsr:@setu-ts/testing@^${VERSION}`);
+      .toBe(`npm:@setu-ts/testing@^${VERSION}`);
   });
 
   for (const start of ['tsx main.ts', 'bun run main.ts']) {
@@ -125,7 +126,7 @@ describe('setu add testing', () => {
       expect(await h.run(['testing'])).toBe(0);
       const manifest = JSON.parse(h.read('/app/package.json'));
       expect(manifest.devDependencies['@setu-ts/testing'])
-        .toBe(`npm:@jsr/setu-ts__testing@^${VERSION}`);
+        .toBe(`^${VERSION}`);
       expect(manifest.dependencies?.['@setu-ts/testing']).toBeUndefined();
     });
   }
@@ -133,7 +134,7 @@ describe('setu add testing', () => {
   it('does not pin a package twice when the other npm section already holds it', async () => {
     // A scaffold may list a package in one section while `add` writes the
     // other; writing it again would pin it in both.
-    const range = `npm:@jsr/setu-ts__testing@^${VERSION}`;
+    const range = `^${VERSION}`;
     const npm = JSON.stringify(
       { scripts: { start: 'tsx main.ts' }, dependencies: { '@setu-ts/testing': range } },
       null,
@@ -231,6 +232,32 @@ describe('withDependency', () => {
 });
 
 describe('withPluginWiring', () => {
+  // Codex review (M111d): an npm-target scaffold is Prettier-formatted, which
+  // puts a short plugin array on ONE line — so an anchor matched only as its own
+  // line left `setu new demo` → `setu add cache` writing the dependency and
+  // wiring nothing.
+  it('wires a provider into the default (Prettier-formatted) Node scaffold', async () => {
+    const fs = createFakeFs();
+    const quiet = { fs, log: () => {}, error: () => {} };
+    expect(await runNewCommand(parseArgs(['demo']), { ...quiet, cwd: '/' })).toBe(0);
+    const before = fs.read('/demo/setu.config.ts');
+    expect(before).toMatch(/plugins: \[[^\n]*\.\.\.\(devtool\?\.plugins \?\? \[\]\)\]/);
+
+    expect(await runAddCommand(parseArgs(['cache']), { ...quiet, cwd: '/demo' })).toBe(0);
+    const after = fs.read('/demo/setu.config.ts');
+    expect(after).toContain("import { CachePlugin } from '@setu-ts/cache-plugin';");
+    expect(after).toContain('CachePlugin(), ...(devtool?.plugins ?? [])');
+  });
+
+  it('refuses a factory carrying the spread twice', () => {
+    const doubled = CLASS_BASED_INGRESS_CONFIG.replace(
+      '...(devtool?.plugins ?? []),',
+      '...(devtool?.plugins ?? []),\n      ...(devtool?.plugins ?? []),',
+    );
+    expect(doubled).not.toBe(CLASS_BASED_INGRESS_CONFIG);
+    expect(withPluginWiring(doubled, 'cache-plugin')).toBeUndefined();
+  });
+
   it('preserves inline, commented and incomplete anchors, and ignores commented calls', () => {
     for (
       const source of [
@@ -764,7 +791,7 @@ describe('runAddCommand', () => {
     expect(await h.run(['auth'])).toBe(0);
 
     const parsed = JSON.parse(h.read('/app/deno.json')) as { imports: Record<string, string> };
-    expect(parsed.imports['@setu-ts/auth-plugin']).toBe(`jsr:@setu-ts/auth-plugin@^${VERSION}`);
+    expect(parsed.imports['@setu-ts/auth-plugin']).toBe(`npm:@setu-ts/auth-plugin@^${VERSION}`);
   });
 
   it('reports the install command rather than running it', async () => {
@@ -793,7 +820,7 @@ describe('runAddCommand', () => {
 
     expect(JSON.parse(h.read('/app/deno.json')).imports['@setu-ts/auth-plugin']).toBeDefined();
     expect(JSON.parse(h.read('/app/package.json')).dependencies['@setu-ts/auth-plugin'])
-      .toBe(`npm:@jsr/setu-ts__auth-plugin@^${VERSION}`);
+      .toBe(`^${VERSION}`);
   });
 
   it('activates an ingress provider in the generated class-based config', async () => {
@@ -993,19 +1020,12 @@ describe('setu add — install command per runtime', () => {
     expect(h.out.join('\n')).toContain('  deno install --min-dep-age 0');
   });
 
-  it('warns when an npm-compat entry is written with no @jsr registry in .npmrc', async () => {
+  // From 0.9 the framework installs from npm under its own names, so an npm
+  // project needs no registry mapping and is never told to add one.
+  it('says nothing about .npmrc for an npm project with none', async () => {
     const h = harness({ '/app/package.json': pkg('tsx main.ts') });
-    await h.run(['cache']);
-    expect(h.out.join('\n')).toContain('@jsr:registry=https://npm.jsr.io');
-  });
-
-  it('warns when .npmrc exists but does not route the @jsr scope', async () => {
-    const h = harness({
-      '/app/package.json': pkg('tsx main.ts'),
-      '/app/.npmrc': 'save-exact=true\n',
-    });
-    await h.run(['cache']);
-    expect(h.out.join('\n')).toContain('Add this line to /app/.npmrc');
+    expect(await h.run(['cache'])).toBe(0);
+    expect(h.out.join('\n')).not.toContain('.npmrc');
   });
 
   it('says nothing about .npmrc when the registry line is present', async () => {

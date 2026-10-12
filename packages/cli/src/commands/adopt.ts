@@ -10,6 +10,8 @@
  * @module
  */
 
+import { rewriteLegacyPins } from '../workspace/legacy-pins.ts';
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
@@ -276,7 +278,7 @@ export async function runAdoptCommand(
     try {
       await writeFiles(
         deps.fs,
-        planned,
+        await formatForTarget(planned, profile.runtime, project, deps.error),
         deps.interrupt === undefined
           ? { root: project }
           : { root: project, signal: deps.interrupt },
@@ -316,7 +318,12 @@ export async function runAdoptCommand(
       try {
         await writeFiles(
           deps.fs,
-          [{ path: entryPath, contents: rewritten, managed: true }],
+          await formatForTarget(
+            [{ path: entryPath, contents: rewritten, managed: true }],
+            profile.runtime,
+            project,
+            deps.error,
+          ),
           deps.interrupt === undefined
             ? { root: project }
             : { root: project, signal: deps.interrupt },
@@ -335,6 +342,60 @@ export async function runAdoptCommand(
           'Workspace files and moved project files remain in place; repair the entry before starting it.',
         );
         return EXIT_ERROR;
+      }
+    }
+
+    // A pre-0.9 project pins the framework through JSR or its npm alias, which
+    // the workspace root no longer maps. Its manifest moves onto the npm names.
+    const manifestKind = profile.manifestKind;
+    // A Deno member's manifest is `deno.json` or `deno.jsonc` (both move), the
+    // first found — Deno's own order. It may carry JSONC comments, which the
+    // rewrite reads and keeps.
+    let manifestPath = '';
+    let pinSource: string | undefined;
+    for (
+      const file of manifestKind === 'deno' ? ['deno.json', 'deno.jsonc'] : ['package.json']
+    ) {
+      manifestPath = joinPath(project, joinPath(memberRoot, file));
+      try {
+        pinSource = new TextDecoder().decode(await deps.fs.readFile(manifestPath));
+        break;
+      } catch (cause) {
+        if (!isMissingPath(cause)) throw cause;
+      }
+    }
+    const pins = pinSource === undefined
+      ? { contents: undefined, rewrites: [] }
+      : rewriteLegacyPins(pinSource, manifestKind);
+    if (pins.unreadable !== undefined) {
+      // Never silent: the project still pins the framework however it did before,
+      // and the workspace root maps no JSR registry for it.
+      deps.error(
+        `Could not read ${escapeName(manifestPath)} to move its framework pins onto npm: ${
+          escapeName(pins.unreadable)
+        }`,
+      );
+      deps.error(
+        'Rewrite any jsr:@setu-ts/* or npm:@jsr/setu-ts__* pins to the npm packages by hand.',
+      );
+    }
+    if (pins.contents !== undefined) {
+      await writeFiles(
+        deps.fs,
+        await formatForTarget(
+          [{ path: manifestPath, contents: pins.contents, managed: true }],
+          profile.runtime,
+          project,
+          deps.error,
+        ),
+        deps.interrupt === undefined
+          ? { root: project }
+          : { root: project, signal: deps.interrupt },
+      );
+      for (const pin of pins.rewrites) {
+        deps.log(
+          `moved ${escapeName(pin.name)} from ${escapeName(pin.from)} to ${escapeName(pin.to)}`,
+        );
       }
     }
 

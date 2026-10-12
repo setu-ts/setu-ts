@@ -24,6 +24,8 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
+  'prettier': '^3.9.10',
+  'tsx': '^4.23.0',
   'vitest': '5.0.3',
   'zod-v3': 'npm:zod@^3.24.0',
   'zod-v4': 'npm:zod@^4.4.0',
@@ -94,6 +96,22 @@ export interface Override {
 
 /** The committed overrides (M111a plan §3.1), each with its reason. */
 export const OVERRIDES: readonly Override[] = [
+  {
+    package: 'packages/cli',
+    dependency: 'prettier',
+    kind: 'regular-dependency',
+    reason: 'the CLI formats every file it writes into an npm-target project with ' +
+      'Prettier (utils/prettier-format.ts), so a fresh scaffold passes its own ' +
+      '`npm run format:check` — loaded lazily, but required (M111d §3.7, maintainer-approved)',
+  },
+  {
+    package: 'packages/cli',
+    dependency: 'tsx',
+    kind: 'regular-dependency',
+    reason: 'the CLI loads every project TypeScript module (setu.config.ts, custom ' +
+      'schematics) through tsx (utils/ts-loader.ts), so `npx @setu-ts/cli` must ' +
+      'carry it — an optional peer is never installed for the consumer (M111d §3.3)',
+  },
   {
     package: 'packages/runtime',
     dependency: '@hono/node-server',

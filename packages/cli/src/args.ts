@@ -32,7 +32,7 @@ export interface ParsedArgs {
  * another flag, is recorded as the boolean `true` — callers type-check the
  * value before using it.
  *
- * @param argv - The argument array (e.g. `Deno.args`)
+ * @param argv - The argument array (e.g. `process.argv.slice(2)`)
  * @param valueFlags - Flags whose value is the next token; defaults to {@linkcode VALUE_FLAGS}
  * @returns The parsed positionals and flags
  */

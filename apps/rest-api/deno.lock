@@ -1772,6 +1772,8 @@
       },
       "jsr:@setu-ts/cli@0.8.0": {
         "dependencies": [
+          "npm:prettier@^3.9.10",
+          "npm:tsx@^4.23.0",
           "npm:vitest@5.0.3"
         ]
       },
@@ -1792,6 +1794,11 @@
         ]
       },
       "jsr:@setu-ts/cqrs-plugin@0.8.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/create@0.8.0": {
         "dependencies": [
           "npm:vitest@5.0.3"
         ]
@@ -2111,11 +2118,17 @@
           }
         }
       },
-      "npm:@setu-ts/cli@0.8.0": {},
+      "npm:@setu-ts/cli@0.8.0": {
+        "dependencies": [
+          "npm:prettier@^3.9.10",
+          "npm:tsx@^4.23.0"
+        ]
+      },
       "npm:@setu-ts/cloudflare-plugin@0.8.0": {},
       "npm:@setu-ts/common@0.8.0": {},
       "npm:@setu-ts/config-plugin@0.8.0": {},
       "npm:@setu-ts/cqrs-plugin@0.8.0": {},
+      "npm:@setu-ts/create@0.8.0": {},
       "npm:@setu-ts/database-plugin@0.8.0": {
         "peerDependencies": [
           "npm:@aws-sdk/client-dynamodb@3",

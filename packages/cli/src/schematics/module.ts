@@ -89,7 +89,7 @@ function classController(names: DerivedNames): string {
   return `import { Body, Controller, Ctx, Get, Inject, Params, Post } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
-import { ${names.pascal}Service } from './${names.kebab}.service.ts';
+import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 /** HTTP controller for the ${names.kebab} resource. */
 @Controller('/${names.kebab}')

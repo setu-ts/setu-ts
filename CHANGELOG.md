@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The CLI is a Node program (M111d).** `setu` ships as an npm `bin`
+  (`npx @setu-ts/cli new my-app`) and the new `@setu-ts/create` package (exporting `createArgs`)
+  makes `npm create @setu-ts my-app` the same as `setu new`. Project TypeScript — `setu.config.ts`
+  for plugin commands, custom schematics — loads through `tsx`, a CLI dependency. An npm-target
+  scaffold (Node, Bun, Workers) carries its own tooling: `check` (`tsc`, TypeScript `~6.0.3`),
+  `lint` (ESLint with `typescript-eslint`) and `format` / `format:check` (Prettier); everything the
+  CLI writes into such a project is Prettier-formatted, so it passes its own `format:check` from the
+  first run. A selected broker, queue or gRPC transport now adds its client package (`ioredis`,
+  `amqplib`, `nats`, `kafkajs`, the cloud SDKs, Connect) to the project — package managers never
+  install an optional peer, so such a scaffold used to fail at its first boot. The generated
+  migration runner (`src/migrations/run.ts`, run with `npx tsx`, `bun run` or `deno run -A`) and
+  gRPC code generation (`proto:gen`) run on every target.
+
 - **npm publishing machinery (M111c).** All 51 manifests gain publish metadata, `src` and LICENSE in
   their tarballs, and audited `sideEffects` declarations. The decorator metadata module is retained;
   other members declare `false`. Publishing packs with pnpm, checks the packed manifest and registry
@@ -549,6 +562,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking: `node` is the default generated target, and every target installs the framework from
+  npm (M111d).** `setu new` and `setu generate app` without `--runtime` now scaffold a Node project;
+  pass `--runtime deno` for the previous default. Generated manifests pin `@setu-ts/*` from npm
+  under their own names — `^0.9.0` in `package.json`, `npm:@setu-ts/…@^0.9.0` in a Deno import map —
+  with no `.npmrc` and no `@jsr/` aliases. A Deno project sets `nodeModulesDir: "auto"`, because the
+  CLI imports its config from Node: run `deno install` before `setu <plugin-command>`, which
+  otherwise refuses by name. A Deno project pinning the framework from JSR is refused the same way,
+  pointing at the upgrade guide; `setu adopt` rewrites pre-0.9 pins (`jsr:@setu-ts/…`,
+  `npm:@jsr/setu-ts__…`) onto npm and reports each. A directory with no manifest now reads as Node
+  rather than Deno wherever the CLI detects a target.
+- **Breaking for embedders: `@setu-ts/cli/main` (M111d).** `MainProcess.prompt` is asynchronous,
+  `(message, signal?) => Promise<string | null>`, so an interrupt ends a pending question instead of
+  waiting for Enter; `denoProcess` is removed and `nodeProcess` replaces it. Both executables set
+  `process.exitCode` rather than calling `process.exit`.
 - **Lazy-import error messages and reported specifiers name the bare package (M111a).** Source
   imports `ioredis`, not `npm:ioredis@5.x`, so `GrpcRuntimeLoadError.specifier`, the telemetry
   instrumentation loaders' reported `specifier`, `SAML_SPECIFIER` and the React Router load failure
@@ -789,6 +816,15 @@ All notable changes to this project are documented here. The format follows
   needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
 
 ### Fixed
+
+- **`setu adopt` moves a project's `deno.jsonc` (M111d).** Adoption moved `deno.json` but left a
+  `deno.jsonc` at the repository root, beside the workspace's new `deno.json`, so the member had no
+  manifest and the project's own was ignored. It now moves with the member, and its pre-0.9 pins are
+  rewritten in place like a `deno.json`'s, comments kept.
+
+- **`setu generate custom <name>` refuses a path-like schematic name (M111d).** `../../x` or a
+  percent-escaped `%2e%2e` segment imported, and ran, a module outside `.setu-ts/schematics/`. A
+  name is now letters, digits, `-` and `_`, and anything else exits 2 naming the rule.
 
 - Consolidated SSE writes and cache coalescing settlement cleanup, preserving closed-connection and
   owner-isolation behavior across runtimes.

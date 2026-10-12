@@ -132,15 +132,15 @@ describe('detectTargetRuntime', () => {
     expect(await detectTargetRuntime(fs, '/app')).toBe('deno');
   });
 
-  it('falls back to deno for an empty directory', async () => {
-    expect(await detectTargetRuntime(createFakeFs({}), '/app')).toBe('deno');
+  it('falls back to node for an empty directory', async () => {
+    expect(await detectTargetRuntime(createFakeFs({}), '/app')).toBe('node');
   });
 
-  it('falls back to deno for an unparseable package.json', async () => {
+  it('falls back to node for an unparseable package.json', async () => {
     // The plugin detector reports a malformed manifest; this one must not throw
     // on the way there.
     const fs = createFakeFs({ '/app/package.json': '{ not json' });
-    expect(await detectTargetRuntime(fs, '/app')).toBe('deno');
+    expect(await detectTargetRuntime(fs, '/app')).toBe('node');
   });
 
   it('reads node for a hand-written package.json with no start script', async () => {

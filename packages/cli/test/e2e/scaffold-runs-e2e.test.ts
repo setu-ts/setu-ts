@@ -4,6 +4,7 @@ import {
   spawnProcess,
   tempDir,
 } from '../../../../test/node-helpers.ts';
+import { fileURLToPath } from 'node:url';
 import * as nodeFs from 'node:fs/promises';
 /**
  * The gate M63 exists for: a stock scaffold is installed, formatted, linted,
@@ -41,6 +42,7 @@ import {
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
+import { startOverlay } from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -180,10 +182,12 @@ function isTransientInstallFailure(output: string): boolean {
 async function runDenoOnce(
   project: string,
   args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
 ): Promise<{ code: number; output: string }> {
   const child = spawnProcess(denoBinary(), {
     args: [...args],
     cwd: project,
+    env: { ...env },
     stdout: 'piped',
     stderr: 'piped',
   });
@@ -241,28 +245,62 @@ async function runDenoOnce(
 async function denoRunRetry(
   project: string,
   args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
 ): Promise<{ code: number; output: string }> {
-  let result = await runDenoOnce(project, args);
+  let result = await runDenoOnce(project, args, env);
   for (let attempt = 1; attempt < DENO_INSTALL_ATTEMPTS; attempt++) {
     if (result.code === 0 || !isTransientInstallFailure(result.output)) {
       return result;
     }
     await new Promise((resolve) => setTimeout(resolve, DENO_INSTALL_RETRY_DELAY_MS));
-    result = await runDenoOnce(project, args);
+    result = await runDenoOnce(project, args, env);
   }
   return result;
+}
+
+/**
+ * Runs Prettier's check over an npm-target project with the CLI's own Prettier,
+ * which reads the project's `.prettierrc.json` and `.prettierignore` — so the
+ * check needs no install.
+ *
+ * @param project - The project directory
+ * @returns Its exit code and combined output
+ */
+async function prettierCheck(project: string): Promise<{ code: number; output: string }> {
+  const bin = fileURLToPath(
+    new URL('../../node_modules/prettier/bin/prettier.cjs', import.meta.url),
+  );
+  const result = await runProcess(process.execPath, {
+    args: [bin, '--check', '.'],
+    cwd: project,
+    stdout: 'piped',
+    stderr: 'piped',
+  });
+  const decoder = new TextDecoder();
+  return {
+    code: result.code,
+    output: `${decoder.decode(result.stdout)}${decoder.decode(result.stderr)}`,
+  };
 }
 
 describe('a scaffolded project is formatted and lints clean', () => {
   for (const [label, args] of HOSTS) {
     it(`holds for ${label}`, async () => {
-      expect(await run(['new', 'shop', ...args])).toBe(0);
+      // Deno unless the host names its own target: this gate formats and lints
+      // with Deno, and the npm hosts get the same treatment on Node in
+      // `node-scaffold-e2e.test.ts`.
+      const workers = args.includes('cloudflare-workers');
+      const runtime = workers ? [] : ['--runtime', 'deno'];
+      expect(await run(['new', 'shop', ...runtime, ...args])).toBe(0);
       const project = `${root}/shop`;
 
-      // The generated project carries its own `fmt` config; this asserts the
-      // CLI's output already satisfies it, so a developer's first
-      // `deno fmt` does not rewrite files they did not write.
-      const formatted = await denoRun(project, ['fmt', '--check']);
+      // The generated project carries its own formatter config; this asserts
+      // the CLI's output already satisfies it, so a developer's first format
+      // run does not rewrite files they did not write. A Workers project is an
+      // npm target, formatted with Prettier — `deno fmt` is not its formatter.
+      const formatted = workers
+        ? await prettierCheck(project)
+        : await denoRun(project, ['fmt', '--check']);
       expect(formatted.code, formatted.output).toBe(0);
 
       const linted = await denoRun(project, ['lint']);
@@ -302,7 +340,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       },
     };
     expect(
-      await runCli(['new', 'shop'], {
+      await runCli(['new', '--runtime', 'deno', 'shop'], {
         fs,
         cwd: root,
         now: () => runtime.now(),
@@ -321,7 +359,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
 
   for (const template of BOOTABLE) {
     it(`holds for --template ${template}`, async () => {
-      expect(await run(['new', 'shop', '--template', template])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
 
@@ -380,7 +418,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
   }
 
   it('runs a smoke test on the template-less host', async () => {
-    expect(await run(['new', 'minimal'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'minimal'])).toBe(0);
     const project = `${root}/minimal`;
     await useWorkspacePackages(project);
     const configPath = `${project}/setu.config.ts`;
@@ -423,7 +461,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
 
   for (const [label, args] of BOOTABLE_STYLED) {
     it(`boots with generated permissions for ${label}`, async () => {
-      expect(await run(['new', 'shop', ...args])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', ...args])).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
 
@@ -499,7 +537,7 @@ describe('a scaffolded Workers project retries a failed boot and never leaks the
 
 describe('a scaffolded project configures itself from a dotenv file', () => {
   it('emits an ignored dotenv file beside a tracked example', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
 
     expect((await nodeFs.stat(`${project}/.env`)).isFile()).toBe(true);
@@ -518,7 +556,7 @@ describe('a scaffolded project configures itself from a dotenv file', () => {
     // at `ConfigPlugin.register` on the first `git clone`, in CI, and inside a
     // container built from the repository. Deleting the file here reproduces
     // exactly that state; `envFileOptional` is what makes it boot.
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
     await nodeFs.rm(`${project}/.env`);
@@ -532,7 +570,7 @@ describe('a scaffolded project configures itself from a dotenv file', () => {
     // The other half: tolerating absence must not mean ignoring the file. This
     // asserts the configured path is genuinely loaded, so a fix that silently
     // stopped reading dotenv files would fail here rather than pass both ways.
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
     await nodeFs.writeFile(`${project}/.env`, 'SCAFFOLD_PROBE_VALUE=from-dotenv\n');
@@ -561,7 +599,7 @@ describe('a scaffolded project answers errors as RFC 9457 Problem Details', () =
     // `errorHandler({ format: 'rfc9457' })` in the emitted source: the format
     // argument reaching the middleware is the only thing that decides the wire
     // shape, and a string match cannot see whether it did.
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
     await nodeFs.writeFile(
@@ -598,7 +636,7 @@ describe('a scaffolded project answers errors as RFC 9457 Problem Details', () =
     // `errorFormat` argument, the validation failure would answer in the
     // default shape (`message`/`errors`, no `type`/`title`/`status`/`detail`)
     // and this assertion fails.
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
     await nodeFs.writeFile(
@@ -669,48 +707,17 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
     await nodeFs.rm(`${project}/deno.lock`).catch(() => {});
   }
 
-  /**
-   * Relaxes the scaffold's `@setu-ts/*` pins to the range floor.
-   *
-   * Both legs below are REAL registry installs — that is the point, since a
-   * workspace-repointed project never consults JSR and so can never exercise
-   * the age policy. But `setu new` pins a project to the CLI's OWN version,
-   * which during a release bump is not published yet, so the install fails on
-   * `Could not find version … that matches '^<next>'` before any age policy is
-   * consulted: the test would then block the very release that would publish
-   * the version it wants. `^0.1.0-alpha.1` resolves to a published release, so
-   * it does not deadlock, and it changes nothing either leg proves — the
-   * emitted value is asserted separately above, and every published version is
-   * younger than the ten-year threshold that makes the refusal leg
-   * deterministic.
-   *
-   * It no longer tracks the NEWEST published release, which it did while every
-   * version was a `0.1.0-alpha.N` prerelease: a caret range caps at the next
-   * minor, so from `v0.2.0` onward this deliberately installs the newest
-   * release of the alpha line. That is still a real registry install under a
-   * real age policy, which is all either leg needs. The self-maintaining
-   * alternative is a BARE specifier — unavailable before `v0.2.0`, because JSR
-   * never pointed `latest` at a prerelease, and available now.
-   *
-   * @param project - The project directory
-   */
-  async function relaxFrameworkPins(project: string): Promise<void> {
-    const path = `${project}/deno.json`;
-    const source = await nodeFs.readFile(path, 'utf8');
-    await nodeFs.writeFile(
-      path,
-      source.replaceAll(/(@setu-ts\/[a-z-]+)@\^[^"]+/g, '$1@^0.1.0-alpha.1'),
-    );
-  }
-
   it('installs under a policy that would otherwise refuse every version', async () => {
     // D1 only bites while the pinned version is inside the age window, so the
     // obvious test is reproducible for one day per release and vacuous after.
-    // Raising the threshold instead makes EVERY published version "too new",
-    // which reproduces the same refusal deterministically and forever — the
-    // scaffold's own `minimumDependencyAge: 0` is then the only thing that can
-    // let the install through.
-    expect(await run(['new', 'shop'])).toBe(0);
+    // The overlay stamps the tree's own packs as published NOW, and the policy is
+    // raised to ten years, which makes every version "too new" — reproducing the
+    // refusal deterministically and forever. The scaffold's own
+    // `minimumDependencyAge: 0` is then the only thing that can let the install
+    // through. The pinned version is the tree's own, which the overlay always
+    // serves, so a release bump can never deadlock this test against the
+    // publish that would satisfy it.
+    expect(await run(['new', 'shop', '--runtime', 'deno'])).toBe(0);
     const project = `${root}/shop`;
 
     // What the scaffold actually emitted, asserted here rather than only in the
@@ -721,42 +728,40 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
       minimumDependencyAge?: unknown;
     };
     expect(emitted.minimumDependencyAge).toBe(0);
-
-    // Read the emitted pins BEFORE relaxing them, so this leg still fails if
-    // `setu new` ever stops pinning the framework at all.
     expect(await nodeFs.readFile(`${project}/deno.json`, 'utf8')).toContain(
-      'jsr:@setu-ts/kernel@^',
+      'npm:@setu-ts/kernel@^',
     );
-    await relaxFrameworkPins(project);
 
-    // 10 years in minutes. Without this leg the second one proves nothing: an
-    // install that succeeds under a policy that was never going to refuse
-    // anything is not evidence that the emitted key does the work.
-    await setDependencyAge(project, 5_256_000);
-    // The refusal is deterministic, but reaching it requires registry I/O to
-    // resolve the versions first, so a transient blip under parallel load can
-    // fail the install with a network error instead of the age message. The
-    // retrying runner absorbs only that transient class and returns the
-    // deterministic refusal (or a success, which would expose a real defect)
-    // on its first attempt.
-    const refused = await denoRunRetry(project, ['install']);
-    expect(refused.code, refused.output).toBe(1);
-    expect(refused.output).toContain('minimum dependency age');
+    const overlay = await startOverlay('now');
+    try {
+      const env = { NPM_CONFIG_REGISTRY: overlay.url };
+      // 10 years in minutes. Without this leg the second one proves nothing: an
+      // install that succeeds under a policy that was never going to refuse
+      // anything is not evidence that the emitted key does the work.
+      await setDependencyAge(project, 5_256_000);
+      // The refusal is deterministic, but reaching it requires registry I/O to
+      // resolve the versions first, so a transient blip under parallel load can
+      // fail the install with a network error instead of the age message. The
+      // retrying runner absorbs only that transient class.
+      const refused = await denoRunRetry(project, ['install'], env);
+      expect(refused.code, refused.output).toBe(1);
+      expect(refused.output).toContain('minimum dependency age');
 
-    // What the CLI actually emits. This install is expected to SUCCEED, so it
-    // goes through the retrying runner: a transient registry blip under the
-    // full suite's parallel load must not fail the step, while a real refusal
-    // (which is deterministic) is still returned on its first attempt.
-    await setDependencyAge(project, 0);
-    const allowed = await denoRunRetry(project, ['install']);
-    expect(allowed.code, allowed.output).toBe(0);
-    expect(allowed.output).not.toContain('minimum dependency age');
+      // What the CLI actually emits. Expected to SUCCEED, through the retrying
+      // runner, while a real refusal is still returned on its first attempt.
+      await setDependencyAge(project, 0);
+      const allowed = await denoRunRetry(project, ['install'], env);
+      expect(allowed.code, allowed.output).toBe(0);
+      expect(allowed.output).not.toContain('minimum dependency age');
+    } finally {
+      await overlay.close();
+    }
   });
 });
 
 describe('a scaffolded full-stack project type-checks its own routes', () => {
   it('runs the generated check:app task over the app tree', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const project = `${root}/shop`;
 
     // Against THIS workspace, not the published packages the scaffold pins.
@@ -802,7 +807,7 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
   // first, and the scaffold shipped no route middleware at all. This drives both
   // through the generated project's own entry, under its own permissions.
   it('applies kernel middleware to every request and route middleware to its route', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const project = `${root}/shop`;
     // The kernel layer, exactly as a developer adds it.
     expect(await run(['g', 'middleware', 'audit', '--dir', project])).toBe(0);
@@ -876,7 +881,7 @@ describe('a scaffolded full-stack project serves route edits in development', ()
   // second copy whose context keys matched nothing. This boots the generated
   // entry and edits a route while it runs.
   it('renders through Vite, shares context keys, and serves an edit without a restart', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
     const installed = await denoRunRetry(project, ['install', '--allow-scripts']);

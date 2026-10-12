@@ -85,10 +85,12 @@ async function denoRun(
 
 describe('a --broker redis --queue redis scaffold', () => {
   it('renders a config that differs from the default one', async () => {
-    await run(['new', 'plain', '--template', 'microservice']);
+    await run(['new', '--runtime', 'deno', 'plain', '--template', 'microservice']);
     expect(
       await run([
         'new',
+        '--runtime',
+        'deno',
         'svc',
         '--template',
         'microservice',
@@ -116,6 +118,8 @@ describe('a --broker redis --queue redis scaffold', () => {
     expect(
       await run([
         'new',
+        '--runtime',
+        'deno',
         'svc',
         '--template',
         'microservice',
@@ -142,7 +146,18 @@ describe('a --broker redis --queue redis scaffold', () => {
   // scaffold fail its OWN `deno fmt --check` — the M63 bar, and invisible to
   // every other arm. Reverting `nestConnection` fails exactly this case.
   it('emits a --broker kafka scaffold that passes its own deno fmt --check', async () => {
-    expect(await run(['new', 'kf', '--template', 'microservice', '--broker', 'kafka'])).toBe(0);
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'kf',
+        '--template',
+        'microservice',
+        '--broker',
+        'kafka',
+      ]),
+    ).toBe(0);
     const project = `${root}/kf`;
     await useWorkspacePackages(project);
 
@@ -153,7 +168,18 @@ describe('a --broker redis --queue redis scaffold', () => {
   });
 
   it('type-checks a --broker rabbitmq scaffold too', async () => {
-    expect(await run(['new', 'mq', '--template', 'microservice', '--broker', 'rabbitmq'])).toBe(0);
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'mq',
+        '--template',
+        'microservice',
+        '--broker',
+        'rabbitmq',
+      ]),
+    ).toBe(0);
     const project = `${root}/mq`;
     await useWorkspacePackages(project);
     const checked = await denoCheck(project, await collectSources(project));
@@ -170,6 +196,8 @@ describe('a --broker redis --queue redis scaffold', () => {
     expect(
       await run([
         'new',
+        '--runtime',
+        'deno',
         'svc',
         '--template',
         'microservice',

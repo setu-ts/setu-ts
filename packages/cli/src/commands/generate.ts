@@ -4,6 +4,7 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
@@ -46,7 +47,12 @@ import {
   type Schematic,
   type SchematicOptions,
 } from '../schematics/registry.ts';
-import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
+import {
+  CUSTOM_SCHEMATIC_DIR,
+  isCustomSchematicName,
+  loadCustomSchematic,
+  type ModuleLoader,
+} from '../schematics/custom.ts';
 import { scanModules } from '../utils/module-scanner.ts';
 import { type AdoptedArtifact, scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
@@ -217,6 +223,14 @@ export async function runGenerateCommand(
     name = args.positionals[2];
     if (customName === undefined || name === undefined) {
       deps.error(`Usage: ${PROGRAM_NAME} generate custom <schematic-name> <name>`);
+      return EXIT_USAGE;
+    }
+    if (!isCustomSchematicName(customName)) {
+      deps.error(
+        `Invalid custom schematic name "${
+          escapeName(customName)
+        }": use letters, digits, "-" and "_" — it names a file in ${CUSTOM_SCHEMATIC_DIR}/`,
+      );
       return EXIT_USAGE;
     }
   } else {
@@ -508,9 +522,10 @@ export async function runGenerateCommand(
   }
 
   try {
+    const formatted = await formatForTarget(files, runtime, dir, deps.error);
     const outcomes = await writeFiles(
       deps.fs,
-      files,
+      formatted,
       deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);

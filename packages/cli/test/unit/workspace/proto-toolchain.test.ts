@@ -88,7 +88,7 @@ describe('protoToolchainFiles', () => {
 describe('the grpc transport arm', () => {
   it('contributes the toolchain, its task, and its imports', () => {
     const grpc = transportSpec('grpc');
-    expect(grpc.memberFiles?.('orders').map((f) => f.path)).toContain('buf.gen.yaml');
+    expect(grpc.memberFiles?.('orders', true).map((f) => f.path)).toContain('buf.gen.yaml');
     expect(grpc.memberTasks?.['proto:gen']).toBe(PROTO_TASK_COMMAND);
     expect(grpc.memberImports?.['@bufbuild/protobuf']).toBeDefined();
   });
@@ -97,8 +97,8 @@ describe('the grpc transport arm', () => {
   // namespace. A hyphenated member name is not a legal proto package component.
   it('derives a distinct, legal proto package per member', () => {
     const grpc = transportSpec('grpc');
-    const first = grpc.memberFiles?.('orders') ?? [];
-    const second = grpc.memberFiles?.('order-items') ?? [];
+    const first = grpc.memberFiles?.('orders', true) ?? [];
+    const second = grpc.memberFiles?.('order-items', true) ?? [];
     expect(first.some((f) => f.contents.includes('package orders.v1;'))).toBe(true);
     expect(second.some((f) => f.contents.includes('package order_items.v1;'))).toBe(true);
   });

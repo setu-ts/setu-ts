@@ -569,7 +569,22 @@ jobs:
         with:
           version: v3.16.3
 
-      # Render drift, image builds, and the Compose model.
+      # The generated mode scaffolds through the Node `setu` binary and installs
+      # the scaffold from a local registry serving this tree's own packs, which
+      # are built with the workspace's TypeScript — so it needs Node and an
+      # installed workspace.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Render drift, image builds, the Compose model, and the generated workspace.
       - name: Deployment gate
         run: deno task check:deploy
 

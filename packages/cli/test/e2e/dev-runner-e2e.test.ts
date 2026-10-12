@@ -141,6 +141,148 @@ async function observed(): Promise<string | undefined> {
   return await nodeFs.readFile(`${root}/observed.txt`, 'utf8').catch(() => undefined);
 }
 
+/**
+ * The npm profile's members: a `package.json` whose `start` script serves, as
+ * the npm runner (`node scripts/dev.mjs`) starts each member with `npm start`.
+ */
+async function writeNodeWorkspace(
+  members: readonly Member[],
+  ordersDelayMs: number,
+): Promise<void> {
+  await nodeFs.writeFile(
+    `${root}/setu.workspace.json`,
+    JSON.stringify({ version: 1, basePort: members[0].port, runtime: 'node', members }, null, 2),
+  );
+  await nodeFs.mkdir(`${root}/scripts`, { recursive: true });
+  const runner = workspaceDevRunner(workspaceProfile('node'));
+  await nodeFs.writeFile(`${root}/${runner.path}`, runner.contents);
+  const orders = members.find((member) => member.name === 'orders')!;
+  const billing = members.find((member) => member.name === 'billing')!;
+  for (const member of members) {
+    await nodeFs.mkdir(`${root}/apps/${member.name}`, { recursive: true });
+    await nodeFs.writeFile(
+      `${root}/apps/${member.name}/package.json`,
+      JSON.stringify({ name: member.name, private: true, scripts: { start: 'node server.mjs' } }),
+    );
+  }
+  await nodeFs.writeFile(
+    `${root}/apps/orders/server.mjs`,
+    `import { createServer } from 'node:http';\n` +
+      `await new Promise((resolve) => setTimeout(resolve, ${ordersDelayMs}));\n` +
+      `createServer((_req, res) => res.end('ok')).listen(${orders.port}, '127.0.0.1');\n`,
+  );
+  await nodeFs.writeFile(
+    `${root}/apps/billing/server.mjs`,
+    `import { createServer } from 'node:http';\n` +
+      `import { writeFileSync } from 'node:fs';\n` +
+      `const ready = await fetch('http://127.0.0.1:${orders.port}/ready')\n` +
+      `  .then((response) => response.ok)\n` +
+      `  .catch(() => false);\n` +
+      `writeFileSync('${root}/observed.txt', String(ready));\n` +
+      `createServer((_req, res) => res.end('ok')).listen(${billing.port}, '127.0.0.1');\n`,
+  );
+}
+
+/** Runs the npm profile's runner until the dependent has reported, then stops it. */
+async function runNodeRunner(
+  timeoutMs: number,
+  env: Readonly<Record<string, string>> = {},
+): Promise<void> {
+  const child = spawnProcess(process.execPath, {
+    args: ['scripts/dev.mjs'],
+    cwd: root,
+    env,
+    stdout: 'piped',
+    stderr: 'piped',
+  });
+  const collected = child.output();
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    if (await observed() !== undefined) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // Already exited.
+  }
+  await collected;
+}
+
+describe('the npm-profile dev runner, executed', () => {
+  it('starts a dependent only after its prerequisite answers /ready', async () => {
+    const orders = await unusedPort();
+    const billing = await unusedPort();
+    await writeNodeWorkspace(
+      [{ name: 'orders', port: orders }, { name: 'billing', port: billing, dependsOn: ['orders'] }],
+      2000,
+    );
+    await runNodeRunner(20_000);
+    expect(await observed()).toBe('true');
+  });
+
+  it('does not wait when nothing is declared — the control', async () => {
+    const orders = await unusedPort();
+    const billing = await unusedPort();
+    await writeNodeWorkspace(
+      [{ name: 'orders', port: orders }, { name: 'billing', port: billing }],
+      2000,
+    );
+    await runNodeRunner(20_000);
+    expect(await observed()).toBe('false');
+  });
+});
+
+/** Whether something still accepts connections on a loopback port. */
+async function listening(port: number): Promise<boolean> {
+  return await fetch(`http://127.0.0.1:${port}/`).then(
+    async (response) => {
+      await response.body?.cancel();
+      return true;
+    },
+    () => false,
+  );
+}
+
+describe('the npm-profile dev runner, stopped', () => {
+  // PR #450 CI: npm runs `start` through the platform shell, and Ubuntu's `dash`
+  // does not forward a signal to the command it runs. The runner signalled only
+  // its `npm` children, so every member's server outlived it — holding its port
+  // and the inherited output pipe. Locally `bash` execs a lone command and hid
+  // it. This shell runs the command as a CHILD, as `dash` does, so the defect
+  // reproduces anywhere; the runner must still leave no server behind.
+  // POSIX only: the fixture is a `/bin/sh` script, and Windows has no process
+  // groups — the runner signals the child directly there, by design.
+  it.skipIf(process.platform === 'win32')(
+    'stops every member when the script shell does not forward signals',
+    async () => {
+      const orders = await unusedPort();
+      const billing = await unusedPort();
+      await writeNodeWorkspace(
+        [{ name: 'orders', port: orders }, {
+          name: 'billing',
+          port: billing,
+          dependsOn: ['orders'],
+        }],
+        0,
+      );
+      const shell = `${root}/non-forwarding-sh`;
+      await nodeFs.writeFile(shell, '#!/bin/sh\nshift\n/bin/sh -c "$1; :"\n', { mode: 0o755 });
+      await runNodeRunner(20_000, { NPM_CONFIG_SCRIPT_SHELL: shell });
+      expect(await observed()).toBe('true');
+      // Shutdown is asynchronous: give the members' groups a moment to exit.
+      const deadline = performance.now() + 5_000;
+      while (
+        performance.now() < deadline && (await listening(orders) || await listening(billing))
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect({ orders: await listening(orders), billing: await listening(billing) })
+        .toEqual({ orders: false, billing: false });
+    },
+  );
+});
+
 describe('the generated dev runner, executed', () => {
   it('starts a dependent only after its prerequisite answers /ready', async () => {
     const orders = await unusedPort();

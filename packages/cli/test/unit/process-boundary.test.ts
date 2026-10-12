@@ -1,12 +1,25 @@
 import * as nodeFs from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
-import { denoProcess, type MainProcess, runMain } from '../../src/main.ts';
+import { createServer } from 'node:net';
+import { emitInterrupt, type MainProcess, nodeProcess, runMain } from '../../src/main.ts';
 
-const PATTERNS = [/prompt\(/, /confirm\(/, /Deno\.stdin/, /Deno\.exit/] as const;
+// Host process reads and exits: Deno's (generated Deno source is emitted by the
+// allowlisted modules as text) and Node's. Only the boundary may touch them.
+const PATTERNS = [
+  /prompt\(/,
+  /confirm\(/,
+  /Deno\.stdin/,
+  /Deno\.exit/,
+  /process\.exit\(/,
+  /process\.stdin/,
+  /node:readline/,
+] as const;
 
 const ALLOWLIST = [
+  'src/bin.ts',
   'src/main.ts',
+  'src/terminal-line.ts',
   'src/workspace/dev-runner.ts',
   'src/devtool/dev-entry.ts',
 ] as const;
@@ -29,8 +42,10 @@ describe('the process boundary of packages/cli/src', () => {
 
   it('holds the allowlist to exactly its named entries', () => {
     expect([...ALLOWLIST].sort()).toEqual([
+      'src/bin.ts',
       'src/devtool/dev-entry.ts',
       'src/main.ts',
+      'src/terminal-line.ts',
       'src/workspace/dev-runner.ts',
     ]);
   });
@@ -49,7 +64,7 @@ describe('the process boundary of packages/cli/src', () => {
       args: ['new', 'app'],
       cwd: () => '/work',
       isTerminal: () => true,
-      prompt: () => '',
+      prompt: () => Promise.resolve(''),
       log: () => {},
       error: err.sink,
       portAvailable: () => Promise.resolve(true),
@@ -76,7 +91,7 @@ describe('the process boundary of packages/cli/src', () => {
       args: ['--version'],
       cwd: () => '/work',
       isTerminal: () => false,
-      prompt: () => null,
+      prompt: () => Promise.resolve(null),
       log: output.sink,
       error: errors.sink,
       portAvailable: () => Promise.resolve(true),
@@ -87,34 +102,93 @@ describe('the process boundary of packages/cli/src', () => {
     expect(output.lines).not.toEqual([]);
   });
 
-  it.skipIf(!('Deno' in globalThis))(
-    'builds a Deno adapter whose port probe reports bind success and refusal',
-    async () => {
-      const originalPrompt = globalThis.prompt;
-      const originalLog = console.log;
-      const originalError = console.error;
-      const messages: string[] = [];
-      globalThis.prompt = () => 'answer';
-      console.log = (message) => messages.push(String(message));
-      console.error = (message) => messages.push(String(message));
-      try {
-        const process = denoProcess();
-        expect(process.args).toEqual(Deno.args);
-        expect(process.cwd()).toBe(Deno.cwd());
-        expect(typeof process.isTerminal()).toBe('boolean');
-        expect(process.prompt('question')).toBe('answer');
-        process.log('out');
-        process.error('err');
-        expect(messages).toEqual(['out', 'err']);
-        expect(await process.portAvailable(0)).toBe(true);
-        expect(await process.portAvailable(-1)).toBe(false);
-      } finally {
-        globalThis.prompt = originalPrompt;
-        console.log = originalLog;
-        console.error = originalError;
-      }
-    },
-  );
+  it('builds a Node adapter whose port probe reports bind success and refusal', async () => {
+    const originalLog = console.log;
+    const originalError = console.error;
+    const messages: string[] = [];
+    console.log = (message) => messages.push(String(message));
+    console.error = (message) => messages.push(String(message));
+    const held = createServer();
+    await new Promise<void>((resolve) => held.listen({ host: '127.0.0.1', port: 0 }, resolve));
+    try {
+      const host = nodeProcess(() => {});
+      expect(host.args).toEqual(process.argv.slice(2));
+      expect(host.cwd()).toBe(process.cwd());
+      expect(typeof host.isTerminal()).toBe('boolean');
+      host.log('out');
+      host.error('err');
+      expect(messages).toEqual(['out', 'err']);
+      const address = held.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      expect(await host.portAvailable(port)).toBe(false);
+      expect(await host.portAvailable(0)).toBe(true);
+      expect(await host.portAvailable(-1)).toBe(false);
+    } finally {
+      console.log = originalLog;
+      console.error = originalError;
+      await new Promise<void>((resolve) => held.close(() => resolve()));
+    }
+  });
+
+  it("routes the Node host's prompt through its reader, and releases it on dispose", async () => {
+    const host = nodeProcess(() => {});
+    const interrupted = new AbortController();
+    interrupted.abort();
+    // An already-interrupted run never asks: no reader is opened on stdin.
+    expect(await host.prompt('Template? ', interrupted.signal)).toBeNull();
+    host.dispose?.();
+    // Disposed: every later question answers "no answer" rather than reading.
+    expect(await host.prompt('Again? ')).toBeNull();
+  });
+
+  it('disposes the host after the run, so an open terminal reader cannot keep it alive', async () => {
+    let disposed = 0;
+    const host: MainProcess = {
+      args: ['--version'],
+      cwd: () => '/work',
+      isTerminal: () => false,
+      prompt: () => Promise.resolve(null),
+      log: () => {},
+      error: () => {},
+      portAvailable: () => Promise.resolve(true),
+      dispose: () => {
+        disposed++;
+      },
+    };
+    expect(await runMain({ fs: createFakeFs(), now: () => 0 }, host)).toBe(0);
+    expect(disposed).toBe(1);
+  });
+
+  it('delivers a Ctrl+C at a question as the SIGINT event, never as a real signal', () => {
+    // process.kill would terminate the process outright on Windows, and on any
+    // platform where no handler is registered; the event only runs handlers.
+    const originalKill = process.kill;
+    let killed = false;
+    process.kill = (() => {
+      killed = true;
+      return true;
+    }) as typeof process.kill;
+    let handled = 0;
+    const handler = (): void => {
+      handled++;
+    };
+    process.on('SIGINT', handler);
+    try {
+      emitInterrupt();
+    } finally {
+      process.off('SIGINT', handler);
+      process.kill = originalKill;
+    }
+    expect(handled).toBe(1);
+    expect(killed).toBe(false);
+  });
+
+  it('never ends the process itself; the executable sets the exit code', async () => {
+    const bin = await nodeFs.readFile(new URL('../../src/bin.ts', import.meta.url), 'utf8');
+    expect(bin.startsWith('#!/usr/bin/env node\n')).toBe(true);
+    expect(stripComments(bin)).toContain('process.exitCode = await runMain(');
+    expect(stripComments(bin)).not.toContain('process.exit(');
+  });
 });
 
 async function* walk(dir: string): AsyncGenerator<string> {

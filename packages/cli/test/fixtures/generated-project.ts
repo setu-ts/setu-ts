@@ -5,6 +5,7 @@ import {
   unusedPort as nodeUnusedPort,
 } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 /**
  * Helpers for type-checking a project the CLI just scaffolded.
  *
@@ -19,7 +20,7 @@ import * as nodeFs from 'node:fs/promises';
  */
 
 /** This repository's root, three levels up from `packages/cli/test/`. */
-export const REPO_ROOT: string = new URL('../../../../', import.meta.url).pathname.replace(
+export const REPO_ROOT: string = fileURLToPath(new URL('../../../../', import.meta.url)).replace(
   /\/$/,
   '',
 );
@@ -97,6 +98,37 @@ export async function useWorkspacePackages(root: string): Promise<void> {
   // Trailing newline, or a later `deno fmt --check` on the repointed project
   // would flag the fixture's own rewrite rather than anything the CLI emitted.
   await nodeFs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await dropFrameworkDependencies(root);
+}
+
+/**
+ * Removes the framework packages from a project's `package.json`, when it has
+ * one (a Workers project, or a template with a frontend build).
+ *
+ * Deno resolves every `package.json` dependency before it type-checks, and the
+ * framework's ranges name a version npm does not carry until the release is
+ * cut. The import map rewritten above already supplies each one, so the entry
+ * here is redundant for the check and only able to fail it.
+ *
+ * @param root - The project directory
+ */
+async function dropFrameworkDependencies(root: string): Promise<void> {
+  const path = `${root}/package.json`;
+  let text: string;
+  try {
+    text = await nodeFs.readFile(path, 'utf8');
+  } catch {
+    return;
+  }
+  const manifest = JSON.parse(text) as Record<string, unknown>;
+  for (const section of ['dependencies', 'devDependencies']) {
+    const entries = manifest[section] as Record<string, string> | undefined;
+    if (entries === undefined) continue;
+    for (const name of Object.keys(entries)) {
+      if (name.startsWith('@setu-ts/')) delete entries[name];
+    }
+  }
+  await nodeFs.writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 /** What a `deno check` subprocess reported. */

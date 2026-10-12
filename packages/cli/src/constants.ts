@@ -43,7 +43,7 @@ export const EXIT_INTERRUPTED = 130;
  * `cloudflare-workers` emits the `export default { fetch }` entry plus a
  * `wrangler.toml` and no `listen`; the other three emit the Hono serve entry.
  */
-export const TARGET_RUNTIMES = ['deno', 'node', 'bun', 'cloudflare-workers'] as const;
+export const TARGET_RUNTIMES = ['node', 'deno', 'bun', 'cloudflare-workers'] as const;
 
 /** A runtime target accepted by `setu new --runtime`. */
 export type TargetRuntime = (typeof TARGET_RUNTIMES)[number];

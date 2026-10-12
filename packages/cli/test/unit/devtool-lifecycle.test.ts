@@ -50,12 +50,15 @@ describe('M101f lifecycle refusals and allocation', () => {
       for (const entry of devEntryVariants(port, false)) {
         const fs = createFakeFs();
         expect(
-          await runNewCommand(parseArgs(['shop', '--devtool', '--devtool-port', String(port)]), {
-            fs,
-            cwd: '/ws',
-            log: () => {},
-            error: () => {},
-          }),
+          await runNewCommand(
+            parseArgs(['shop', '--runtime', 'deno', '--devtool', '--devtool-port', String(port)]),
+            {
+              fs,
+              cwd: '/ws',
+              log: () => {},
+              error: () => {},
+            },
+          ),
         ).toBe(0);
         await fs.writeFile('/ws/shop/main.dev.ts', new TextEncoder().encode(entry));
         const before = fs.writes.length;
@@ -89,7 +92,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     const fs = createFakeFs();
     const deps = { fs, log: () => {}, error: () => {} };
     expect(
-      await runNewCommand(parseArgs(['ws', '--workspace', '--port', '3000']), {
+      await runNewCommand(parseArgs(['ws', '--workspace', '--runtime', 'deno', '--port', '3000']), {
         ...deps,
         cwd: '/',
       }),
@@ -127,7 +130,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     const fs = createFakeFs();
     const deps = { fs, log: () => {}, error: () => {} };
     expect(
-      await runNewCommand(parseArgs(['ws', '--workspace', '--port', '3000']), {
+      await runNewCommand(parseArgs(['ws', '--workspace', '--runtime', 'deno', '--port', '3000']), {
         ...deps,
         cwd: '/',
       }),
@@ -212,7 +215,7 @@ describe('M101f lifecycle refusals and allocation', () => {
           imports: Object.fromEntries(
             ['common', 'kernel', 'runtime'].map((
               name,
-            ) => [`@setu-ts/${name}`, `jsr:@setu-ts/${name}@^0.7.0`]),
+            ) => [`@setu-ts/${name}`, `npm:@setu-ts/${name}@^0.7.0`]),
           ),
         }),
       });
@@ -262,7 +265,7 @@ describe('M101f lifecycle refusals and allocation', () => {
   it('probes the standalone default and records it in the entry and README', async () => {
     const fs = createFakeFs();
     expect(
-      await runNewCommand(parseArgs(['shop', '--devtool']), {
+      await runNewCommand(parseArgs(['shop', '--runtime', 'deno', '--devtool']), {
         fs,
         cwd: '/ws',
         log: () => {},
@@ -367,7 +370,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     const fs = createFakeFs();
     const deps = { fs, log: () => {}, error: () => {} };
     expect(
-      await runNewCommand(parseArgs(['ws', '--workspace', '--port', '3000']), {
+      await runNewCommand(parseArgs(['ws', '--workspace', '--runtime', 'deno', '--port', '3000']), {
         ...deps,
         cwd: '/',
       }),

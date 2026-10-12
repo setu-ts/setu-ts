@@ -396,7 +396,7 @@ describe('generated artifacts are wired — end to end', () => {
   // this is the project shape that has none — so it is the one where the promise is
   // either true or merely documented.
   it('serves every wired artifact in a project scaffolded with no template', async () => {
-    expect(await run(['new', 'bare'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'bare'])).toBe(0);
     const project = `${root}/bare`;
 
     for (const [schematic, name] of MINIMAL_ARTIFACTS) {
@@ -427,7 +427,7 @@ describe('generated artifacts are wired — end to end', () => {
   // until it was listed no generated artifact had ever been booted in one.
   for (const template of ['rest', 'class-based', 'microservice'] as const) {
     it(`serves every wired artifact on --template ${template}`, async () => {
-      expect(await run(['new', 'shop', '--template', template])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
 
       const classBased = template === 'class-based';
@@ -505,7 +505,18 @@ describe('generated artifacts are wired — end to end', () => {
   // handler placed there would be registered twice. This arm boots it once with
   // every ingress family and asserts the single registration site.
   it('serves every ingress artifact on microservice --style class-based', async () => {
-    expect(await run(['new', 'shop', '--template', 'microservice', '--style', 'class-based'])).toBe(
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'shop',
+        '--template',
+        'microservice',
+        '--style',
+        'class-based',
+      ]),
+    ).toBe(
       0,
     );
     const project = `${root}/shop`;
@@ -589,7 +600,7 @@ export function auditLogMiddleware(): MiddlewareFunction {
 `;
 
     it('leaves the regenerated barrel compiling', async () => {
-      expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
       await nodeFs.mkdir(`${project}/src/middleware`, { recursive: true });
       await nodeFs.writeFile(
@@ -703,7 +714,7 @@ await app.stop();
 `;
 
     it('the edited factory survives an unrelated generate and its dependency arrives', async () => {
-      expect(await run(['new', 'shop', '--template', 'microservice'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'microservice'])).toBe(0);
       const project = `${root}/shop`;
 
       // Generate the command handler, then the developer edits its factory.
@@ -740,7 +751,7 @@ await app.stop();
   // failures — a 500 on every module request, and a silently unreachable route.
   describe('the collision refusal', () => {
     it('refuses each colliding pair, and writes nothing', async () => {
-      expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(0);
       expect(await run(['g', 'controller', 'gizmo', '--dir', project])).toBe(0);

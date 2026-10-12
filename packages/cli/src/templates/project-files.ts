@@ -11,13 +11,7 @@
  * @module
  */
 
-import {
-  CONFIG_EXPORT,
-  CONFIG_MODULE,
-  PROGRAM_NAME,
-  type TargetRuntime,
-  VERSION,
-} from '../constants.ts';
+import { CONFIG_EXPORT, CONFIG_MODULE, PROGRAM_NAME, type TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { renderDevtoolSources, withSourceArgs } from '../devtool/sources.ts';
 import type {
@@ -39,9 +33,12 @@ import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 import { renderEquals, testHarnessFor } from '../schematics/test-harness.ts';
-
-/** Semver range the scaffolded project pins framework packages to. */
-const RANGE = `^${VERSION}`;
+import { frameworkSpecifier } from './framework-specifier.ts';
+import {
+  NPM_TOOLING_DEV_DEPENDENCIES,
+  NPM_TOOLING_SCRIPTS,
+  npmToolingFiles,
+} from './npm-tooling.ts';
 
 /**
  * The devtool composition parameter every generated factory accepts as its
@@ -137,6 +134,16 @@ export interface ResolvedHost {
    * pins — what a transport-contributed file needs in order to compile.
    */
   readonly extraImports: Readonly<Record<string, string>>;
+  /**
+   * npm `dependencies` merged into a generated `package.json` beyond the
+   * framework pins — the client a selected broker, queue or RPC transport loads
+   * (see `client-dependencies.ts`).
+   */
+  readonly extraDependencies: Readonly<Record<string, string>>;
+  /** npm `scripts` merged into a generated `package.json` (a transport's `proto:gen`). */
+  readonly extraScripts: Readonly<Record<string, string>>;
+  /** npm `devDependencies` merged into a generated `package.json` (the proto toolchain). */
+  readonly extraDevDependencies: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
   /** Routes the template's own source serves, for the README. */
@@ -181,6 +188,9 @@ export function resolveHost(
     setupCalls: host.setupCalls ?? [],
     extraTasks: { ...host.extraTasks },
     extraImports: {},
+    extraDependencies: {},
+    extraScripts: {},
+    extraDevDependencies: {},
     appFactory: host.appFactory,
     routes: host.routes ?? [],
     appFactoryContext: {
@@ -1030,12 +1040,12 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
  * Builds the Deno `imports` map for a generated project.
  *
  * @param host - The resolved template host
- * @returns Specifier → `jsr:` URL
+ * @returns Specifier → `npm:@setu-ts/…` specifier
  */
-function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
+function frameworkImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const imports: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
-    imports[`@setu-ts/${pkg}`] = `jsr:@setu-ts/${pkg}@${RANGE}`;
+    imports[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'deno');
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.
@@ -1043,19 +1053,18 @@ function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, 
 }
 
 /**
- * Builds the npm `dependencies` map for a generated project, using JSR's npm
- * compatibility names.
+ * Builds the npm `dependencies` map for a generated project.
  *
  * @param host - The resolved template host
- * @returns Specifier → `npm:@jsr/…` range
+ * @returns Package name → caret range
  */
 function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
     if (DEV_FRAMEWORK_PACKAGES.has(pkg)) continue;
-    deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
+    deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
   }
-  return { ...deps, ...host.manifest?.npmDependencies };
+  return { ...deps, ...host.extraDependencies, ...host.manifest?.npmDependencies };
 }
 
 /**
@@ -1071,7 +1080,7 @@ const DEV_FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set(['testing']);
  *
  * @param host - The resolved template host
  * @param runtime - The target runtime
- * @returns Specifier → `npm:@jsr/…` range
+ * @returns Package name → caret range
  */
 function npmDevFrameworkDependencies(
   host: ResolvedHost,
@@ -1080,7 +1089,7 @@ function npmDevFrameworkDependencies(
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
     if (DEV_FRAMEWORK_PACKAGES.has(pkg)) {
-      deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
+      deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
     }
   }
   return deps;
@@ -1313,13 +1322,23 @@ function tsconfigOptions(
   const template = manifest?.tsconfigCompilerOptions;
   const workers = runtime === 'cloudflare-workers'
     ? {
-      allowImportingTsExtensions: true,
-      noEmit: true,
       // A template's own `lib` wins: a frontend build needs the DOM for the code
       // it ships to a browser.
       lib: template?.['lib'] ?? ['ES2022'],
       types: [WORKERS_TYPES_PACKAGE, ...templateTypes(template)],
     }
+    : {};
+  // Every npm-manifest target type-checks with its own `tsc` (M111d §3.7), and
+  // its imports end in `.ts` — which `tsc` accepts only alongside `noEmit`. A
+  // Deno project's `tsconfig.json` serves its frontend build alone.
+  const checked = runtime === 'deno' ? {} : { allowImportingTsExtensions: true, noEmit: true };
+  // TypeScript 6 includes no `@types/*` package unless `types` names it, so the
+  // runtime's own declarations are named — `process` and `node:test` on Node,
+  // `bun:test` on Bun. Workers names its own below.
+  const runtimeTypes = runtime === 'node'
+    ? { types: ['node', ...templateTypes(template)] }
+    : runtime === 'bun'
+    ? { types: ['bun', ...templateTypes(template)] }
     : {};
   return {
     target: 'ES2022',
@@ -1329,6 +1348,8 @@ function tsconfigOptions(
     verbatimModuleSyntax: true,
     skipLibCheck: true,
     ...template,
+    ...checked,
+    ...runtimeTypes,
     ...workers,
   };
 }
@@ -1464,7 +1485,8 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   // the only checker present. `tsc` reads the `tsconfig.json` the scaffold
   // already emitted and nothing consumed.
   //
-  // The three are pinned as a SET, because they are not independent: every
+  // `wrangler` and its types are pinned as a SET (TypeScript comes from the
+  // shared npm tooling, `npm-tooling.ts`), because they are not independent: every
   // `wrangler` release declares a peer range on `@cloudflare/workers-types`
   // starting at its own bundled workerd date, and npm refuses an install whose
   // ranges do not intersect. `wrangler` moved that peer from `^4` to `^5` inside
@@ -1480,7 +1502,6 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   if (runtime === 'cloudflare-workers') {
     return {
       wrangler: '~4.148.0',
-      typescript: '^5.7.0',
       [WORKERS_TYPES_PACKAGE]: '^5.20261006.1',
     };
   }
@@ -1496,7 +1517,7 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
  *   no `package.json`, so an npm toolchain would otherwise have nowhere to be
  *   declared. Only one template needs this.
  * - **Cloudflare Workers, always.** `wrangler` bundles with esbuild, which
- *   resolves neither `jsr:` specifiers nor a Deno import map, so every Workers
+ *   resolves no Deno import map, so every Workers
  *   project needs its framework packages in a `package.json` regardless of
  *   template.
  *
@@ -1521,7 +1542,7 @@ function standaloneNpmFiles(
   // through the import map instead) must not acquire a package.json — that
   // switches Deno to node_modules resolution.
   // Workers ALWAYS needs one: `wrangler` bundles `src/index.ts` with esbuild,
-  // which resolves neither `jsr:` specifiers nor a Deno import map, so a project
+  // which resolves no Deno import map, so a project
   // declaring its framework packages only in `deno.json` fails `wrangler dev`
   // with one `Could not resolve "@setu-ts/…"` per package — while the CLI's own
   // next-step hint already said `npm install && npx wrangler dev`. There was
@@ -1539,11 +1560,14 @@ function standaloneNpmFiles(
     // devDependencies have ONE home. Inlining Workers' here meant a package
     // added to that helper would be silently ignored on this path.
     ...runtimeDevDependencies(runtime),
+    ...(onWorkers ? NPM_TOOLING_DEV_DEPENDENCIES : {}),
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
     ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
-    ...(onWorkers ? { check: 'tsc --noEmit', dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
+    ...(onWorkers
+      ? { ...NPM_TOOLING_SCRIPTS, dev: 'wrangler dev', deploy: 'wrangler deploy' }
+      : {}),
   };
 
   return [
@@ -1569,14 +1593,13 @@ function standaloneNpmFiles(
         )
       }\n`,
     },
-    // JSR packages resolve from npm only when the @jsr scope is mapped.
-    ...(onWorkers ? [{ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' }] : []),
     {
       path: 'tsconfig.json',
       contents: `${
         JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
       }\n`,
     },
+    ...(onWorkers ? npmToolingFiles(manifest?.npmBuild?.outputDir) : []),
   ];
 }
 
@@ -1799,7 +1822,13 @@ describe('application composition', () => {
             // it; the renderer never did.
             //
             // Refused in a workspace member, where the root declares it instead.
-            ...(!isWorkspaceMember && manifest?.npmBuild !== undefined
+            //
+            // Every standalone Deno project carries it too (M111d §3.4): the
+            // `setu` CLI runs on Node and imports `setu.config.ts` through Node
+            // resolution, which cannot read this import map — `deno install`
+            // links `node_modules/@setu-ts/*` under this setting, and that link
+            // is what the import resolves through.
+            ...(!isWorkspaceMember && (runtime === 'deno' || manifest?.npmBuild !== undefined)
               ? { nodeModulesDir: 'auto' }
               : {}),
             // Declared by the template rather than fixed here: `deno check` reads
@@ -1807,7 +1836,7 @@ describe('application composition', () => {
             // JSX needs `jsx`, and decorated classes need nothing, because the
             // decorator surface is TC39 standard decorators.
             ...(compilerOptions === undefined ? {} : { compilerOptions }),
-            imports: jsrImports(host, runtime),
+            imports: frameworkImports(host, runtime),
           },
           null,
           2,
@@ -1830,7 +1859,11 @@ describe('application composition', () => {
             name: projectName,
             version: '0.1.0',
             type: 'module',
-            scripts: npmScripts(runtime, manifest),
+            scripts: {
+              ...npmScripts(runtime, manifest),
+              ...NPM_TOOLING_SCRIPTS,
+              ...host.extraScripts,
+            },
             dependencies: npmDependencies(host, runtime),
             // Runtime-level first, so a template that pins its own copy of the
             // same package wins — the template knows what its build needs.
@@ -1844,6 +1877,8 @@ describe('application composition', () => {
             devDependencies: {
               ...npmDevFrameworkDependencies(host, runtime),
               ...runtimeDevDependencies(runtime),
+              ...NPM_TOOLING_DEV_DEPENDENCIES,
+              ...host.extraDevDependencies,
               ...manifest?.npmDevDependencies,
             },
           },
@@ -1852,14 +1887,13 @@ describe('application composition', () => {
         )
       }\n`,
     });
-    // JSR packages resolve from npm only when the @jsr scope is mapped.
-    files.push({ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' });
     files.push({
       path: 'tsconfig.json',
       contents: `${
         JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
       }\n`,
     });
+    for (const file of npmToolingFiles(manifest?.npmBuild?.outputDir)) files.push(file);
   }
 
   files.push({

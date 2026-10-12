@@ -51,7 +51,7 @@
     "npm:@types/deno@2.7.0": "2.7.0",
     "npm:@types/node@24": "24.19.2",
     "npm:@types/ws@^8.18.2": "8.18.2",
-    "npm:@vitest/coverage-v8@5.0.3": "5.0.3_vitest@5.0.3_@opentelemetry+api@1.9.1_@types+node@24.19.2_esbuild@0.28.2_vite@8.3.1",
+    "npm:@vitest/coverage-v8@5.0.3": "5.0.3_vitest@5.0.3_@types+node@24.19.2_tsx@4.23.15",
     "npm:amqplib@0.10": "0.10.9",
     "npm:drizzle-orm@0.45.2": "0.45.2_@opentelemetry+api@1.9.1_@prisma+client@7.10.0_pg@8.23.0_typescript@6.0.3",
     "npm:drizzle-orm@~0.45.2": "0.45.2_@opentelemetry+api@1.9.1_@prisma+client@7.10.0_pg@8.23.0_typescript@6.0.3",
@@ -67,7 +67,9 @@
     "npm:pg@8": "8.23.0",
     "npm:pino@10": "10.3.1",
     "npm:playwright@1.63.0": "1.63.0",
+    "npm:prettier@^3.9.10": "3.9.10",
     "npm:react-router@8": "8.4.0_react@19.3.0",
+    "npm:tsx@^4.23.0": "4.23.15",
     "npm:typescript@6.0.3": "6.0.3",
     "npm:vitest@5.0.3": "5.0.3_@opentelemetry+api@1.9.1_@types+node@24.19.2_@vitest+coverage-v8@5.0.3",
     "npm:ws@^8.18.0": "8.22.0",
@@ -1842,7 +1844,7 @@
         "tslib@2.8.1"
       ]
     },
-    "@vitest/coverage-v8@5.0.3_vitest@5.0.3_@opentelemetry+api@1.9.1_@types+node@24.19.2_esbuild@0.28.2_vite@8.3.1": {
+    "@vitest/coverage-v8@5.0.3_vitest@5.0.3_@types+node@24.19.2_tsx@4.23.15": {
       "integrity": "sha512-+klsyz7BvT1vCU28Zkfzms1Ia78XD0V41U3FUtRaa3S+vOr/EXvK1O6BvVD7l1RzEjm6SONR2aybOvDDf9u0mQ==",
       "dependencies": [
         "@bcoe/v8-coverage",
@@ -1865,7 +1867,7 @@
         "@vitest/istanbul-lib-coverage"
       ]
     },
-    "@vitest/mocker@5.0.3_vite@8.3.1_@types+node@24.19.2_esbuild@0.28.2": {
+    "@vitest/mocker@5.0.3_vite@8.3.1_@types+node@24.19.2_tsx@4.23.15": {
       "integrity": "sha512-T8sWAIbkSyAjkwTcaEc3Iu0o9A27X1/kdXrizhZkGuSKScRQtRzclfAMpOTcGdXCsqxeWlpGy3XjqaW8CpLORg==",
       "dependencies": [
         "@jridgewell/trace-mapping",
@@ -3241,6 +3243,10 @@
         "xtend"
       ]
     },
+    "prettier@3.9.10": {
+      "integrity": "sha512-skGHTH1Yb9QvaTC4hWnRTzEYtCpApF0UMBPz+t/0ZPzP8ihefo/btKd+QA7pUE0fEwA1SbS/NmhyEcstdXOIdA==",
+      "bin": true
+    },
     "priorityqueuejs@2.0.0": {
       "integrity": "sha512-19BMarhgpq3x4ccvVi8k2QpJZcymo/iFUcrhPd4V96kYGovOdTsWwy7fxChYi4QY+m2EnGBWSX9Buakz+tWNQQ=="
     },
@@ -3684,6 +3690,16 @@
     "tslib@2.8.1": {
       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="
     },
+    "tsx@4.23.15": {
+      "integrity": "sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==",
+      "dependencies": [
+        "esbuild"
+      ],
+      "optionalDependencies": [
+        "fsevents"
+      ],
+      "bin": true
+    },
     "tsyringe@4.10.0": {
       "integrity": "sha512-axr3IdNuVIxnaK5XGEUFTu3YmAQ6lllgrvqfEoR16g/HGnYY/6We4oWENtAnzK6/LpJ2ur9PAb80RBt7/U4ugw==",
       "dependencies": [
@@ -3731,7 +3747,7 @@
       "deprecated": true,
       "bin": true
     },
-    "vite@8.3.1_@types+node@24.19.2_esbuild@0.28.2": {
+    "vite@8.3.1_@types+node@24.19.2_esbuild@0.28.2_tsx@4.23.15": {
       "integrity": "sha512-/bvH9E9tmCXRGp2uXY3WbOldqpTwFkbha/8ANaEQ6VkxhH60KyqLwgZq6lG2y+4uT55x9+9eUHMpQ7uGnOCKjA==",
       "dependencies": [
         "@types/node@24.19.2",
@@ -3740,14 +3756,16 @@
         "picomatch",
         "postcss",
         "rolldown",
-        "tinyglobby"
+        "tinyglobby",
+        "tsx"
       ],
       "optionalDependencies": [
         "fsevents"
       ],
       "optionalPeers": [
         "@types/node@24.19.2",
-        "esbuild"
+        "esbuild",
+        "tsx"
       ],
       "bin": true
     },
@@ -4033,12 +4051,16 @@
       },
       "packages/cli": {
         "dependencies": [
+          "npm:prettier@^3.9.10",
+          "npm:tsx@^4.23.0",
           "npm:vitest@5.0.3"
         ],
         "packageJson": {
           "dependencies": [
             "npm:@types/deno@2.7.0",
             "npm:@types/node@24",
+            "npm:prettier@^3.9.10",
+            "npm:tsx@^4.23.0",
             "npm:typescript@6.0.3",
             "npm:vitest@5.0.3"
           ]
@@ -4083,6 +4105,18 @@
         }
       },
       "packages/cqrs-plugin": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ],
+        "packageJson": {
+          "dependencies": [
+            "npm:@types/node@24",
+            "npm:typescript@6.0.3",
+            "npm:vitest@5.0.3"
+          ]
+        }
+      },
+      "packages/create": {
         "dependencies": [
           "npm:vitest@5.0.3"
         ],

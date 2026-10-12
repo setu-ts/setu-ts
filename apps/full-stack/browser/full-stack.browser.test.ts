@@ -38,7 +38,18 @@ beforeAll(async () => {
   const runtime = createDenoRuntimeServices();
   const messages: string[] = [];
   expect(
-    await runCli(['new', 'shop', '--template', 'full-stack'], {
+    // `--runtime deno` explicitly: Node is the default target since M111d, and
+    // everything below — the workspace repointing, `deno task build`, the
+    // generated server — drives the Deno form. The Node full-stack scaffold is
+    // installed, built and served by packages/cli's node-scaffold-e2e.
+    await runCli([
+      'new',
+      'shop',
+      '--template',
+      'full-stack',
+      '--runtime',
+      'deno',
+    ], {
       fs: runtime.fs!,
       cwd: scratch,
       now: () => runtime.now(),

@@ -222,21 +222,18 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
-
-setu new my-app
-cd my-app && setu generate service billing
+npx @setu-ts/cli new my-app --template rest      # or: npm create @setu-ts my-app -- --template rest
+cd my-app && npm install && npm start
 ```
 
-Use the global install, or pass `--no-config --no-lock` to an ad-hoc `deno run` inside a project so
-Deno does not write the CLI's dependency graph into the project's lockfile.
+`setu` is a Node program on npm; `npm install --global @setu-ts/cli` puts it on your `PATH`. Node is
+the default target — `--runtime deno`, `bun` or `cloudflare-workers` scaffolds the others, each
+installing the framework from npm with its own package manager.
 
-The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
-
-All 51 workspace members are published on JSR as one release train: the core (`common`, `kernel`,
-`runtime`, `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`
-and the `cli` — except members added since the last release (`localization-plugin` and
-`idempotency-plugin` today), which the next release publishes.
+All 52 workspace members ship as one release train: the core (`common`, `kernel`, `runtime`,
+`exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, the `cli`
+and `create` — through `v0.8.0` on JSR, and from `v0.9.0` on npm, which also publishes the members
+added since `v0.8.0` (`localization-plugin`, `idempotency-plugin` and `create`) for the first time.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
@@ -376,7 +373,7 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 setu-ts/
-├── packages/              # 51 workspace members, published on JSR
+├── packages/              # 52 workspace members, published on JSR through v0.8.0, npm from v0.9.0
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)

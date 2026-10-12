@@ -43,6 +43,9 @@ function contentsOf(
   return file?.contents ?? '';
 }
 
+/** The guard every generated install line opens with (M111d). */
+const GUARD = 'RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && ';
+
 describe('workspaceContainerFiles', () => {
   it('emits a Dockerfile, an ignore file and a Compose file, all managed', () => {
     const files = workspaceContainerFiles(
@@ -124,9 +127,22 @@ describe('workspaceContainerFiles', () => {
       const command = lines.find((line) => line.startsWith('CMD '));
       expect(command).toContain('"run", "--frozen"');
       expect(command).not.toContain('--no-lock');
-      const install = lines.find((line) => line.startsWith('RUN deno cache main.ts'));
+      const install = lines.find((line) => line.includes('&& deno cache main.ts'));
       expect(install).toContain('deno install --frozen');
       expect(install).not.toContain('--no-lock');
+    });
+
+    // M111d: a gate builds against a local registry through this build argument.
+    // Empty (the default) it is UNSET before the install, so npm, Deno and Bun use
+    // their own default registry rather than an empty one; an ARG never reaches
+    // the running container's environment.
+    it('takes the install registry as an optional build argument', () => {
+      const contents = dockerfile();
+      expect(contents).toContain('ARG NPM_CONFIG_REGISTRY=');
+      expect(contents).toContain(`${GUARD}deno cache main.ts`);
+      expect(contents).not.toMatch(/^ENV NPM_CONFIG_REGISTRY/m);
+      // A build argument's value lands in image history, so the file says so.
+      expect(contents).toContain('never a\n# credential');
     });
 
     // Considered and rejected (plan §3.5), then MEASURED: with a cold cache and
@@ -330,8 +346,9 @@ describe('workspaceContainerFiles', () => {
       expect(contents).not.toContain('denoland/deno');
       // The whole workspace installs, not one member: a member resolves its
       // dependencies through the ROOT manifest and lockfile.
-      expect(contents).toContain('COPY package.json package-lock.json* .npmrc ./');
-      expect(contents).toContain('RUN npm install');
+      expect(contents).toContain('COPY package.json package-lock.json* ./');
+      expect(contents).toContain(`${GUARD}npm install`);
+      expect(contents).toContain('ARG NPM_CONFIG_REGISTRY=');
       // Numeric user, same reason as the Deno arm.
       expect(contents).toContain('USER 1000:1000');
       expect(contents).not.toMatch(/^USER deno/m);
@@ -346,7 +363,8 @@ describe('workspaceContainerFiles', () => {
       expect(contents).not.toContain('denoland/deno');
       // Bun installs into each member's own node_modules as well as the root,
       // and runs the entry with `bun`.
-      expect(contents).toContain('RUN bun install');
+      expect(contents).toContain(`${GUARD}bun install`);
+      expect(contents).toContain('ARG NPM_CONFIG_REGISTRY=');
       expect(contents).toContain('USER 1000:1000');
       expect(contents).toContain('CMD ["sh", "-c", "bun run main.ts"]');
     });
