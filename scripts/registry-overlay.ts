@@ -18,14 +18,11 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { basename } from 'node:path';
+import type { AddressInfo } from 'node:net';
 import { type PackedMember, packMembers } from './pack-members.ts';
 
 /** The public registry every other request is forwarded to. */
 export const UPSTREAM_REGISTRY = 'https://registry.npmjs.org';
-
-/** The URL prefix the overlay's own tarballs are served under. */
-const TARBALL_PREFIX = '/-/setu-overlay/';
 
 /**
  * The publication time packuments report by default: old enough that no
@@ -33,12 +30,19 @@ const TARBALL_PREFIX = '/-/setu-overlay/';
  */
 export const DEFAULT_PUBLISHED_AT = '2020-01-01T00:00:00.000Z';
 
-/** How the overlay is configured. */
-export interface RegistryOverlayOptions {
-  /** The packs to serve; built from the tree when omitted. */
-  readonly packs?: ReadonlyMap<string, PackedMember>;
-  /** The repository root the packs are built from, when `packs` is omitted. */
-  readonly root?: string;
+/**
+ * How the overlay is configured: the packs to serve, or the repository root to
+ * build them from.
+ */
+export type RegistryOverlayOptions =
+  & OverlaySettings
+  & (
+    | { readonly packs: ReadonlyMap<string, PackedMember> }
+    | { readonly root: string }
+  );
+
+/** The settings every overlay takes. */
+export interface OverlaySettings {
   /** `'now'` stamps packuments with the current time instead of the default. */
   readonly publishedAt?: 'default' | 'now';
   /** The registry everything else is forwarded to. */
@@ -85,13 +89,27 @@ export function packument(
       [pack.version]: {
         ...pack.manifest,
         dist: {
-          tarball: `${base}${TARBALL_PREFIX.slice(1)}${basename(pack.tarball)}`,
+          tarball: `${base}${tarballPath(pack.name, pack.version).slice(1)}`,
           ...digest,
         },
       },
     },
     time: { created: time, modified: time, [pack.version]: time },
   };
+}
+
+/**
+ * The canonical registry path of a package version's tarball — the route the
+ * public registry uses, `/@scope/name/-/name-version.tgz`. Advertising it rather
+ * than a private route means a lockfile resolved here names the same path a
+ * lockfile resolved against npm does, and the overlay serves both.
+ *
+ * @param name - The scoped package name
+ * @param version - The version
+ * @returns The request path
+ */
+export function tarballPath(name: string, version: string): string {
+  return `/${name}/-/${name.slice(name.indexOf('/') + 1)}-${version}.tgz`;
 }
 
 /**
@@ -110,6 +128,15 @@ export function requestedPackage(path: string): string | undefined {
   return /^@setu-ts\/[a-z0-9-]+$/.test(decoded) ? decoded : undefined;
 }
 
+/** A request path with `%2f` and the like decoded, or as sent when malformed. */
+function decodedPath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
 /**
  * Starts the overlay on an ephemeral `127.0.0.1` port.
  *
@@ -117,9 +144,9 @@ export function requestedPackage(path: string): string | undefined {
  * @returns The running overlay
  */
 export async function startRegistryOverlay(
-  options: RegistryOverlayOptions = {},
+  options: RegistryOverlayOptions,
 ): Promise<RegistryOverlay> {
-  const packs = options.packs ?? await packMembers(options.root ?? process.cwd());
+  const packs = 'packs' in options ? options.packs : await packMembers(options.root);
   const upstream = options.upstream ?? UPSTREAM_REGISTRY;
   const doFetch = options.fetch ?? fetch;
   const time = options.publishedAt === 'now' ? new Date().toISOString() : DEFAULT_PUBLISHED_AT;
@@ -128,7 +155,7 @@ export async function startRegistryOverlay(
   const digests = new Map<string, Integrity>();
   for (const pack of packs.values()) {
     const bytes = await fs.readFile(pack.tarball);
-    byTarball.set(basename(pack.tarball), pack);
+    byTarball.set(tarballPath(pack.name, pack.version), pack);
     digests.set(pack.name, {
       shasum: createHash('sha1').update(bytes).digest('hex'),
       integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
@@ -137,7 +164,9 @@ export async function startRegistryOverlay(
 
   let base = '';
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const path = (req.url ?? '/').split('?')[0] ?? '/';
+    // Always set on a request a server receives; typed optional for clients.
+    const url = String(req.url);
+    const path = url.replace(/\?.*$/s, '');
     const name = requestedPackage(path);
     if (name !== undefined) {
       const pack = packs.get(name);
@@ -150,24 +179,23 @@ export async function startRegistryOverlay(
       res.end(JSON.stringify({ error: `${name} is not served by this overlay` }));
       return;
     }
-    if (path.startsWith(TARBALL_PREFIX)) {
-      // Only a tarball the overlay itself packed is ever read from disk: the
-      // name is looked up, never joined onto a path.
-      const pack = byTarball.get(path.slice(TARBALL_PREFIX.length));
-      if (pack === undefined) {
-        res.statusCode = 404;
-        res.end();
-        return;
-      }
+    // Only a tarball the overlay itself packed is ever read from disk: the
+    // request path is looked up, never joined onto a filesystem path. Any other
+    // version of a framework package is the public registry's to serve.
+    const pack = byTarball.get(decodedPath(path));
+    if (pack !== undefined) {
       res.setHeader('content-type', 'application/octet-stream');
       res.end(await fs.readFile(pack.tarball));
       return;
     }
-    const forwarded = await doFetch(`${upstream}${req.url ?? '/'}`, {
+    const forwarded = await doFetch(`${upstream}${url}`, {
       headers: { accept: req.headers.accept ?? 'application/json' },
     });
     res.statusCode = forwarded.status;
-    res.setHeader('content-type', forwarded.headers.get('content-type') ?? 'application/octet-stream');
+    res.setHeader(
+      'content-type',
+      forwarded.headers.get('content-type') ?? 'application/octet-stream',
+    );
     res.end(Buffer.from(await forwarded.arrayBuffer()));
   };
 
@@ -178,9 +206,8 @@ export async function startRegistryOverlay(
     });
   });
   await new Promise<void>((resolve) => server.listen({ host: '127.0.0.1', port: 0 }, resolve));
-  const address = server.address();
-  const port = typeof address === 'object' && address !== null ? address.port : 0;
-  base = `http://127.0.0.1:${port}/`;
+  // A listening TCP server always reports an address object.
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
   return {
     url: base,
     packs,

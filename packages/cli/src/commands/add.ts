@@ -462,13 +462,21 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   const provider = ZERO_CONFIG_WIRINGS.get(bare);
   if (provider === undefined) return undefined;
 
-  const anchor = '...(devtool?.plugins ?? []),';
+  const anchor = '...(devtool?.plugins ?? [])';
   const scope = factoryScope(source);
   const code = scope?.code.slice(scope.start, scope.end);
-  const anchorMatch = code === undefined
-    ? null
-    : /^[ \t]*\.\.\.\(devtool\?\.plugins \?\? \[\]\),[ \t]*$/m.exec(code);
-  if (code === undefined || anchorMatch === null) {
+  // The spread as an ARRAY ELEMENT: followed by `,` or `]`, on its own line (the
+  // CLI's Deno rendering) or inline (Prettier's rendering of a short array, which
+  // is what an npm-target scaffold carries). Exactly one, so the insertion point
+  // is never a guess.
+  const anchors = code === undefined
+    ? []
+    : [...code.matchAll(/\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g)];
+  const anchorMatch = anchors.length === 1 ? anchors[0]! : null;
+  if (
+    code === undefined || anchorMatch === null ||
+    code.split(anchor).length !== 2
+  ) {
     return undefined;
   }
   const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
@@ -500,14 +508,14 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   }
 
   const withImport = importedBinding === undefined ? `${providerImport}\n${source}` : source;
-  const insertion = anchorMatch.index + anchorMatch[0].indexOf(anchor) +
-    scope!.start +
+  const insertion = anchorMatch.index + scope!.start +
     (importedBinding === undefined ? providerImport.length + 1 : 0);
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
-  const indentation = withImport.slice(lineStart, insertion);
-  return `${withImport.slice(0, insertion)}${factory}(),\n${indentation}${
-    withImport.slice(insertion)
-  }`;
+  const before = withImport.slice(lineStart, insertion);
+  // On its own line the new call takes a line of its own at the same indentation;
+  // inline it joins the array where it stands.
+  const separator = before.trim() === '' ? `\n${before}` : ' ';
+  return `${withImport.slice(0, insertion)}${factory}(),${separator}${withImport.slice(insertion)}`;
 }
 
 /**

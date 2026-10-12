@@ -82,6 +82,18 @@ export function formatsWithPrettier(runtime: TargetRuntime): boolean {
   return runtime !== 'deno';
 }
 
+/**
+ * The absolute path a planned file is written to: commands plan some files
+ * relative to the project and some absolute.
+ *
+ * @param projectRoot - The project directory
+ * @param path - The planned path
+ * @returns The destination path
+ */
+function destination(projectRoot: string, path: string): string {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) ? path : joinPath(projectRoot, path);
+}
+
 /** One file Prettier could not format, kept as rendered. */
 export interface FormatSkip {
   readonly path: string;
@@ -97,8 +109,9 @@ export interface FormattedPlan {
 /**
  * Formats every planned file Prettier has a parser for.
  *
- * With a `projectRoot` the configuration is the project's own when it has one
- * on disk, so a later `setu generate` honours a project that changed its style;
+ * With a `projectRoot` the configuration is the project's own for each
+ * destination file when it has one on disk — `overrides` and nested config files
+ * included — so a later `setu generate` honours a project that changed its style;
  * without one — `setu new`, before the project exists — it is the options the
  * scaffold writes into `.prettierrc.json`. A file whose source Prettier cannot
  * parse (a custom schematic's malformed output) is kept as rendered and
@@ -116,9 +129,6 @@ export async function formatPlannedFiles(
 ): Promise<FormattedPlan> {
   if (!files.some((file) => parserFor(file.path) !== undefined)) return { files, skipped: [] };
   const prettier = await load();
-  const config = projectRoot === undefined
-    ? PRETTIER_OPTIONS
-    : await prettier.resolveConfig(joinPath(projectRoot, 'package.json')) ?? PRETTIER_OPTIONS;
   const out: GeneratedFile[] = [];
   const skipped: FormatSkip[] = [];
   for (const file of files) {
@@ -128,6 +138,11 @@ export async function formatPlannedFiles(
       continue;
     }
     try {
+      // Resolved for EACH destination, so an `overrides` entry or a nested
+      // config file applies exactly as the project's own `format:check` reads it.
+      const config = projectRoot === undefined
+        ? PRETTIER_OPTIONS
+        : await prettier.resolveConfig(destination(projectRoot, file.path)) ?? PRETTIER_OPTIONS;
       out.push({ ...file, contents: await prettier.format(file.contents, { ...config, parser }) });
     } catch (cause) {
       out.push(file);

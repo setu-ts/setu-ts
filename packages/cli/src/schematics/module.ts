@@ -116,7 +116,7 @@ export class ${names.pascal}Controller {
 function classTest(names: DerivedNames, runtime: TargetRuntime): string {
   return `${testHarnessFor(runtime).imports}
 
-import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
+import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 describe('${names.pascal}Service', () => {
   it('starts with no records', () => {
@@ -130,7 +130,7 @@ function classModule(names: DerivedNames): string {
   return `import { Module } from '@setu-ts/decorator-plugin';
 
 import { ${names.pascal}Controller } from './${names.kebab}.controller.ts';
-import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
+import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 /**
  * The ${names.kebab} module.

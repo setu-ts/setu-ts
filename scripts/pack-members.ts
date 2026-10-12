@@ -8,11 +8,12 @@
  *
  * The packs are cached under `<root>/.tmp/overlay/<key>`, where the key hashes
  * every input a pack is built from: each published member's `src/`,
- * `package.json` and `tsconfig.json`, and the root inputs every build inherits —
- * `tsconfig.base.json`, the root `package.json`, `pnpm-lock.yaml` and this
- * script. A change to any of them is a new key, so a stale pack is never served.
- * A cache directory is published by an atomic rename, so concurrent callers
- * either build it or find it complete, never half-written.
+ * `package.json`, `tsconfig.json`, `README.md` and `LICENSE`, and the root inputs
+ * every build inherits — `tsconfig.base.json`, the solution `tsconfig.json`, the
+ * root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, the root
+ * `LICENSE` and this script. A change to any of them is a new key, so a stale
+ * pack is never served. A cache directory is published by an atomic rename, so a
+ * caller either builds it or finds it complete, never half-written.
  *
  * @module
  */
@@ -20,6 +21,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import { hostname } from 'node:os';
 import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
@@ -39,7 +41,14 @@ export interface PackedMember {
 }
 
 /** The root inputs every member's build inherits. */
-const ROOT_INPUTS = ['tsconfig.base.json', 'package.json', 'pnpm-lock.yaml'];
+const ROOT_INPUTS = [
+  'tsconfig.base.json',
+  'tsconfig.json',
+  'package.json',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'LICENSE',
+];
 
 /** Every file under a directory, sorted, as paths relative to `base`. */
 async function filesUnder(dir: string, base: string): Promise<string[]> {
@@ -75,7 +84,14 @@ export async function packCacheKey(
   const files: string[] = [...ROOT_INPUTS, relative(root, self)];
   for (const member of members) {
     files.push(...await filesUnder(join(root, member, 'src'), root));
-    files.push(join(member, 'package.json'), join(member, 'tsconfig.json'));
+    // Every file a tarball carries besides `dist/` (built from the inputs above)
+    // and `src/`: an edited README or licence is a different tarball.
+    files.push(
+      join(member, 'package.json'),
+      join(member, 'tsconfig.json'),
+      join(member, 'README.md'),
+      join(member, 'LICENSE'),
+    );
   }
   const hash = createHash('sha256');
   for (const file of files.sort()) {
@@ -129,31 +145,55 @@ async function packedManifest(tarball: string): Promise<Record<string, unknown>>
   return JSON.parse(stdout) as Record<string, unknown>;
 }
 
+/** How a {@linkcode packMembers} call reaches the outside world; for tests. */
+export interface PackDeps {
+  /** Runs a command; defaults to `execFile`. */
+  readonly run?: (
+    command: string,
+    args: readonly string[],
+    options: { cwd: string; maxBuffer: number },
+  ) => Promise<{ stdout: string }>;
+  /** Whether a process id on this host is alive; defaults to `process.kill(pid, 0)`. */
+  readonly alive?: (pid: number) => boolean;
+  /** The wall clock in milliseconds; defaults to `Date.now`. */
+  readonly now?: () => number;
+  /** Waits between polls; defaults to a timer. */
+  readonly sleep?: (ms: number) => Promise<void>;
+  /** This host's name, recorded in the lock; defaults to `os.hostname()`. */
+  readonly hostname?: string;
+}
+
 /**
- * Builds the workspace and packs every published member, or returns the cached
- * packs for this tree.
+ * Builds and packs every published member, or returns the packs a previous call
+ * built for the same tree.
  *
  * Requires an installed workspace (`pnpm install`); it builds with
  * `pnpm exec tsc -b`, packs each member with `pnpm pack --ignore-scripts`, and
  * refuses a pack missing any entrypoint its manifest names.
  *
+ * One build runs at a time per repository, whatever its key: `tsc -b` writes
+ * every member's `dist/`, so two builds — even for different member lists —
+ * would pack each other's half-written output. The lock records its owner; a
+ * lock whose owner on this host is dead is reclaimed rather than waited on for
+ * fifteen minutes, and a waiter re-reads the index before declaring failure,
+ * since the builder publishes it and then removes the lock.
+ *
  * @param root - The repository root (absolute)
  * @param members - The member directories; defaults to every published one
+ * @param deps - Injection seams; for tests
  * @returns The packed members, by package name
  */
 export async function packMembers(
   root: string,
   members: readonly string[] = PUBLISHED_PACKAGES,
+  deps: PackDeps = {},
 ): Promise<ReadonlyMap<string, PackedMember>> {
   const self = new URL(import.meta.url).pathname;
   const key = await packCacheKey(root, members, self);
   const cacheDir = join(root, '.tmp', 'overlay', key);
   const index = join(cacheDir, 'packs.json');
-  try {
-    return toMap(JSON.parse(await fs.readFile(index, 'utf8')) as PackedMember[]);
-  } catch {
-    // Not built for this tree yet.
-  }
+  const cached = await readIndex(index);
+  if (cached !== undefined) return cached;
 
   try {
     await fs.stat(join(root, 'node_modules'));
@@ -161,42 +201,131 @@ export async function packMembers(
     throw new Error(`packMembers: ${root} is not installed; run \`pnpm install\` first.`);
   }
 
-  // One builder per key: `tsc -b` writes every member's `dist/`, and two at once
-  // race. `mkdir` is atomic, so exactly one caller holds the lock; the others
-  // wait for the index it publishes.
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const host = deps.hostname ?? hostname();
   await fs.mkdir(join(root, '.tmp', 'overlay'), { recursive: true });
-  const lock = `${cacheDir}.lock`;
-  try {
-    await fs.mkdir(lock);
-  } catch {
-    return await waitForIndex(index, lock);
-  }
-  try {
-    return await build(root, members, cacheDir, index);
-  } finally {
-    await fs.rm(lock, { recursive: true, force: true });
+  const lock = join(root, '.tmp', 'overlay', 'build.lock');
+  const deadline = now() + BUILD_WAIT_MS;
+  for (;;) {
+    if (await acquireLock(lock, host, now())) {
+      try {
+        // Built while this caller waited for the lock.
+        const done = await readIndex(index);
+        if (done !== undefined) return done;
+        return await build(root, members, cacheDir, index, deps.run ?? defaultRun);
+      } finally {
+        await fs.rm(lock, { recursive: true, force: true });
+      }
+    }
+    if (await lockIsStale(lock, host, now(), deps.alive ?? processAlive)) {
+      await reclaimLock(lock);
+      continue;
+    }
+    const done = await readIndex(index);
+    if (done !== undefined) return done;
+    if (now() > deadline) throw new Error(`packMembers: timed out waiting for ${lock}`);
+    await sleep(500);
   }
 }
 
 /** How long a waiting caller allows another's cold build to take. */
 const BUILD_WAIT_MS = 15 * 60 * 1000;
 
-/** Waits for another caller's build of the same key to publish its index. */
-async function waitForIndex(index: string, lock: string): Promise<ReadonlyMap<string, PackedMember>> {
-  const deadline = Date.now() + BUILD_WAIT_MS;
-  while (Date.now() < deadline) {
+/**
+ * How long a lock may exist without an owner record before it is presumed
+ * abandoned: the owner writes the record immediately after creating the lock, so
+ * only a crash in between leaves one without it.
+ */
+const OWNERLESS_GRACE_MS = 60 * 1000;
+
+/** The owner a lock records. */
+interface LockOwner {
+  readonly pid: number;
+  readonly hostname: string;
+  readonly since: number;
+}
+
+/** Runs a command through `execFile`. */
+const defaultRun: NonNullable<PackDeps['run']> = (command, args, options) =>
+  run(command, [...args], options);
+
+/** Whether a process on this host is alive. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    // EPERM: it exists, owned by someone else.
+    return (cause as { code?: unknown }).code === 'EPERM';
+  }
+}
+
+/** Reads a published index, or `undefined` when there is none yet. */
+async function readIndex(index: string): Promise<ReadonlyMap<string, PackedMember> | undefined> {
+  try {
+    return toMap(JSON.parse(await fs.readFile(index, 'utf8')) as PackedMember[]);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Takes the build lock: `mkdir` is atomic, so exactly one caller succeeds.
+ *
+ * @returns Whether this caller now holds it
+ */
+export async function acquireLock(lock: string, host: string, since: number): Promise<boolean> {
+  try {
+    await fs.mkdir(lock);
+  } catch {
+    return false;
+  }
+  const owner: LockOwner = { pid: process.pid, hostname: host, since };
+  await fs.writeFile(join(lock, 'owner.json'), JSON.stringify(owner));
+  return true;
+}
+
+/**
+ * Whether a held lock was abandoned: its owner is a dead process on this host,
+ * or it has carried no owner record for longer than a crash between creating it
+ * and recording one could explain. A lock owned on another host is never
+ * presumed dead — this host cannot ask.
+ */
+export async function lockIsStale(
+  lock: string,
+  host: string,
+  now: number,
+  alive: (pid: number) => boolean,
+): Promise<boolean> {
+  let owner: LockOwner;
+  try {
+    owner = JSON.parse(await fs.readFile(join(lock, 'owner.json'), 'utf8')) as LockOwner;
+  } catch {
     try {
-      return toMap(JSON.parse(await fs.readFile(index, 'utf8')) as PackedMember[]);
+      const stat = await fs.stat(lock);
+      return now - stat.mtimeMs > OWNERLESS_GRACE_MS;
     } catch {
-      try {
-        await fs.stat(lock);
-      } catch {
-        throw new Error('packMembers: the build holding the lock ended without publishing packs.');
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      return false; // Released in the meantime: not stale, simply gone.
     }
   }
-  throw new Error(`packMembers: timed out waiting for ${lock}`);
+  return owner.hostname === host && typeof owner.pid === 'number' && !alive(owner.pid);
+}
+
+/**
+ * Removes an abandoned lock. Renamed aside first, so two callers reclaiming the
+ * same lock cannot remove a fresh one the other has just taken: only one rename
+ * of a given directory succeeds.
+ */
+async function reclaimLock(lock: string): Promise<void> {
+  const aside = `${lock}.stale-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  try {
+    await fs.rename(lock, aside);
+  } catch {
+    return; // Another caller reclaimed it first.
+  }
+  await fs.rm(aside, { recursive: true, force: true });
 }
 
 /** Builds and packs every member into a fresh cache directory. */
@@ -205,48 +334,49 @@ async function build(
   members: readonly string[],
   cacheDir: string,
   index: string,
+  exec: NonNullable<PackDeps['run']>,
 ): Promise<ReadonlyMap<string, PackedMember>> {
-  await run('pnpm', ['exec', 'tsc', '-b'], { cwd: root, maxBuffer: 64 * 1024 * 1024 });
+  await exec('pnpm', ['exec', 'tsc', '-b'], { cwd: root, maxBuffer: 64 * 1024 * 1024 });
 
   const staging = await fs.mkdtemp(join(root, '.tmp', 'overlay-staging-'));
-  const packed: PackedMember[] = [];
-  const refusals: string[] = [];
-  for (const member of members) {
-    const { stdout } = await run(
-      'pnpm',
-      ['pack', '--ignore-scripts', '--pack-destination', staging],
-      { cwd: join(root, member), maxBuffer: 16 * 1024 * 1024 },
-    );
-    const tarballPath = stdout.trim().split('\n').reverse().find((line) => line.endsWith('.tgz'));
-    if (tarballPath === undefined) {
-      refusals.push(`${member}: pnpm pack reported no tarball`);
-      continue;
-    }
-    const final = join(cacheDir, tarballPath.slice(staging.length + 1));
-    const manifest = await packedManifest(tarballPath);
-    const present = await tarballFiles(tarballPath);
-    for (const entry of packedEntrypoints(manifest)) {
-      if (!present.has(entry)) refusals.push(`${member}: packed manifest names ${entry}, absent`);
-    }
-    packed.push({
-      name: String(manifest['name']),
-      version: String(manifest['version']),
-      tarball: final,
-      manifest,
-    });
-  }
-  if (refusals.length > 0) {
-    await fs.rm(staging, { recursive: true, force: true });
-    throw new Error(`packMembers refused:\n${refusals.join('\n')}`);
-  }
-  await fs.writeFile(join(staging, 'packs.json'), JSON.stringify(packed, null, 2));
+  let published = false;
   try {
+    const packed: PackedMember[] = [];
+    const refusals: string[] = [];
+    for (const member of members) {
+      const { stdout } = await exec(
+        'pnpm',
+        ['pack', '--ignore-scripts', '--pack-destination', staging],
+        { cwd: join(root, member), maxBuffer: 16 * 1024 * 1024 },
+      );
+      const tarballPath = stdout.trim().split('\n').reverse().find((line) => line.endsWith('.tgz'));
+      if (tarballPath === undefined) {
+        refusals.push(`${member}: pnpm pack reported no tarball`);
+        continue;
+      }
+      const final = join(cacheDir, tarballPath.slice(staging.length + 1));
+      const manifest = await packedManifest(tarballPath);
+      const present = await tarballFiles(tarballPath);
+      for (const entry of packedEntrypoints(manifest)) {
+        if (!present.has(entry)) refusals.push(`${member}: packed manifest names ${entry}, absent`);
+      }
+      packed.push({
+        name: String(manifest['name']),
+        version: String(manifest['version']),
+        tarball: final,
+        manifest,
+      });
+    }
+    if (refusals.length > 0) throw new Error(`packMembers refused:\n${refusals.join('\n')}`);
+    await fs.writeFile(join(staging, 'packs.json'), JSON.stringify(packed, null, 2));
     await fs.rename(staging, cacheDir);
-  } catch {
-    // Another caller published this key first; theirs is identical.
-    await fs.rm(staging, { recursive: true, force: true });
+    published = true;
+  } finally {
+    // Whatever failed — a pack, an extraction, a refusal, the publish itself —
+    // the staging directory is this call's, and nothing else will remove it.
+    if (!published) await fs.rm(staging, { recursive: true, force: true });
   }
-  return toMap(JSON.parse(await fs.readFile(index, 'utf8')) as PackedMember[]);
+  return (await readIndex(index))!;
 }
 
 /** Indexes packs by name. */

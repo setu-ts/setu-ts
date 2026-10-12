@@ -39,7 +39,15 @@ export function projectsFor(member: string) {
 
 export function configurationFor(member: string) {
 const include = member === 'tooling'
-  ? ['scripts/codemods/*.ts', 'test/node-helpers.ts']
+  ? [
+    'scripts/codemods/*.ts',
+    'test/node-helpers.ts',
+    // The scaffold-install gates' packer and local registry (M111d): `node:`
+    // APIs only, and the overlay binds a real socket, which the root Deno lane
+    // grants no permission for.
+    'scripts/pack-members.ts',
+    'scripts/registry-overlay.ts',
+  ]
   : [`${member.replace(/^\.\//, '')}/src/**/*.ts`];
 
 // Vitest 5's oxc transform does not lower TC39 decorators; esbuild must run first.

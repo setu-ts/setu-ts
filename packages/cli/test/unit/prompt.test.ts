@@ -15,9 +15,9 @@ describe('createTerminalPrompter', () => {
     let asked = false;
     const prompter = createTerminalPrompter(
       () => false,
-      async () => {
+      () => {
         asked = true;
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => {},
     );
@@ -80,9 +80,9 @@ describe('createTerminalPrompter', () => {
     controller.abort();
     const prompter = createTerminalPrompter(
       () => true,
-      async () => {
+      () => {
         asked = true;
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => {},
       controller.signal,
@@ -95,9 +95,9 @@ describe('createTerminalPrompter', () => {
     const controller = new AbortController();
     const prompter = createTerminalPrompter(
       () => true,
-      async () => {
+      () => {
         controller.abort();
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => {},
       controller.signal,
@@ -110,9 +110,9 @@ describe('createTerminalPrompter', () => {
     let asked = false;
     const prompter = createTerminalPrompter(
       () => true,
-      async () => {
+      () => {
         asked = true;
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => controller.abort(),
       controller.signal,
@@ -126,9 +126,9 @@ describe('createTerminalPrompter', () => {
     let calls = 0;
     const prompter = createTerminalPrompter(
       () => true,
-      async () => {
+      () => {
         calls++;
-        return 'aaa';
+        return Promise.resolve('aaa');
       },
       (message) => {
         if (message.includes('is not one of')) controller.abort();
@@ -144,9 +144,9 @@ describe('createTerminalPrompter', () => {
     let question = '';
     const prompter = createTerminalPrompter(
       () => true,
-      async (message) => {
+      (message) => {
         question = message;
-        return '';
+        return Promise.resolve('');
       },
       (message) => printed.push(message),
     );

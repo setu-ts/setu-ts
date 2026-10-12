@@ -18,6 +18,7 @@ import {
 } from '../../../src/commands/add.ts';
 import { VERSION } from '../../../src/constants.ts';
 import { parseArgs } from '../../../src/args.ts';
+import { runNewCommand } from '../../../src/commands/new.ts';
 import { listSchematics } from '../../../src/schematics/registry.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
 
@@ -231,6 +232,32 @@ describe('withDependency', () => {
 });
 
 describe('withPluginWiring', () => {
+  // Codex review (M111d): an npm-target scaffold is Prettier-formatted, which
+  // puts a short plugin array on ONE line — so an anchor matched only as its own
+  // line left `setu new demo` → `setu add cache` writing the dependency and
+  // wiring nothing.
+  it('wires a provider into the default (Prettier-formatted) Node scaffold', async () => {
+    const fs = createFakeFs();
+    const quiet = { fs, log: () => {}, error: () => {} };
+    expect(await runNewCommand(parseArgs(['demo']), { ...quiet, cwd: '/' })).toBe(0);
+    const before = fs.read('/demo/setu.config.ts');
+    expect(before).toMatch(/plugins: \[[^\n]*\.\.\.\(devtool\?\.plugins \?\? \[\]\)\]/);
+
+    expect(await runAddCommand(parseArgs(['cache']), { ...quiet, cwd: '/demo' })).toBe(0);
+    const after = fs.read('/demo/setu.config.ts');
+    expect(after).toContain("import { CachePlugin } from '@setu-ts/cache-plugin';");
+    expect(after).toContain('CachePlugin(), ...(devtool?.plugins ?? [])');
+  });
+
+  it('refuses a factory carrying the spread twice', () => {
+    const doubled = CLASS_BASED_INGRESS_CONFIG.replace(
+      '...(devtool?.plugins ?? []),',
+      '...(devtool?.plugins ?? []),\n      ...(devtool?.plugins ?? []),',
+    );
+    expect(doubled).not.toBe(CLASS_BASED_INGRESS_CONFIG);
+    expect(withPluginWiring(doubled, 'cache-plugin')).toBeUndefined();
+  });
+
   it('preserves inline, commented and incomplete anchors, and ignores commented calls', () => {
     for (
       const source of [

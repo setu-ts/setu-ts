@@ -462,7 +462,30 @@ describe('development source policies', () => {
     ).toBe(true);
     expect(importMapRetargets({ scopes: 'nope' })).toBe(true);
     expect(importMapRetargets({ imports: { '@setu-ts/kernel': 1 } })).toBe(true);
-    expect(importMapRetargets({ dependencies: { '@setu-ts/kernel': '^1' } })).toBe(true);
+    // An npm dependency map installs the KEY's own package from a version, range,
+    // tag or the workspace protocol — the form the CLI writes since 0.9. Anything
+    // else installs something the key does not name.
+    for (const value of ['^1', '~1.2.0', '0.9.0', 'latest', 'workspace:^', 'workspace:*']) {
+      expect(importMapRetargets({ dependencies: { '@setu-ts/kernel': value } }), value)
+        .toBe(false);
+    }
+    for (
+      const value of [
+        'npm:evil@1',
+        'file:../kernel',
+        'git+https://example.test/x.git',
+        'https://example.test/kernel.tgz',
+        'user/repo',
+        './vendor/kernel',
+        'workspace:npm:evil@1',
+        '',
+      ]
+    ) {
+      expect(importMapRetargets({ devDependencies: { '@setu-ts/kernel': value } }), value)
+        .toBe(true);
+    }
+    // In an IMPORT map a bare range is not a specifier at all: still a retarget.
+    expect(importMapRetargets({ imports: { '@setu-ts/kernel': '^1' } })).toBe(true);
     expect(importMapRetargets('text')).toBe(false);
 
     const retarget = JSON.stringify(
