@@ -17,6 +17,7 @@ import { withBrokerArgs, withQueueArgs } from '../templates/broker.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_ENDPOINTS_EXPORT } from './discovery-module.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import type { TransportSpec } from './transport.ts';
+import { withClientDependencies } from '../templates/client-dependencies.ts';
 
 /** The package whose wiring the discovery overlay rewrites. */
 const DISCOVERY_PACKAGE = 'service-discovery-plugin';
@@ -123,7 +124,9 @@ function withTransport(
     override,
   );
 
-  return {
+  // The transport's clients (the gRPC runtime) are optional peers of the plugin
+  // it appends, so the member declares them itself (`client-dependencies.ts`).
+  return withClientDependencies({
     ...next,
     ...(host.appFactory === undefined || transport.name !== 'grpc'
       ? {}
@@ -135,5 +138,5 @@ function withTransport(
     files: [...next.files, ...(transport.memberFiles?.(member) ?? [])],
     extraTasks: { ...next.extraTasks, ...transport.memberTasks },
     extraImports: { ...next.extraImports, ...transport.memberImports },
-  };
+  }, transport.clients ?? []);
 }

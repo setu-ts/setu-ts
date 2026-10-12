@@ -135,6 +135,12 @@ export interface ResolvedHost {
    * pins — what a transport-contributed file needs in order to compile.
    */
   readonly extraImports: Readonly<Record<string, string>>;
+  /**
+   * npm `dependencies` merged into a generated `package.json` beyond the
+   * framework pins — the client a selected broker, queue or RPC transport loads
+   * (see `client-dependencies.ts`).
+   */
+  readonly extraDependencies: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
   /** Routes the template's own source serves, for the README. */
@@ -179,6 +185,7 @@ export function resolveHost(
     setupCalls: host.setupCalls ?? [],
     extraTasks: { ...host.extraTasks },
     extraImports: {},
+    extraDependencies: {},
     appFactory: host.appFactory,
     routes: host.routes ?? [],
     appFactoryContext: {
@@ -1052,7 +1059,7 @@ function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<str
     if (DEV_FRAMEWORK_PACKAGES.has(pkg)) continue;
     deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
   }
-  return { ...deps, ...host.manifest?.npmDependencies };
+  return { ...deps, ...host.extraDependencies, ...host.manifest?.npmDependencies };
 }
 
 /**

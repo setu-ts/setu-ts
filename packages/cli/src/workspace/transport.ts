@@ -175,6 +175,17 @@ export interface TransportSpec {
    */
   readonly queueArgs?: (connection: string) => string;
   /**
+   * Client packages the project needs once {@linkcode messagingArgs} selects this
+   * broker. Each is an OPTIONAL peer of `messaging-plugin`, which no package
+   * manager installs for the consumer, so the arm declares it in the project
+   * itself (`client-dependencies.ts`).
+   */
+  readonly messagingClients?: readonly string[];
+  /** Client packages the project needs once {@linkcode queueArgs} selects this queue. */
+  readonly queueClients?: readonly string[];
+  /** Client packages every member of a workspace on this transport needs. */
+  readonly clients?: readonly string[];
+  /**
    * Where the connection value comes from. Omitted → the transport has none
    * (`http`, `grpc`, `memory`).
    */
@@ -275,6 +286,7 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   },
   ['grpc']: {
     name: 'grpc',
+    clients: ['@connectrpc/connect', '@bufbuild/protobuf'],
     // Mounted rather than root-owned: the stable prefix lets a full-stack
     // member exempt RPCs from form CSRF without exempting its own POST routes.
     // Verified by probe, not assumed: this `GrpcPlugin()` answers
@@ -299,6 +311,8 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   },
   ['redis']: {
     name: 'redis',
+    messagingClients: ['ioredis'],
+    queueClients: ['ioredis'],
     description: 'Redis Streams broker shared by every member',
     plugins: [],
     messagingArgs: (connection) => `{ broker: 'redis-streams', url: ${connection} }`,
@@ -328,6 +342,8 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   },
   ['rabbitmq']: {
     name: 'rabbitmq',
+    messagingClients: ['amqplib'],
+    queueClients: ['amqplib'],
     description: 'RabbitMQ broker shared by every member',
     plugins: [],
     messagingArgs: (connection) => `{ broker: 'rabbitmq', url: ${connection} }`,
@@ -356,6 +372,7 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   },
   ['nats']: {
     name: 'nats',
+    messagingClients: ['nats'],
     description: 'NATS broker shared by every member',
     plugins: [],
     messagingArgs: (connection) => `{ broker: 'nats', url: ${connection} }`,
@@ -382,6 +399,7 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   },
   ['kafka']: {
     name: 'kafka',
+    messagingClients: ['kafkajs'],
     // `brokers` is a LIST on this arm, not a `url` — the one broker whose option
     // shape differs, which is why each spec renders its own literal instead of a
     // shared `{ broker, url }` template.
@@ -431,6 +449,7 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   },
   ['pubsub']: {
     name: 'pubsub',
+    messagingClients: ['@google-cloud/pubsub'],
     description: 'GCP Pub/Sub shared by every member (emulator by default)',
     plugins: [],
     // The project id, not an endpoint: the SDK takes the EMULATOR host from
@@ -475,6 +494,7 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   },
   ['service-bus']: {
     name: 'service-bus',
+    messagingClients: ['@azure/service-bus'],
     description: 'Azure Service Bus shared by every member (emulator by default)',
     plugins: [],
     // Read from the environment rather than interpolated: a Service Bus
