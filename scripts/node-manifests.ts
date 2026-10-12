@@ -397,6 +397,7 @@ export function findSrcCycle(
  */
 export const BIN_ENTRIES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   'packages/cli': { setu: './dist/bin.js' },
+  'packages/create': { create: './dist/bin.js' },
 };
 
 /** A dependency map as an object with its keys in code-unit order, independent of insertion order. */

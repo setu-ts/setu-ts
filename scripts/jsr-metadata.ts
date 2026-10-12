@@ -323,6 +323,10 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     description: 'setu — project scaffolding and plugin-aware code generation',
     runtimeCompat: SERVER_ONLY,
   },
+  'create': {
+    description: 'npm create @setu-ts — scaffolds a Setu-TS project with setu new',
+    runtimeCompat: SERVER_ONLY,
+  },
   'sdk': {
     description:
       'Portable HTTP client with retry, circuit breaker, rate limiting, and OpenAPI codegen',

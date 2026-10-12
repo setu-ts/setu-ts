@@ -1040,7 +1040,7 @@ describe('M111c declared artifact coverage', () => {
       ),
     );
     expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
-    expect(expected).toHaveLength(51);
+    expect(expected).toHaveLength(52);
     expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
     const deno = JSON.parse(await Deno.readTextFile('deno.json'));
     expect(deno.tasks['publish:check']).toBeUndefined();

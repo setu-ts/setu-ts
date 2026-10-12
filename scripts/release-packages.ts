@@ -62,6 +62,8 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
 
   // Tier 5 — tooling. Depends on `common` and `runtime`.
   'packages/cli',
+  // Depends on `cli`: `npm create @setu-ts` runs `setu new`.
+  'packages/create',
 
   // Tier 6 — composition libraries (starters). These depend on other starters,
   // so they must be published in order: rest → microservice → full-stack.

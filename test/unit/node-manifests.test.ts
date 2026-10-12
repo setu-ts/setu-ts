@@ -171,13 +171,16 @@ describe('the CLI executable (M111d §3.2, §3.3)', () => {
   const CLI = member('packages/cli', '@setu-ts/cli', {
     'src/index.ts': "import type { X } from '@setu-ts/common';",
     'src/utils/ts-loader.ts': "const { tsImport } = await import('tsx/esm/api');",
+    'src/utils/prettier-format.ts': "const prettier = await import('prettier');",
   });
   const { classified, refusals } = classifyMember(CLI, nameToDir);
 
-  it('makes tsx a regular dependency, never an optional peer the consumer must add', () => {
+  it('makes tsx and prettier regular dependencies, never optional peers the consumer must add', () => {
     expect(refusals).toEqual([]);
     expect(classified.dependencies.get('tsx')).toBe('^4.23.0');
     expect(classified.peerDependencies.has('tsx')).toBe(false);
+    expect(classified.dependencies.get('prettier')).toBe('^3.9.10');
+    expect(classified.peerDependencies.has('prettier')).toBe(false);
   });
 
   it('renders the setu bin and lists the executable as its only side effect', () => {

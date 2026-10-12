@@ -2,7 +2,7 @@
 
 Verifies the published npm packages on Node.js and Bun. The workflow probes the npm scope before
 installing: HTTP 404 reports an unpublished scope and skips; HTTP 200 runs the suite; other statuses
-fail. It installs all 51 `@setu-ts/*` packages at `latest` from the ordinary npm registry.
+fail. It installs all 52 `@setu-ts/*` packages at `latest` from the ordinary npm registry.
 
 ```bash
 cd compat
@@ -59,7 +59,7 @@ introduction and its first publish — it cannot be installed before it exists o
 goes in `PENDING_FIRST_PUBLISH` in `compat.test.mjs` and comes out once it ships.
 
 The workflow probes `@setu-ts/common` first: HTTP 404 reports the npm scope as unpublished and skips
-install and suite steps; HTTP 200 runs them; every other status fails. All 51 dependencies are
+install and suite steps; HTTP 200 runs them; every other status fails. All 52 dependencies are
 already declared, so the first npm publish arms the suite without an edit.
 
 ## Adding a check

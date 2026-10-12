@@ -67,10 +67,11 @@
     "npm:pg@8": "8.23.0",
     "npm:pino@10": "10.3.1",
     "npm:playwright@1.63.0": "1.63.0",
+    "npm:prettier@^3.9.10": "3.9.10",
     "npm:react-router@8": "8.4.0_react@19.3.0",
     "npm:tsx@^4.23.0": "4.23.15",
     "npm:typescript@6.0.3": "6.0.3",
-    "npm:vitest@5.0.3": "5.0.3_@opentelemetry+api@1.9.1_@types+node@24.19.2_@vitest+coverage-v8@5.0.3_tsx@4.23.15",
+    "npm:vitest@5.0.3": "5.0.3_@opentelemetry+api@1.9.1_@types+node@24.19.2_@vitest+coverage-v8@5.0.3",
     "npm:ws@^8.18.0": "8.22.0",
     "npm:xml-crypto@6": "6.3.2",
     "npm:zod@3.24.0": "3.24.0",
@@ -3242,6 +3243,10 @@
         "xtend"
       ]
     },
+    "prettier@3.9.10": {
+      "integrity": "sha512-skGHTH1Yb9QvaTC4hWnRTzEYtCpApF0UMBPz+t/0ZPzP8ihefo/btKd+QA7pUE0fEwA1SbS/NmhyEcstdXOIdA==",
+      "bin": true
+    },
     "priorityqueuejs@2.0.0": {
       "integrity": "sha512-19BMarhgpq3x4ccvVi8k2QpJZcymo/iFUcrhPd4V96kYGovOdTsWwy7fxChYi4QY+m2EnGBWSX9Buakz+tWNQQ=="
     },
@@ -3764,7 +3769,7 @@
       ],
       "bin": true
     },
-    "vitest@5.0.3_@opentelemetry+api@1.9.1_@types+node@24.19.2_@vitest+coverage-v8@5.0.3_tsx@4.23.15": {
+    "vitest@5.0.3_@opentelemetry+api@1.9.1_@types+node@24.19.2_@vitest+coverage-v8@5.0.3": {
       "integrity": "sha512-xMw97S3rjdtj5dkVat7jCsqWBpvchs3RlpQctUqwJD0KkERk40vz2fJ77lDwW/Vzh/pk18eItYAzkodhSes3jQ==",
       "dependencies": [
         "@opentelemetry/api",
@@ -4046,6 +4051,7 @@
       },
       "packages/cli": {
         "dependencies": [
+          "npm:prettier@^3.9.10",
           "npm:tsx@^4.23.0",
           "npm:vitest@5.0.3"
         ],
@@ -4053,6 +4059,7 @@
           "dependencies": [
             "npm:@types/deno@2.7.0",
             "npm:@types/node@24",
+            "npm:prettier@^3.9.10",
             "npm:tsx@^4.23.0",
             "npm:typescript@6.0.3",
             "npm:vitest@5.0.3"
@@ -4098,6 +4105,18 @@
         }
       },
       "packages/cqrs-plugin": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ],
+        "packageJson": {
+          "dependencies": [
+            "npm:@types/node@24",
+            "npm:typescript@6.0.3",
+            "npm:vitest@5.0.3"
+          ]
+        }
+      },
+      "packages/create": {
         "dependencies": [
           "npm:vitest@5.0.3"
         ],

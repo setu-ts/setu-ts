@@ -13875,14 +13875,14 @@ The first npm release is `v0.9.0`; `v0.8.0` remains the last JSR release. The CL
 scaffold npm projects, because it pins generated projects to its own version.
 
 1. The maintainer publishes the README-only placeholders locally with npm login and 2FA under tag
-   `bootstrap`, creating all 51 names without a token.
+   `bootstrap`, creating all 52 names without a token.
 2. Configure each package to trust `release.yml`, repository `setu-ts/setu-ts`, environment `npm`
    using npm ≥11.15.0. Configure trust immediately before tagging: each configuration must complete
    its first successful OIDC publish within two days or it expires.
 3. Tag `v0.9.0`: CI publishes the first real versions through OIDC, validating all configurations
    and producing provenance. Deprecate placeholders, remove their tag, and disallow tokens.
 4. **Exit:** a bare npm install of kernel/runtime serves a request on Node 24 and Bun, and npm
-   reports provenance on all 51 real packages.
+   reports provenance on all 52 real packages.
 
 pnpm is the repository's pack tool; consumers may use npm, Yarn, pnpm or Bun. The exit proof uses
 plain npm in an empty directory. See `docs/releasing.md` for commands and partial-failure recovery.

@@ -31,6 +31,7 @@ packages:
   - packages/multi-tenancy-plugin
   - packages/testing
   - packages/cli
+  - packages/create
   - packages/sdk
   - packages/starters/rest-starter
   - packages/starters/microservice-starter

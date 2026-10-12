@@ -9,6 +9,8 @@ export const SIDE_EFFECT_MODULES: Readonly<Record<string, string>> = {
     'Installs Symbol.metadata write-if-absent before TC39 decorated class definition (M111a).',
   'packages/cli/src/bin.ts':
     'The setu executable: runs the CLI on load, reached only through package.json bin (M111d).',
+  'packages/create/src/bin.ts':
+    'The npm create @setu-ts executable: runs setu new on load, reached only through bin (M111d).',
 };
 
 /** One source finding, including the target of an effect-only import. */

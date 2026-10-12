@@ -8,7 +8,7 @@
  * 2. `pnpm pack` every member into `.tmp/node-pack/` and refuse any tarball
  *    whose shipped dependency fields still name `workspace:`.
  * 3. In an empty project, a PLAIN `npm install` (deliberately not pnpm — it is
- *    the repository's tool, not the consumer's) of all 51
+ *    the repository's tool, not the consumer's) of all 52
  *    release members, each imported and checked for an exported surface.
  * 4. Compile the fixture's decorated controller with the repository's `tsc`
  *    and run `scripts/fixtures/node-boot/boot.mjs` on Node 24, Node 22 and
