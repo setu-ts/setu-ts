@@ -47,9 +47,10 @@ export const PRETTIER_OPTIONS: Readonly<Record<string, unknown>> = {
 
 /**
  * Generated output and installed packages: never linted or formatted, since
- * neither is source the project owns.
+ * none is source the project owns. `src/gen/` is where a gRPC member's
+ * `proto:gen` writes compiler output, which its next run overwrites.
  */
-const IGNORED_OUTPUT: readonly string[] = ['node_modules/', 'dist/', '.wrangler/'];
+const IGNORED_OUTPUT: readonly string[] = ['node_modules/', 'dist/', '.wrangler/', 'src/gen/'];
 
 /**
  * Renders the ESLint flat configuration.

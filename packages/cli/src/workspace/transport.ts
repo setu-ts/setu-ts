@@ -23,6 +23,8 @@ import type { WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import {
   PROTO_IMPORTS,
   PROTO_TASK,
+  PROTO_DEV_DEPENDENCIES,
+  PROTO_SCRIPT_COMMAND,
   PROTO_TASK_COMMAND,
   protoToolchainFiles,
 } from './proto-toolchain.ts';
@@ -212,9 +214,10 @@ export interface TransportSpec {
    * put two members' messages in the same namespace.
    *
    * @param member - The member's kebab-case name
+   * @param onDeno - Whether the member is a Deno project; the files differ
    * @returns Files relative to the member root
    */
-  readonly memberFiles?: (member: string) => readonly GeneratedFile[];
+  readonly memberFiles?: (member: string, onDeno: boolean) => readonly GeneratedFile[];
   /** Tasks merged into every member's `deno.json`, for what those files need. */
   readonly memberTasks?: Readonly<Record<string, string>>;
   /**
@@ -228,6 +231,10 @@ export interface TransportSpec {
    * map`.
    */
   readonly memberImports?: Readonly<Record<string, string>>;
+  /** Scripts merged into every npm-target member's `package.json`. */
+  readonly memberScripts?: Readonly<Record<string, string>>;
+  /** devDependencies merged into every npm-target member's `package.json`. */
+  readonly memberDevDependencies?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -300,9 +307,12 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     // The health service needs none of this — the plugin carries that descriptor
     // itself. Serving the member's OWN protos needs a compiler, so the toolchain
     // ships instead of the descriptors.
-    memberFiles: (member) => protoToolchainFiles(`${member.replaceAll('-', '_')}.v1`),
+    memberFiles: (member, onDeno) =>
+      protoToolchainFiles(`${member.replaceAll('-', '_')}.v1`, onDeno),
     memberTasks: { [PROTO_TASK]: PROTO_TASK_COMMAND },
     memberImports: PROTO_IMPORTS,
+    memberScripts: { [PROTO_TASK]: PROTO_SCRIPT_COMMAND },
+    memberDevDependencies: PROTO_DEV_DEPENDENCIES,
   },
   ['memory']: {
     name: 'memory',

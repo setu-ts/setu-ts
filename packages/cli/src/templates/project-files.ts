@@ -141,6 +141,10 @@ export interface ResolvedHost {
    * (see `client-dependencies.ts`).
    */
   readonly extraDependencies: Readonly<Record<string, string>>;
+  /** npm `scripts` merged into a generated `package.json` (a transport's `proto:gen`). */
+  readonly extraScripts: Readonly<Record<string, string>>;
+  /** npm `devDependencies` merged into a generated `package.json` (the proto toolchain). */
+  readonly extraDevDependencies: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
   /** Routes the template's own source serves, for the README. */
@@ -186,6 +190,8 @@ export function resolveHost(
     extraTasks: { ...host.extraTasks },
     extraImports: {},
     extraDependencies: {},
+    extraScripts: {},
+    extraDevDependencies: {},
     appFactory: host.appFactory,
     routes: host.routes ?? [],
     appFactoryContext: {
@@ -1852,7 +1858,7 @@ describe('application composition', () => {
             name: projectName,
             version: '0.1.0',
             type: 'module',
-            scripts: { ...npmScripts(runtime, manifest), ...NPM_TOOLING_SCRIPTS },
+            scripts: { ...npmScripts(runtime, manifest), ...NPM_TOOLING_SCRIPTS, ...host.extraScripts },
             dependencies: npmDependencies(host, runtime),
             // Runtime-level first, so a template that pins its own copy of the
             // same package wins — the template knows what its build needs.
@@ -1867,6 +1873,7 @@ describe('application composition', () => {
               ...npmDevFrameworkDependencies(host, runtime),
               ...runtimeDevDependencies(runtime),
               ...NPM_TOOLING_DEV_DEPENDENCIES,
+              ...host.extraDevDependencies,
               ...manifest?.npmDevDependencies,
             },
           },

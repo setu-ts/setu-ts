@@ -117,6 +117,7 @@ function withTransport(
   // `QueueAdapterType` supports fewer backends — so a NATS or Kafka workspace
   // keeps the in-memory queue, which is the honest outcome rather than a
   // silently wrong adapter.
+  const onDeno = profile.manifestKind === 'deno';
   const next = withQueueArgs(
     withBrokerArgs(host, transport, profile, override),
     transport,
@@ -135,8 +136,17 @@ function withTransport(
     // registers one of them would collide — none does, and a unit test pins
     // that across the registry.
     plugins: [...next.plugins, ...transport.plugins],
-    files: [...next.files, ...(transport.memberFiles?.(member) ?? [])],
-    extraTasks: { ...next.extraTasks, ...transport.memberTasks },
-    extraImports: { ...next.extraImports, ...transport.memberImports },
+    files: [...next.files, ...(transport.memberFiles?.(member, onDeno) ?? [])],
+    // Each manifest kind gets only its own half: a Deno member's tasks and import
+    // map, an npm member's scripts and devDependencies.
+    ...(onDeno
+      ? {
+        extraTasks: { ...next.extraTasks, ...transport.memberTasks },
+        extraImports: { ...next.extraImports, ...transport.memberImports },
+      }
+      : {
+        extraScripts: { ...next.extraScripts, ...transport.memberScripts },
+        extraDevDependencies: { ...next.extraDevDependencies, ...transport.memberDevDependencies },
+      }),
   }, transport.clients ?? []);
 }
