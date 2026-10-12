@@ -298,6 +298,31 @@ describe('runAdoptCommand', () => {
     expect(h.out.text()).toContain('moved @setu-ts/kernel from jsr:@setu-ts/kernel@^0.8.0');
   });
 
+  // A `deno.jsonc` project: the manifest moves with the member (it used to stay
+  // at the root, beside the workspace's new `deno.json`), its pins move onto npm,
+  // and its comments survive.
+  it('moves a deno.jsonc manifest into the member and rewrites its pins', async () => {
+    const { ['/work/svc/deno.json']: _dropped, ...withoutJson } = PROJECT;
+    const h = harness({
+      ...withoutJson,
+      '/work/svc/deno.jsonc': [
+        '{',
+        '  // framework pins',
+        '  "imports": { "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0", },',
+        '}',
+        '',
+      ].join('\n'),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const member = h.fs.read('/work/svc/apps/svc/deno.jsonc');
+    expect(member).toContain('// framework pins');
+    expect(member).toMatch(/"@setu-ts\/kernel": "npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain('moved deno.jsonc -> apps/svc/deno.jsonc');
+    // The root holds the workspace manifest alone.
+    expect(h.fs.has('/work/svc/deno.jsonc')).toBe(false);
+    expect(JSON.parse(h.fs.read('/work/svc/deno.json'))).toHaveProperty('workspace');
+  });
+
   it('reports a manifest it cannot read rather than skipping it silently', async () => {
     const h = harness({ ...PROJECT, '/work/svc/deno.json': '{ "imports": { ' });
     expect(await h.run(['--port', '4000'])).toBe(0);

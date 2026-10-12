@@ -817,6 +817,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`setu adopt` moves a project's `deno.jsonc` (M111d).** Adoption moved `deno.json` but left a
+  `deno.jsonc` at the repository root, beside the workspace's new `deno.json`, so the member had no
+  manifest and the project's own was ignored. It now moves with the member, and its pre-0.9 pins are
+  rewritten in place like a `deno.json`'s, comments kept.
+
+- **`setu generate custom <name>` refuses a path-like schematic name (M111d).** `../../x` or a
+  percent-escaped `%2e%2e` segment imported, and ran, a module outside `.setu-ts/schematics/`. A
+  name is now letters, digits, `-` and `_`, and anything else exits 2 naming the rule.
+
 - Consolidated SSE writes and cache coalescing settlement cleanup, preserving closed-connection and
   owner-isolation behavior across runtimes.
 

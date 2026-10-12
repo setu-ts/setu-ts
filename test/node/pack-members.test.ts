@@ -15,11 +15,13 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
   acquireLock,
-  lockIsStale,
   packCacheKey,
   type PackDeps,
   packedEntrypoints,
   packMembers,
+  reclaimLock,
+  releaseLock,
+  staleLockRecord,
 } from '../../scripts/pack-members.ts';
 import { tempDir } from '../node-helpers.ts';
 
@@ -217,7 +219,9 @@ describe('packMembers', () => {
         (await fs.readdir(join(root, '.tmp/overlay')))[0]!,
       );
       await fs.rename(join(cacheDir, 'packs.json'), join(root, 'packs.json'));
-      expect(await acquireLock(join(root, '.tmp/overlay/build.lock'), 'here', 0)).toBe(true);
+      expect(await acquireLock(join(root, '.tmp/overlay/build.lock'), 'here', 0)).toEqual(
+        expect.any(String),
+      );
       let waits = 0;
       const packs = await packMembers(root, ['packages/alpha'], {
         ...fakePnpm(),
@@ -241,7 +245,7 @@ describe('packMembers', () => {
     try {
       const lock = join(root, '.tmp/overlay/build.lock');
       await fs.mkdir(join(root, '.tmp/overlay'), { recursive: true });
-      expect(await acquireLock(lock, 'here', 0)).toBe(true);
+      expect(await acquireLock(lock, 'here', 0)).toEqual(expect.any(String));
       const pnpm = fakePnpm();
       const packs = await packMembers(root, ['packages/alpha'], {
         ...pnpm,
@@ -263,7 +267,7 @@ describe('packMembers', () => {
     try {
       const lock = join(root, '.tmp/overlay/build.lock');
       await fs.mkdir(join(root, '.tmp/overlay'), { recursive: true });
-      expect(await acquireLock(lock, 'here', 0)).toBe(true);
+      expect(await acquireLock(lock, 'here', 0)).toEqual(expect.any(String));
       const pnpm = fakePnpm();
       const packs = await packMembers(root, ['packages/alpha'], {
         ...pnpm,
@@ -284,7 +288,7 @@ describe('packMembers', () => {
     try {
       const lock = join(root, '.tmp/overlay/build.lock');
       await fs.mkdir(join(root, '.tmp/overlay'), { recursive: true });
-      expect(await acquireLock(lock, 'elsewhere', 0)).toBe(true);
+      expect(await acquireLock(lock, 'elsewhere', 0)).toEqual(expect.any(String));
       let clock = 0;
       await expect(packMembers(root, ['packages/alpha'], {
         ...fakePnpm(),
@@ -323,7 +327,7 @@ describe('reclaiming a stale lock', () => {
     try {
       const lock = join(root, '.tmp/overlay/build.lock');
       await fs.mkdir(join(root, '.tmp/overlay'), { recursive: true });
-      expect(await acquireLock(lock, 'here', 0)).toBe(true);
+      expect(await acquireLock(lock, 'here', 0)).toEqual(expect.any(String));
       const packs = await packMembers(root, ['packages/alpha'], {
         ...fakePnpm(),
         hostname: 'here',
@@ -394,7 +398,7 @@ describe('waiting through the real timer', () => {
     try {
       const lock = join(root, '.tmp/overlay/build.lock');
       await fs.mkdir(join(root, '.tmp/overlay'), { recursive: true });
-      expect(await acquireLock(lock, hostname(), 0)).toBe(true);
+      expect(await acquireLock(lock, hostname(), 0)).toEqual(expect.any(String));
       const released = setTimeout(() => rmSync(lock, { recursive: true, force: true }), 100);
       try {
         const packs = await packMembers(root, ['packages/alpha'], fakePnpm());
@@ -408,31 +412,123 @@ describe('waiting through the real timer', () => {
   });
 });
 
-describe('lockIsStale', () => {
+describe('staleLockRecord', () => {
   it('reads an ownerless lock by its age, and a released one as not stale', async () => {
     const root = await repository();
     try {
       const lock = join(root, 'lock');
       await fs.mkdir(lock);
       const created = (await fs.stat(lock)).mtimeMs;
-      expect(await lockIsStale(lock, 'here', created + 1000, () => true)).toBe(false);
-      expect(await lockIsStale(lock, 'here', created + 61_000, () => true)).toBe(true);
+      expect(await staleLockRecord(lock, 'here', created + 1000, () => true)).toBeUndefined();
+      expect(await staleLockRecord(lock, 'here', created + 61_000, () => true)).toBeNull();
       await fs.rm(lock, { recursive: true });
-      expect(await lockIsStale(lock, 'here', created + 61_000, () => true)).toBe(false);
+      expect(await staleLockRecord(lock, 'here', created + 61_000, () => true)).toBeUndefined();
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
 
-  it('asks whether a same-host owner is alive', async () => {
+  it('asks whether a same-host owner is alive, and returns the record it judged', async () => {
     const root = await repository();
     try {
       const lock = join(root, 'lock');
-      expect(await acquireLock(lock, 'here', 5)).toBe(true);
-      expect(await acquireLock(lock, 'here', 6)).toBe(false);
-      expect(await lockIsStale(lock, 'here', 10, () => true)).toBe(false);
-      expect(await lockIsStale(lock, 'here', 10, () => false)).toBe(true);
-      expect(await lockIsStale(lock, 'other', 10, () => false)).toBe(false);
+      expect(await acquireLock(lock, 'here', 5)).toEqual(expect.any(String));
+      expect(await acquireLock(lock, 'here', 6)).toBeUndefined();
+      const record = await fs.readFile(join(lock, 'owner.json'), 'utf8');
+      expect(await staleLockRecord(lock, 'here', 10, () => true)).toBeUndefined();
+      expect(await staleLockRecord(lock, 'here', 10, () => false)).toBe(record);
+      expect(await staleLockRecord(lock, 'other', 10, () => false)).toBeUndefined();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('treats a half-written record as held', async () => {
+    const root = await repository();
+    try {
+      const lock = join(root, 'lock');
+      await fs.mkdir(lock);
+      await fs.writeFile(join(lock, 'owner.json'), '{"pid": 1');
+      expect(await staleLockRecord(lock, 'here', 10, () => false)).toBeUndefined();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// M111d audit F5: between judging a lock stale and renaming it aside, another
+// caller may reclaim it and take a fresh one. The reclaim must remove only the
+// lock it judged, and a release only the lock it holds.
+describe('reclaiming and releasing the build lock', () => {
+  it('removes the lock it judged stale', async () => {
+    const root = await repository();
+    try {
+      const lock = join(root, 'lock');
+      await acquireLock(lock, 'here', 1);
+      const stale = await staleLockRecord(lock, 'here', 10, () => false);
+      await reclaimLock(lock, stale!);
+      await expect(fs.stat(lock)).rejects.toThrow();
+      expect((await fs.readdir(root)).filter((name) => name.includes('.stale-'))).toEqual([]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("puts back a fresh live owner's lock taken after the judgement", async () => {
+    const root = await repository();
+    try {
+      const lock = join(root, 'lock');
+      // A judges the dead owner's lock stale…
+      await acquireLock(lock, 'here', 1);
+      const judged = await staleLockRecord(lock, 'here', 10, () => false);
+      // …B reclaims it and takes a fresh one before A acts.
+      await reclaimLock(lock, judged!);
+      const tokenB = await acquireLock(lock, 'here', 2);
+      const recordB = await fs.readFile(join(lock, 'owner.json'), 'utf8');
+      // A's reclaim, acting on its old judgement, must leave B's lock in place.
+      await reclaimLock(lock, judged!);
+      expect(await fs.readFile(join(lock, 'owner.json'), 'utf8')).toBe(recordB);
+      await releaseLock(lock, tokenB!);
+      await expect(fs.stat(lock)).rejects.toThrow();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('restores an ownerless lock that gained an owner in between', async () => {
+    const root = await repository();
+    try {
+      const lock = join(root, 'lock');
+      await fs.mkdir(lock);
+      await fs.writeFile(join(lock, 'owner.json'), '{"token":"late"}');
+      await reclaimLock(lock, null);
+      expect(await fs.readFile(join(lock, 'owner.json'), 'utf8')).toBe('{"token":"late"}');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does nothing when the lock is already gone', async () => {
+    const root = await repository();
+    try {
+      await reclaimLock(join(root, 'lock'), null);
+      await releaseLock(join(root, 'lock'), 'any');
+      expect((await fs.readdir(root)).filter((name) => name.startsWith('lock'))).toEqual([]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves another caller's lock on release, and an unreadable record too", async () => {
+    const root = await repository();
+    try {
+      const lock = join(root, 'lock');
+      await acquireLock(lock, 'here', 1);
+      await releaseLock(lock, 'not-mine');
+      await fs.stat(lock);
+      await fs.writeFile(join(lock, 'owner.json'), '{oops');
+      await releaseLock(lock, 'not-mine');
+      await fs.stat(lock);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

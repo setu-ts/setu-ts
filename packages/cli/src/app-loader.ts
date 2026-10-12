@@ -236,7 +236,7 @@ export async function loadApp(
 
   let module: Record<string, unknown>;
   try {
-    module = await load(url);
+    module = await load(url, dir);
   } catch (cause) {
     throw new Error(
       `Cannot load ${escapeName(String(url))}: ${

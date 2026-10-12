@@ -209,18 +209,20 @@ export async function packMembers(
   const lock = join(root, '.tmp', 'overlay', 'build.lock');
   const deadline = now() + BUILD_WAIT_MS;
   for (;;) {
-    if (await acquireLock(lock, host, now())) {
+    const token = await acquireLock(lock, host, now());
+    if (token !== undefined) {
       try {
         // Built while this caller waited for the lock.
         const done = await readIndex(index);
         if (done !== undefined) return done;
         return await build(root, members, cacheDir, index, deps.run ?? defaultRun);
       } finally {
-        await fs.rm(lock, { recursive: true, force: true });
+        await releaseLock(lock, token);
       }
     }
-    if (await lockIsStale(lock, host, now(), deps.alive ?? processAlive)) {
-      await reclaimLock(lock);
+    const stale = await staleLockRecord(lock, host, now(), deps.alive ?? processAlive);
+    if (stale !== undefined) {
+      await reclaimLock(lock, stale);
       continue;
     }
     const done = await readIndex(index);
@@ -245,6 +247,8 @@ interface LockOwner {
   readonly pid: number;
   readonly hostname: string;
   readonly since: number;
+  /** Unique to one acquisition, so a release or reclaim can tell this lock from a newer one. */
+  readonly token: string;
 }
 
 /** Runs a command through `execFile`. */
@@ -271,61 +275,114 @@ async function readIndex(index: string): Promise<ReadonlyMap<string, PackedMembe
   }
 }
 
-/**
- * Takes the build lock: `mkdir` is atomic, so exactly one caller succeeds.
- *
- * @returns Whether this caller now holds it
- */
-export async function acquireLock(lock: string, host: string, since: number): Promise<boolean> {
+/** The owner record of a lock directory, verbatim, or `null` when it has none. */
+async function ownerRecord(lock: string): Promise<string | null> {
   try {
-    await fs.mkdir(lock);
+    return await fs.readFile(join(lock, 'owner.json'), 'utf8');
   } catch {
-    return false;
+    return null;
   }
-  const owner: LockOwner = { pid: process.pid, hostname: host, since };
-  await fs.writeFile(join(lock, 'owner.json'), JSON.stringify(owner));
-  return true;
 }
 
 /**
- * Whether a held lock was abandoned: its owner is a dead process on this host,
- * or it has carried no owner record for longer than a crash between creating it
- * and recording one could explain. A lock owned on another host is never
- * presumed dead — this host cannot ask.
+ * Takes the build lock: `mkdir` is atomic, so exactly one caller succeeds.
+ *
+ * @returns The acquisition's token when this caller now holds it, else `undefined`
  */
-export async function lockIsStale(
+export async function acquireLock(
+  lock: string,
+  host: string,
+  since: number,
+): Promise<string | undefined> {
+  try {
+    await fs.mkdir(lock);
+  } catch {
+    return undefined;
+  }
+  const token = `${process.pid}-${since}-${Math.random().toString(36).slice(2)}`;
+  const owner: LockOwner = { pid: process.pid, hostname: host, since, token };
+  await fs.writeFile(join(lock, 'owner.json'), JSON.stringify(owner));
+  return token;
+}
+
+/**
+ * Releases a lock this caller holds — only while it still carries this
+ * caller's token, so a holder whose lock was wrongly reclaimed cannot remove the
+ * lock another caller has taken since.
+ */
+export async function releaseLock(lock: string, token: string): Promise<void> {
+  const record = await ownerRecord(lock);
+  if (record === null) return;
+  let owner: Partial<LockOwner>;
+  try {
+    owner = JSON.parse(record) as Partial<LockOwner>;
+  } catch {
+    return;
+  }
+  if (owner.token === token) await fs.rm(lock, { recursive: true, force: true });
+}
+
+/**
+ * The record of a lock that was abandoned — its owner is a dead process on this
+ * host, or it has carried no owner record for longer than a crash between
+ * creating it and recording one could explain — or `undefined` when it is held
+ * (or already gone). A lock owned on another host is never presumed dead: this
+ * host cannot ask.
+ *
+ * The record is returned verbatim (`null` for an ownerless lock) so a reclaim
+ * can confirm it is removing the very lock it judged, not a newer one.
+ */
+export async function staleLockRecord(
   lock: string,
   host: string,
   now: number,
   alive: (pid: number) => boolean,
-): Promise<boolean> {
-  let owner: LockOwner;
-  try {
-    owner = JSON.parse(await fs.readFile(join(lock, 'owner.json'), 'utf8')) as LockOwner;
-  } catch {
+): Promise<string | null | undefined> {
+  const record = await ownerRecord(lock);
+  if (record === null) {
     try {
       const stat = await fs.stat(lock);
-      return now - stat.mtimeMs > OWNERLESS_GRACE_MS;
+      return now - stat.mtimeMs > OWNERLESS_GRACE_MS ? null : undefined;
     } catch {
-      return false; // Released in the meantime: not stale, simply gone.
+      return undefined; // Released in the meantime: not stale, simply gone.
     }
   }
-  return owner.hostname === host && typeof owner.pid === 'number' && !alive(owner.pid);
+  let owner: Partial<LockOwner>;
+  try {
+    owner = JSON.parse(record) as Partial<LockOwner>;
+  } catch {
+    return undefined; // Being written: its owner is alive enough to write it.
+  }
+  return owner.hostname === host && typeof owner.pid === 'number' && !alive(owner.pid)
+    ? record
+    : undefined;
 }
 
 /**
- * Removes an abandoned lock. Renamed aside first, so two callers reclaiming the
- * same lock cannot remove a fresh one the other has just taken: only one rename
- * of a given directory succeeds.
+ * Removes an abandoned lock — the one whose record was judged stale, and no
+ * other. It is renamed aside first (only one rename of a directory succeeds),
+ * then its record compared with the stale one: between the judgement and the
+ * rename another caller may have reclaimed it and taken a fresh lock, which is
+ * then put straight back rather than removed (M111d audit F5).
+ *
+ * @param lock - The lock directory
+ * @param stale - The record judged stale, verbatim (`null` for an ownerless lock)
  */
-async function reclaimLock(lock: string): Promise<void> {
+export async function reclaimLock(lock: string, stale: string | null): Promise<void> {
   const aside = `${lock}.stale-${process.pid}-${Math.random().toString(36).slice(2)}`;
   try {
     await fs.rename(lock, aside);
   } catch {
     return; // Another caller reclaimed it first.
   }
-  await fs.rm(aside, { recursive: true, force: true });
+  if ((await ownerRecord(aside)) === stale) {
+    await fs.rm(aside, { recursive: true, force: true });
+    return;
+  }
+  // Not the lock that was judged: restore it. Should a third caller have taken
+  // the path in the instant between, the restore fails and the displaced holder
+  // keeps building; its release then leaves the newer lock alone (token check).
+  await fs.rename(aside, lock).catch(() => {});
 }
 
 /** Builds and packs every member into a fresh cache directory. */

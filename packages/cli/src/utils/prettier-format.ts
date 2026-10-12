@@ -18,6 +18,8 @@
  * @module
  */
 
+import { resolve, sep } from 'node:path';
+
 import { joinPath } from './file-writer.ts';
 import type { GeneratedFile } from './file-writer.ts';
 import type { TargetRuntime } from '../constants.ts';
@@ -25,7 +27,9 @@ import { PRETTIER_OPTIONS } from '../templates/npm-tooling.ts';
 
 /** The part of Prettier's API this module uses. */
 export interface PrettierApi {
-  resolveConfig(path: string): Promise<Record<string, unknown> | null>;
+  /** Locates the config file governing `path`, WITHOUT loading it. */
+  resolveConfigFile(path: string): Promise<string | null>;
+  resolveConfig(path: string, options: { config: string }): Promise<Record<string, unknown> | null>;
   format(source: string, options: Record<string, unknown>): Promise<string>;
 }
 
@@ -36,7 +40,8 @@ export type PrettierLoader = () => Promise<PrettierApi>;
 export const loadPrettier: PrettierLoader = async () => {
   const prettier = await import('prettier');
   return {
-    resolveConfig: (path) => prettier.resolveConfig(path),
+    resolveConfigFile: (path) => prettier.resolveConfigFile(path),
+    resolveConfig: (path, options) => prettier.resolveConfig(path, options),
     format: (source, options) => prettier.format(source, options),
   };
 };
@@ -94,6 +99,34 @@ function destination(projectRoot: string, path: string): string {
   return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) ? path : joinPath(projectRoot, path);
 }
 
+/**
+ * The Prettier configuration for one destination, taken only from INSIDE the
+ * project.
+ *
+ * Prettier's own lookup walks up to the filesystem root and imports a
+ * JavaScript config it finds there, plugins included — so a
+ * `prettier.config.mjs` planted in a directory above the project (a shared
+ * parent, `/tmp`) would run in the developer's process on the next
+ * `setu generate`. The config FILE is located first, which reads no code, and
+ * loaded only when it lies within the project; otherwise the options the
+ * scaffold writes apply (M111d audit F3).
+ *
+ * @param prettier - The Prettier API
+ * @param projectRoot - The project directory
+ * @param path - The destination file
+ * @returns The options to format `path` with
+ */
+async function projectConfig(
+  prettier: PrettierApi,
+  projectRoot: string,
+  path: string,
+): Promise<Record<string, unknown>> {
+  const file = await prettier.resolveConfigFile(path);
+  const root = resolve(projectRoot);
+  if (file === null || !resolve(file).startsWith(`${root}${sep}`)) return PRETTIER_OPTIONS;
+  return await prettier.resolveConfig(path, { config: file }) ?? PRETTIER_OPTIONS;
+}
+
 /** One file Prettier could not format, kept as rendered. */
 export interface FormatSkip {
   readonly path: string;
@@ -142,7 +175,7 @@ export async function formatPlannedFiles(
       // config file applies exactly as the project's own `format:check` reads it.
       const config = projectRoot === undefined
         ? PRETTIER_OPTIONS
-        : await prettier.resolveConfig(destination(projectRoot, file.path)) ?? PRETTIER_OPTIONS;
+        : await projectConfig(prettier, projectRoot, destination(projectRoot, file.path));
       out.push({ ...file, contents: await prettier.format(file.contents, { ...config, parser }) });
     } catch (cause) {
       out.push(file);

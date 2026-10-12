@@ -20,9 +20,12 @@ export const CUSTOM_SCHEMATIC_DIR = '.setu-ts/schematics';
  * `test/integration/custom-schematic-real-import.test.ts`.
  *
  * @param url - Absolute module URL to import
+ * @param root - The project the module belongs to (absolute). The default
+ * loader looks for configuration no higher than this, so a file planted above
+ * the project cannot redirect the module's imports; a loader may ignore it.
  * @returns The module's exports
  */
-export type ModuleLoader = (url: string) => Promise<Record<string, unknown>>;
+export type ModuleLoader = (url: string, root?: string) => Promise<Record<string, unknown>>;
 
 /**
  * The default {@linkcode ModuleLoader}: a real import of the project's
@@ -32,6 +35,21 @@ export type ModuleLoader = (url: string) => Promise<Record<string, unknown>>;
  * @returns The module's exports
  */
 export const importModule: ModuleLoader = importProjectModule;
+
+/**
+ * Whether `name` can name a custom schematic: one file name under
+ * {@linkcode CUSTOM_SCHEMATIC_DIR}, never a path.
+ *
+ * A separator, a dot segment or a percent escape would let
+ * `setu g custom ../../x` import — and execute — a module outside the project's
+ * schematics directory, because the URL builder normalises `..`.
+ *
+ * @param name - The requested schematic name
+ * @returns `true` for letters, digits, `-` and `_`, starting alphanumerically
+ */
+export function isCustomSchematicName(name: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name);
+}
 
 /**
  * Resolves the module URL a custom schematic is loaded from.
@@ -62,11 +80,16 @@ export async function loadCustomSchematic(
   name: string,
   load: ModuleLoader = importModule,
 ): Promise<Schematic> {
+  if (!isCustomSchematicName(name)) {
+    throw new Error(
+      `Invalid custom schematic name "${escapeName(name)}": use letters, digits, "-" and "_"`,
+    );
+  }
   const url = customSchematicUrl(dir, name);
 
   let module: Record<string, unknown>;
   try {
-    module = await load(url);
+    module = await load(url, dir);
   } catch (cause) {
     throw new Error(
       `Cannot load custom schematic "${escapeName(name)}" from ${url}: ${

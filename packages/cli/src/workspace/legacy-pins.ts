@@ -30,16 +30,6 @@ export interface LegacyPinResult {
   readonly unreadable?: string;
 }
 
-/** The JSON string literal for `value`, as it appears in manifest text. */
-function literal(value: string): string {
-  return JSON.stringify(value);
-}
-
-/** Escapes a string for use inside a regular expression. */
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /** The sections of each manifest kind that can hold a framework pin. */
 const SECTIONS: Readonly<Record<FrameworkManifest, readonly string[]>> = {
   deno: ['imports'],
@@ -57,12 +47,110 @@ export function legacyFrameworkPackage(value: string): string | undefined {
     /^jsr:\/?@setu-ts\/([a-z0-9-]+)@/.exec(value)?.[1];
 }
 
+/** One string value directly inside a pin section, with its exact source span. */
+interface SectionEntry {
+  readonly section: string;
+  readonly name: string;
+  readonly value: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+/** One open object or array while scanning, and where its keys stand. */
+interface Frame {
+  readonly kind: 'object' | 'array';
+  /** The key this container is the value of, in its parent object. */
+  readonly key: string | undefined;
+  /** Whether the next string in this object is a key (`true`) or a value. */
+  expectingKey: boolean;
+  lastKey: string | undefined;
+}
+
+/**
+ * Lists every string value directly inside a top-level pin section, with the
+ * exact span of its literal in `source`.
+ *
+ * A token scan rather than a text search, so the rewrite can only ever touch a
+ * real entry: a comment that quotes a pin, the same key in another section
+ * (`overrides`), or a value spelled with JSON escapes (`jsr:\/@setu-ts\/…`) is
+ * each seen for what it is (M111d audit F4). Comments are skipped; strings are
+ * decoded exactly as `JSON.parse` decodes them.
+ *
+ * @param source - Manifest text already known to parse as JSONC
+ * @param sections - The top-level keys whose entries are wanted
+ * @returns Every string entry of those sections, in source order
+ */
+function sectionEntries(source: string, sections: readonly string[]): SectionEntry[] {
+  const entries: SectionEntry[] = [];
+  const stack: Frame[] = [];
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index]!;
+    const next = source[index + 1];
+    if (char === '/' && next === '/') {
+      while (index < source.length && source[index] !== '\n') index += 1;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      const close = source.indexOf('*/', index + 2);
+      index = close === -1 ? source.length : close + 2;
+      continue;
+    }
+    const top = stack[stack.length - 1];
+    if (char === '{' || char === '[') {
+      const key = top?.kind === 'object' && !top.expectingKey ? top.lastKey : undefined;
+      stack.push({
+        kind: char === '{' ? 'object' : 'array',
+        key,
+        expectingKey: true,
+        lastKey: undefined,
+      });
+      index += 1;
+      continue;
+    }
+    if (char === '}' || char === ']') {
+      stack.pop();
+      index += 1;
+      continue;
+    }
+    if (char === ',') {
+      if (top?.kind === 'object') top.expectingKey = true;
+      index += 1;
+      continue;
+    }
+    if (char === ':') {
+      if (top?.kind === 'object') top.expectingKey = false;
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      let end = index + 1;
+      while (end < source.length && source[end] !== '"') end += source[end] === '\\' ? 2 : 1;
+      end += 1;
+      const text = JSON.parse(source.slice(index, end)) as string;
+      if (top?.kind === 'object' && top.expectingKey) {
+        top.lastKey = text;
+      } else if (
+        top?.kind === 'object' && stack.length === 2 && top.key !== undefined &&
+        sections.includes(top.key) && top.lastKey !== undefined
+      ) {
+        entries.push({ section: top.key, name: top.lastKey, value: text, start: index, end });
+      }
+      index = end;
+      continue;
+    }
+    index += 1;
+  }
+  return entries;
+}
+
 /**
  * Rewrites every pre-0.9 framework pin in one manifest.
  *
  * Only an entry whose KEY is the same framework package its value names is
  * touched, so a hand-written alias pointing one name at another package is the
- * developer's and stays as written.
+ * developer's and stays as written. Each rewrite replaces exactly the value's
+ * literal, so comments, layout and every other entry are left byte-identical.
  *
  * @param source - The manifest text
  * @param manifest - `deno` for `deno.json`, `npm` for `package.json`
@@ -82,27 +170,20 @@ export function rewriteLegacyPins(source: string, manifest: FrameworkManifest): 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { contents: undefined, rewrites: [], unreadable: 'the manifest is not a JSON object' };
   }
-  const record = parsed as Record<string, unknown>;
   const rewrites: PinRewrite[] = [];
-  for (const section of SECTIONS[manifest]) {
-    const entries = record[section];
-    if (typeof entries !== 'object' || entries === null || Array.isArray(entries)) continue;
-    for (const [name, value] of Object.entries(entries as Record<string, unknown>)) {
-      if (typeof value !== 'string') continue;
-      const pkg = legacyFrameworkPackage(value);
-      if (pkg === undefined || name !== `@setu-ts/${pkg}`) continue;
-      rewrites.push({ name, from: value, to: frameworkSpecifier(pkg, manifest) });
-    }
+  const edits: { readonly start: number; readonly end: number; readonly text: string }[] = [];
+  for (const entry of sectionEntries(source, SECTIONS[manifest])) {
+    const pkg = legacyFrameworkPackage(entry.value);
+    if (pkg === undefined || entry.name !== `@setu-ts/${pkg}`) continue;
+    const to = frameworkSpecifier(pkg, manifest);
+    rewrites.push({ name: entry.name, from: entry.value, to });
+    edits.push({ start: entry.start, end: entry.end, text: JSON.stringify(to) });
   }
   if (rewrites.length === 0) return { contents: undefined, rewrites };
-  // Edited in place rather than re-serialised, so a JSONC manifest keeps its
-  // comments, ordering and layout: only each `"name": "value"` pair changes.
   let contents = source;
-  for (const { name, from, to } of rewrites) {
-    const pair = new RegExp(
-      `(${escapeRegExp(literal(name))}\\s*:\\s*)${escapeRegExp(literal(from))}`,
-    );
-    contents = contents.replace(pair, (_match, head: string) => `${head}${literal(to)}`);
+  // From the end, so an earlier edit never shifts a later span.
+  for (const edit of edits.reverse()) {
+    contents = contents.slice(0, edit.start) + edit.text + contents.slice(edit.end);
   }
   return { contents, rewrites };
 }

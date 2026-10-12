@@ -31,12 +31,18 @@ import { escapeName } from '../utils/names.ts';
  * The files and directories a conversion relocates into the member.
  *
  * Every entry is one the CLI emits itself (`templates/project-files.ts` and the
- * seam barrels). Anything else in the project directory stays where it is, which
- * is what keeps `.git`, `.github`, `deno.lock`, `node_modules` and any file a
- * developer added at the repository root — where they belong for a workspace.
+ * seam barrels), plus `deno.jsonc`: Deno reads it as the project's manifest
+ * exactly as it reads `deno.json`, so a project that renamed its manifest still
+ * has one, and leaving it at the root would put it beside the workspace's new
+ * `deno.json` — two manifests in one directory, the project's own ignored —
+ * while the moved member had none. Anything else in the project directory stays
+ * where it is, which is what keeps `.git`, `.github`, `deno.lock`, `node_modules`
+ * and any file a developer added at the repository root — where they belong for
+ * a workspace.
  */
 export const ADOPTED_ENTRIES: readonly string[] = [
   'deno.json',
+  'deno.jsonc',
   'package.json',
   '.npmrc',
   'tsconfig.json',

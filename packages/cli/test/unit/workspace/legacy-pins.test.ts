@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { VERSION } from '../../../src/constants.ts';
 import { legacyFrameworkPackage, rewriteLegacyPins } from '../../../src/workspace/legacy-pins.ts';
+import { parseJsonc } from '../../../src/utils/manifest-reader.ts';
 
 describe('legacyFrameworkPackage', () => {
   const cases: readonly (readonly [string, string | undefined])[] = [
@@ -115,6 +116,94 @@ describe('rewriteLegacyPins', () => {
         rewrites: [],
       });
     }
+  });
+
+  // M111d audit F4: the rewrite edits only a real entry of a pin section — never
+  // a comment that quotes one, never the same key in another section — and it
+  // reads a JSON-escaped spelling as the value it decodes to. Each case used to
+  // report `moved` while the real pin stayed on JSR.
+  describe('edits only real pin entries', () => {
+    const PIN = 'jsr:@setu-ts/kernel@^0.8.0';
+    const TO = `npm:@setu-ts/kernel@^${VERSION}`;
+
+    it('skips a commented copy that precedes the entry', () => {
+      const source = [
+        '{',
+        `  // "@setu-ts/kernel": "${PIN}",`,
+        `  /* "@setu-ts/kernel": "${PIN}" */`,
+        `  "imports": { "@setu-ts/kernel": "${PIN}" }`,
+        '}',
+      ].join('\n');
+      const out = rewriteLegacyPins(source, 'deno').contents!;
+      expect(out.split('\n').slice(0, 3)).toEqual(source.split('\n').slice(0, 3));
+      expect((parseJsonc(out) as { imports: Record<string, string> }).imports['@setu-ts/kernel'])
+        .toBe(TO);
+    });
+
+    it('leaves the same key in another section alone', () => {
+      const source = JSON.stringify(
+        {
+          overrides: { '@setu-ts/kernel': 'npm:@jsr/setu-ts__kernel@^0.8.0' },
+          dependencies: { '@setu-ts/kernel': 'npm:@jsr/setu-ts__kernel@^0.8.0' },
+        },
+        null,
+        2,
+      );
+      const out = JSON.parse(rewriteLegacyPins(source, 'npm').contents!) as {
+        overrides: Record<string, string>;
+        dependencies: Record<string, string>;
+      };
+      expect(out.overrides['@setu-ts/kernel']).toBe('npm:@jsr/setu-ts__kernel@^0.8.0');
+      expect(out.dependencies['@setu-ts/kernel']).toBe(`^${VERSION}`);
+    });
+
+    it('rewrites a pin spelled with JSON escapes', () => {
+      const source = '{ "imports": { "@setu-ts\\/kernel": "jsr:\\/@setu-ts\\/kernel@^0.8.0" } }';
+      const result = rewriteLegacyPins(source, 'deno');
+      expect((parseJsonc(result.contents!) as { imports: Record<string, string> }).imports)
+        .toEqual({ '@setu-ts/kernel': TO });
+      expect(result.rewrites).toEqual([
+        { name: '@setu-ts/kernel', from: 'jsr:/@setu-ts/kernel@^0.8.0', to: TO },
+      ]);
+    });
+
+    it('ignores nested values, arrays and non-string entries inside a section', () => {
+      const source = JSON.stringify({
+        imports: {
+          nested: { '@setu-ts/kernel': PIN },
+          list: [PIN, { x: 1 }],
+          count: 3,
+          flag: true,
+          '@setu-ts/kernel': PIN,
+        },
+        other: [PIN],
+      });
+      const result = rewriteLegacyPins(source, 'deno');
+      expect(result.rewrites).toHaveLength(1);
+      const out = parseJsonc(result.contents!) as {
+        imports: { nested: Record<string, string>; list: unknown[] };
+        other: string[];
+      };
+      expect(out.imports.nested['@setu-ts/kernel']).toBe(PIN);
+      expect(out.imports.list[0]).toBe(PIN);
+      expect(out.other).toEqual([PIN]);
+    });
+
+    it('rewrites every entry of a section, each in its own span', () => {
+      const source = JSON.stringify({
+        imports: {
+          '@setu-ts/kernel': PIN,
+          '@setu-ts/runtime': 'jsr:@setu-ts/runtime@^0.8.0',
+        },
+      });
+      const out = parseJsonc(rewriteLegacyPins(source, 'deno').contents!) as {
+        imports: Record<string, string>;
+      };
+      expect(out.imports).toEqual({
+        '@setu-ts/kernel': TO,
+        '@setu-ts/runtime': `npm:@setu-ts/runtime@^${VERSION}`,
+      });
+    });
   });
 
   // Never silent: adoption reports a manifest it could not read, because the

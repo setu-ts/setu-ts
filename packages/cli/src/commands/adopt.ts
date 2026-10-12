@@ -348,18 +348,21 @@ export async function runAdoptCommand(
     // A pre-0.9 project pins the framework through JSR or its npm alias, which
     // the workspace root no longer maps. Its manifest moves onto the npm names.
     const manifestKind = profile.manifestKind;
-    // `deno.json` only: adoption moves the files the CLI emits, and a project's
-    // own `deno.jsonc` is not one of them. The manifest may still carry JSONC
-    // comments, which the rewrite reads and keeps.
-    const manifestPath = joinPath(
-      project,
-      joinPath(memberRoot, manifestKind === 'deno' ? 'deno.json' : 'package.json'),
-    );
+    // A Deno member's manifest is `deno.json` or `deno.jsonc` (both move), the
+    // first found — Deno's own order. It may carry JSONC comments, which the
+    // rewrite reads and keeps.
+    let manifestPath = '';
     let pinSource: string | undefined;
-    try {
-      pinSource = new TextDecoder().decode(await deps.fs.readFile(manifestPath));
-    } catch (cause) {
-      if (!isMissingPath(cause)) throw cause;
+    for (
+      const file of manifestKind === 'deno' ? ['deno.json', 'deno.jsonc'] : ['package.json']
+    ) {
+      manifestPath = joinPath(project, joinPath(memberRoot, file));
+      try {
+        pinSource = new TextDecoder().decode(await deps.fs.readFile(manifestPath));
+        break;
+      } catch (cause) {
+        if (!isMissingPath(cause)) throw cause;
+      }
     }
     const pins = pinSource === undefined
       ? { contents: undefined, rewrites: [] }

@@ -22,18 +22,31 @@ import {
 } from '../../../src/utils/prettier-format.ts';
 import { PRETTIER_OPTIONS } from '../../../src/templates/npm-tooling.ts';
 
-/** A loader recording every config lookup and every format call. */
+/**
+ * A loader recording every config lookup and every format call.
+ *
+ * `configs` maps a destination to the config FILE governing it and the options
+ * that file holds, so a test controls both halves of the lookup: where the file
+ * was found, and what loading it yields.
+ */
 function fakePrettier(
-  configs: Readonly<Record<string, Record<string, unknown> | null>> = {},
+  configs: Readonly<
+    Record<string, { readonly file: string; readonly options: Record<string, unknown> | null }>
+  > = {},
   failOn?: (source: string) => unknown,
 ) {
   const lookups: string[] = [];
+  const loaded: string[] = [];
   const calls: { source: string; options: Record<string, unknown> }[] = [];
   let loads = 0;
   const api: PrettierApi = {
-    resolveConfig: (path) => {
+    resolveConfigFile: (path) => {
       lookups.push(path);
-      return Promise.resolve(configs[path] ?? null);
+      return Promise.resolve(configs[path]?.file ?? null);
+    },
+    resolveConfig: (path, options) => {
+      loaded.push(options.config);
+      return Promise.resolve(configs[path]?.options ?? null);
     },
     format: (source, options) => {
       calls.push({ source, options });
@@ -44,6 +57,7 @@ function fakePrettier(
   };
   return {
     lookups,
+    loaded,
     calls,
     loads: () => loads,
     load: () => {
@@ -116,25 +130,52 @@ describe('formatPlannedFiles', () => {
 
   it('resolves the configuration per destination, relative or absolute', async () => {
     const fake = fakePrettier({
-      '/proj/src/a.ts': { semi: false },
-      '/elsewhere/b.json': { tabWidth: 4 },
+      '/proj/src/a.ts': { file: '/proj/src/.prettierrc', options: { semi: false } },
+      '/proj/b.json': { file: '/proj/.prettierrc', options: { tabWidth: 4 } },
     });
     await formatPlannedFiles(
       [
         { path: 'src/a.ts', contents: 'a' },
-        { path: '/elsewhere/b.json', contents: '{}' },
+        { path: '/proj/b.json', contents: '{}' },
         { path: 'c.md', contents: '# c' },
       ],
       '/proj',
       fake.load,
     );
-    expect(fake.lookups).toEqual(['/proj/src/a.ts', '/elsewhere/b.json', '/proj/c.md']);
+    expect(fake.lookups).toEqual(['/proj/src/a.ts', '/proj/b.json', '/proj/c.md']);
+    expect(fake.loaded).toEqual(['/proj/src/.prettierrc', '/proj/.prettierrc']);
     expect(fake.calls.map((call) => call.options)).toEqual([
       { semi: false, parser: 'typescript' },
       { tabWidth: 4, parser: 'json' },
       // No config on disk for this file: the scaffold's own options.
       { ...PRETTIER_OPTIONS, parser: 'markdown' },
     ]);
+  });
+
+  // M111d audit F3: Prettier's lookup walks above the project, and LOADING a
+  // JavaScript config executes it. A config file found outside the project — or
+  // in a sibling whose name merely starts with the project's — is never loaded.
+  it('never loads a config file found outside the project', async () => {
+    const fake = fakePrettier({
+      '/shared/proj/a.ts': { file: '/shared/prettier.config.mjs', options: { semi: false } },
+      '/shared/proj/b.ts': { file: '/shared/proj-other/.prettierrc', options: { semi: false } },
+    });
+    await formatPlannedFiles(
+      [{ path: 'a.ts', contents: 'a' }, { path: 'b.ts', contents: 'b' }],
+      '/shared/proj',
+      fake.load,
+    );
+    expect(fake.loaded).toEqual([]);
+    expect(fake.calls.map((call) => call.options)).toEqual([
+      { ...PRETTIER_OPTIONS, parser: 'typescript' },
+      { ...PRETTIER_OPTIONS, parser: 'typescript' },
+    ]);
+  });
+
+  it('falls back to the scaffold options when an in-project config loads as nothing', async () => {
+    const fake = fakePrettier({ '/proj/a.ts': { file: '/proj/.prettierrc', options: null } });
+    await formatPlannedFiles([{ path: 'a.ts', contents: 'a' }], '/proj', fake.load);
+    expect(fake.calls[0]?.options).toEqual({ ...PRETTIER_OPTIONS, parser: 'typescript' });
   });
 
   it('keeps a file Prettier cannot parse as rendered and reports its first line', async () => {
@@ -186,6 +227,35 @@ describe('formatForTarget', () => {
 });
 
 describe('the real Prettier', () => {
+  // M111d audit F3, through the real lookup: a JavaScript config planted ABOVE
+  // the project must not run. The control puts the same file INSIDE the
+  // project, where it is the project's own and applies — so the first case
+  // cannot pass merely because a JS config never loads at all.
+  it('never executes a config planted above the project', async () => {
+    const outer = await nodeFs.mkdtemp(join(tmpdir(), 'setu-prettier-planted-'));
+    const project = join(outer, 'proj');
+    const canary = join(outer, 'CANARY');
+    const config = `import { writeFileSync } from 'node:fs';\n` +
+      `writeFileSync(${JSON.stringify(canary)}, 'ran');\n` +
+      'export default { semi: false };\n';
+    try {
+      await nodeFs.mkdir(project);
+      await nodeFs.writeFile(join(outer, 'prettier.config.mjs'), config);
+      const planted = await formatPlannedFiles(
+        [{ path: 'a.ts', contents: 'const a = 1' }],
+        project,
+      );
+      expect(planted.files[0]!.contents).toBe('const a = 1;\n');
+      await expect(nodeFs.stat(canary)).rejects.toThrow();
+
+      await nodeFs.rename(join(outer, 'prettier.config.mjs'), join(project, 'prettier.config.mjs'));
+      const own = await formatPlannedFiles([{ path: 'a.ts', contents: 'const a = 1' }], project);
+      expect(own.files[0]!.contents).toBe('const a = 1\n');
+    } finally {
+      await nodeFs.rm(outer, { recursive: true });
+    }
+  });
+
   it('formats with the scaffold options', async () => {
     const plan = await formatPlannedFiles([
       { path: 'a.ts', contents: 'const a = "x"' },
