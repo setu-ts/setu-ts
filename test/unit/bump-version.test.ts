@@ -13,6 +13,7 @@ import { expect } from '@std/expect';
 
 import {
   type BumpOptions,
+  isArchivedPlan,
   isLater,
   isTestPath,
   main,
@@ -134,6 +135,47 @@ describe('isTestPath', () => {
     expect(isTestPath('packages/cli/test/unit/a.test.ts')).toBe(true);
     expect(isTestPath('packages/cli/src/testing.ts')).toBe(false);
     expect(isTestPath('packages/testing/src/index.ts')).toBe(false);
+  });
+
+  // Cutting v0.9.0: a codemod's colocated test carried a `jsr:@setu-ts/…`
+  // input fixture, and the sweep moved it.
+  it('matches a colocated *.test.ts outside a test directory', () => {
+    expect(isTestPath('scripts/codemods/std-to-vitest.test.ts')).toBe(true);
+    expect(isTestPath('scripts/codemods/std-to-vitest.ts')).toBe(false);
+  });
+});
+
+describe('isArchivedPlan', () => {
+  it('matches only plans under plans/archive/', () => {
+    expect(isArchivedPlan('plans/archive/milestone-111a-node-build.md')).toBe(true);
+    expect(isArchivedPlan('plans/milestone-112-x.md')).toBe(false);
+    expect(isArchivedPlan('docs/plans/archive/x.md')).toBe(false);
+  });
+
+  // Cutting v0.9.0: the sweep rewrote what two archived plans recorded about
+  // the 0.8.0 tree, turning history false.
+  it('leaves an archived plan untouched while moving a live document', () => {
+    const files = tree({
+      'plans/archive/milestone-1-x.md': 'probed `@setu-ts/common@^0.8.0`\n',
+      'docs/guide.md': 'install `@setu-ts/common@^0.8.0`\n',
+    });
+    const { plan, content } = edited(files);
+    expect(plan.edits.some((edit) => edit.path === 'plans/archive/milestone-1-x.md')).toBe(false);
+    expect(content('docs/guide.md')).toContain('@setu-ts/common@^0.9.0');
+  });
+});
+
+describe('the release:bump task', () => {
+  // Cutting v0.9.0: the task granted `--allow-run=git` while `syncManifests`
+  // spawns `Deno.execPath()`, so a real bump rewrote every file and then died
+  // with NotCapable before regenerating the manifests.
+  it('grants run access to the deno binary syncManifests spawns', async () => {
+    const config = JSON.parse(
+      await Deno.readTextFile(new URL('../../deno.json', import.meta.url)),
+    ) as { tasks: Record<string, string> };
+    const grant = /--allow-run=(\S+)/.exec(config.tasks['release:bump'] ?? '')?.[1] ?? '';
+    expect(grant.split(',')).toContain('deno');
+    expect(grant.split(',')).toContain('git');
   });
 });
 
