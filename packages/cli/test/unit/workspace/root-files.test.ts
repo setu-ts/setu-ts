@@ -9,20 +9,28 @@ import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 const HTTP = transportSpec('http');
 
 /**
+ * The Deno profile these assertions describe. Node is the default since 0.9;
+ * the npm root is asserted in `runtime-profile.test.ts`.
+ */
+const DENO = workspaceProfile('deno');
+
+/**
  * Reads one emitted file's contents.
  *
  * @param path - The path to read
  * @returns Its contents
  */
 function contentsOf(path: string): string {
-  const file = workspaceRootFiles('acme', 3000, HTTP).find((candidate) => candidate.path === path);
+  const file = workspaceRootFiles('acme', 3000, HTTP, DENO).find((candidate) =>
+    candidate.path === path
+  );
   expect(file).toBeDefined();
   return file?.contents ?? '';
 }
 
 describe('workspaceRootFiles', () => {
   it('emits the root files and its development runner', () => {
-    expect(workspaceRootFiles('acme', 3000, HTTP).map((file) => file.path).sort()).toEqual([
+    expect(workspaceRootFiles('acme', 3000, HTTP, DENO).map((file) => file.path).sort()).toEqual([
       '.gitignore',
       'README.md',
       WORKSPACE_MANIFEST,
@@ -32,7 +40,7 @@ describe('workspaceRootFiles', () => {
   });
 
   it('plans no path twice', () => {
-    expect(firstDuplicatePath(workspaceRootFiles('acme', 3000, HTTP))).toBeUndefined();
+    expect(firstDuplicatePath(workspaceRootFiles('acme', 3000, HTTP, DENO))).toBeUndefined();
   });
 
   // A GLOB, parsed rather than substring-matched: this is what makes adding a
@@ -81,7 +89,9 @@ describe('workspaceRootFiles', () => {
   });
 
   it('records the base port it was given', () => {
-    const file = workspaceRootFiles('acme', 4100, HTTP).find((f) => f.path === WORKSPACE_MANIFEST);
+    const file = workspaceRootFiles('acme', 4100, HTTP, DENO).find((f) =>
+      f.path === WORKSPACE_MANIFEST
+    );
     expect(JSON.parse(file?.contents ?? '{}')).toMatchObject({ basePort: 4100 });
   });
 

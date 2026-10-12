@@ -330,7 +330,7 @@ describe('workspaceContainerFiles', () => {
       expect(contents).not.toContain('denoland/deno');
       // The whole workspace installs, not one member: a member resolves its
       // dependencies through the ROOT manifest and lockfile.
-      expect(contents).toContain('COPY package.json package-lock.json* .npmrc ./');
+      expect(contents).toContain('COPY package.json package-lock.json* ./');
       expect(contents).toContain('RUN npm install');
       // Numeric user, same reason as the Deno arm.
       expect(contents).toContain('USER 1000:1000');

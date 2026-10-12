@@ -21,10 +21,10 @@ import type { Wiring } from '../templates/registry.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import {
-  PROTO_IMPORTS,
-  PROTO_TASK,
   PROTO_DEV_DEPENDENCIES,
+  PROTO_IMPORTS,
   PROTO_SCRIPT_COMMAND,
+  PROTO_TASK,
   PROTO_TASK_COMMAND,
   protoToolchainFiles,
 } from './proto-toolchain.ts';

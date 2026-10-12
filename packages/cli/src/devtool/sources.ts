@@ -170,6 +170,7 @@ export const FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set([
   'cloudflare-plugin',
   'common',
   'config-plugin',
+  'create',
   'cqrs-plugin',
   'database-plugin',
   'decorator-plugin',

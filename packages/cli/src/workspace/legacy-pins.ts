@@ -12,7 +12,7 @@
  * @module
  */
 
-import { frameworkSpecifier, type FrameworkManifest } from '../templates/framework-specifier.ts';
+import { type FrameworkManifest, frameworkSpecifier } from '../templates/framework-specifier.ts';
 
 /** One pin moved onto npm. */
 export interface PinRewrite {

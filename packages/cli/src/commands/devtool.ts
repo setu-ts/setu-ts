@@ -22,6 +22,7 @@
 
 import { FRAMEWORK_RANGE, frameworkSpecifier } from '../templates/framework-specifier.ts';
 import type { IFileSystem } from '@setu-ts/common';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { DOCKERFILE, DOCKERIGNORE, workspaceContainerFiles } from '../workspace/compose.ts';
 import { transportSpec } from '../workspace/transport.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
@@ -750,6 +751,14 @@ async function enableStandalone(
   }
 
   try {
+    // An empty or foreign directory is "not a project", not "the wrong runtime":
+    // the runtime detector reads no manifest there and answers Node.
+    if (!(await anyPresent(deps.fs, dir, ['deno.json', 'deno.jsonc', 'package.json']))) {
+      return reportInapplicable(
+        deps,
+        `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
+      );
+    }
     const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir));
     if (refusal !== undefined) return reportInapplicable(deps, refusal);
   } catch (cause) {
@@ -978,4 +987,30 @@ function frameworkPinRefusal(handle: DenoJsonHandle): string | undefined {
       }`
     ).join('\n') +
     `\nThe devtool entry imports types that exist only at ${VERSION}; upgrade the project first (see docs/upgrading.md), then run this again.`;
+}
+
+/**
+ * Whether any of the named files exists in a directory. Only a missing path is
+ * absent; any other failure is thrown, so an unreadable manifest is reported
+ * rather than read as absence.
+ *
+ * @param fs - The filesystem to probe
+ * @param dir - The directory
+ * @param names - The file names to look for
+ * @returns True when at least one exists
+ */
+async function anyPresent(
+  fs: IFileSystem,
+  dir: string,
+  names: readonly string[],
+): Promise<boolean> {
+  for (const name of names) {
+    try {
+      await fs.stat(joinPath(dir, name));
+      return true;
+    } catch (cause) {
+      if (!isMissingPath(cause)) throw cause;
+    }
+  }
+  return false;
 }

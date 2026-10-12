@@ -370,7 +370,9 @@ export async function runAdoptCommand(
           project,
           deps.error,
         ),
-        deps.interrupt === undefined ? { root: project } : { root: project, signal: deps.interrupt },
+        deps.interrupt === undefined
+          ? { root: project }
+          : { root: project, signal: deps.interrupt },
       );
       for (const pin of pins.rewrites) {
         deps.log(

@@ -179,7 +179,7 @@ edit it — the next \`${run}\` overwrites it.
 Nothing needs \`buf\` or \`protoc\` on your PATH: ${
     onDeno
       ? "both the compiler and the\nTypeScript plugin run through Deno's npm compatibility."
-      : "both are devDependencies, and\n`npm run` puts them on the PATH."
+      : 'both are devDependencies, and\n`npm run` puts them on the PATH.'
   }
 `;
 

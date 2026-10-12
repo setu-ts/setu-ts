@@ -392,12 +392,13 @@ ${envLines}${dependsBlock}
  *
  * @param manifest - The workspace as it will be after the current command
  * @param transport - The workspace's transport
+ * @param profile - The runtime profile; defaults to the one the manifest records
  * @returns The files to write, relative to the workspace root
  */
 export function workspaceContainerFiles(
   manifest: WorkspaceManifest,
   transport: TransportSpec,
-  profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile(manifest.runtime),
 ): readonly GeneratedFile[] {
   const backing = transport.compose;
 

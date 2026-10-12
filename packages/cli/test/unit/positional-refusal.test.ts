@@ -30,7 +30,12 @@ interface IHarnessOptions {
 }
 
 function harness(options: IHarnessOptions = {}): IHarness {
-  const fs = createFakeFs({ '/work/deno.json': '{}', ...(options.seed ?? {}) });
+  const fs = createFakeFs({
+    '/work/deno.json': '{}',
+    // Installed, so a plugin command reaches its loader (see app-loader.ts).
+    '/work/node_modules/@setu-ts/kernel/package.json': '{}',
+    ...(options.seed ?? {}),
+  });
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -226,7 +231,7 @@ describe('valid arities still succeed', () => {
   it('new takes its one name', async () => {
     const h = harness();
     expect(await h.run(['new', 'app']), h.err.text()).toBe(0);
-    expect(h.fs.has('/work/app/deno.json')).toBe(true);
+    expect(h.fs.has('/work/app/package.json')).toBe(true);
   });
 
   it('generate takes the schematic word and one name', async () => {

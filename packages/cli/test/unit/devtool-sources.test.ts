@@ -352,7 +352,7 @@ describe('development source policies', () => {
     const count = (text: string) => packageSpecifierCount(text, 'cache-plugin');
     expect(count("import { A } from '@setu-ts/cache-plugin';")).toBe(1);
     expect(count('import * as a from "@setu-ts/cache-plugin";')).toBe(1);
-    expect(count("import * as a from 'jsr:@setu-ts/cache-plugin@^0.8.0';")).toBe(1);
+    expect(count("import * as a from 'npm:@setu-ts/cache-plugin@^0.8.0';")).toBe(1);
     expect(count("import * as a from 'npm:@jsr/setu-ts__cache-plugin@0.8.0';")).toBe(1);
     expect(count("import * as a from '@setu-ts/cache-plugin/sub';")).toBe(1);
     expect(count("import x from '@setu-ts/cache-plugin-x';")).toBe(0);
@@ -431,8 +431,8 @@ describe('development source policies', () => {
     const map = (imports: Record<string, string>) => ({ imports });
     for (
       const same of [
-        { '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin@^0.8.0' },
-        { '@setu-ts/runtime/': 'jsr:@setu-ts/runtime@^0.8.0/' },
+        { '@setu-ts/cache-plugin': 'npm:@setu-ts/cache-plugin@^0.8.0' },
+        { '@setu-ts/runtime/': 'npm:@setu-ts/runtime@^0.8.0/' },
         { '@setu-ts/cache-plugin': 'npm:@jsr/setu-ts__cache-plugin@^0.8.0' },
         { '@setu-ts/rest-starter': '../../packages/starters/rest-starter/src/index.ts' },
         { '@setu-ts/kernel': '/repo/packages/kernel/src/index.ts' },
@@ -440,9 +440,9 @@ describe('development source policies', () => {
     ) expect(importMapRetargets(map(same)), JSON.stringify(same)).toBe(false);
     for (
       const other of [
-        { '@setu-ts/cachealias': 'jsr:@setu-ts/cache-plugin@^0.8.0' },
-        { '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' },
-        { '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin-evil@^1' },
+        { '@setu-ts/cachealias': 'npm:@setu-ts/cache-plugin@^0.8.0' },
+        { '@setu-ts/health-plugin': 'npm:@setu-ts/cache-plugin@^1' },
+        { '@setu-ts/cache-plugin': 'npm:@setu-ts/cache-plugin-evil@^1' },
         // Audit round 7: a path that merely passes through `<pkg>/`.
         { '@setu-ts/storage-plugin': '../storage-plugin/../packages/cache-plugin/src/index.ts' },
         { '@setu-ts/storage-plugin': './vendor/storage-plugin/x.ts' },
@@ -452,12 +452,12 @@ describe('development source policies', () => {
     // Keys are compared AFTER JSON decoding: an escaped key is the same key.
     expect(
       importMapRetargets(
-        JSON.parse('{"imports":{"@setu-ts\\/storage-plugin":"jsr:@setu-ts/cache-plugin@^1"}}'),
+        JSON.parse('{"imports":{"@setu-ts\\/storage-plugin":"npm:@setu-ts/cache-plugin@^1"}}'),
       ),
     ).toBe(true);
     expect(
       importMapRetargets({
-        scopes: { './x/': { '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' } },
+        scopes: { './x/': { '@setu-ts/health-plugin': 'npm:@setu-ts/cache-plugin@^1' } },
       }),
     ).toBe(true);
     expect(importMapRetargets({ scopes: 'nope' })).toBe(true);
@@ -466,16 +466,16 @@ describe('development source policies', () => {
     expect(importMapRetargets('text')).toBe(false);
 
     const retarget = JSON.stringify(
-      map({ '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' }),
+      map({ '@setu-ts/health-plugin': 'npm:@setu-ts/cache-plugin@^1' }),
     );
-    const clean = JSON.stringify(map({ '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^1' }));
+    const clean = JSON.stringify(map({ '@setu-ts/kernel': 'npm:@setu-ts/kernel@^1' }));
     // A workspace root's maps are inherited; an unrelated ancestor's are not.
     expect(
       await frameworkImportsRetargeted(
         createFakeFs({
           '/ws/deno.json': JSON.stringify({
             workspace: ['./apps/*'],
-            ...map({ '@setu-ts/health-plugin': 'jsr:@setu-ts/cache-plugin@^1' }),
+            ...map({ '@setu-ts/health-plugin': 'npm:@setu-ts/cache-plugin@^1' }),
           }),
           '/ws/apps/a/deno.json': clean,
         }),
@@ -652,7 +652,7 @@ describe('development source policies', () => {
     const retargeted = await readDevtoolSourceNames(
       createFakeFs({
         '/app/deno.json': JSON.stringify({
-          imports: { '@setu-ts/realtime-backplane-plugin': 'jsr:@setu-ts/cache-plugin@^1' },
+          imports: { '@setu-ts/realtime-backplane-plugin': 'npm:@setu-ts/cache-plugin@^1' },
         }),
       }),
       '/app',
@@ -824,7 +824,7 @@ describe('development source policies', () => {
         // Audit round 4: an escaped alias, a `jsr:` second import, or a template
         // hiding a custom call — each beside a dead plain call.
         `${imported}const p = [RealtimeBackplanePlugin(), R\\u0065altimeBackplanePlugin({ transport: 'custom', backplane })];`,
-        `${imported}import { RealtimeBackplanePlugin as X } from 'jsr:@setu-ts/realtime-backplane-plugin@^0.8.0';\n` +
+        `${imported}import { RealtimeBackplanePlugin as X } from 'npm:@setu-ts/realtime-backplane-plugin@^0.8.0';\n` +
         "const p = [RealtimeBackplanePlugin(), X({ transport: 'custom', backplane })];",
         `${imported}const o = \`\${\`/*\`}\`;\nconst c = RealtimeBackplanePlugin({ transport: 'custom', backplane });\n// */\n` +
         'const p = [RealtimeBackplanePlugin()];',

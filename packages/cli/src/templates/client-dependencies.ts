@@ -47,7 +47,9 @@ export function withClientDependencies(
   const imports = { ...host.extraImports };
   for (const name of clients) {
     const range = CLIENT_RANGES[name];
-    if (range === undefined) throw new Error(`No client range for ${name}; add it to CLIENT_RANGES.`);
+    if (range === undefined) {
+      throw new Error(`No client range for ${name}; add it to CLIENT_RANGES.`);
+    }
     dependencies[name] = range;
     imports[name] = `npm:${name}@${range}`;
   }

@@ -106,7 +106,7 @@ function workspaceSeed(
     }\n`,
     '/ws/apps/orders/deno.json': JSON.stringify({
       tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' },
-      imports: { '@setu-ts/common': 'jsr:@setu-ts/common@^0.8.0' },
+      imports: { '@setu-ts/common': 'npm:@setu-ts/common@^0.8.0' },
     }),
     '/ws/apps/orders/setu.config.ts': CURRENT_CONFIG,
   };
@@ -621,7 +621,7 @@ describe('devtool enable branch coverage', () => {
   it('refuses a standalone project without deno.json or setu.config.ts', async () => {
     const h = workspaceHarness({});
     expect(await h.run(['enable'])).toBe(1);
-    expect(h.err.text()).toContain('No deno.json in /ws');
+    expect(h.err.text()).toContain('No deno.json or package.json in /ws');
   });
 
   it('refuses a standalone project whose deno.json is not JSON', async () => {
@@ -647,7 +647,7 @@ describe('devtool enable branch coverage', () => {
     const h = workspaceHarness({
       '/ws/deno.json': JSON.stringify({
         tasks: { start: 'deno run --allow-net --allow-env main.ts' },
-        imports: { '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.6.0' },
+        imports: { '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.6.0' },
       }),
       '/ws/setu.config.ts': CURRENT_CONFIG,
     });
@@ -655,7 +655,7 @@ describe('devtool enable branch coverage', () => {
     expect(h.err.text()).toContain(
       'Framework pins in',
     );
-    expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.6.0');
+    expect(h.err.text()).toContain('npm:@setu-ts/diagnostics-plugin@^0.6.0');
     expect(h.fs.writes).toEqual([]);
   });
 
@@ -669,7 +669,7 @@ describe('devtool enable branch coverage', () => {
       imports: Record<string, string>;
     };
     expect(manifest.imports).toEqual({
-      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.8.0',
+      '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0',
     });
   });
 
@@ -677,7 +677,7 @@ describe('devtool enable branch coverage', () => {
     const h = workspaceHarness({
       '/ws/deno.json': JSON.stringify({
         tasks: { start: 'deno run --allow-net --allow-env main.ts' },
-        imports: { '~': './src/', '@setu-ts/common': 'jsr:@setu-ts/common@^0.8.0' },
+        imports: { '~': './src/', '@setu-ts/common': 'npm:@setu-ts/common@^0.8.0' },
       }),
       '/ws/setu.config.ts': CURRENT_CONFIG,
     });
@@ -687,8 +687,8 @@ describe('devtool enable branch coverage', () => {
     };
     expect(manifest.imports).toEqual({
       '~': './src/',
-      '@setu-ts/common': 'jsr:@setu-ts/common@^0.8.0',
-      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.8.0',
+      '@setu-ts/common': 'npm:@setu-ts/common@^0.8.0',
+      '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0',
     });
   });
 });
@@ -880,7 +880,7 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
         },
         // The pin the enable flow merges: byte-identical, so the whole run is
         // a no-op, which is what makes the command idempotent.
-        imports: { '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.8.0' },
+        imports: { '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0' },
       }),
       '/ws/setu.config.ts': CURRENT_CONFIG,
       // Byte-identical to what the command would write.

@@ -322,7 +322,9 @@ describe('a template with a frontend build, on a Deno target', () => {
     // But it DOES get a `test` task: `setu generate module` emits a
     // `*.service.test.ts` into every host, and no template ran it (A3).
     expect(manifest.tasks['test']).toBe('deno test -A');
-    expect(manifest.nodeModulesDir).toBeUndefined();
+    // Every Deno project links node_modules since 0.9, so the Node-hosted CLI
+    // can import its config; that is the only one of the three it gains.
+    expect(manifest.nodeModulesDir).toBe('auto');
     expect(manifest.lint).toBeUndefined();
   });
 });
@@ -435,8 +437,10 @@ describe('the Cloudflare Workers target', () => {
       contentsOf([...projectFiles('edge', 'node', node)], 'tsconfig.json'),
     ) as { compilerOptions: Record<string, unknown> };
 
-    expect(tsconfig.compilerOptions['types']).toBeUndefined();
-    expect(tsconfig.compilerOptions['allowImportingTsExtensions']).toBeUndefined();
+    // Only the runtime's own types: TypeScript 6 includes no `@types` package
+    // unless `types` names it, and none of the Workers declarations leak in.
+    expect(tsconfig.compilerOptions['types']).toEqual(['node']);
+    expect(tsconfig.compilerOptions['lib']).toBeUndefined();
   });
 
   it('documents every binding type the plugin reads (X9-9)', () => {

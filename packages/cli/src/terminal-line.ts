@@ -71,7 +71,11 @@ export function createLineReader(options: LineReaderOptions): LineReader {
 
   const open = (): Interface => {
     if (rl !== undefined) return rl;
-    rl = createInterface({ input: options.input, output: options.output, terminal: options.terminal });
+    rl = createInterface({
+      input: options.input,
+      output: options.output,
+      terminal: options.terminal,
+    });
     rl.on('line', (line) => {
       if (pending === undefined) queued.push(line);
       else settle(line);

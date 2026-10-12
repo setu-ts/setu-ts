@@ -11,12 +11,7 @@
  * @module
  */
 
-import {
-  CONFIG_EXPORT,
-  CONFIG_MODULE,
-  PROGRAM_NAME,
-  type TargetRuntime,
-} from '../constants.ts';
+import { CONFIG_EXPORT, CONFIG_MODULE, PROGRAM_NAME, type TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { renderDevtoolSources, withSourceArgs } from '../devtool/sources.ts';
 import type {
@@ -39,7 +34,11 @@ import { renderConfigOptions } from './env-file.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 import { renderEquals, testHarnessFor } from '../schematics/test-harness.ts';
 import { frameworkSpecifier } from './framework-specifier.ts';
-import { NPM_TOOLING_DEV_DEPENDENCIES, NPM_TOOLING_SCRIPTS, npmToolingFiles } from './npm-tooling.ts';
+import {
+  NPM_TOOLING_DEV_DEPENDENCIES,
+  NPM_TOOLING_SCRIPTS,
+  npmToolingFiles,
+} from './npm-tooling.ts';
 
 /**
  * The devtool composition parameter every generated factory accepts as its
@@ -1566,7 +1565,9 @@ function standaloneNpmFiles(
   };
   const scripts = {
     ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
-    ...(onWorkers ? { ...NPM_TOOLING_SCRIPTS, dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
+    ...(onWorkers
+      ? { ...NPM_TOOLING_SCRIPTS, dev: 'wrangler dev', deploy: 'wrangler deploy' }
+      : {}),
   };
 
   return [
@@ -1858,7 +1859,11 @@ describe('application composition', () => {
             name: projectName,
             version: '0.1.0',
             type: 'module',
-            scripts: { ...npmScripts(runtime, manifest), ...NPM_TOOLING_SCRIPTS, ...host.extraScripts },
+            scripts: {
+              ...npmScripts(runtime, manifest),
+              ...NPM_TOOLING_SCRIPTS,
+              ...host.extraScripts,
+            },
             dependencies: npmDependencies(host, runtime),
             // Runtime-level first, so a template that pins its own copy of the
             // same package wins — the template knows what its build needs.

@@ -140,7 +140,7 @@ describe('the one devtool planner', () => {
     // already on disk.
     const created = harnessOver(createFakeFs());
     const createdCode = await created.runNew(
-      ['shop', '--devtool', '--devtool-port', '4919'],
+      ['shop', '--runtime', 'deno', '--devtool', '--devtool-port', '4919'],
       '/ws',
     );
     expect(createdCode, created.err.text()).toBe(0);
@@ -169,7 +169,7 @@ describe('the one devtool planner', () => {
       '/ws/shop/deno.json': `${
         JSON.stringify({
           tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' },
-          imports: { '@setu-ts/cache-plugin': 'jsr:@setu-ts/cache-plugin@^0.8.0' },
+          imports: { '@setu-ts/cache-plugin': 'npm:@setu-ts/cache-plugin@^0.8.0' },
         })
       }\n`,
       '/ws/shop/setu.config.ts': CONFIG + 'const banner = `unclassified`;\n',

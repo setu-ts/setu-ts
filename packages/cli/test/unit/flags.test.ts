@@ -72,6 +72,7 @@ function withApp(commands: readonly { name: string; handler: () => void }[]): {
 } {
   const fs = createFakeFs({
     '/work/deno.json': '{}',
+    '/work/node_modules/@setu-ts/kernel/package.json': '{}',
     '/work/setu.config.ts': 'export function createApp() {}',
   });
   const err = createRecorder();

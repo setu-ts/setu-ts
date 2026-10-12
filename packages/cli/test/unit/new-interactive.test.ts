@@ -87,12 +87,12 @@ describe('resolveNewChoices', () => {
   // it held for broker and queue and not for the very first question.
   it('never offers a runtime a workspace cannot be hosted on', async () => {
     const menus = await offered(['acme', '--workspace'], ['deno', 'http']);
-    expect(menus.get('Runtime?')).toEqual(['deno', 'node', 'bun']);
+    expect(menus.get('Runtime?')).toEqual(['node', 'deno', 'bun']);
   });
 
   it('still offers every runtime to a standalone project', async () => {
     const menus = await offered(['svc'], ['deno', 'minimal']);
-    expect(menus.get('Runtime?')).toEqual(['deno', 'node', 'bun', 'cloudflare-workers']);
+    expect(menus.get('Runtime?')).toEqual(['node', 'deno', 'bun', 'cloudflare-workers']);
   });
 
   it('asks runtime and transport only for a workspace', async () => {

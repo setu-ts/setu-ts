@@ -62,7 +62,7 @@ describe('a --broker scaffold', () => {
     const config = h.fs.read('/work/svc/setu.config.ts');
     expect(config).toContain('{');
     expect(config).toContain("broker: 'redis-streams'");
-    expect(config).toContain("Deno.env.get('REDIS_URL')");
+    expect(config).toContain('process.env.REDIS_URL');
     expect(config).toContain("'redis://127.0.0.1:6379'");
   });
 
@@ -84,7 +84,7 @@ describe('a --broker scaffold', () => {
     expect(await h.run(['svc', '--template', 'microservice', '--queue', 'redis'])).toBe(0);
     const config = h.fs.read('/work/svc/setu.config.ts');
     expect(config).toContain("adapter: 'redis'");
-    expect(config).toContain("Deno.env.get('REDIS_URL')");
+    expect(config).toContain('process.env.REDIS_URL');
   });
 
   it('writes the connection variable into the dotenv pair', async () => {

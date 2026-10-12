@@ -49,7 +49,7 @@ describe('runCli', () => {
       expect(lines[0]).toBe('Framework pins in /work/deno.json disagree with this CLI:');
       const escaped = `\\u${control.charCodeAt(0).toString(16).padStart(4, '0')}`;
       expect(lines[1]).toBe(
-        `  @setu-ts/common${escaped}FORGED-KEY: canary-pin${escaped}FORGED-VALUE; expected jsr:@setu-ts/common${escaped}FORGED-KEY@^${VERSION}`,
+        `  @setu-ts/common${escaped}FORGED-KEY: canary-pin${escaped}FORGED-VALUE; expected npm:@setu-ts/common${escaped}FORGED-KEY@^${VERSION}`,
       );
       expect(lines[2]).toContain('upgrade the project first');
       expect(h.fs.writes).toEqual([]);
@@ -60,7 +60,7 @@ describe('runCli', () => {
     const h = harness({
       '/work/deno.json': JSON.stringify({
         tasks: { start: 'deno run --allow-net --allow-env main.ts' },
-        imports: { '@setu-ts/common': `jsr:@setu-ts/common@^${VERSION}` },
+        imports: { '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}` },
       }),
       '/work/setu.config.ts': 'export const createApp = makeApplicationFactory();',
     });
@@ -121,13 +121,13 @@ describe('runCli', () => {
     it('routes new', async () => {
       const h = harness();
       expect(await h.run(['new', 'app'])).toBe(0);
-      expect(h.fs.has('/work/app/deno.json')).toBe(true);
+      expect(h.fs.has('/work/app/package.json')).toBe(true);
     });
 
     it('routes the n alias', async () => {
       const h = harness();
       expect(await h.run(['n', 'app'])).toBe(0);
-      expect(h.fs.has('/work/app/deno.json')).toBe(true);
+      expect(h.fs.has('/work/app/package.json')).toBe(true);
     });
 
     it('routes generate', async () => {
@@ -286,6 +286,9 @@ describe('runCli', () => {
     function withApp(commands: readonly { name: string; handler: () => void }[]) {
       const fs = createFakeFs({
         '/work/deno.json': '{}',
+        // Installed, as `deno install` leaves it: the CLI imports the
+        // project's config from Node, which resolves through node_modules.
+        '/work/node_modules/@setu-ts/kernel/package.json': '{}',
         '/work/setu.config.ts': 'export function createApp() {}',
       });
       const out = createRecorder();
@@ -345,7 +348,7 @@ describe('runCli', () => {
         }]);
         expect(await h.run(['new', 'app'])).toBe(0);
         expect(shadowed).toBe(false);
-        expect(h.fs.has('/work/app/deno.json')).toBe(true);
+        expect(h.fs.has('/work/app/package.json')).toBe(true);
       });
 
       it('does not let a plugin shadow generate', async () => {

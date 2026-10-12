@@ -43,7 +43,11 @@ describe('the scaffolded application smoke test', () => {
         const manifest = files.find((file) =>
           file.path === (runtime === 'deno' ? 'deno.json' : 'package.json')
         )!.contents;
-        expect(manifest).toContain(`setu-ts${runtime === 'deno' ? '/' : '__'}testing@^${VERSION}`);
+        expect(manifest).toContain(
+          runtime === 'deno'
+            ? `"npm:@setu-ts/testing@^${VERSION}"`
+            : `"@setu-ts/testing": "^${VERSION}"`,
+        );
         const parsed = JSON.parse(manifest);
         const buildsFirst = host.manifest?.npmBuild !== undefined;
         if (runtime === 'deno') {
@@ -55,7 +59,7 @@ describe('the scaffolded application smoke test', () => {
           // puts it; in `dependencies` it ships to production and gets pinned
           // twice by a later add.
           expect(parsed.devDependencies['@setu-ts/testing'])
-            .toBe(`npm:@jsr/setu-ts__testing@^${VERSION}`);
+            .toBe(`^${VERSION}`);
           expect(parsed.dependencies['@setu-ts/testing']).toBeUndefined();
           expect(
             parsed.scripts.test.startsWith(`${runtime === 'bun' ? 'bun' : 'npm'} run build && `),
