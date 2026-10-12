@@ -238,10 +238,31 @@ describe('denoInstallRefusal', () => {
 
   it('passes a workspace member satisfied by the root node_modules', async () => {
     const fs = createFakeFs({
+      '/ws/setu.workspace.json': '{}',
       '/ws/apps/api/deno.json': '{}',
       '/ws/node_modules/@setu-ts/kernel/package.json': '{}',
     });
     expect(await denoInstallRefusal(fs, '/ws/apps/api')).toBeUndefined();
+  });
+
+  // M111d audit round 2, N1: a kernel planted in a shared parent (`/tmp`) must
+  // not count as installed — Node would import and run it. The search reaches
+  // no higher than the project, or the workspace root when it is a member.
+  it('ignores a kernel in an ancestor outside the project', async () => {
+    const fs = createFakeFs({
+      '/tmp/app/deno.json': '{}',
+      '/tmp/node_modules/@setu-ts/kernel/package.json': '{}',
+    });
+    expect(await denoInstallRefusal(fs, '/tmp/app')).toContain('deno install');
+  });
+
+  it('ignores a kernel above the workspace root', async () => {
+    const fs = createFakeFs({
+      '/tmp/ws/setu.workspace.json': '{}',
+      '/tmp/ws/apps/api/deno.json': '{}',
+      '/tmp/node_modules/@setu-ts/kernel/package.json': '{}',
+    });
+    expect(await denoInstallRefusal(fs, '/tmp/ws/apps/api')).toContain('deno install');
   });
 
   it('refuses an uninstalled Deno project, naming deno install', async () => {

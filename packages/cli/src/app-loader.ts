@@ -13,6 +13,7 @@ import type { IApplication } from '@setu-ts/common';
 import { CONFIG_EXPORT, CONFIG_MODULE } from './constants.ts';
 import { joinPath, toFileUrl } from './utils/file-writer.ts';
 import { escapeName } from './utils/names.ts';
+import { WORKSPACE_MANIFEST } from './workspace/manifest.ts';
 import { importModule, type ModuleLoader } from './schematics/custom.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -172,6 +173,24 @@ export function parentDir(path: string): string | undefined {
 }
 
 /**
+ * The directories whose `node_modules` may install a Deno project's framework:
+ * the project, and — when it is a workspace member — each ancestor up to and
+ * including the nearest workspace root. Outside a workspace, the project alone.
+ *
+ * @param fs - The CLI's filesystem
+ * @param dir - The project root (absolute)
+ * @returns The directories, nearest first
+ */
+export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<string[]> {
+  const chain: string[] = [];
+  for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
+    chain.push(current);
+    if (await exists(fs, joinPath(current, WORKSPACE_MANIFEST))) return chain;
+  }
+  return [dir];
+}
+
+/**
  * Why a Deno project's config cannot be imported by this Node CLI, if it can't.
  *
  * The CLI imports `setu.config.ts` through Node resolution, which cannot read a
@@ -179,8 +198,15 @@ export function parentDir(path: string): string | undefined {
  * after `deno install` its framework packages are linked into a `node_modules`
  * the import resolves through. Without that link the import would fail inside
  * module resolution with a message naming a package rather than the cause, so
- * it is refused here, by name, first. Node resolution walks up, so a workspace
- * member is satisfied by its workspace root's `node_modules`.
+ * it is refused here, by name, first. A workspace member is satisfied by its
+ * workspace root's `node_modules`, where a Deno workspace links its packages.
+ *
+ * The search is bounded: the project itself, then its ancestors up to the
+ * nearest workspace root (a directory holding {@linkcode WORKSPACE_MANIFEST})
+ * and no further. An unbounded walk would accept a `node_modules/@setu-ts/kernel`
+ * planted in a shared parent such as `/tmp` as "installed", and Node would then
+ * import and run it (M111d audit round 2, N1). With the bound, a kernel is found
+ * only where the project's own resolution reaches it first.
  *
  * @param fs - The CLI's filesystem
  * @param dir - The project root (absolute)
@@ -197,7 +223,7 @@ export async function denoInstallRefusal(
   }
   if (manifest === undefined) return undefined;
 
-  for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
+  for (const current of await installSearchDirs(fs, dir)) {
     if (await exists(fs, joinPath(current, 'node_modules', '@setu-ts', 'kernel'))) {
       return undefined;
     }

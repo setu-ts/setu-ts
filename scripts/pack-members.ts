@@ -236,9 +236,9 @@ export async function packMembers(
 const BUILD_WAIT_MS = 15 * 60 * 1000;
 
 /**
- * How long a lock may exist without an owner record before it is presumed
- * abandoned: the owner writes the record immediately after creating the lock, so
- * only a crash in between leaves one without it.
+ * How long a lock may exist without a readable owner record before it is
+ * presumed abandoned. This code publishes a lock only with its record inside,
+ * so such a lock was left by a crash under an older writer.
  */
 const OWNERLESS_GRACE_MS = 60 * 1000;
 
@@ -285,7 +285,13 @@ async function ownerRecord(lock: string): Promise<string | null> {
 }
 
 /**
- * Takes the build lock: `mkdir` is atomic, so exactly one caller succeeds.
+ * Takes the build lock.
+ *
+ * The lock directory is built aside — owner record included — and renamed into
+ * place, so a lock never exists without a complete record: a crash can leave a
+ * stray temp directory, never a half-written owner (M111d audit round 2, N2).
+ * The rename is what makes one caller win: it fails while another caller's lock
+ * (always non-empty) is in place.
  *
  * @returns The acquisition's token when this caller now holds it, else `undefined`
  */
@@ -294,15 +300,18 @@ export async function acquireLock(
   host: string,
   since: number,
 ): Promise<string | undefined> {
+  const token = `${process.pid}-${since}-${Math.random().toString(36).slice(2)}`;
+  const staging = `${lock}.acquire-${token}`;
+  await fs.mkdir(staging);
+  const owner: LockOwner = { pid: process.pid, hostname: host, since, token };
+  await fs.writeFile(join(staging, 'owner.json'), JSON.stringify(owner));
   try {
-    await fs.mkdir(lock);
+    await fs.rename(staging, lock);
+    return token;
   } catch {
+    await fs.rm(staging, { recursive: true, force: true });
     return undefined;
   }
-  const token = `${process.pid}-${since}-${Math.random().toString(36).slice(2)}`;
-  const owner: LockOwner = { pid: process.pid, hostname: host, since, token };
-  await fs.writeFile(join(lock, 'owner.json'), JSON.stringify(owner));
-  return token;
 }
 
 /**
@@ -320,6 +329,15 @@ export async function releaseLock(lock: string, token: string): Promise<void> {
     return;
   }
   if (owner.token === token) await fs.rm(lock, { recursive: true, force: true });
+}
+
+/** Whether `path` exists and was last modified longer ago than the ownerless grace. */
+async function olderThanGrace(path: string, now: number): Promise<boolean> {
+  try {
+    return now - (await fs.stat(path)).mtimeMs > OWNERLESS_GRACE_MS;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -340,18 +358,17 @@ export async function staleLockRecord(
 ): Promise<string | null | undefined> {
   const record = await ownerRecord(lock);
   if (record === null) {
-    try {
-      const stat = await fs.stat(lock);
-      return now - stat.mtimeMs > OWNERLESS_GRACE_MS ? null : undefined;
-    } catch {
-      return undefined; // Released in the meantime: not stale, simply gone.
-    }
+    // Released in the meantime (gone): not stale, simply gone.
+    return (await olderThanGrace(lock, now)) ? null : undefined;
   }
   let owner: Partial<LockOwner>;
   try {
     owner = JSON.parse(record) as Partial<LockOwner>;
   } catch {
-    return undefined; // Being written: its owner is alive enough to write it.
+    // This code never publishes a partial record, so an unreadable one was left
+    // by a crash under an older writer: abandoned once it has aged past the
+    // grace an ownerless lock gets, rather than wedging every later run.
+    return (await olderThanGrace(join(lock, 'owner.json'), now)) ? record : undefined;
   }
   return owner.hostname === host && typeof owner.pid === 'number' && !alive(owner.pid)
     ? record
@@ -379,9 +396,13 @@ export async function reclaimLock(lock: string, stale: string | null): Promise<v
     await fs.rm(aside, { recursive: true, force: true });
     return;
   }
-  // Not the lock that was judged: restore it. Should a third caller have taken
-  // the path in the instant between, the restore fails and the displaced holder
-  // keeps building; its release then leaves the newer lock alone (token check).
+  // Not the lock that was judged: restore it. Every lock is created with its
+  // record already inside, so a lock another caller took in the instant between
+  // is never an empty directory and this rename cannot replace it (round 2, R1).
+  // In that case the restore fails instead and the displaced holder keeps
+  // building beside the new one — a residual three-caller window this tooling
+  // accepts, since a filesystem offers no atomic compare-and-delete. Its release
+  // still leaves the newer lock alone (token check).
   await fs.rename(aside, lock).catch(() => {});
 }
 

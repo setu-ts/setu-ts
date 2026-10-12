@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promises as fs, rmSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -443,13 +443,20 @@ describe('staleLockRecord', () => {
     }
   });
 
-  it('treats a half-written record as held', async () => {
+  // M111d audit round 2, N2: an unreadable record (a crash under an older
+  // writer) must not wedge every later run. Young, it may still be in writing;
+  // aged past the grace, it is abandoned and returned verbatim for the reclaim.
+  it('ages an unreadable record into staleness rather than holding it for ever', async () => {
     const root = await repository();
     try {
       const lock = join(root, 'lock');
       await fs.mkdir(lock);
-      await fs.writeFile(join(lock, 'owner.json'), '{"pid": 1');
-      expect(await staleLockRecord(lock, 'here', 10, () => false)).toBeUndefined();
+      await fs.writeFile(join(lock, 'owner.json'), '{"pid": 9');
+      const written = (await fs.stat(join(lock, 'owner.json'))).mtimeMs;
+      expect(await staleLockRecord(lock, 'here', written + 1000, () => true)).toBeUndefined();
+      expect(await staleLockRecord(lock, 'here', written + 61_000, () => true)).toBe('{"pid": 9');
+      await reclaimLock(lock, '{"pid": 9');
+      await expect(fs.stat(lock)).rejects.toThrow();
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -503,6 +510,43 @@ describe('reclaiming and releasing the build lock', () => {
       await fs.writeFile(join(lock, 'owner.json'), '{"token":"late"}');
       await reclaimLock(lock, null);
       expect(await fs.readFile(join(lock, 'owner.json'), 'utf8')).toBe('{"token":"late"}');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  // M111d audit round 2, R1: the restore cannot replace a lock another caller
+  // took in between only because no lock ever exists without its record — an
+  // empty directory is what a rename would replace. Acquisition therefore never
+  // creates the lock path itself; it renames a populated directory into place.
+  it('never creates the lock path empty', async () => {
+    const root = await repository();
+    const mkdir = vi.spyOn(fs, 'mkdir');
+    try {
+      const lock = join(root, 'lock');
+      expect(await acquireLock(lock, 'here', 1)).toEqual(expect.any(String));
+      expect(mkdir.mock.calls.map(([path]) => String(path))).not.toContain(lock);
+      expect(await fs.readdir(lock)).toEqual(['owner.json']);
+      // A second caller loses, and leaves no staging directory behind.
+      expect(await acquireLock(lock, 'here', 2)).toBeUndefined();
+      expect((await fs.readdir(root)).filter((name) => name.includes('.acquire-'))).toEqual([]);
+    } finally {
+      mkdir.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('cannot restore over a lock that was taken in between', async () => {
+    const root = await repository();
+    try {
+      const lock = join(root, 'lock');
+      const aside = join(root, 'aside');
+      await acquireLock(lock, 'here', 1);
+      await fs.rename(lock, aside);
+      const tokenC = await acquireLock(lock, 'here', 2);
+      // The restore step's own primitive, against a lock acquired in between.
+      await expect(fs.rename(aside, lock)).rejects.toThrow();
+      expect(JSON.parse(await fs.readFile(join(lock, 'owner.json'), 'utf8')).token).toBe(tokenC);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

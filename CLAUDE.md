@@ -6169,7 +6169,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   hook and passes under the new one. Endpoint assertions now check content rather than status,
   cleanup kills the process tree, and `setu adopt` rewrites a commented `deno.json` in place instead
   of skipping it. The full gate run also caught type errors in CLI test files that Vitest never
-  type-checks, and a stale `docs/cli.md` still teaching the JSR install — complete (PR pending)
+  type-checks, and a stale `docs/cli.md` still teaching the JSR install. **The fresh-context
+  security audit failed round 1** on a High (the `tsconfig.json` lookup walked above the project, so
+  a `paths` entry planted in a shared parent chose which file an `@setu-ts/*` import ran, even over
+  installed packages — every Deno scaffold has no `tsconfig.json` of its own), a Medium (Prettier
+  executed a planted `prettier.config.mjs` the same way) and three Lows; round 2 confirmed all five
+  closed with negative controls and found three more Lows, one a regression from a round-1 fix.
+  Those were fixed and NOT re-audited, at the maintainer's direction. `setu adopt` also now moves a
+  project's `deno.jsonc` (pre-existing, folded in at the maintainer's direction) — complete (PR
+  pending)
 - **Next milestone** — the `v0.9.0` cut (placeholders, trust, OIDC publish), then M104, the `v0.9.0`
   client-brief run; see ROADMAP.md.
 
