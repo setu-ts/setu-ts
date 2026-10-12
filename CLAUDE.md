@@ -6143,8 +6143,35 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and release run only on a pushed `v*` tag, every action is pinned to a commit SHA, decompression
   is capped at 64 MiB, and the runbook restricts environment `npm` to `v*` tags and logs out after
   every login. NOT re-audited, at the maintainer's direction — complete (PR #448)
-- **Next milestone** — M111d, the CLI goes Node-first; the `v0.9.0` cut (placeholders, trust, OIDC
-  publish) follows it, then M104, the `v0.9.0` client-brief run; see ROADMAP.md.
+- **Milestone 111d** (`packages/cli` + new `packages/create` + `scripts/` + docs — the CLI goes
+  Node-first): `setu` is a Node `bin` (`runMain` + `nodeProcess` behind `@setu-ts/cli/main`, one
+  readline reader, `process.exitCode` never `process.exit`), `@setu-ts/create` makes
+  `npm create @setu-ts` the same as `setu new`, and project TypeScript loads through `tsx` (a CLI
+  dependency). Node is the default target and every target pins the framework from npm (`^V` in
+  `package.json`, `npm:@setu-ts/x@^V` in a Deno import map, no `.npmrc`); a Deno project sets
+  `nodeModulesDir: "auto"` and plugin commands refuse until `deno install` has run. An npm-target
+  scaffold carries `tsc` (`~6.0.3`, `types` named), ESLint and Prettier, and everything the CLI
+  writes is Prettier-formatted through config resolved per file (maintainer decision); a selected
+  broker, queue or gRPC transport declares its client package, since a package manager never
+  installs an optional peer. **Two breaking changes**: the default `--runtime`, and
+  `MainProcess.prompt` becoming asynchronous for embedders (maintainer-approved, with the two
+  `bin.ts` files as an approved AI_GUIDELINES §11.5 exception). Nothing is on npm until the cut, so
+  a local registry overlay (`scripts/registry-overlay.ts`) serves the tree's own packs at canonical
+  tarball routes and proxies the rest; every Node e2e and `check:deploy --generated` install through
+  it. **Measurement corrected the plan three times**: `deno fmt` and Prettier disagree on 3–13 files
+  per template, so no renderer change satisfies both; the `lock.jsr` hardening was deleted after
+  three cold installs wrote byte-identical npm lockfile sections; and the deploy gate's devtool
+  probe was grepping file CONTENTS, which an npm tarball's README defeats, so it now matches package
+  paths behind a positive control. **The third Codex review found a test that proved nothing**: the
+  source-redirect hook rewrote the scaffolded project's own `@setu-ts/*` imports to workspace
+  source, so `plugin-commands-e2e` never exercised the packed tarballs. The hook now leaves an
+  installed project to Node, and a control that poisons the installed kernel fails under the old
+  hook and passes under the new one. Endpoint assertions now check content rather than status,
+  cleanup kills the process tree, and `setu adopt` rewrites a commented `deno.json` in place instead
+  of skipping it. The full gate run also caught type errors in CLI test files that Vitest never
+  type-checks, and a stale `docs/cli.md` still teaching the JSR install — complete (PR pending)
+- **Next milestone** — the `v0.9.0` cut (placeholders, trust, OIDC publish), then M104, the `v0.9.0`
+  client-brief run; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

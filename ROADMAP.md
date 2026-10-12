@@ -13857,7 +13857,8 @@ runner, before anything is published to npm.
 
 ### Milestone 111d: The CLI Goes Node-First
 
-**Objective:** `npx @setu-ts/cli new` (or `npm create setu`) on Node is the documented first run.
+**Objective:** `npx @setu-ts/cli new` (or `npm create @setu-ts`) on Node is the documented first
+run.
 
 - `setu` ships as an npm `bin`; `src/main.ts` becomes a Node process boundary.
 - The emitted Deno Dockerfile's `jsr:@std/jsonc` step moves with the generated-Deno-target text.
@@ -13868,6 +13869,19 @@ runner, before anything is published to npm.
   target first; the Deno target keeps one boot gate.
 - **Exit:** every template scaffolds, installs, type-checks, lints and boots on Node from a clean
   checkout.
+
+**Shipped.** `setu` is a Node `bin` (`@setu-ts/cli`) and the new `@setu-ts/create` package makes
+`npm create @setu-ts` the same as `setu new`; project TypeScript loads through `tsx`. Every target
+pins the framework from npm, Node is the default, and an npm-target scaffold carries `tsc`, ESLint
+and Prettier, with everything the CLI writes Prettier-formatted. A selected broker, queue or gRPC
+transport now declares its client package. The scaffold gates did not move wholesale onto Node: the
+type-drift e2e keep their Deno checks, and Node is proved end to end by `node-scaffold-e2e` (every
+host installed from a local registry overlay of the tree's own packs, then run through its own
+`check`, `lint`, `format:check`, `test` and `start`), `bin-e2e` and `plugin-commands-e2e`, whose
+control proves the installed tarballs — not workspace source — are what load.
+`check:deploy
+--generated` builds the generated image against that overlay. The plan's §3.17 records
+every correction made by measurement, including the deletion of the `lock.jsr` hardening.
 
 ### The v0.9.0 cut — after 111c and 111d
 
@@ -14171,6 +14185,6 @@ patch by construction and gains nothing new here.
 | 111a      | ✅     | every member — a Node build: pnpm workspaces, `tsc` to `dist/`, `npm:` lazy imports as optional peers ([#446](https://github.com/setu-ts/setu-ts/pull/446))                                                                                   |
 | 111b      | ✅     | every member — the test suite on Node under Vitest, per-file 90% enforced by the runner ([#447](https://github.com/setu-ts/setu-ts/pull/447))                                                                                                 |
 | 111c      | ✅     | every member + release tooling — npm publishing machinery (dry runs; the cut follows 111d) ([#448](https://github.com/setu-ts/setu-ts/pull/448))                                                                                              |
-| 111d      | ⬜     | cli — Node-first: npm `bin`, Node as the default generated target                                                                                                                                                                             |
+| 111d      | ✅     | cli — Node-first: npm `bin`, Node as the default generated target (PR pending)                                                                                                                                                                |
 | 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |
 | 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                 |
